@@ -1,0 +1,35 @@
+plugins {
+    id 'com.diffplug.spotless' version '8.8.0'
+}
+
+group = 'com.backtoback'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+spotless {
+    java {
+        target '**/src/**/*.java'
+        importOrder('\\#', 'java', 'javax', 'org', 'net', 'com', '', 'com.nhncorp', 'com.navercorp', 'com.naver')
+        lineEndings = com.diffplug.spotless.LineEnding.UNIX
+        eclipse().configFile("config/naver-eclipse-formatter.xml")
+        leadingTabsToSpaces(4)
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+
+    format 'misc', {
+        target '*.gradle', '.gitignore', '.gitattributes', '.editorconfig'
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+
+    format 'markdown', {
+        target '**/*.md'
+        targetExclude '**/node_modules/**'
+        endWithNewline()
+    }
+}

@@ -1,0 +1,57 @@
+# Gradle build output and caches
+.gradle/
+.kotlin/
+**/build/
+!**/src/**/build/
+
+# Java output and crash logs
+*.class
+*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+*.war
+*.ear
+*.log
+hs_err_pid*
+replay_pid*
+
+# Local environment files and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/application-secret.yml
+**/application-secret.yaml
+*.pem
+*.p12
+*.jks
+*.keystore
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Eclipse and VS Code
+.project
+.classpath
+.settings/
+.factorypath
+.apt_generated/
+.vscode/
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.stackdump
