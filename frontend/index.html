@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Re:Solve 연결 확인</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 12vh auto; padding: 0 1.5rem; line-height: 1.6; }
+      h1 { margin-bottom: 0.5rem; }
+      button { padding: 0.65rem 1rem; cursor: pointer; }
+      #status { margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Re:Solve</h1>
+    <p>프론트엔드와 Nginx가 실행 중입니다.</p>
+    <button id="check" type="button">API Gateway 연결 확인</button>
+    <p id="status" role="status"></p>
+    <script>
+      document.getElementById('check').addEventListener('click', async () => {
+        const status = document.getElementById('status');
+        status.textContent = '확인 중...';
+        try {
+          const response = await fetch('/gateway-health', { cache: 'no-store' });
+          status.textContent = `API Gateway 응답: HTTP ${response.status}`;
+        } catch {
+          status.textContent = 'API Gateway에 연결하지 못했습니다.';
+        }
+      });
+    </script>
+  </body>
+</html>

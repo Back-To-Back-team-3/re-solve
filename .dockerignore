@@ -1,0 +1,35 @@
+# Git 및 IDE 파일
+**/.git
+**/.github
+**/.idea
+**/.vscode
+**/*.iml
+**/*.iws
+**/*.ipr
+
+# 로컬 빌드 결과물
+**/.gradle
+**/build
+**/out
+**/node_modules
+**/*.class
+**/*.log
+**/hs_err_pid*
+**/replay_pid*
+
+# 로컬 환경 파일과 비밀값
+**/.env*
+**/application-secret.yml
+**/application-secret.yaml
+**/*.pem
+**/*.p12
+**/*.jks
+**/*.keystore
+
+# macOS 및 Windows 임시 파일
+**/.DS_Store
+**/._*
+**/.AppleDouble
+**/Thumbs.db
+**/ehthumbs.db
+**/[Dd]esktop.ini

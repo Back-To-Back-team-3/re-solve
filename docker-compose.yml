@@ -1,0 +1,219 @@
+x-backend-build: &backend-build
+  dockerfile: ../Dockerfile
+
+x-db-environment: &db-environment
+  SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+  SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+  SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+
+x-db-redis-environment: &db-redis-environment
+  <<: *db-environment
+  SPRING_DATA_REDIS_HOST: ${REDIS_HOST:-redis}
+  SPRING_DATA_REDIS_PORT: ${REDIS_PORT:-6379}
+  SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+
+services:
+  nginx:
+    image: ${NGINX_IMAGE:-nginx:stable-alpine}
+    restart: unless-stopped
+    ports:
+      - "${NGINX_BIND_ADDRESS:-127.0.0.1}:${NGINX_HTTP_PORT:-8080}:80"
+      - "${NGINX_BIND_ADDRESS:-127.0.0.1}:${NGINX_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ${NGINX_CONFIG_FILE:-./nginx/local.conf}:/etc/nginx/conf.d/default.conf:ro
+      - ${NGINX_CERTS_DIR:-./nginx/certs}:/etc/letsencrypt:ro
+      - ${NGINX_CHALLENGE_DIR:-./nginx/certbot}:/var/www/certbot:ro
+    depends_on:
+      - api-gateway
+
+  # 로컬에서만 실행한다.
+  frontend:
+    profiles: [local]
+    build:
+      context: ./frontend
+      args:
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:stable-alpine}
+    image: re-solve-frontend:${IMAGE_TAG:-local}
+
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.4}
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      MYSQL_DATABASE: ${MEMBER_DB_NAME:-member_db}
+      MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    ports:
+      - "127.0.0.1:${MYSQL_HOST_PORT:-3308}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # 첫 실행 때 서비스별 DB를 만들고 공통 개발 계정에 권한을 부여한다.
+  mysql-init:
+    image: ${MYSQL_IMAGE:-mysql:8.4}
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      MEMBER_DB_NAME: ${MEMBER_DB_NAME:-member_db}
+      PROBLEM_DB_NAME: ${PROBLEM_DB_NAME:-problem_db}
+      JUDGE_DB_NAME: ${JUDGE_DB_NAME:-judge_db}
+      CONTEST_DB_NAME: ${CONTEST_DB_NAME:-contest_db}
+      STUDY_DB_NAME: ${STUDY_DB_NAME:-study_db}
+      NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME:-notification_db}
+      INTEGRATION_DB_NAME: ${INTEGRATION_DB_NAME:-integration_db}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        case "$$DB_USERNAME" in
+          ''|*[!a-zA-Z0-9_]*) echo 'DB_USERNAME must contain only letters, numbers, or underscores' >&2; exit 1 ;;
+        esac
+        for db in "$$MEMBER_DB_NAME" "$$PROBLEM_DB_NAME" "$$JUDGE_DB_NAME" "$$CONTEST_DB_NAME" "$$STUDY_DB_NAME" "$$NOTIFICATION_DB_NAME" "$$INTEGRATION_DB_NAME"; do
+          case "$$db" in
+            ''|*[!a-zA-Z0-9_]*) echo 'DB name must contain only letters, numbers, or underscores' >&2; exit 1 ;;
+          esac
+          mysql -h mysql -u root -e "CREATE DATABASE IF NOT EXISTS \`$$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON \`$$db\`.* TO '$$DB_USERNAME'@'%';"
+        done
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7.4-alpine}
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api-gateway:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-api-gateway:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./api-gateway
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      MEMBER_SERVICE_URL: ${MEMBER_SERVICE_URL:-http://member-service:8080}
+      PROBLEM_SERVICE_URL: ${PROBLEM_SERVICE_URL:-http://problem-service:8080}
+      JUDGE_SERVICE_URL: ${JUDGE_SERVICE_URL:-http://judge-service:8080}
+      CONTEST_SERVICE_URL: ${CONTEST_SERVICE_URL:-http://contest-service:8080}
+      STUDY_SERVICE_URL: ${STUDY_SERVICE_URL:-http://study-service:8080}
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL:-http://notification-service:8080}
+      INTEGRATION_SERVICE_URL: ${INTEGRATION_SERVICE_URL:-http://integration-service:8080}
+
+  member-service:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-member-service:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./member-service
+    environment:
+      <<: *db-redis-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${MEMBER_DB_NAME:-member_db}
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  problem-service:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-problem-service:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./problem-service
+    environment:
+      <<: *db-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${PROBLEM_DB_NAME:-problem_db}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+
+  judge-service:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-judge-service:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./judge-service
+    environment:
+      <<: *db-redis-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${JUDGE_DB_NAME:-judge_db}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-}
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  contest-service:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-contest-service:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./contest-service
+    environment:
+      <<: *db-redis-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${CONTEST_DB_NAME:-contest_db}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  study-service:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-study-service:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./study-service
+    environment:
+      <<: *db-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${STUDY_DB_NAME:-study_db}
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+
+  notification-service:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-notification-service:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./notification-service
+    environment:
+      <<: *db-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${NOTIFICATION_DB_NAME:-notification_db}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+
+  integration-service:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-integration-service:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./integration-service
+    environment:
+      <<: *db-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${INTEGRATION_DB_NAME:-integration_db}
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+
+volumes:
+  mysql-data:
+  redis-data:
