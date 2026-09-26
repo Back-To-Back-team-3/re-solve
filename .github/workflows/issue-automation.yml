@@ -1,0 +1,109 @@
+name: Issue Automation
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  sync-issue:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+      PROJECT_PRIORITY_FIELD: ${{ vars.PROJECT_PRIORITY_FIELD }}
+      PROJECT_SIZE_FIELD: ${{ vars.PROJECT_SIZE_FIELD }}
+      PROJECT_START_DATE_FIELD: ${{ vars.PROJECT_START_DATE_FIELD }}
+      PROJECT_DUE_DATE_FIELD: ${{ vars.PROJECT_DUE_DATE_FIELD }}
+    steps:
+      - name: 담당자와 종류 라벨 설정
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          issue_number="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          author="$(jq -r '.issue.user.login' "$GITHUB_EVENT_PATH")"
+          title="$(jq -r '.issue.title' "$GITHUB_EVENT_PATH")"
+          repo="$GITHUB_REPOSITORY"
+
+          if [ "$GITHUB_EVENT_NAME" = "issues" ] && [ "${{ github.event.action }}" = "opened" ]; then
+            gh issue edit "$issue_number" --repo "$repo" --add-assignee "$author" || true
+          fi
+
+          case "$title" in
+            feat\(*) label="💫 feat"; color="5319e7" ;;
+            fix\(*) label="🐛 bug"; color="d73a4a" ;;
+            chore\(*) label="⚙️ chore"; color="c5def5" ;;
+            docs\(*) label="📝 docs"; color="0075ca" ;;
+            refactor\(*) label="♻️ refactor"; color="bfdadc" ;;
+            test\(*) label="✅ test"; color="0e8a16" ;;
+            *) label="" ;;
+          esac
+
+          if [ -n "$label" ]; then
+            gh label create "$label" --repo "$repo" --color "$color" --force >/dev/null
+            for old_label in "💫 feat" "🐛 bug" "⚙️ chore" "📝 docs" "♻️ refactor" "✅ test"; do
+              if [ "$old_label" != "$label" ]; then
+                gh issue edit "$issue_number" --repo "$repo" --remove-label "$old_label" >/dev/null 2>&1 || true
+              fi
+            done
+            gh issue edit "$issue_number" --repo "$repo" --add-label "$label"
+          fi
+
+      - name: GitHub Project 동기화
+        if: env.PROJECT_TOKEN != '' && env.PROJECT_OWNER != '' && env.PROJECT_NUMBER != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          issue_url="$(jq -r '.issue.html_url' "$GITHUB_EVENT_PATH")"
+          body="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+
+          gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$issue_url" >/dev/null
+
+          selected() {
+            printf '%s\n' "$body" | grep -Eq "^- \\[[xX]\\] .* $1( |$)"
+          }
+
+          priority=""
+          for value in "🌋 Urgent" "🏔 High" "🏕 Medium" "🏝 Low"; do
+            if selected "${value#* }"; then priority="$value"; break; fi
+          done
+          if [ -n "$priority" ] && [ -n "$PROJECT_PRIORITY_FIELD" ]; then
+            gh project item-edit "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$issue_url" \
+              --field "$PROJECT_PRIORITY_FIELD" --value "$priority"
+          fi
+
+          size=""
+          for value in "🦑 Large" "🐂 Medium" "🐇 Small" "🦔 Tiny"; do
+            if selected "${value#* }"; then size="$value"; break; fi
+          done
+          if [ -n "$size" ] && [ -n "$PROJECT_SIZE_FIELD" ]; then
+            gh project item-edit "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$issue_url" \
+              --field "$PROJECT_SIZE_FIELD" --value "$size"
+          fi
+
+          if [ -n "$PROJECT_START_DATE_FIELD" ]; then
+            start_date="$(jq -r '.issue.created_at[0:10]' "$GITHUB_EVENT_PATH")"
+            gh project item-edit "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$issue_url" \
+              --field "$PROJECT_START_DATE_FIELD" --date "$start_date"
+          fi
+
+          if [ -n "$PROJECT_DUE_DATE_FIELD" ]; then
+            due_date="$(printf '%s\n' "$body" | sed -n '/^## 📅 완료 기한/,/^## /p' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -n 1 || true)"
+            if [ -n "$due_date" ]; then
+              gh project item-edit "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$issue_url" \
+                --field "$PROJECT_DUE_DATE_FIELD" --date "$due_date"
+            fi
+          fi

@@ -1,0 +1,151 @@
+name: Discord Notification
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, reopened, closed]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_REVIEWER_MAP: ${{ vars.DISCORD_REVIEWER_MAP }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: PR 또는 CI 결과 알림
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+
+          webhook = os.environ.get("DISCORD_WEBHOOK_URL", "")
+          if not webhook:
+              print("Discord 웹훅이 설정되지 않아 알림을 건너뜁니다.")
+              raise SystemExit(0)
+
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as event_file:
+              event = json.load(event_file)
+
+          reviewer_map = {}
+          for entry in os.environ.get("DISCORD_REVIEWER_MAP", "").split(","):
+              login, separator, user_id = entry.strip().partition(":")
+              if separator and login and re.fullmatch(r"\d{15,25}", user_id):
+                  reviewer_map[login.casefold()] = user_id
+
+          payload = None
+          event_name = os.environ["GITHUB_EVENT_NAME"]
+
+          if event_name == "pull_request":
+              pr = event["pull_request"]
+              action = event["action"]
+              if pr.get("draft") and action in {"opened", "reopened"}:
+                  raise SystemExit(0)
+              if action == "closed" and not pr.get("merged"):
+                  raise SystemExit(0)
+
+              def section(heading):
+                  body = re.sub(r"<!--.*?-->", "", pr.get("body") or "", flags=re.S)
+                  match = re.search(
+                      rf"^##\s+[^\n]*{re.escape(heading)}\s*\n(.*?)(?=^##\s+|\Z)",
+                      body,
+                      flags=re.M | re.S,
+                  )
+                  value = match.group(1).strip() if match else ""
+                  return value[:800] or "-"
+
+              merged = action == "closed"
+              title = "🟣 PR 병합" if merged else "🟢 PR 리뷰 요청"
+              fields = [
+                  {"name": "작성자", "value": pr["user"]["login"], "inline": True},
+                  {"name": "브랜치", "value": f'{pr["head"]["ref"]} → {pr["base"]["ref"]}', "inline": True},
+                  {"name": "변경량", "value": f'+{pr.get("additions", 0)} / -{pr.get("deletions", 0)}', "inline": True},
+              ]
+              if not merged:
+                  fields.extend([
+                      {"name": "개요", "value": section("개요"), "inline": False},
+                      {"name": "리뷰어에게", "value": section("리뷰어에게"), "inline": False},
+                  ])
+
+              content = ""
+              ids = []
+              if not merged:
+                  author_login = pr["user"]["login"].casefold()
+                  ids = list(dict.fromkeys(
+                      user_id for login, user_id in reviewer_map.items()
+                      if login != author_login
+                  ))
+                  content = " ".join(f"<@{user_id}>" for user_id in ids)
+                  content = f"{content} 리뷰 부탁드립니다.".strip()
+
+              payload = {
+                  "content": content,
+                  "allowed_mentions": {"parse": [], "users": ids},
+                  "embeds": [{
+                      "title": title,
+                      "description": f'#{pr["number"]} {pr["title"]}'[:4000],
+                      "url": pr["html_url"],
+                      "color": 10181046 if merged else 5763719,
+                      "fields": fields,
+                  }],
+              }
+
+          elif event_name == "workflow_run":
+              run = event["workflow_run"]
+              prs = run.get("pull_requests") or []
+              if run.get("conclusion") != "failure" or not prs:
+                  raise SystemExit(0)
+              pr_number = prs[0]["number"]
+              author = "-"
+              pr_request = urllib.request.Request(
+                  f'https://api.github.com/repos/{os.environ["GITHUB_REPOSITORY"]}/pulls/{pr_number}',
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f'Bearer {os.environ["GITHUB_TOKEN"]}',
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(pr_request, timeout=15) as response:
+                      author = json.load(response)["user"]["login"]
+              except (urllib.error.URLError, KeyError, ValueError) as error:
+                  print(f"PR 작성자를 조회하지 못해 멘션 없이 알립니다: {error}")
+              author_id = reviewer_map.get(author.casefold())
+              payload = {
+                  "content": f'<@{author_id}> CI 실패 확인 부탁드립니다.' if author_id else "CI 실패 확인 부탁드립니다.",
+                  "allowed_mentions": {"parse": [], "users": [author_id] if author_id else []},
+                  "embeds": [{
+                      "title": "🔴 CI 실패",
+                      "description": f"#{pr_number} CI 검사에 실패했습니다.",
+                      "url": run["html_url"],
+                      "color": 15548997,
+                      "fields": [
+                          {"name": "작성자", "value": author, "inline": True},
+                          {"name": "브랜치", "value": run.get("head_branch") or "-", "inline": True},
+                          {"name": "검사", "value": run.get("name") or "CI", "inline": True},
+                      ],
+                  }],
+              }
+
+          if payload is None:
+              raise SystemExit(0)
+
+          request = urllib.request.Request(
+              webhook,
+              data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=15) as response:
+              if response.status not in (200, 204):
+                  raise RuntimeError(f"Discord 알림 실패: HTTP {response.status}")
+          PY

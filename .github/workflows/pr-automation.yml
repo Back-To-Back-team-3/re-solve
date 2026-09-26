@@ -1,0 +1,114 @@
+name: PR Automation
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, ready_for_review, reopened, closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  sync-pr:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REVIEWERS: ${{ vars.PR_REVIEWERS }}
+      PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+      PROJECT_CODE_SIZE_FIELD: ${{ vars.PROJECT_CODE_SIZE_FIELD }}
+      PROJECT_STATUS_FIELD: ${{ vars.PROJECT_STATUS_FIELD }}
+      PROJECT_DONE_VALUE: ${{ vars.PROJECT_DONE_VALUE }}
+    steps:
+      - name: 담당자·라벨·리뷰어 설정
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_number="$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")"
+          author="$(jq -r '.pull_request.user.login' "$GITHUB_EVENT_PATH")"
+          title="$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")"
+          draft="$(jq -r '.pull_request.draft' "$GITHUB_EVENT_PATH")"
+          action="${{ github.event.action }}"
+          repo="$GITHUB_REPOSITORY"
+
+          if [ "$action" = "opened" ]; then
+            gh pr edit "$pr_number" --repo "$repo" --add-assignee "$author" || true
+          fi
+
+          case "$title" in
+            feat\(*) label="💫 feat"; color="5319e7" ;;
+            fix\(*) label="🐛 bug"; color="d73a4a" ;;
+            chore\(*) label="⚙️ chore"; color="c5def5" ;;
+            docs\(*) label="📝 docs"; color="0075ca" ;;
+            refactor\(*) label="♻️ refactor"; color="bfdadc" ;;
+            test\(*) label="✅ test"; color="0e8a16" ;;
+            *) label="" ;;
+          esac
+
+          if [ -n "$label" ] && { [ "$action" = "opened" ] || [ "$action" = "edited" ]; }; then
+            gh label create "$label" --repo "$repo" --color "$color" --force >/dev/null
+            for old_label in "💫 feat" "🐛 bug" "⚙️ chore" "📝 docs" "♻️ refactor" "✅ test"; do
+              if [ "$old_label" != "$label" ]; then
+                gh issue edit "$pr_number" --repo "$repo" --remove-label "$old_label" >/dev/null 2>&1 || true
+              fi
+            done
+            gh issue edit "$pr_number" --repo "$repo" --add-label "$label"
+          fi
+
+          if [ "$draft" = "false" ] && { [ "$action" = "opened" ] || [ "$action" = "ready_for_review" ] || [ "$action" = "reopened" ]; }; then
+            reviewers=()
+            IFS=',' read -ra configured <<< "$REVIEWERS"
+            for reviewer in "${configured[@]}"; do
+              reviewer="${reviewer//[[:space:]]/}"
+              if [ -n "$reviewer" ] && [ "$reviewer" != "$author" ]; then
+                reviewers+=("$reviewer")
+              fi
+            done
+            if [ "${#reviewers[@]}" -gt 0 ]; then
+              reviewer_csv="$(IFS=,; echo "${reviewers[*]}")"
+              gh pr edit "$pr_number" --repo "$repo" --add-reviewer "$reviewer_csv"
+            fi
+          fi
+
+      - name: GitHub Project 동기화
+        if: env.PROJECT_TOKEN != '' && env.PROJECT_OWNER != '' && env.PROJECT_NUMBER != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          pr_url="$(jq -r '.pull_request.html_url' "$GITHUB_EVENT_PATH")"
+          action="${{ github.event.action }}"
+          merged="$(jq -r '.pull_request.merged // false' "$GITHUB_EVENT_PATH")"
+          additions="$(jq -r '.pull_request.additions // 0' "$GITHUB_EVENT_PATH")"
+          deletions="$(jq -r '.pull_request.deletions // 0' "$GITHUB_EVENT_PATH")"
+          changed_lines=$((additions + deletions))
+
+          if [ "$action" = "closed" ] && [ "$merged" != "true" ]; then
+            exit 0
+          fi
+
+          gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$pr_url" >/dev/null
+
+          if [ -n "$PROJECT_CODE_SIZE_FIELD" ] && [ "$action" != "closed" ]; then
+            if [ "$changed_lines" -ge 401 ]; then size="🦑 Large"
+            elif [ "$changed_lines" -ge 101 ]; then size="🐂 Medium"
+            elif [ "$changed_lines" -ge 21 ]; then size="🐇 Small"
+            else size="🦔 Tiny"; fi
+            gh project item-edit "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$pr_url" \
+              --field "$PROJECT_CODE_SIZE_FIELD" --value "$size"
+          fi
+
+          if [ "$action" = "closed" ] && [ "$merged" = "true" ] && [ -n "$PROJECT_STATUS_FIELD" ] && [ -n "$PROJECT_DONE_VALUE" ]; then
+            gh project item-edit "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$pr_url" \
+              --field "$PROJECT_STATUS_FIELD" --value "$PROJECT_DONE_VALUE"
+          fi
