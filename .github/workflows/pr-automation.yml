@@ -95,6 +95,37 @@ jobs:
             fi
           fi
 
+      - name: 연결된 Issue의 마일스톤 지정
+        if: github.event.action != 'closed'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_number="$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")"
+          repo="$GITHUB_REPOSITORY"
+          current_milestone="$(gh api "repos/$repo/issues/$pr_number" --jq '.milestone.number // empty')"
+          if [ -n "$current_milestone" ]; then
+            exit 0
+          fi
+
+          linked_issues="$(gh pr view "$pr_number" --repo "$repo" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')"
+          milestone_number=""
+          for issue_number in $linked_issues; do
+            issue_milestone="$(gh api "repos/$repo/issues/$issue_number" --jq '.milestone.number // empty')"
+            if [ -z "$issue_milestone" ]; then
+              continue
+            fi
+            if [ -n "$milestone_number" ] && [ "$milestone_number" != "$issue_milestone" ]; then
+              echo "연결된 Issue의 마일스톤이 서로 달라 PR 마일스톤을 지정하지 않습니다."
+              exit 0
+            fi
+            milestone_number="$issue_milestone"
+          done
+
+          if [ -n "$milestone_number" ]; then
+            gh api --method PATCH "repos/$repo/issues/$pr_number" -F milestone="$milestone_number" --silent
+          fi
+
       - name: GitHub Project 동기화
         if: env.PROJECT_TOKEN != '' && env.PROJECT_OWNER != '' && env.PROJECT_NUMBER != '' && (github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'synchronize' || (github.event.action == 'closed' && github.event.pull_request.merged))
         shell: bash
