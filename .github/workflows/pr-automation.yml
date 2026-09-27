@@ -53,6 +53,8 @@ jobs:
             docs\(*) label="📝 docs" ;;
             refactor\(*) label="♻️ refactor" ;;
             test\(*) label="✅ test" ;;
+            style\(*) label="🎨 style" ;;
+            hotfix\(*) label="🚑 hotfix" ;;
             *) label="" ;;
           esac
 
@@ -61,7 +63,7 @@ jobs:
             if ! grep -Fxq "$label" <<< "$current_labels"; then
               gh issue edit "$pr_number" --repo "$repo" --add-label "$label"
             fi
-            for old_label in "💫 feat" "🐛 fix" "⚙️ chore" "📝 docs" "♻️ refactor" "✅ test"; do
+            for old_label in "💫 feat" "🐛 fix" "⚙️ chore" "📝 docs" "♻️ refactor" "✅ test" "🎨 style" "🚑 hotfix"; do
               if [ "$old_label" != "$label" ] && grep -Fxq "$old_label" <<< "$current_labels"; then
                 gh issue edit "$pr_number" --repo "$repo" --remove-label "$old_label"
               fi
@@ -163,9 +165,9 @@ jobs:
           }
 
           if [ -n "$PROJECT_CODE_SIZE_FIELD" ] && [ "$action" != "closed" ]; then
-            if [ "$changed_lines" -ge 401 ]; then size="🦑 Large"
-            elif [ "$changed_lines" -ge 101 ]; then size="🐂 Medium"
-            elif [ "$changed_lines" -ge 21 ]; then size="🐇 Small"
+            if [ "$changed_lines" -ge 601 ]; then size="🦑 Large"
+            elif [ "$changed_lines" -ge 201 ]; then size="🐂 Medium"
+            elif [ "$changed_lines" -ge 51 ]; then size="🐇 Small"
             else size="🦔 Tiny"; fi
             set_choice "$PROJECT_CODE_SIZE_FIELD" "$size"
           fi

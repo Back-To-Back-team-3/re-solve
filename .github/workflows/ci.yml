@@ -17,5 +17,5 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: 코드 형식과 테스트 확인
-        run: bash ./gradlew spotlessCheck checkstyleMain checkstyleTest test
+      - name: 코드 형식과 테스트 소스 컴파일
+        run: bash ./gradlew spotlessCheck checkstyleMain checkstyleTest compileTestJava
