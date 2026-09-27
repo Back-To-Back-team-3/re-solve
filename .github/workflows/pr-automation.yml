@@ -2,7 +2,7 @@ name: PR Automation
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, ready_for_review, reopened, closed]
+    types: [opened, edited, synchronize, ready_for_review, reopened, stacked, labeled, unlabeled, closed]
 
 permissions:
   contents: read
@@ -12,6 +12,7 @@ permissions:
 concurrency:
   group: pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   sync-pr:
@@ -36,6 +37,8 @@ jobs:
           author="$(jq -r '.pull_request.user.login' "$GITHUB_EVENT_PATH")"
           title="$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")"
           draft="$(jq -r '.pull_request.draft' "$GITHUB_EVENT_PATH")"
+          stack_position="$(jq -r '.pull_request.stack.position // 0' "$GITHUB_EVENT_PATH")"
+          stack_base="$(jq -r '.pull_request.stack.base.ref // ""' "$GITHUB_EVENT_PATH")"
           action="${{ github.event.action }}"
           repo="$GITHUB_REPOSITORY"
 
@@ -44,23 +47,37 @@ jobs:
           fi
 
           case "$title" in
-            feat\(*) label="💫 feat"; color="5319e7" ;;
-            fix\(*) label="🐛 bug"; color="d73a4a" ;;
-            chore\(*) label="⚙️ chore"; color="c5def5" ;;
-            docs\(*) label="📝 docs"; color="0075ca" ;;
-            refactor\(*) label="♻️ refactor"; color="bfdadc" ;;
-            test\(*) label="✅ test"; color="0e8a16" ;;
+            feat\(*) label="💫 feat" ;;
+            fix\(*) label="🐛 fix" ;;
+            chore\(*) label="⚙️ chore" ;;
+            docs\(*) label="📝 docs" ;;
+            refactor\(*) label="♻️ refactor" ;;
+            test\(*) label="✅ test" ;;
             *) label="" ;;
           esac
 
           if [ -n "$label" ] && { [ "$action" = "opened" ] || [ "$action" = "edited" ]; }; then
-            gh label create "$label" --repo "$repo" --color "$color" --force >/dev/null
-            for old_label in "💫 feat" "🐛 bug" "⚙️ chore" "📝 docs" "♻️ refactor" "✅ test"; do
-              if [ "$old_label" != "$label" ]; then
-                gh issue edit "$pr_number" --repo "$repo" --remove-label "$old_label" >/dev/null 2>&1 || true
+            current_labels="$(jq -r '.pull_request.labels[]?.name' "$GITHUB_EVENT_PATH")"
+            if ! grep -Fxq "$label" <<< "$current_labels"; then
+              gh issue edit "$pr_number" --repo "$repo" --add-label "$label"
+            fi
+            for old_label in "💫 feat" "🐛 fix" "⚙️ chore" "📝 docs" "♻️ refactor" "✅ test"; do
+              if [ "$old_label" != "$label" ] && grep -Fxq "$old_label" <<< "$current_labels"; then
+                gh issue edit "$pr_number" --repo "$repo" --remove-label "$old_label"
               fi
             done
-            gh issue edit "$pr_number" --repo "$repo" --add-label "$label"
+          fi
+
+          if [ "$action" != "closed" ]; then
+            stack_label="🧱 stack"
+            has_stack_label="$(jq -r --arg name "$stack_label" 'any(.pull_request.labels[]?; .name == $name)' "$GITHUB_EVENT_PATH")"
+            if [ "$stack_position" -gt 1 ] && { [ "$stack_base" = "develop" ] || [ "$stack_base" = "main" ]; }; then
+              if [ "$has_stack_label" != "true" ]; then
+                gh issue edit "$pr_number" --repo "$repo" --add-label "$stack_label"
+              fi
+            elif [ "$has_stack_label" = "true" ]; then
+              gh issue edit "$pr_number" --repo "$repo" --remove-label "$stack_label"
+            fi
           fi
 
           if [ "$draft" = "false" ] && { [ "$action" = "opened" ] || [ "$action" = "ready_for_review" ] || [ "$action" = "reopened" ]; }; then
@@ -79,7 +96,7 @@ jobs:
           fi
 
       - name: GitHub Project 동기화
-        if: env.PROJECT_TOKEN != '' && env.PROJECT_OWNER != '' && env.PROJECT_NUMBER != ''
+        if: env.PROJECT_TOKEN != '' && env.PROJECT_OWNER != '' && env.PROJECT_NUMBER != '' && (github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'synchronize' || (github.event.action == 'closed' && github.event.pull_request.merged))
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
@@ -97,18 +114,31 @@ jobs:
             exit 0
           fi
 
-          gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$pr_url" >/dev/null
+          project_id="$(gh project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq '.id')"
+          item_id="$(gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$pr_url" --format json --jq '.id')"
+          fields_json="$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --limit 100 --format json)"
+
+          set_choice() {
+            local field_id option_id
+            field_id="$(jq -r --arg name "$1" '.fields[] | select(.name == $name) | .id' <<< "$fields_json")"
+            option_id="$(jq -r --arg name "$1" --arg value "$2" \
+              '.fields[] | select(.name == $name) | .options[]? | select(.name == $value) | .id' <<< "$fields_json")"
+            if [ -z "$field_id" ] || [ -z "$option_id" ]; then
+              echo "Project 필드 또는 선택지를 찾을 수 없습니다: $1 / $2" >&2
+              exit 1
+            fi
+            gh project item-edit --id "$item_id" --project-id "$project_id" \
+              --field-id "$field_id" --single-select-option-id "$option_id"
+          }
 
           if [ -n "$PROJECT_CODE_SIZE_FIELD" ] && [ "$action" != "closed" ]; then
             if [ "$changed_lines" -ge 401 ]; then size="🦑 Large"
             elif [ "$changed_lines" -ge 101 ]; then size="🐂 Medium"
             elif [ "$changed_lines" -ge 21 ]; then size="🐇 Small"
             else size="🦔 Tiny"; fi
-            gh project item-edit "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$pr_url" \
-              --field "$PROJECT_CODE_SIZE_FIELD" --value "$size"
+            set_choice "$PROJECT_CODE_SIZE_FIELD" "$size"
           fi
 
           if [ "$action" = "closed" ] && [ "$merged" = "true" ] && [ -n "$PROJECT_STATUS_FIELD" ] && [ -n "$PROJECT_DONE_VALUE" ]; then
-            gh project item-edit "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$pr_url" \
-              --field "$PROJECT_STATUS_FIELD" --value "$PROJECT_DONE_VALUE"
+            set_choice "$PROJECT_STATUS_FIELD" "$PROJECT_DONE_VALUE"
           fi

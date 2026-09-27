@@ -1,0 +1,54 @@
+# PR 자동화는 GitHub-native Stack의 2번째 이상 PR에만 `🧱 stack` 라벨을 붙인다.
+merge_protections_settings:
+  auto_merge_conditions: true
+
+queue_rules:
+  - name: promote-between-main-and-develop
+    merge_method: merge
+    branch_protection_injection_mode: queue
+    queue_conditions:
+      - or:
+          - and:
+              - base = develop
+              - head = main
+          - and:
+              - base = main
+              - head = develop
+      - -draft
+      - -conflict
+      - "#approved-reviews-by >= 3"
+      - "#changes-requested-reviews-by = 0"
+      - "#review-threads-unresolved = 0"
+      - check-success = quality-check
+    merge_conditions:
+      - check-success = quality-check
+  - name: work-and-stack
+    merge_method: squash
+    branch_protection_injection_mode: queue
+    batch_size: 5
+    batch_max_wait_time: 1 min
+    queue_conditions:
+      - or:
+          - and:
+              - base = develop
+              - head != main
+              - head != develop
+          - and:
+              - base = main
+              - head != main
+              - head != develop
+          - and:
+              - label = 🧱 stack
+              - base != develop
+              - base != main
+              - head != develop
+              - head != main
+              - -from-fork
+      - -draft
+      - -conflict
+      - "#approved-reviews-by >= 2"
+      - "#changes-requested-reviews-by = 0"
+      - "#review-threads-unresolved = 0"
+      - check-success = quality-check
+    merge_conditions:
+      - check-success = quality-check
