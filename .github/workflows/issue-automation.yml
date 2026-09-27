@@ -47,6 +47,8 @@ jobs:
             docs\(*) label="📝 docs" ;;
             refactor\(*) label="♻️ refactor" ;;
             test\(*) label="✅ test" ;;
+            style\(*) label="🎨 style" ;;
+            hotfix\(*) label="🚑 hotfix" ;;
             *) label="" ;;
           esac
 
@@ -55,11 +57,26 @@ jobs:
             if ! grep -Fxq "$label" <<< "$current_labels"; then
               gh issue edit "$issue_number" --repo "$repo" --add-label "$label"
             fi
-            for old_label in "💫 feat" "🐛 fix" "⚙️ chore" "📝 docs" "♻️ refactor" "✅ test"; do
+            for old_label in "💫 feat" "🐛 fix" "⚙️ chore" "📝 docs" "♻️ refactor" "✅ test" "🎨 style" "🚑 hotfix"; do
               if [ "$old_label" != "$label" ] && grep -Fxq "$old_label" <<< "$current_labels"; then
                 gh issue edit "$issue_number" --repo "$repo" --remove-label "$old_label"
               fi
             done
+          fi
+
+          body="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          priority=""
+          for value in Urgent High Medium Low; do
+            if grep -Eq "^- \\[[xX]\\] .* ${value}( |$)" <<< "$body"; then
+              priority="$value"
+              break
+            fi
+          done
+          if [ -n "$priority" ]; then
+            jq -n --arg value "$priority" \
+              '{issue_field_values: [{field_id: 43680323, value: $value}]}' |
+              gh api --method POST "repos/$repo/issues/$issue_number/issue-field-values" \
+                -H "X-GitHub-Api-Version: 2026-03-10" --input - >/dev/null
           fi
 
       - name: GitHub Project 동기화
