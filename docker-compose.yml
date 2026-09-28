@@ -66,6 +66,8 @@ services:
       STUDY_DB_NAME: ${STUDY_DB_NAME:-study_db}
       NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME:-notification_db}
       INTEGRATION_DB_NAME: ${INTEGRATION_DB_NAME:-integration_db}
+      AI_DB_NAME: ${AI_DB_NAME:-ai_db}
+      ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME:-analytics_db}
     entrypoint:
       - /bin/sh
       - -ec
@@ -73,7 +75,7 @@ services:
         case "$$DB_USERNAME" in
           ''|*[!a-zA-Z0-9_]*) echo 'DB_USERNAME must contain only letters, numbers, or underscores' >&2; exit 1 ;;
         esac
-        for db in "$$MEMBER_DB_NAME" "$$PROBLEM_DB_NAME" "$$JUDGE_DB_NAME" "$$CONTEST_DB_NAME" "$$STUDY_DB_NAME" "$$NOTIFICATION_DB_NAME" "$$INTEGRATION_DB_NAME"; do
+        for db in "$$MEMBER_DB_NAME" "$$PROBLEM_DB_NAME" "$$JUDGE_DB_NAME" "$$CONTEST_DB_NAME" "$$STUDY_DB_NAME" "$$NOTIFICATION_DB_NAME" "$$INTEGRATION_DB_NAME" "$$AI_DB_NAME" "$$ANALYTICS_DB_NAME"; do
           case "$$db" in
             ''|*[!a-zA-Z0-9_]*) echo 'DB name must contain only letters, numbers, or underscores' >&2; exit 1 ;;
           esac
@@ -118,6 +120,8 @@ services:
       STUDY_SERVICE_URL: ${STUDY_SERVICE_URL:-http://study-service:8080}
       NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL:-http://notification-service:8080}
       INTEGRATION_SERVICE_URL: ${INTEGRATION_SERVICE_URL:-http://integration-service:8080}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8080}
+      ANALYTICS_SERVICE_URL: ${ANALYTICS_SERVICE_URL:-http://analytics-service:8080}
 
   member-service:
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-member-service:${IMAGE_TAG:-local}
@@ -210,6 +214,32 @@ services:
     environment:
       <<: *db-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${INTEGRATION_DB_NAME:-integration_db}
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+
+  ai-service:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-ai-service:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./ai-service
+    environment:
+      <<: *db-redis-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${AI_DB_NAME:-ai_db}
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  analytics-service:
+    image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-analytics-service:${IMAGE_TAG:-local}
+    build:
+      <<: *backend-build
+      context: ./analytics-service
+    environment:
+      <<: *db-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${ANALYTICS_DB_NAME:-analytics_db}
     depends_on:
       mysql-init:
         condition: service_completed_successfully
