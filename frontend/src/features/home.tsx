@@ -280,7 +280,7 @@ export function HomePage() {
       >
         <div className="stack">
           <div className="row">
-            <Pet level={modal === "diagnosis" ? current.level : 0} />
+            <Pet level={modal === "diagnosis" ? petLevel : 0} />
             <div>
               <h3>
                 {modal === "diagnosis"
@@ -451,7 +451,11 @@ export function DashboardPage() {
                 <p className="muted">
                   전체 문제 중 {solved.size} / {problems.length} 해결
                 </p>
-                <Progress value={(solved.size / problems.length) * 100} />
+                <Progress
+                  value={
+                    problems.length ? (solved.size / problems.length) * 100 : 0
+                  }
+                />
               </div>
             </div>
           </Section>

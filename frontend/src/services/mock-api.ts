@@ -172,14 +172,29 @@ export const api = {
     const db = await read();
     return db.users.find((x) => x.id === db.currentUserId) || null;
   },
-  async login(email: string, name?: string) {
+  async signup(email: string, name: string) {
+    return change((db) => {
+      if (db.users.some((u) => u.email === email))
+        throw new Error("이미 사용 중인 이메일입니다.");
+      const u: User = {
+        id: crypto.randomUUID(),
+        email,
+        name,
+        goal: "매일 한 문제씩",
+      };
+      db.users.push(u);
+      db.currentUserId = u.id;
+      return u;
+    });
+  },
+  async login(email: string) {
     return change((db) => {
       let u = db.users.find((x) => x.email === email);
       if (!u) {
         u = {
           id: crypto.randomUUID(),
           email,
-          name: name || email.split("@")[0],
+          name: email.split("@")[0],
           goal: "매일 한 문제씩",
         };
         db.users.push(u);

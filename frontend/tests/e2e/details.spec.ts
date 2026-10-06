@@ -88,3 +88,36 @@ test("signup returns to destination and stores no password", async ({
     page.getByRole("link", { name: "새로운 동료", exact: true }),
   ).toBeVisible();
 });
+test("duplicate signup preserves the account and existing login still works", async ({
+  page,
+}) => {
+  await page.goto("/signup?returnTo=%2Fstudies");
+  await expect(page.locator("main")).toHaveAttribute("data-ready", "true");
+  const before = await page.evaluate(() =>
+    localStorage.getItem("resolve:mock:v1"),
+  );
+  await page.getByLabel("닉네임").fill("다른 닉네임");
+  await page.getByLabel("이메일").fill("mentor@resolve.demo");
+  await page.getByLabel("비밀번호").fill("throw-away-password");
+  await page.getByRole("button", { name: "데모 회원가입" }).click();
+  await expect(
+    page.getByText("이미 사용 중인 이메일입니다.", { exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL("/signup?returnTo=%2Fstudies");
+  await expect(page.getByLabel("닉네임")).toHaveValue("다른 닉네임");
+  expect(
+    await page.evaluate(() => localStorage.getItem("resolve:mock:v1")),
+  ).toBe(before);
+
+  await page.getByRole("link", { name: "이미 계정이 있어요" }).click();
+  await expect(
+    page.getByRole("heading", { name: "다시 만나서 반가워요", exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("이메일").fill("mentor@resolve.demo");
+  await page.getByLabel("비밀번호").fill("throw-away-password");
+  await page.getByRole("button", { name: "데모 로그인", exact: true }).click();
+  await expect(page).toHaveURL("/studies");
+  await expect(
+    page.getByRole("link", { name: "코테선배", exact: true }),
+  ).toBeVisible();
+});

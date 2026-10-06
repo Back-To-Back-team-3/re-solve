@@ -50,10 +50,9 @@ export function AuthPage({ signup = false }: { signup?: boolean }) {
             f = new FormData(form);
           await action(
             async () => {
-              await api.login(
-                String(f.get("email")),
-                signup ? String(f.get("name")) : undefined,
-              );
+              const email = String(f.get("email"));
+              if (signup) await api.signup(email, String(f.get("name")));
+              else await api.login(email);
               form.reset();
               router.push(safeReturn(params.get("returnTo")));
             },
