@@ -1,3 +1,32 @@
 spring:
   application:
     name: member-service
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  jackson:
+    time-zone: Asia/Seoul
+
+resolve:
+  auth:
+    frontend-origin: ${FRONTEND_ORIGIN:http://localhost:8080}
+    # 로그인 후 이동할 수 있는 프론트 경로(상대 경로 접두어). "/"는 모든 상대 경로를 허용한다.
+    allowed-redirect-paths:
+      - /
+    github:
+      client-id: ${GITHUB_CLIENT_ID:}
+      client-secret: ${GITHUB_CLIENT_SECRET:}
+      redirect-uri: ${GITHUB_REDIRECT_URI:http://localhost:8080/api/v1/auth/github/callback}
+      authorize-uri: https://github.com/login/oauth/authorize
+      token-uri: https://github.com/login/oauth/access_token
+      api-base-uri: https://api.github.com
+    jwt:
+      # HS256 서명 키. Gateway와 같은 값을 쓰며 32바이트 이상이어야 한다.
+      secret: ${JWT_SECRET:}
+      access-token-ttl: 1h
+    refresh-token:
+      ttl: 14d
+      cookie-secure: ${REFRESH_COOKIE_SECURE:true}
