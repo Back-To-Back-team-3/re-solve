@@ -13,10 +13,11 @@ RUN node scripts/copy-monaco.mjs && npm run build
 
 FROM node:24-alpine AS runner
 WORKDIR /app
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=80 HOSTNAME=0.0.0.0
+# Keep the non-root server port aligned with nginx/local.conf.
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
 USER node
-EXPOSE 80
+EXPOSE 3000
 CMD ["node", "server.js"]
