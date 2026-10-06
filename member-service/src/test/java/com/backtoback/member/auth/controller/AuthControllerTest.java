@@ -2,7 +2,10 @@ package com.backtoback.member.auth.controller;
 
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -24,10 +27,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.backtoback.member.auth.config.AuthProperties;
 import com.backtoback.member.auth.service.AuthService;
 import com.backtoback.member.auth.service.LoginResult;
+import com.backtoback.member.auth.service.TokenRefreshResult;
 import com.backtoback.member.global.config.SecurityConfig;
 import com.backtoback.member.global.error.BusinessException;
 import com.backtoback.member.global.error.ErrorCode;
 import com.backtoback.member.member.domain.Member;
+
+import jakarta.servlet.http.Cookie;
 
 @WebMvcTest(
     controllers = AuthController.class,
@@ -168,5 +174,92 @@ class AuthControllerTest {
             )
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_LOGIN_CODE_INVALID"));
+    }
+
+    @Test
+    @DisplayName("1.1.4 재발급은 새 Access Token을 주고 교체된 Refresh Token 쿠키를 설정한다")
+    void refreshReturnsAccessTokenAndRotatedCookie() throws Exception {
+        given(authService.refresh("old-refresh"))
+            .willReturn(new TokenRefreshResult("new-access", 3600L, "new-refresh"));
+
+        mockMvc
+            .perform(post("/api/v1/auth/token/refresh").cookie(new Cookie("refreshToken", "old-refresh")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data.accessToken").value("new-access"))
+            .andExpect(jsonPath("$.data.expiresIn").value(3600))
+            .andExpect(
+                header()
+                    .string(
+                        "Set-Cookie",
+                        allOf(
+                            containsString("refreshToken=new-refresh"),
+                            containsString("Max-Age=1209600"),
+                            containsString("HttpOnly")
+                        )
+                    )
+            );
+    }
+
+    @Test
+    @DisplayName("1.1.4 유예 시간 안의 중복 재발급은 Access Token만 주고 쿠키는 그대로 둔다")
+    void refreshWithinGraceKeepsCookie() throws Exception {
+        given(authService.refresh("just-rotated")).willReturn(new TokenRefreshResult("new-access", 3600L, null));
+
+        mockMvc
+            .perform(post("/api/v1/auth/token/refresh").cookie(new Cookie("refreshToken", "just-rotated")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.accessToken").value("new-access"))
+            .andExpect(header().doesNotExist("Set-Cookie"));
+    }
+
+    @Test
+    @DisplayName("1.1.4 재발급 실패(INVALID·REUSED)는 401과 함께 Refresh Token 쿠키를 지운다")
+    void refreshFailureClearsCookie() throws Exception {
+        given(authService.refresh(null)).willThrow(new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+        given(authService.refresh("stolen")).willThrow(new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_REUSED));
+
+        mockMvc
+            .perform(post("/api/v1/auth/token/refresh"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_INVALID"))
+            .andExpect(
+                header().string("Set-Cookie", allOf(containsString("refreshToken="), containsString("Max-Age=0")))
+            );
+
+        mockMvc
+            .perform(post("/api/v1/auth/token/refresh").cookie(new Cookie("refreshToken", "stolen")))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_REUSED"))
+            .andExpect(header().string("Set-Cookie", containsString("Max-Age=0")));
+    }
+
+    @Test
+    @DisplayName("1.1.5 로그아웃은 204와 함께 Refresh Token 쿠키를 지운다")
+    void logoutClearsCookie() throws Exception {
+        mockMvc
+            .perform(
+                post("/api/v1/auth/logout")
+                    .header("X-User-Id", "7")
+                    .header("Authorization", "Bearer access")
+                    .cookie(new Cookie("refreshToken", "refresh"))
+            )
+            .andExpect(status().isNoContent())
+            .andExpect(
+                header().string("Set-Cookie", allOf(containsString("refreshToken="), containsString("Max-Age=0")))
+            );
+
+        verify(authService).logout(7L, "Bearer access", "refresh");
+    }
+
+    @Test
+    @DisplayName("1.1.5 Gateway 인증 정보(X-User-Id)가 없으면 401 AUTH_TOKEN_INVALID")
+    void logoutRequiresAuthenticatedUser() throws Exception {
+        mockMvc
+            .perform(post("/api/v1/auth/logout").header("Authorization", "Bearer access"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+
+        verify(authService, never()).logout(any(), any(), any());
     }
 }

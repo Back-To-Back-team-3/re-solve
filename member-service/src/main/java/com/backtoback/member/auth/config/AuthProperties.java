@@ -43,6 +43,10 @@ public record AuthProperties(
         }
     }
 
-    public record RefreshToken(@NotNull Duration ttl, boolean cookieSecure) {
+    /**
+     * @param reuseGrace 교체된 Refresh Token을 재사용으로 보지 않는 유예 시간. 여러 탭·동시 요청이 거의 같은 때
+     *     재발급을 시도해도 정상 사용자가 로그아웃되지 않게 한다.
+     */
+    public record RefreshToken(@NotNull Duration ttl, @NotNull Duration reuseGrace, boolean cookieSecure) {
     }
 }

@@ -18,6 +18,8 @@ public enum ErrorCode {
 
     // Auth
     AUTH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "인증 정보가 유효하지 않습니다."),
+    AUTH_REFRESH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "로그인이 만료되었습니다. 다시 로그인해 주세요."),
+    AUTH_REFRESH_TOKEN_REUSED(HttpStatus.UNAUTHORIZED, "보안을 위해 모든 기기에서 로그아웃되었습니다. 다시 로그인해 주세요."),
     AUTH_LOGIN_CODE_INVALID(HttpStatus.UNAUTHORIZED, "로그인 코드가 없거나 만료되었습니다. 다시 로그인해 주세요."),
     AUTH_OAUTH_FAILED(HttpStatus.BAD_GATEWAY, "GitHub 로그인에 실패했습니다. 잠시 후 다시 시도해 주세요."),
     AUTH_ACCESS_DENIED(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),

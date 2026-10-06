@@ -29,4 +29,6 @@ resolve:
       access-token-ttl: 1h
     refresh-token:
       ttl: 14d
+      # 교체 직후 이 시간 안에 이전 토큰으로 온 재발급은 재사용으로 보지 않는다 (동시 요청·여러 탭 대응)
+      reuse-grace: 10s
       cookie-secure: ${REFRESH_COOKIE_SECURE:true}

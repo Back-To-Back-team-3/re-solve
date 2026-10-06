@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -42,6 +43,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<ErrorResponse> handleMissingParameter(MissingServletRequestParameterException exception) {
         return invalidRequest(List.of(new FieldErrorDetail(exception.getParameterName(), "필수 값입니다.")));
+    }
+
+    /**
+     * Gateway가 인증 후 넣어 주는 {@code X-User-Id}가 없으면 인증되지 않은 요청이다.
+     */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorResponse> handleMissingHeader(MissingRequestHeaderException exception) {
+        if ("X-User-Id".equalsIgnoreCase(exception.getHeaderName())) {
+            ErrorCode errorCode = ErrorCode.AUTH_TOKEN_INVALID;
+            return ResponseEntity.status(errorCode.getStatus()).body(ErrorResponse.of(errorCode));
+        }
+        return invalidRequest(List.of(new FieldErrorDetail(exception.getHeaderName(), "필수 값입니다.")));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

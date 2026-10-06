@@ -57,7 +57,7 @@ class RedirectPathPolicyTest {
                 List.of("/problems"),
                 base.github(),
                 base.jwt(),
-                new AuthProperties.RefreshToken(Duration.ofDays(14), true)
+                new AuthProperties.RefreshToken(Duration.ofDays(14), Duration.ofSeconds(10), true)
             );
         RedirectPathPolicy narrowPolicy = new RedirectPathPolicy(narrowed);
 

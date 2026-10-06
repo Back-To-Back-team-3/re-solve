@@ -1,5 +1,7 @@
 package com.backtoback.member.member.service;
 
+import java.util.Optional;
+
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +42,11 @@ public class MemberService {
     @Transactional(readOnly = true)
     public Member getMember(Long memberId) {
         return memberRepository.findById(memberId).orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<Member> findMember(Long memberId) {
+        return memberRepository.findById(memberId);
     }
 
     private GitHubMemberRegistration register(GitHubUser gitHubUser) {
