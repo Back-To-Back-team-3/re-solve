@@ -46,6 +46,7 @@ services:
       - "127.0.0.1:${MYSQL_HOST_PORT:-3308}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+      - ./init-scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
       interval: 10s
@@ -105,6 +106,24 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  localstack:
+    image: ${LOCALSTACK_IMAGE:-localstack/localstack:3.8}
+    ports:
+      - "127.0.0.1:${LOCALSTACK_HOST_PORT:-4566}:4566"
+    environment:
+      SERVICES: "s3,sqs,sns"
+      AWS_DEFAULT_REGION: ${AWS_REGION:-ap-northeast-2}
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./init-aws/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "awslocal", "sqs", "list-queues"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   api-gateway:
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-api-gateway:${IMAGE_TAG:-local}
@@ -247,3 +266,4 @@ services:
 volumes:
   mysql-data:
   redis-data:
+  localstack-data:
