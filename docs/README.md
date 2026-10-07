@@ -6,15 +6,26 @@
 
 | 분류 | 문서 | 내용 |
 | --- | --- | --- |
-| 개발·협업 가이드 | [Git/GitHub 메뉴얼](guides/git-github.md) | 브랜치·Issue·PR·리뷰·병합 규칙과 작업 흐름 |
+| 개발·협업 가이드 | [Git/GitHub 매뉴얼](guides/git-github.md) | 브랜치·Issue·PR·리뷰·병합 규칙과 작업 흐름 |
+| 개발·협업 가이드 | [컨벤션·빌드 매뉴얼](guides/convention-build-manual.md) | Spotless·Checkstyle·빌드 규칙 |
+| 기획 | [기획서](dev/planning/planning.md) | 서비스 개요, 기능 목록, 마일스톤 |
+| 기획 | [정책 및 상태](dev/planning/policy-and-state.md) | 도메인 정책, 상태 전이, 불변식 |
+| 아키텍처 | [시스템 구성도](dev/architecture/system-architecture.md) | 전체 아키텍처 구조 |
+| 아키텍처 | [다이어그램](dev/architecture/diagrams.md) | 서비스 간 시퀀스, 상태 전이 흐름 |
+| 명세 | [API 명세서](dev/specifications/api-spec.md) | 서비스 외부 인터페이스 |
+| 명세 | [ERD](dev/specifications/erd.md) | 도메인·DB 구조 |
+| 명세 | [이벤트 계약서](dev/specifications/event-contract.md) | 서비스 간 내부 인터페이스 |
+| 명세 | [스케줄러](dev/specifications/scheduler.md) | 예약 작업 정의 |
+| 명세 | [에러 코드 표](dev/specifications/error-codes.md) | 공통 에러 코드 |
+| 운영 | [환경 변수 예시](operations/env-example.md) | 로컬·Docker 환경 변수 설정 예시 |
 
 ## 디렉터리 구분
 
 | 경로 | 저장할 자료 |
 | --- | --- |
-| `planning/` | 기획서, 정책 및 상태, 개발 일정 |
-| `architecture/` | 시스템 구성도, 서비스 간 처리 다이어그램 |
-| `specifications/` | API 명세, 도메인·DB, 이벤트 계약, 스케줄러 정의 |
+| `dev/planning/` | 기획서, 정책 및 상태, 개발 일정 |
+| `dev/architecture/` | 시스템 구성도, 서비스 간 처리 다이어그램 |
+| `dev/specifications/` | API 명세, 에러코드 표, 도메인·DB, 이벤트 계약, 스케줄러 정의 |
 | `guides/` | Git/GitHub, 코드 컨벤션, 로컬 개발·실행 방법 |
 | `operations/` | AWS 구성, 배포 절차, 모니터링, 장애 대응 절차 |
 | `records/` | 회의록, 결정 근거, 테스트·성능 측정·운영 결과 |

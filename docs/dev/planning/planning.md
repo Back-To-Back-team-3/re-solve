@@ -495,22 +495,22 @@ Framework | Java 21, Spring Boot 4.1.1 | 전 서비스 동일 버전, 공통 모
 ---
 
 ### 6.1 시스템 구성도
-[시스템 구성도 v1.0](system-architecture.md)
+[시스템 구성도 v1.0](../architecture/system-architecture.md)
 
 ### 6.2 도메인 및 데이터베이스 / ERD
-[도메인 및 데이터베이스 v1.0](erd.md)
+[도메인 및 데이터베이스 v1.0](../specifications/erd.md)
 
 ### 6.3 API 명세서
-[API 명세서 v1.0](api-spec.md)
+[API 명세서 v1.0](../specifications/api-spec.md)
 
 ### 6.4 이벤트 계약서
-[이벤트 계약서 v1.0](event-contract.md)
+[이벤트 계약서 v1.0](../specifications/event-contract.md)
 
 ### 6.5 다이어그램
-[다이어그램](diagrams.md)
+[다이어그램](../architecture/diagrams.md)
 
 ### 6.6 스케줄러
-[스케줄러](scheduler.md)
+[스케줄러](../specifications/scheduler.md)
 
 ### 6.7 AWS / 모니터링
 추후 등록 예정

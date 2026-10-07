@@ -97,7 +97,7 @@ NGINX_CHALLENGE_DIR=./nginx
 
 ## 3. 컨테이너 빌드 및 가동
 
-- `Dockerfile`은 각 모듈의 실행 JAR를 복사한다.
+- `../../Dockerfile`은 각 모듈의 실행 JAR를 복사한다.
 
 ```bash
 # 저장소 루트에서 JAR 생성 후 컨테이너 빌드·실행

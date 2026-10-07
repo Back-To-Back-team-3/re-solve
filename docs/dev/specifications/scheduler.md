@@ -1033,7 +1033,7 @@
 | 잠금 | ShedLock 없음. `SELECT … WHERE status IN ('PENDING','RETRY_WAITING','RATE_LIMITED') AND (next_retry_at IS NULL OR next_retry_at <= now()) ORDER BY id LIMIT 10 FOR UPDATE SKIP LOCKED` → `RUNNING`, `updated_at = now()` 커밋 |
 | 트랜잭션 경계 | ① 선점 Tx ② Tx 밖: 연동 상태 확인 → 설치 토큰 발급 → judge 3.3.3 코드 조회 → Contents API PUT ③ 결과 Tx: `WHERE id=:id AND status='RUNNING'` 조건부 UPDATE |
 | 상태 전이 | 201/200 → `SUCCEEDED`(`commit_sha`). 403·429·잔여 호출 기준 이하 → `RATE_LIMITED`(`next_retry_at = x-ratelimit-reset`). 5xx·네트워크·코드 조회 실패 → `RETRY_WAITING`(`retry_count + 1`, 1분 → 5분 → 30분). `retry_count > 5` → `FAILED` + `GitHubSyncFailed`. 401 → 작업 `FAILED`, 연동 `DISCONNECTED`(`AUTH_EXPIRED`), 대기 작업 `CANCELED`, `GitHubSyncFailed`(`AUTH_EXPIRED`) |
-| 커밋 경로 | `commit_path_rule` = `{난이도}/{문제번호}-{문제명}/{Solution.ext}` + `README.md`. 같은 문제 재AC는 같은 경로에 새 커밋(기존 파일 `sha` 조회 후 PUT) |
+| 커밋 경로 | `commit_path_rule` = `{난이도}/{문제번호}-{문제명}/{Solution.ext}` + `../../../README.md`. 같은 문제 재AC는 같은 경로에 새 커밋(기존 파일 `sha` 조회 후 PUT) |
 | 지표 | 성공·실패·Rate Limit 건수, 대기 시간 |
 
 **동시성 설계 포인트:**
