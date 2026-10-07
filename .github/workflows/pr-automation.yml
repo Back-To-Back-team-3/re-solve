@@ -136,7 +136,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          pr_url="$(jq -r '.pull_request.html_url' "$GITHUB_EVENT_PATH")"
+          content_id="$(jq -r '.pull_request.node_id' "$GITHUB_EVENT_PATH")"
           action="${{ github.event.action }}"
           merged="$(jq -r '.pull_request.merged // false' "$GITHUB_EVENT_PATH")"
           additions="$(jq -r '.pull_request.additions // 0' "$GITHUB_EVENT_PATH")"
@@ -148,7 +148,10 @@ jobs:
           fi
 
           project_id="$(gh project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq '.id')"
-          item_id="$(gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$pr_url" --format json --jq '.id')"
+          item_id="$(gh api graphql \
+            -f query='mutation($projectId: ID!, $contentId: ID!) { addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) { item { id } } }' \
+            -f projectId="$project_id" -f contentId="$content_id" \
+            --jq '.data.addProjectV2ItemById.item.id')"
           fields_json="$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --limit 100 --format json)"
 
           set_choice() {
