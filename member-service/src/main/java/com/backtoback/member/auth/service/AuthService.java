@@ -1,5 +1,7 @@
 package com.backtoback.member.auth.service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 
@@ -15,6 +17,7 @@ import com.backtoback.member.auth.store.AccessTokenBlocklist;
 import com.backtoback.member.auth.store.LoginCodeStore;
 import com.backtoback.member.auth.store.LoginCodeStore.LoginCodeClaim;
 import com.backtoback.member.auth.store.OAuthStateStore;
+import com.backtoback.member.auth.store.OAuthStateStore.OAuthState;
 import com.backtoback.member.auth.store.RefreshTokenStore;
 import com.backtoback.member.auth.store.RefreshTokenStore.RotationResult;
 import com.backtoback.member.auth.token.AccessTokenProvider;
@@ -44,6 +47,7 @@ import lombok.extern.slf4j.Slf4j;
 public class AuthService {
 
     private static final String BEARER_PREFIX = "Bearer ";
+    private static final String GITHUB_ACCESS_DENIED = "access_denied";
 
     private final AuthProperties authProperties;
     private final RedirectPathPolicy redirectPathPolicy;
@@ -57,41 +61,73 @@ public class AuthService {
     private final MemberService memberService;
     private final Clock clock;
 
-    public String startGitHubLogin(String redirectPath) {
+    /**
+     * state와 함께 브라우저 nonce를 만든다. nonce는 쿠키로 브라우저에 두고 해시만 state에 저장해,
+     * 로그인을 시작한 브라우저에서만 콜백과 코드 교환을 마칠 수 있게 한다(login CSRF 방지, RFC 6749 §10.12).
+     */
+    public GitHubLoginStart startGitHubLogin(String redirectPath) {
         String path = redirectPath == null ? RedirectPathPolicy.DEFAULT_PATH : redirectPath;
         if (!redirectPathPolicy.isAllowed(path)) {
             throw new BusinessException(ErrorCode.COMMON_INVALID_REQUEST);
         }
         String state = tokenGenerator.generate();
-        oAuthStateStore.save(state, path);
-        return gitHubOAuthClient.buildAuthorizeUrl(state);
+        String browserNonce = tokenGenerator.generate();
+        oAuthStateStore.save(state, path, tokenGenerator.hash(browserNonce));
+        return new GitHubLoginStart(gitHubOAuthClient.buildAuthorizeUrl(state), browserNonce);
     }
 
     /**
+     * GitHub 콜백을 처리한다. 사용자가 인가를 취소했거나 GitHub가 오류를 돌려줘도 state는 소비해 다시 쓸 수 없게 한다.
+     *
+     * @param authorizationCode GitHub 인가 코드. 인가를 취소하면 없다.
+     * @param gitHubError GitHub가 돌려준 {@code error} (예: {@code access_denied})
+     * @param browserNonce 로그인 시작 때 내려준 브라우저 nonce 쿠키 값
      * @return 로그인 교환 코드를 붙인 프론트 콜백 주소
      */
-    public String completeGitHubLogin(String authorizationCode, String state) {
-        String redirectPath
+    public String completeGitHubLogin(String authorizationCode, String state, String gitHubError, String browserNonce) {
+        if (!StringUtils.hasText(state)) {
+            throw new BusinessException(ErrorCode.AUTH_TOKEN_INVALID);
+        }
+        OAuthState oAuthState
             = oAuthStateStore.consume(state).orElseThrow(() -> new BusinessException(ErrorCode.AUTH_TOKEN_INVALID));
+        if (!matchesBrowserNonce(browserNonce, oAuthState.browserNonceHash())) {
+            throw new BusinessException(ErrorCode.AUTH_TOKEN_INVALID);
+        }
+        if (StringUtils.hasText(gitHubError)) {
+            throw new BusinessException(
+                GITHUB_ACCESS_DENIED.equals(gitHubError) ? ErrorCode.AUTH_OAUTH_DENIED : ErrorCode.AUTH_OAUTH_FAILED
+            );
+        }
+        if (!StringUtils.hasText(authorizationCode)) {
+            throw new BusinessException(ErrorCode.AUTH_OAUTH_FAILED);
+        }
 
         GitHubUser gitHubUser = gitHubOAuthClient.fetchUser(authorizationCode);
         GitHubMemberRegistration registration = memberService.findOrRegister(gitHubUser);
-        String loginCode = loginCodeStore.issue(registration.member().getId(), registration.newMember());
+        String loginCode
+            = loginCodeStore
+                .issue(registration.member().getId(), registration.newMember(), oAuthState.browserNonceHash());
 
-        return UriComponentsBuilder
-            .fromUriString(authProperties.frontendOrigin())
-            .path("/auth/callback")
+        return frontendCallback()
             .queryParam("loginCode", loginCode)
-            .queryParam("redirectPath", redirectPath)
+            .queryParam("redirectPath", oAuthState.redirectPath())
             .encode()
             .build()
             .toUriString();
     }
 
-    public LoginResult exchangeLoginCode(String loginCode) {
+    /**
+     * 콜백 처리에 실패했을 때 보낼 프론트 콜백 주소. 프론트는 {@code error} 값(오류 코드)으로 분기한다.
+     */
+    public String frontendCallbackError(ErrorCode errorCode) {
+        return frontendCallback().queryParam("error", errorCode.name()).encode().build().toUriString();
+    }
+
+    public LoginResult exchangeLoginCode(String loginCode, String browserNonce) {
         LoginCodeClaim claim
             = loginCodeStore
                 .consume(loginCode)
+                .filter(consumed -> matchesBrowserNonce(browserNonce, consumed.browserNonceHash()))
                 .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_LOGIN_CODE_INVALID));
         Member member = memberService.getMember(claim.memberId());
         if (member.isWithdrawn()) {
@@ -162,6 +198,18 @@ public class AuthService {
         if (StringUtils.hasText(refreshToken)) {
             refreshTokenStore.revoke(memberId, refreshToken);
         }
+    }
+
+    private UriComponentsBuilder frontendCallback() {
+        return UriComponentsBuilder.fromUriString(authProperties.frontendOrigin()).path("/auth/callback");
+    }
+
+    private boolean matchesBrowserNonce(String browserNonce, String expectedHash) {
+        if (!StringUtils.hasText(browserNonce) || !StringUtils.hasText(expectedHash)) {
+            return false;
+        }
+        byte[] actual = tokenGenerator.hash(browserNonce).getBytes(StandardCharsets.US_ASCII);
+        return MessageDigest.isEqual(actual, expectedHash.getBytes(StandardCharsets.US_ASCII));
     }
 
     private String extractBearerToken(String authorization) {

@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * GitHub 콜백 뒤 프론트로 넘기는 1회용 로그인 교환 코드. 토큰을 URL에 싣지 않기 위해 쓴다.
+ * 로그인을 시작한 브라우저의 nonce 해시를 함께 저장해, 다른 브라우저에서는 교환할 수 없게 한다.
  */
 @Component
 @RequiredArgsConstructor
@@ -25,9 +26,10 @@ public class LoginCodeStore {
     private final StringRedisTemplate redisTemplate;
     private final SecureTokenGenerator tokenGenerator;
 
-    public String issue(Long memberId, boolean newMember) {
+    public String issue(Long memberId, boolean newMember, String browserNonceHash) {
         String loginCode = CODE_PREFIX + tokenGenerator.generate();
-        redisTemplate.opsForValue().set(KEY_PREFIX + loginCode, memberId + SEPARATOR + newMember, TTL);
+        String value = memberId + SEPARATOR + newMember + SEPARATOR + browserNonceHash;
+        redisTemplate.opsForValue().set(KEY_PREFIX + loginCode, value, TTL);
         return loginCode;
     }
 
@@ -39,10 +41,13 @@ public class LoginCodeStore {
         if (value == null) {
             return Optional.empty();
         }
-        String[] parts = value.split(SEPARATOR);
-        return Optional.of(new LoginCodeClaim(Long.valueOf(parts[0]), Boolean.parseBoolean(parts[1])));
+        String[] parts = value.split(SEPARATOR, 3);
+        if (parts.length != 3) {
+            return Optional.empty();
+        }
+        return Optional.of(new LoginCodeClaim(Long.valueOf(parts[0]), Boolean.parseBoolean(parts[1]), parts[2]));
     }
 
-    public record LoginCodeClaim(Long memberId, boolean newMember) {
+    public record LoginCodeClaim(Long memberId, boolean newMember, String browserNonceHash) {
     }
 }

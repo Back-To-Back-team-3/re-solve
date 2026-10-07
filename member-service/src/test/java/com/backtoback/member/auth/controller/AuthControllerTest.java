@@ -2,6 +2,7 @@ package com.backtoback.member.auth.controller;
 
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -26,6 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.backtoback.member.auth.config.AuthProperties;
 import com.backtoback.member.auth.service.AuthService;
+import com.backtoback.member.auth.service.GitHubLoginStart;
 import com.backtoback.member.auth.service.LoginResult;
 import com.backtoback.member.auth.service.TokenRefreshResult;
 import com.backtoback.member.global.config.SecurityConfig;
@@ -64,14 +66,28 @@ class AuthControllerTest {
     private AuthService authService;
 
     @Test
-    @DisplayName("1.1.1 로그인 시작은 GitHub 인가 화면으로 302 리다이렉트한다")
-    void startGitHubLoginRedirects() throws Exception {
-        given(authService.startGitHubLogin("/problems")).willReturn("https://github.com/login/oauth/authorize?s=1");
+    @DisplayName("1.1.1 로그인 시작은 브라우저 nonce 쿠키(SameSite=Lax)를 주고 GitHub 인가 화면으로 302 리다이렉트한다")
+    void startGitHubLoginRedirectsWithNonceCookie() throws Exception {
+        given(authService.startGitHubLogin("/problems"))
+            .willReturn(new GitHubLoginStart("https://github.com/login/oauth/authorize?s=1", "nonce-1"));
 
         mockMvc
             .perform(get("/api/v1/auth/github").param("redirectPath", "/problems"))
             .andExpect(status().isFound())
-            .andExpect(header().string("Location", "https://github.com/login/oauth/authorize?s=1"));
+            .andExpect(header().string("Location", "https://github.com/login/oauth/authorize?s=1"))
+            .andExpect(
+                header()
+                    .string(
+                        "Set-Cookie",
+                        allOf(
+                            containsString("loginNonce=nonce-1"),
+                            containsString("Path=/api/v1/auth"),
+                            containsString("Max-Age=600"),
+                            containsString("HttpOnly"),
+                            containsString("SameSite=Lax")
+                        )
+                    )
+            );
     }
 
     @Test
@@ -88,13 +104,18 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("1.1.2 콜백은 로그인 교환 코드를 붙여 프론트로 302 리다이렉트한다")
+    @DisplayName("1.1.2 콜백은 nonce 쿠키를 서비스에 넘기고 로그인 교환 코드를 붙여 프론트로 302 리다이렉트한다")
     void callbackRedirectsToFrontend() throws Exception {
-        given(authService.completeGitHubLogin("code", "state-1"))
+        given(authService.completeGitHubLogin("code", "state-1", null, "nonce-1"))
             .willReturn("http://localhost:8080/auth/callback?loginCode=lc_abc&redirectPath=/");
 
         mockMvc
-            .perform(get("/api/v1/auth/github/callback").param("code", "code").param("state", "state-1"))
+            .perform(
+                get("/api/v1/auth/github/callback")
+                    .param("code", "code")
+                    .param("state", "state-1")
+                    .cookie(new Cookie("loginNonce", "nonce-1"))
+            )
             .andExpect(status().isFound())
             .andExpect(
                 header().string("Location", "http://localhost:8080/auth/callback?loginCode=lc_abc&redirectPath=/")
@@ -102,28 +123,76 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("1.1.2 state가 유효하지 않으면 401 AUTH_TOKEN_INVALID")
-    void callbackRejectsInvalidState() throws Exception {
-        given(authService.completeGitHubLogin("code", "bad"))
+    @DisplayName("1.1.2 콜백 실패는 JSON이 아니라 프론트 콜백 ?error=코드로 302 리다이렉트하고 nonce 쿠키를 지운다")
+    void callbackFailureRedirectsWithError() throws Exception {
+        given(authService.completeGitHubLogin("code", "bad", null, null))
             .willThrow(new BusinessException(ErrorCode.AUTH_TOKEN_INVALID));
+        given(authService.frontendCallbackError(ErrorCode.AUTH_TOKEN_INVALID))
+            .willReturn("http://localhost:8080/auth/callback?error=AUTH_TOKEN_INVALID");
 
         mockMvc
             .perform(get("/api/v1/auth/github/callback").param("code", "code").param("state", "bad"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+            .andExpect(status().isFound())
+            .andExpect(header().string("Location", "http://localhost:8080/auth/callback?error=AUTH_TOKEN_INVALID"))
+            .andExpect(
+                header().string("Set-Cookie", allOf(containsString("loginNonce="), containsString("Max-Age=0")))
+            );
     }
 
     @Test
-    @DisplayName("1.1.3 코드 교환은 Access Token을 본문으로, Refresh Token을 HttpOnly 쿠키로 준다")
+    @DisplayName("1.1.2 GitHub 인가 취소(code 없이 error=access_denied)도 프론트 콜백으로 302 리다이렉트한다")
+    void callbackHandlesCancel() throws Exception {
+        given(authService.completeGitHubLogin(null, "state-1", "access_denied", "nonce-1"))
+            .willThrow(new BusinessException(ErrorCode.AUTH_OAUTH_DENIED));
+        given(authService.frontendCallbackError(ErrorCode.AUTH_OAUTH_DENIED))
+            .willReturn("http://localhost:8080/auth/callback?error=AUTH_OAUTH_DENIED");
+
+        mockMvc
+            .perform(
+                get("/api/v1/auth/github/callback")
+                    .param("error", "access_denied")
+                    .param("state", "state-1")
+                    .cookie(new Cookie("loginNonce", "nonce-1"))
+            )
+            .andExpect(status().isFound())
+            .andExpect(header().string("Location", "http://localhost:8080/auth/callback?error=AUTH_OAUTH_DENIED"));
+    }
+
+    @Test
+    @DisplayName("1.1.2 예상하지 못한 오류도 프론트 콜백 ?error=COMMON_INTERNAL_SERVER_ERROR로 보낸다")
+    void callbackUnexpectedFailureRedirects() throws Exception {
+        given(authService.completeGitHubLogin("code", "state-1", null, "nonce-1"))
+            .willThrow(new IllegalStateException("redis down"));
+        given(authService.frontendCallbackError(ErrorCode.COMMON_INTERNAL_SERVER_ERROR))
+            .willReturn("http://localhost:8080/auth/callback?error=COMMON_INTERNAL_SERVER_ERROR");
+
+        mockMvc
+            .perform(
+                get("/api/v1/auth/github/callback")
+                    .param("code", "code")
+                    .param("state", "state-1")
+                    .cookie(new Cookie("loginNonce", "nonce-1"))
+            )
+            .andExpect(status().isFound())
+            .andExpect(
+                header().string("Location", "http://localhost:8080/auth/callback?error=COMMON_INTERNAL_SERVER_ERROR")
+            );
+    }
+
+    @Test
+    @DisplayName("1.1.3 코드 교환은 Access Token을 본문으로, Refresh Token을 HttpOnly 쿠키로 주고 nonce 쿠키를 지운다")
     void exchangeLoginCodeReturnsTokens() throws Exception {
         Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
         ReflectionTestUtils.setField(member, "id", 7L);
-        given(authService.exchangeLoginCode("lc_abc"))
+        given(authService.exchangeLoginCode("lc_abc", "nonce-1"))
             .willReturn(new LoginResult("access-token", 3600L, "refresh-token", member, true));
 
         mockMvc
             .perform(
-                post("/api/v1/auth/token").contentType(MediaType.APPLICATION_JSON).content("{\"loginCode\":\"lc_abc\"}")
+                post("/api/v1/auth/token")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"loginCode\":\"lc_abc\"}")
+                    .cookie(new Cookie("loginNonce", "nonce-1"))
             )
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.success").value(true))
@@ -136,16 +205,25 @@ class AuthControllerTest {
             .andExpect(jsonPath("$.data.member.isNewMember").value(true))
             .andExpect(
                 header()
-                    .string(
+                    .stringValues(
                         "Set-Cookie",
-                        allOf(
-                            containsString("refreshToken=refresh-token"),
-                            containsString("Path=/api/v1/auth"),
-                            containsString("Max-Age=1209600"),
-                            containsString("Secure"),
-                            containsString("HttpOnly"),
-                            containsString("SameSite=Strict")
+                        hasItem(
+                            allOf(
+                                containsString("refreshToken=refresh-token"),
+                                containsString("Path=/api/v1/auth"),
+                                containsString("Max-Age=1209600"),
+                                containsString("Secure"),
+                                containsString("HttpOnly"),
+                                containsString("SameSite=Strict")
+                            )
                         )
+                    )
+            )
+            .andExpect(
+                header()
+                    .stringValues(
+                        "Set-Cookie",
+                        hasItem(allOf(containsString("loginNonce="), containsString("Max-Age=0")))
                     )
             );
     }
@@ -161,9 +239,9 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("1.1.3 이미 쓴 로그인 코드는 401 AUTH_LOGIN_CODE_INVALID")
+    @DisplayName("1.1.3 이미 쓴 코드이거나 다른 브라우저면 401 AUTH_LOGIN_CODE_INVALID")
     void exchangeLoginCodeRejectsUsedCode() throws Exception {
-        given(authService.exchangeLoginCode("lc_used"))
+        given(authService.exchangeLoginCode("lc_used", null))
             .willThrow(new BusinessException(ErrorCode.AUTH_LOGIN_CODE_INVALID));
 
         mockMvc
@@ -174,6 +252,25 @@ class AuthControllerTest {
             )
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_LOGIN_CODE_INVALID"));
+    }
+
+    @Test
+    @DisplayName("없는 경로·맞지 않는 메서드는 500이 아니라 원래 상태(404·405)로 응답한다")
+    void springClientErrorsKeepTheirStatus() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/unknown")).andExpect(status().isNotFound());
+        mockMvc
+            .perform(get("/api/v1/auth/token"))
+            .andExpect(status().isMethodNotAllowed())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("숫자가 아닌 X-User-Id는 500이 아니라 401 AUTH_TOKEN_INVALID")
+    void nonNumericUserIdIsUnauthorized() throws Exception {
+        mockMvc
+            .perform(post("/api/v1/auth/logout").header("X-User-Id", "abc").header("Authorization", "Bearer access"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
 
     @Test

@@ -31,6 +31,7 @@ import com.backtoback.member.auth.store.AccessTokenBlocklist;
 import com.backtoback.member.auth.store.LoginCodeStore;
 import com.backtoback.member.auth.store.LoginCodeStore.LoginCodeClaim;
 import com.backtoback.member.auth.store.OAuthStateStore;
+import com.backtoback.member.auth.store.OAuthStateStore.OAuthState;
 import com.backtoback.member.auth.store.RefreshTokenStore;
 import com.backtoback.member.auth.store.RefreshTokenStore.RotationOutcome;
 import com.backtoback.member.auth.store.RefreshTokenStore.RotationResult;
@@ -218,25 +219,28 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("로그인 시작: state를 이동 경로와 함께 저장하고 GitHub 인가 주소를 돌려준다")
-    void startGitHubLoginStoresState() {
-        given(tokenGenerator.generate()).willReturn("state-1");
+    @DisplayName("로그인 시작: state·이동 경로·브라우저 nonce 해시를 저장하고 nonce를 함께 돌려준다")
+    void startGitHubLoginStoresStateBoundToBrowser() {
+        given(tokenGenerator.generate()).willReturn("state-1", "nonce-1");
+        given(tokenGenerator.hash("nonce-1")).willReturn("hash-1");
         given(gitHubOAuthClient.buildAuthorizeUrl("state-1")).willReturn("https://github.com/login/oauth/authorize?x");
 
-        String authorizeUrl = authService.startGitHubLogin("/problems");
+        GitHubLoginStart start = authService.startGitHubLogin("/problems");
 
-        assertThat(authorizeUrl).isEqualTo("https://github.com/login/oauth/authorize?x");
-        verify(oAuthStateStore).save("state-1", "/problems");
+        assertThat(start.authorizeUrl()).isEqualTo("https://github.com/login/oauth/authorize?x");
+        assertThat(start.browserNonce()).isEqualTo("nonce-1");
+        verify(oAuthStateStore).save("state-1", "/problems", "hash-1");
     }
 
     @Test
     @DisplayName("로그인 시작: 이동 경로가 없으면 / 로 돌아온다")
     void startGitHubLoginDefaultsToRoot() {
-        given(tokenGenerator.generate()).willReturn("state-1");
+        given(tokenGenerator.generate()).willReturn("state-1", "nonce-1");
+        given(tokenGenerator.hash("nonce-1")).willReturn("hash-1");
 
         authService.startGitHubLogin(null);
 
-        verify(oAuthStateStore).save("state-1", "/");
+        verify(oAuthStateStore).save("state-1", "/", "hash-1");
     }
 
     @Test
@@ -254,7 +258,11 @@ class AuthServiceTest {
     void completeGitHubLoginRejectsUnknownState() {
         given(oAuthStateStore.consume("unknown")).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> authService.completeGitHubLogin("code", "unknown"))
+        assertThatThrownBy(() -> authService.completeGitHubLogin("code", "unknown", null, "nonce-1"))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
+        assertThatThrownBy(() -> authService.completeGitHubLogin("code", null, null, "nonce-1"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
             .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
@@ -262,16 +270,67 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("콜백: 회원을 가입시키고 로그인 교환 코드를 붙여 프론트 콜백으로 보낸다")
+    @DisplayName("콜백: 로그인을 시작한 브라우저가 아니면(login CSRF) AUTH_TOKEN_INVALID")
+    void completeGitHubLoginRejectsOtherBrowser() {
+        given(oAuthStateStore.consume("state-1")).willReturn(Optional.of(new OAuthState("/", "hash-1")));
+        given(oAuthStateStore.consume("state-2")).willReturn(Optional.of(new OAuthState("/", "hash-1")));
+        given(tokenGenerator.hash("victim-nonce")).willReturn("hash-victim");
+
+        assertThatThrownBy(() -> authService.completeGitHubLogin("code", "state-1", null, "victim-nonce"))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
+        assertThatThrownBy(() -> authService.completeGitHubLogin("code", "state-2", null, null))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
+        verify(gitHubOAuthClient, never()).fetchUser(anyString());
+    }
+
+    @Test
+    @DisplayName("콜백: 사용자가 GitHub 인가를 취소하면 state를 소비하고 AUTH_OAUTH_DENIED")
+    void completeGitHubLoginHandlesCancel() {
+        given(oAuthStateStore.consume("state-1")).willReturn(Optional.of(new OAuthState("/", "hash-1")));
+        given(tokenGenerator.hash("nonce-1")).willReturn("hash-1");
+
+        assertThatThrownBy(() -> authService.completeGitHubLogin(null, "state-1", "access_denied", "nonce-1"))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.AUTH_OAUTH_DENIED);
+        verify(oAuthStateStore).consume("state-1");
+        verify(gitHubOAuthClient, never()).fetchUser(anyString());
+    }
+
+    @Test
+    @DisplayName("콜백: GitHub가 그 밖의 오류를 돌려주거나 인가 코드가 없으면 AUTH_OAUTH_FAILED")
+    void completeGitHubLoginHandlesGitHubError() {
+        given(oAuthStateStore.consume("state-1")).willReturn(Optional.of(new OAuthState("/", "hash-1")));
+        given(oAuthStateStore.consume("state-2")).willReturn(Optional.of(new OAuthState("/", "hash-1")));
+        given(tokenGenerator.hash("nonce-1")).willReturn("hash-1");
+
+        assertThatThrownBy(() -> authService.completeGitHubLogin(null, "state-1", "server_error", "nonce-1"))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.AUTH_OAUTH_FAILED);
+        assertThatThrownBy(() -> authService.completeGitHubLogin(null, "state-2", null, "nonce-1"))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.AUTH_OAUTH_FAILED);
+    }
+
+    @Test
+    @DisplayName("콜백: 회원을 가입시키고 브라우저에 묶인 로그인 교환 코드를 붙여 프론트 콜백으로 보낸다")
     void completeGitHubLoginRedirectsWithLoginCode() {
         GitHubUser gitHubUser = new GitHubUser(1001L, "kim-dev", null, null);
         Member member = memberWithId(7L);
-        given(oAuthStateStore.consume("state-1")).willReturn(Optional.of("/studies/12?tab=a&b=c"));
+        given(oAuthStateStore.consume("state-1"))
+            .willReturn(Optional.of(new OAuthState("/studies/12?tab=a&b=c", "hash-1")));
+        given(tokenGenerator.hash("nonce-1")).willReturn("hash-1");
         given(gitHubOAuthClient.fetchUser("code")).willReturn(gitHubUser);
         given(memberService.findOrRegister(gitHubUser)).willReturn(new GitHubMemberRegistration(member, true));
-        given(loginCodeStore.issue(7L, true)).willReturn("lc_abc");
+        given(loginCodeStore.issue(7L, true, "hash-1")).willReturn("lc_abc");
 
-        String redirectUrl = authService.completeGitHubLogin("code", "state-1");
+        String redirectUrl = authService.completeGitHubLogin("code", "state-1", null, "nonce-1");
 
         assertThat(redirectUrl)
             .isEqualTo(
@@ -281,11 +340,36 @@ class AuthServiceTest {
     }
 
     @Test
+    @DisplayName("콜백 실패 주소: 오류 코드를 error로 붙인 프론트 콜백")
+    void frontendCallbackErrorUrl() {
+        assertThat(authService.frontendCallbackError(ErrorCode.AUTH_OAUTH_DENIED))
+            .isEqualTo(AuthPropertiesFixture.FRONTEND_ORIGIN + "/auth/callback?error=AUTH_OAUTH_DENIED");
+    }
+
+    @Test
     @DisplayName("코드 교환: 코드가 없거나 이미 쓰였으면 AUTH_LOGIN_CODE_INVALID")
     void exchangeLoginCodeRejectsUsedCode() {
         given(loginCodeStore.consume("lc_used")).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> authService.exchangeLoginCode("lc_used"))
+        assertThatThrownBy(() -> authService.exchangeLoginCode("lc_used", "nonce-1"))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.AUTH_LOGIN_CODE_INVALID);
+        verifyNoInteractions(accessTokenProvider, refreshTokenStore);
+    }
+
+    @Test
+    @DisplayName("코드 교환: 로그인을 시작한 브라우저가 아니면(login CSRF) AUTH_LOGIN_CODE_INVALID")
+    void exchangeLoginCodeRejectsOtherBrowser() {
+        given(loginCodeStore.consume("lc_abc")).willReturn(Optional.of(new LoginCodeClaim(7L, true, "hash-1")));
+        given(loginCodeStore.consume("lc_def")).willReturn(Optional.of(new LoginCodeClaim(7L, true, "hash-1")));
+        given(tokenGenerator.hash("victim-nonce")).willReturn("hash-victim");
+
+        assertThatThrownBy(() -> authService.exchangeLoginCode("lc_abc", "victim-nonce"))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.AUTH_LOGIN_CODE_INVALID);
+        assertThatThrownBy(() -> authService.exchangeLoginCode("lc_def", null))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
             .isEqualTo(ErrorCode.AUTH_LOGIN_CODE_INVALID);
@@ -296,13 +380,14 @@ class AuthServiceTest {
     @DisplayName("코드 교환: Access Token과 Refresh Token을 발급하고 신규 가입 여부를 전달한다")
     void exchangeLoginCodeIssuesTokens() {
         Member member = memberWithId(7L);
-        given(loginCodeStore.consume("lc_abc")).willReturn(Optional.of(new LoginCodeClaim(7L, true)));
+        given(loginCodeStore.consume("lc_abc")).willReturn(Optional.of(new LoginCodeClaim(7L, true, "hash-1")));
+        given(tokenGenerator.hash("nonce-1")).willReturn("hash-1");
         given(memberService.getMember(7L)).willReturn(member);
         given(accessTokenProvider.issue(member)).willReturn("access-token");
         given(accessTokenProvider.expiresInSeconds()).willReturn(3600L);
         given(refreshTokenStore.issue(7L)).willReturn("refresh-token");
 
-        LoginResult result = authService.exchangeLoginCode("lc_abc");
+        LoginResult result = authService.exchangeLoginCode("lc_abc", "nonce-1");
 
         assertThat(result.accessToken()).isEqualTo("access-token");
         assertThat(result.expiresIn()).isEqualTo(3600L);
