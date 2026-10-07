@@ -66,7 +66,10 @@ CI 결과와 로컬 실행 결과는 구분해서 적습니다.
 ## 🔗 관련 이슈
 
 <!--
-병합 시 Issue를 닫으려면 Closes #번호, 연결만 하려면 Related to #번호를 적습니다.
+Issue 자동 종료를 지정하려면 Closes #번호, 참조만 하려면 Related to #번호를 적습니다.
+자동 종료는 기본 브랜치(현재 develop)를 대상으로 병합할 때 적용됩니다.
+GitHub Stack 후속 PR은 선행 PR 병합 후 base가 develop로 변경된 뒤 병합하면 적용됩니다.
+main 대상 PR은 완료된 Issue를 직접 닫거나 develop 역반영 PR에 Closes #번호를 적습니다.
 작성 예시: Closes #9
 여러 Issue가 있으면 각 번호를 별도 줄에 적습니다. 실제 Issue 번호로 바꿉니다.
 -->

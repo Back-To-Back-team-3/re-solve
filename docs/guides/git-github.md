@@ -112,7 +112,9 @@ docs(contest): 시험 API 명세 반영
 | Stack 후속 PR | 바로 아래 작업 브랜치 | 후속 작업 브랜치 |
 - PR은 Draft로 열고 `.github/pull_request_template.md`의 개요·구현 내용·테스트·관련 이슈·리뷰어 안내·체크리스트를 작성한다.
 - 테스트 항목은 실제 수행한 것만 체크한다. 실행하지 않았다면 `테스트 미진행`과 이유를 적는다.
-- 병합 시 Issue를 닫으려면 `Closes #번호`, 연결만 하려면 `Related to #번호`를 적는다.
+- Issue 자동 종료를 지정하려면 `Closes #번호`, 참조만 하려면 `Related to #번호`를 적는다. `Closes` 자동 종료는 저장소의 기본 브랜치(현재 `develop`)를 대상으로 병합할 때 적용된다.
+- GitHub Stack 후속 PR은 선행 PR 병합 후 base가 `develop`로 변경된 뒤 병합하면 자동 종료가 적용된다.
+- `main` 대상 PR은 병합만으로 Issue가 자동 종료되지 않는다. 완료된 Issue를 직접 닫거나 `develop` 역반영 PR에 `Closes #번호`를 적는다.
 - Stack의 2번째 이상 PR에만 `🧱 stack` 라벨을 붙인다. 선행 PR이 병합되면 후속 PR의 base와 diff를 다시 확인한다.
 
 ### 1.5 병합 정책
