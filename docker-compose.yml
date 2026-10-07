@@ -117,9 +117,8 @@ services:
     volumes:
       - localstack-data:/var/lib/localstack
       - ./init-aws/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
-      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
-      test: ["CMD", "awslocal", "sqs", "list-queues"]
+      test: ["CMD-SHELL", "awslocal sqs list-queues > /dev/null 2>&1 && curl -sf http://127.0.0.1:4566/_localstack/init/ready | grep -q '\"state\": \"SUCCESSFUL\"'"]
       interval: 10s
       timeout: 5s
       retries: 5
