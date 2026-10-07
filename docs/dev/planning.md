@@ -494,50 +494,29 @@ Framework | Java 21, Spring Boot 4.1.1 | 전 서비스 동일 버전, 공통 모
 
 ---
 
-## 6. 개발 문서
-
 ### 6.1 시스템 구성도
+[시스템 구성도 v1.0](system-architecture.md)
 
-> 전체 아키텍처 구조
-> 
-
-[시스템 구성도 v1.0](https://app.notion.com/p/v1-0-3dfac7091a7480a99d8fd6224e793d6e?pvs=21)
-
-### 6.2 **도메인 및 데이터베이스 / ERD**
-
-> API·이벤트 설계의 기반이 되는 데이터 모델
-> 
-
-[**도메인 및 데이터베이스** v1.0](https://app.notion.com/p/v1-0-3eeac7091a748001bdfcef67a3f1c937?pvs=21)
+### 6.2 도메인 및 데이터베이스 / ERD
+[도메인 및 데이터베이스 v1.0](erd.md)
 
 ### 6.3 API 명세서
-
-> 서비스 외부 인터페이스
-> 
-
-[API 명세서 v1.0 — 전문 ](https://app.notion.com/p/API-v1-0-3f1ac7091a748048b8dbd67b147a0e1c?pvs=21)
+[API 명세서 v1.0](api-spec.md)
 
 ### 6.4 이벤트 계약서
-
-> 서비스 간 내부 인터페이스
-> 
+[이벤트 계약서 v1.0](event-contract.md)
 
 ### 6.5 다이어그램
-
-> 세부 플로우·상태 전이 등 시각화
-> 
+[다이어그램](diagrams.md)
 
 ### 6.6 스케줄러
-
-> 운영 관련 세부 사항
-> 
+[스케줄러](scheduler.md)
 
 ### 6.7 AWS / 모니터링
-
-> 인프라/운영
-> 
+추후 등록 예정
 
 ### 6.8 Git/GitHub 컨벤션
+[Git/GitHub 메뉴얼](/docs/guides/git-github.md)
 
 ---
 
