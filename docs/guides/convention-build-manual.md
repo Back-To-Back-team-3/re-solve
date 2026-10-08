@@ -16,16 +16,16 @@
 ## 2. IntelliI 사전 설정
 
 - Naver Java Formatter 적용
-    - Intellij > Settings > Editor > Coding Style > Java > [Scheme: ]  톱니바퀴 > Import Scheme > [Intellij IDEA code style XML] > `re-seat/config/naver-intellij-formatter.xml` > Apply
+    - IntelliJ > Settings > Editor > Coding Style > Java > [Scheme: ]  톱니바퀴 > Import Scheme > [IntelliJ IDEA code style XML] > `re-solve/config/naver-intellij-formatter.xml` > Apply
 - 저장 시 자동 정리
-    - Intellij > Settings > Tools > 기능 및 저장(Actions on Save) > [Reformat code], [Import 문 최적화(Optimize imports)] 체크
-- CheckStyle-IDEA 플러그인 설
-    - Intellij > Settings > Plugins > [CheckStyle-IDEA] 설치 >IDE 재시작
+    - IntelliJ > Settings > Tools > 기능 및 저장(Actions on Save) > [Reformat code], [Import 문 최적화(Optimize imports)] 체크
+- CheckStyle-IDEA 플러그인 설치
+    - IntelliJ > Settings > Plugins > [CheckStyle-IDEA] 설치 >IDE 재시작
 - CheckStyle 적용
-    - `Checkstyle version`을 `build.gradle`의 `toolVersion`(현재 `10.12.5`) 에 가급적 맞춘다.
-    - Intellij > Settings > Tools > Checkstyle > Configuration File `+` 추가 >
+    - `Checkstyle version`을 `build.gradle`의 `toolVersion`에 가급적 맞춘다.
+    - IntelliJ > Settings > Tools > Checkstyle > Configuration File `+` 추가 >
         - Description: Naver Coding Convention
-        - File: `re-seat/config/naver-checkstyle-rules.xml`
+        - File: `re-solve/config/naver-checkstyle-rules.xml`
         - > Next > 프로퍼티 `suppressionFile`, Value: `config/naver-checkstyle-suppressions.xml` ] 지정
         - > Next > Apply
 
@@ -47,11 +47,11 @@ git push -u origin style/$ISSUE-$DOMAIN-code-convention
 ./gradlew spotlessApply
 
 git status                          # 전체 도메인이 바뀐 것 확인
-git add src/main/java/com/backtoback/reseat/domain/$DOMAIN
-git add src/test/java/com/backtoback/reseat/domain/$DOMAIN
+git add $DOMAIN-service/src/main/java/com/backtoback/$DOMAIN/
+git add $DOMAIN-service/src/test/java/com/backtoback/$DOMAIN/
 
 git restore .                       # 스테이징 안 된 나머지 도메인 되돌리기
-git status                          # reservation만 남았는지 재확인
+git status                          # $DOMAIN-service만 남았는지 재확인
 
 ### 3. 최종 점검 후 1차 커밋
 ./gradlew spotlessCheck
@@ -72,8 +72,8 @@ git push -u origin style/$ISSUE-$DOMAIN-code-convention
 
 git status                                   # 담당 도메인 밖 수정 여부 먼저 확인
 
-git add src/main/java/com/backtoback/reseat/domain/$DOMAIN
-git add src/test/java/com/backtoback/reseat/domain/$DOMAIN
+git add $DOMAIN-service/src/main/java/com/backtoback/$DOMAIN/
+git add $DOMAIN-service/src/test/java/com/backtoback/$DOMAIN/
 git restore .
 git status
 
@@ -93,25 +93,22 @@ git log --oneline -5                # 커밋 2개(포맷팅 / 네이밍정리)�
 
 | 규칙 | 의미 | 수정 예시 |
 | --- | --- | --- |
-| `[import-grouping]` | import 그룹(static → java → jakarta/javax → 외부 라이브러리 → 사내 패키지 → lombok) 순서·빈 줄 위반 | 그룹별로 재정렬 + 그룹 사이 빈 줄 |
+| `[import-grouping]` | import 그룹(`#`(static) → `java` → `javax` → `org` → `net` → `com` → 그 외 → `com.nhncorp` → `com.navercorp` → `com.naver`) 순서·빈 줄 위반 | 그룹별로 재정렬 + 그룹 사이 빈 줄 |
 | `[avoid-star-import]` | `import xxx.*` 형태 금지 | 실제 쓰는 이름으로 개별 import |
 | `[need-braces]` | 한 줄 `if`에 중괄호 누락 | `if (x) y;` → `if (x) { y; }` |
-| `[var-lower-camelcase]` 
-/ `[avoid-1-char-var]` | 1글자 변수명 금지 | `s` → `stadium` 
-(파라미터명과 겹치지 않게 주의) |
+| `[var-lower-camelcase]` / `[avoid-1-char-var]` | 1글자 변수명 금지 | `s` → `memberId` (파라미터명과 겹치지 않게 주의) |
 | `[space-around-brace]` | 빈 중괄호 앞뒤 공백 누락 | `{}` → `{ }` (줄바꿈) |
 | `[line-length-120]` | 120자 초과 | 문자열 `+` 연결로 줄바꿈 |
-| `[braces-knr-style]` | 닫는 중괄호가 단독 줄에 있지 않음 | K&R 스타일로 정리 |
+| `[braces-knr-style]` | 닫는 중괄호가 단독 줄에 있지 않음 | K&R 스타일로 정리 | 
+
 - `[space-around-brace]`
     - `{}` → 한 칸 공백(`{ }`)은 Spotless가 다시 축소시켜 재발한다.
     - 아래처럼 줄바꿈해서 빈 몸통으로 만들어야 통과한다.
-        
         ```bash
-        public interface StadiumRepository extends JpaRepository<Stadium, Long> {
-        		
+        public interface SomeRepository extends JpaRepository<SomeEntity, Long> {
+              
         }
         ```
-        
 
 **충돌 대비**
 
