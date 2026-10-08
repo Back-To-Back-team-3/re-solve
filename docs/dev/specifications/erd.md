@@ -88,8 +88,6 @@ flowchart LR
     problem -. "문제 선택 API" .-> study & contest & member
 ```
 
-![image.png](image.png)
-
 | 참조하는 서비스·테이블 | 컬럼 | 참조 대상 | 값을 받는 방법 | 복제본 여부 |
 | --- | --- | --- | --- | --- |
 | `member.member_tag_levels` | `tag_id` | `problem.tags.id` | `SubmissionJudged` 태그 스냅샷 · 진단 출제 API | N |
@@ -265,7 +263,7 @@ flowchart LR
 > 
 - 서비스 내부 관계:
     
-    ```json
+    ```text
     hint_requests      : (member_id, problem_id, level) 기준 이력
     hint_daily_usages  : (member_id, usage_date) 기준 1건
     hint_block_replicas: (member_id, context_type, context_id, problem_id) 기준 1건
