@@ -45,3 +45,18 @@ CREATE DATABASE IF NOT EXISTS `ai_db`
 CREATE DATABASE IF NOT EXISTS `analytics_db`
     DEFAULT CHARACTER SET utf8mb4
     COLLATE utf8mb4_unicode_ci;
+
+-- 10. 서비스 계정에 생성된 데이터베이스에 대한 접근 권한 부여
+-- docker-entrypoint 환경 변수(MYSQL_USER)로 생성된 계정이 모든 서비스 DB에 접근할 수 있도록 권한 부여
+GRANT ALL PRIVILEGES ON `member_db`.* TO '%'@'%';
+GRANT ALL PRIVILEGES ON `problem_db`.* TO '%'@'%';
+GRANT ALL PRIVILEGES ON `judge_db`.* TO '%'@'%';
+GRANT ALL PRIVILEGES ON `contest_db`.* TO '%'@'%';
+GRANT ALL PRIVILEGES ON `study_db`.* TO '%'@'%';
+GRANT ALL PRIVILEGES ON `notification_db`.* TO '%'@'%';
+GRANT ALL PRIVILEGES ON `integration_db`.* TO '%'@'%';
+GRANT ALL PRIVILEGES ON `ai_db`.* TO '%'@'%';
+GRANT ALL PRIVILEGES ON `analytics_db`.* TO '%'@'%';
+FLUSH PRIVILEGES;
+
+

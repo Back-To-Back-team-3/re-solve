@@ -54,38 +54,6 @@ services:
       retries: 10
       start_period: 30s
 
-  # 첫 실행 때 서비스별 DB를 만들고 공통 개발 계정에 권한을 부여한다.
-  mysql-init:
-    image: ${MYSQL_IMAGE:-mysql:8.4}
-    environment:
-      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
-      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
-      MEMBER_DB_NAME: ${MEMBER_DB_NAME:-member_db}
-      PROBLEM_DB_NAME: ${PROBLEM_DB_NAME:-problem_db}
-      JUDGE_DB_NAME: ${JUDGE_DB_NAME:-judge_db}
-      CONTEST_DB_NAME: ${CONTEST_DB_NAME:-contest_db}
-      STUDY_DB_NAME: ${STUDY_DB_NAME:-study_db}
-      NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME:-notification_db}
-      INTEGRATION_DB_NAME: ${INTEGRATION_DB_NAME:-integration_db}
-      AI_DB_NAME: ${AI_DB_NAME:-ai_db}
-      ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME:-analytics_db}
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        case "$$DB_USERNAME" in
-          ''|*[!a-zA-Z0-9_]*) echo 'DB_USERNAME must contain only letters, numbers, or underscores' >&2; exit 1 ;;
-        esac
-        for db in "$$MEMBER_DB_NAME" "$$PROBLEM_DB_NAME" "$$JUDGE_DB_NAME" "$$CONTEST_DB_NAME" "$$STUDY_DB_NAME" "$$NOTIFICATION_DB_NAME" "$$INTEGRATION_DB_NAME" "$$AI_DB_NAME" "$$ANALYTICS_DB_NAME"; do
-          case "$$db" in
-            ''|*[!a-zA-Z0-9_]*) echo 'DB name must contain only letters, numbers, or underscores' >&2; exit 1 ;;
-          esac
-          mysql -h mysql -u root -e "CREATE DATABASE IF NOT EXISTS \`$$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON \`$$db\`.* TO '$$DB_USERNAME'@'%';"
-        done
-    depends_on:
-      mysql:
-        condition: service_healthy
-    restart: "no"
 
   redis:
     image: ${REDIS_IMAGE:-redis:7.4-alpine}
@@ -150,8 +118,8 @@ services:
       <<: *db-redis-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${MEMBER_DB_NAME:-member_db}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -165,8 +133,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${PROBLEM_DB_NAME:-problem_db}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
 
   judge-service:
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-judge-service:${IMAGE_TAG:-local}
@@ -179,8 +147,8 @@ services:
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -194,8 +162,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${CONTEST_DB_NAME:-contest_db}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -208,8 +176,8 @@ services:
       <<: *db-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${STUDY_DB_NAME:-study_db}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
 
   notification-service:
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-notification-service:${IMAGE_TAG:-local}
@@ -221,8 +189,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${NOTIFICATION_DB_NAME:-notification_db}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
 
   integration-service:
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-integration-service:${IMAGE_TAG:-local}
@@ -233,8 +201,8 @@ services:
       <<: *db-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${INTEGRATION_DB_NAME:-integration_db}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
 
   ai-service:
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-ai-service:${IMAGE_TAG:-local}
@@ -245,8 +213,8 @@ services:
       <<: *db-redis-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${AI_DB_NAME:-ai_db}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -259,8 +227,8 @@ services:
       <<: *db-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${ANALYTICS_DB_NAME:-analytics_db}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
 
 volumes:
   mysql-data:
