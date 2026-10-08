@@ -39,14 +39,14 @@ services:
     image: ${MYSQL_IMAGE:-mysql:8.4}
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
-      MYSQL_DATABASE: ${MEMBER_DB_NAME:-member_db}
+      MYSQL_DATABASE: member_db
       MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
       MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     ports:
       - "127.0.0.1:${MYSQL_HOST_PORT:-3308}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./init-scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./init-scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
       interval: 10s
@@ -116,7 +116,7 @@ services:
       context: ./member-service
     environment:
       <<: *db-redis-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${MEMBER_DB_NAME:-member_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/member_db
     depends_on:
       mysql:
         condition: service_healthy
@@ -130,7 +130,7 @@ services:
       context: ./problem-service
     environment:
       <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${PROBLEM_DB_NAME:-problem_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/problem_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
       mysql:
@@ -143,7 +143,7 @@ services:
       context: ./judge-service
     environment:
       <<: *db-redis-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${JUDGE_DB_NAME:-judge_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/judge_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-}
     depends_on:
@@ -159,7 +159,7 @@ services:
       context: ./contest-service
     environment:
       <<: *db-redis-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${CONTEST_DB_NAME:-contest_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/contest_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
       mysql:
@@ -174,7 +174,7 @@ services:
       context: ./study-service
     environment:
       <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${STUDY_DB_NAME:-study_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/study_db
     depends_on:
       mysql:
         condition: service_healthy
@@ -186,7 +186,7 @@ services:
       context: ./notification-service
     environment:
       <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${NOTIFICATION_DB_NAME:-notification_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/notification_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
       mysql:
@@ -199,7 +199,7 @@ services:
       context: ./integration-service
     environment:
       <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${INTEGRATION_DB_NAME:-integration_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/integration_db
     depends_on:
       mysql:
         condition: service_healthy
@@ -211,7 +211,7 @@ services:
       context: ./ai-service
     environment:
       <<: *db-redis-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${AI_DB_NAME:-ai_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/ai_db
     depends_on:
       mysql:
         condition: service_healthy
@@ -225,7 +225,7 @@ services:
       context: ./analytics-service
     environment:
       <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${ANALYTICS_DB_NAME:-analytics_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/analytics_db
     depends_on:
       mysql:
         condition: service_healthy
