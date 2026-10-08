@@ -66,7 +66,7 @@
 
 ### 0.3 공통 성공 / 에러 응답
 
-```json
+```text
 // 조회 성공
 {
   "success": true,
@@ -6022,8 +6022,7 @@
 | 외부 경로 | `/api/v1/studies/**`, `/api/v1/admin/studies/**` |
 | 내부 경로 | `/internal/v1/studies/**` |
 | 소유 테이블 | 스키마 `study` |
-| 동시성 원칙 | 정원·참여 상한은 카운터 조건부 UPDATE, "진행 중 1건"은 생성 컬럼 + 유일 제약, 
-상태 전이는 `WHERE status = :expected` 조건부 UPDATE |
+| 동시성 원칙 | 정원·참여 상한은 카운터 조건부 UPDATE, "진행 중 1건"은 생성 컬럼 + 유일 제약, 상태 전이는 `WHERE status = :expected` 조건부 UPDATE |
 | 이벤트 발행 | 모든 발행은 Outbox(같은 트랜잭션) |
 
 ### 5.1 외부 API — 스터디 탐색·조회
@@ -7274,8 +7273,7 @@
 | 발행 / 구독 | `study-service` / notification(강제 탈퇴 알림), contest·problem(복제본 해제) |
 | 발행 시점 | `LEFT`·`REMOVED` 전이 트랜잭션 |
 | 데이터 | `studyId`, `membershipId`, `memberId`, `reason`(`LEFT` / `REMOVED` / `MEMBER_WITHDRAWN`), `leftAt` |
-| 구독 후 처리 | 같은 `membershipId`이면 해제, 더 작은 `membershipId`면 무시. 
-시험 시작 후 탈퇴해도 이미 등록한 참가는 유지. |
+| 구독 후 처리 | 같은 `membershipId`이면 해제, 더 작은 `membershipId`면 무시. 시험 시작 후 탈퇴해도 이미 등록한 참가는 유지. |
 
 ```json
 {

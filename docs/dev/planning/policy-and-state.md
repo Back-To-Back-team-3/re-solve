@@ -162,13 +162,9 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 풀이 형태 | 사용자는 `solution` 함수를 구현해 값을 반환한다. Java는 Solution의 public 인스턴스 메서드, Python은 최상위 동기 함수, C++은 전역 solution 함수. C++의 main과 입출력 처리는 실행 코드가 제공한다. |
 | 코드 크기 | 64KB 이하. 초과 시 `CODE_TOO_LARGE`(413) |
 | 제출 문맥 | 제출은 `context`(`PRACTICE` / `EXAM` / `CONTEST` / `DIAGNOSIS`)와 문맥 ID를 가진다. |
-| 진입점 | `PRACTICE`: 클라이언트 → `judge-service` `POST /submissions`
-`EXAM`·`CONTEST`: 클라이언트 → `contest-service`가 접수·검증 후 `ExamSubmissionRequested`/`ContestSubmissionRequested` 이벤트로 `judge-service`에 채점 요청. `judge-service`는 이 이벤트로만 `EXAM`·`CONTEST` 제출을 생성한다.
-`DIAGNOSIS`: 진단 세션을 소유한 `member-service`가 접수·검증 후 채점을 요청한다(세부 경로 확정 필요). |
+| 진입점 | `PRACTICE`: 클라이언트 → `judge-service` `POST /submissions`, <br>`EXAM`·`CONTEST`: 클라이언트 → `contest-service`가 접수·검증 후 `ExamSubmissionRequested`/`ContestSubmissionRequested` 이벤트로 `judge-service`에 채점 요청. `judge-service`는 이 이벤트로만 `EXAM`·`CONTEST` 제출을 생성한다., <br> `DIAGNOSIS`: 진단 세션을 소유한 `member-service`가 접수·검증 후 채점을 요청한다(세부 경로 확정 필요). |
 | 제출 대상 | `PRACTICE`는 `scope = GENERAL`·`visibility = PUBLIC` 문제 중 해당 태그의 사용자 레벨이 허용하는 난이도까지만(§8.3). `EXAM`·`CONTEST`는 시험·대회에 고정된 문제 회차만. `DIAGNOSIS`는 진단이 출제한 문제만(레벨 제한 미적용). `PRIVATE`·`ARCHIVED` 문제의 `PRACTICE` 제출은 `PROBLEM_NOT_AVAILABLE`(404) |
-| 멱등 처리 | **일반 풀이(`PRACTICE`)**는 `Idempotency-Key` 헤더가 필수다. 접수 후 24시간 동안 같은 사용자·같은 키·같은 본문 요청에는 기존 제출을 반환한다. 
-유효 기간 안에 같은 키로 다른 본문을 보내면 `IDEMPOTENCY_KEY_CONFLICT`(422)로 처리한다. 유효 기간이 지나 같은 키로 들어온 요청은 사전 검증을 다시 수행하여 새 제출로 접수한다.
-**시험·대회 제출**은 각각 `examSubmissionId`·`contestSubmissionId`를 멱등키로 사용한다. 같은 접수 ID의 요청이 다시 전달되면 기존 제출로 처리하며, 일반 풀이의 24시간 만료 규칙을 적용하지 않는다. |
+| 멱등 처리 | **일반 풀이(`PRACTICE`)**는 `Idempotency-Key` 헤더가 필수다. 접수 후 24시간 동안 같은 사용자·같은 키·같은 본문 요청에는 기존 제출을 반환한다. 유효 기간 안에 같은 키로 다른 본문을 보내면 `IDEMPOTENCY_KEY_CONFLICT`(422)로 처리한다. 유효 기간이 지나 같은 키로 들어온 요청은 사전 검증을 다시 수행하여 새 제출로 접수한다. **시험·대회 제출**은 각각 `examSubmissionId`·`contestSubmissionId`를 멱등키로 사용한다. 같은 접수 ID의 요청이 다시 전달되면 기존 제출로 처리하며, 일반 풀이의 24시간 만료 규칙을 적용하지 않는다. |
 | Rate Limit | 사용자당 분당 10회, 동일 문제 5초 간격. 시험·대회 제출은 `contest-service`에서 같은 기준을 적용한다(자동 제출은 제외). 초과 시 `SUBMISSION_RATE_LIMITED`(429)와 `Retry-After` |
 | 접수 응답 | 검증 통과 시 제출(`QUEUED`)·채점 작업(`judge_jobs`, `PENDING`)·테스트별 결과 자리를 한 트랜잭션에 저장하고 `202 Accepted`와 접수 ID를 반환한다. 채점 결과는 접수 응답에 포함하지 않는다. |
 | 코드 실행(Run) | 제출과 분리된 실행 경로다. 공개 테스트케이스와 사용자 직접 입력 테스트만 실행하고, 제출 이력·결과 저장·이벤트 발행이 없다. 채점 파이프라인을 거치지 않고 Judge0를 동기 호출한다. |
@@ -431,13 +427,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 대상 | `scope = GENERAL`·`visibility = PUBLIC` 문제만. 대회 전용 문제는 대회 종료 전 제외 |
 | 답안 노출 금지 | 어떤 단계에서도 실행 가능한 코드를 제공하지 않는다. 응답은 정해진 JSON 스키마(단계·본문)로 받고, 코드 블록·언어 문법 패턴이 감지되면 1회 재생성, 다시 감지되면 폴백으로 대체한다. |
 | 입력 범위 | 1차 범위에서 힌트 입력은 문제 본문·태그·단계뿐이다. 사용자 자유 입력과 사용자 코드는 넣지 않는다(프롬프트 인젝션 표면 최소화). 코드 기반 피드백은 P3 후보 |
-| 시험·대회 중 차단 | 사용자가 참가 중인 시험·대회에 포함된 문제는 `HINT_BLOCKED_DURING_EXAM`(403)으로 거절한다. 
-① 원천: `study` 스키마의 차단 복제본 `hint_block_replicas`(회원·시험 참조(`EXAM:{id}` / `CONTEST:{id}`)·문제·시작 시각·종료 시각)를 둔다. 유일 제약은 `(회원, 시험 참조, 문제)`다. 
-② 생성: 참가 등록 이벤트를 받으면 해당 참가자와 시험 문제 목록으로 행을 만든다. 미입장(`ABSENT`) 참가자도 차단 대상에 포함한다. 
-③ 판정: `시작 시각 <= 현재 < 종료 시각`인 행이 있으면 차단한다. 차단 여부를 시각으로 판정하므로 시작 이벤트 지연의 영향을 받지 않는다. 
-④ 해제: 종료·취소 이벤트를 받으면 해당 시험 참조의 행을 삭제한다. 이벤트가 유실돼도 종료 시각 + 10분이 지난 행은 차단에 쓰지 않는다. 
-⑤ 이중 확인: 요청 접수 시점과 `READY` 전이 직전에 모두 확인한다. 전달 직전 차단되면 `BLOCKED`로 전이하고 일일 횟수를 차감하지 않는다. 
-⑥ 장애: 복제본 조회가 실패하면 거절한다(fail-closed). |
+| 시험·대회 중 차단 | 사용자가 참가 중인 시험·대회에 포함된 문제는 `HINT_BLOCKED_DURING_EXAM`(403)으로 거절한다. <br>① 원천: `study` 스키마의 차단 복제본 `hint_block_replicas`(회원·시험 참조(`EXAM:{id}` / `CONTEST:{id}`)·문제·시작 시각·종료 시각)를 둔다. 유일 제약은 `(회원, 시험 참조, 문제)`다. <br>② 생성: 참가 등록 이벤트를 받으면 해당 참가자와 시험 문제 목록으로 행을 만든다. 미입장(`ABSENT`) 참가자도 차단 대상에 포함한다.  <br>③ 판정: `시작 시각 <= 현재 < 종료 시각`인 행이 있으면 차단한다. 차단 여부를 시각으로 판정하므로 시작 이벤트 지연의 영향을 받지 않는다.  <br>④ 해제: 종료·취소 이벤트를 받으면 해당 시험 참조의 행을 삭제한다. 이벤트가 유실돼도 종료 시각 + 10분이 지난 행은 차단에 쓰지 않는다. <br>⑤ 이중 확인: 요청 접수 시점과 `READY` 전이 직전에 모두 확인한다. 전달 직전 차단되면 `BLOCKED`로 전이하고 일일 횟수를 차감하지 않는다. <br>⑥ 장애: 복제본 조회가 실패하면 거절한다(fail-closed). |
 | 차단 적용 화면 | 차단은 시험 화면뿐 아니라 일반 문제 풀이 화면의 힌트 요청에도 똑같이 적용한다. |
 | 진단 중 차단 | 진단이 진행 중인 사용자는 모든 문제의 힌트를 사용할 수 없다(§8.3). 판정 경로는 확정 필요. |
 | 요청 제한 | 1인 하루 20회. 초과 시 `HINT_DAILY_LIMIT_EXCEEDED`(429). 캐시 적중 응답도 횟수에 포함한다. |
@@ -566,43 +556,32 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 
 | 이벤트 | 발행 | 소비 | 경로 |
 | --- | --- | --- | --- |
-| `ExamSubmissionRequested` / 
-`ContestSubmissionRequested` | contest | judge | SQS 
-`exam-submission-queue` |
+| `ExamSubmissionRequested` / `ContestSubmissionRequested` | contest | judge | SQS `exam-submission-queue` |
 | `ProblemStateChanged` | problem | study(문제집 문제 `ACTIVE ↔ EXCLUDED`·힌트 캐시 무효화), contest | SNS 팬아웃 |
-| `SubmissionJudged` 
-(`PRACTICE` 전용) | judge | notification, study, member, integration, problem | SNS 팬아웃 |
+| `SubmissionJudged` (`PRACTICE` 전용) | judge | notification, study, member, integration, problem | SNS 팬아웃 |
 | `ExamSubmissionJudged` | judge | contest | SNS 팬아웃 |
 | `ContestSubmissionJudged` | judge | contest | SNS 팬아웃 |
 | `SubmissionFailed` | judge | notification, contest | SNS 팬아웃 |
 | `ExamParticipantRegistered` / `ExamParticipantCanceled` | contest | study(힌트 차단 복제본), notification(시험 시작 전 예약·취소) | SNS 팬아웃 |
-| `ExamStarted` / 
-`ExamClosed` / 
-`ExamFinalized` | contest | study(힌트 차단 복제본), notification | SNS 팬아웃 |
-| `ExamUpdated` / 
-`ExamCanceled` | contest | study(힌트 차단 복제본), notification | SNS 팬아웃 |
+| `ExamStarted` / `ExamClosed` / `ExamFinalized` | contest | study(힌트 차단 복제본), notification | SNS 팬아웃 |
+| `ExamUpdated` / `ExamCanceled` | contest | study(힌트 차단 복제본), notification | SNS 팬아웃 |
 | `ContestParticipantRegistered` / `ContestParticipantCanceled` | contest | study(힌트 차단 복제본) | SNS 팬아웃 |
-| `ContestStarted` / 
-`ContestEnded` / 
-`ContestFinalized` | contest | study(힌트 차단 복제본), notification, problem(전용 문제 공개) | SNS 팬아웃 |
+| `ContestStarted` / `ContestEnded` / `ContestFinalized` | contest | study(힌트 차단 복제본), notification, problem(전용 문제 공개) | SNS 팬아웃 |
 | `ContestCanceled` | contest | study(힌트 차단 복제본), notification | SNS 팬아웃 |
-| `StudyMemberJoined` / 
-`StudyMemberLeft` | study | notification(가입 알림·강제 탈퇴 알림), contest(시험 참가 자격 복제본) | SNS 팬아웃 |
+| `StudyMemberJoined` / `StudyMemberLeft` | study | notification(가입 알림·강제 탈퇴 알림), contest(시험 참가 자격 복제본) | SNS 팬아웃 |
 | `StudyApplicationDecided` | study | notification | SNS 팬아웃 |
-| `AssignmentPublished` / 
-`AssignmentDeadlineApproaching` | study | notification | SNS 팬아웃 |
+| `AssignmentPublished` / `AssignmentDeadlineApproaching` | study | notification | SNS 팬아웃 |
 | `AssignmentIncompleteRepeated` | study | notification(운영진) | SNS 팬아웃 |
 | `HintReady` | study(AI 모듈) | notification | SNS 팬아웃 |
 | `LearningProfileUpdated` | member | study(추천 복제본 갱신) | SNS 팬아웃 |
 | `TagLevelChanged` | member | notification | SNS 팬아웃 |
-| `MemberWithdrawn` / 
-`MemberSuspended` | member | 전 서비스 | SNS 팬아웃 |
+| `MemberWithdrawn` / `MemberSuspended` | member | 전 서비스 | SNS 팬아웃 |
 | `GitHubSyncFailed` | integration | notification | SNS 팬아웃 |
 - `DIAGNOSIS` 제출의 채점 결과를 별도 이벤트로 나눌지는 B·E 협의 후 확정한다.
 
 **페이로드 예시**
 
-```json
+```text
 // SubmissionJudged (PRACTICE 전용)
 {
   "eventId": "8f2c…",
@@ -751,48 +730,28 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 회원(`members`) | `ACTIVE ↔ SUSPENDED`, `ACTIVE / SUSPENDED → WITHDRAWN` |
 | 문제 공개 상태(`problem.visibility`) | `PRIVATE ↔ PUBLIC`, `PRIVATE / PUBLIC → ARCHIVED` (공개된 수정 회차가 1개 이상일 때만 `PUBLIC`) |
 | 문제 용도(`problem.scope`) | `GENERAL` / `EXAM_ONLY` (생성 시 결정) |
-| 문제 수정 회차(`problem_revision`) | 공개된 회차는 수정하지 않고 새 회차를 만든다(`revision_number + 1`). 이전 회차는 이력으로 보존한다.
-(P2 검수 워크플로 도입 시: `DRAFT → IN_REVIEW → 승인 / REJECTED`, `REJECTED → DRAFT`) |
-| 제출(`submissions`) | `QUEUED → JUDGING → COMPLETED`
-`JUDGING → RETRY_WAITING → JUDGING`(시스템 오류·임대 만료 회수)
-`RETRY_WAITING / JUDGING → FAILED`(실행 시도 상한 초과)
-`FAILED → QUEUED`(관리자 재처리)
-`COMPLETED → QUEUED`(관리자 재채점, `judge_attempt + 1`) |
+| 문제 수정 회차(`problem_revision`) | 공개된 회차는 수정하지 않고 새 회차를 만든다(`revision_number + 1`). 이전 회차는 이력으로 보존한다. (P2 검수 워크플로 도입 시: `DRAFT → IN_REVIEW → 승인 / REJECTED`, `REJECTED → DRAFT`) |
+| 제출(`submissions`) | `QUEUED → JUDGING → COMPLETED`, <br>`JUDGING → RETRY_WAITING → JUDGING`(시스템 오류·임대 만료 회수), <br>`RETRY_WAITING / JUDGING → FAILED`(실행 시도 상한 초과), <br>`FAILED → QUEUED`(관리자 재처리), <br>`COMPLETED → QUEUED`(관리자 재채점, `judge_attempt + 1`) |
 | 제출 판정(`submissions.verdict`) | `COMPLETED`일 때만 `AC / WA / TLE / MLE / RE / CE` 중 하나 |
-| 채점 작업(`judge_jobs`) | `PENDING → RUNNING → SUCCEEDED`
-`RUNNING → RETRY_WAITING → RUNNING`(`try_count + 1`, 백오프 10→30초)
-`RETRY_WAITING / RUNNING → FAILED`(`try_count` 3 초과) |
+| 채점 작업(`judge_jobs`) | `PENDING → RUNNING → SUCCEEDED`, <br>`RUNNING → RETRY_WAITING → RUNNING`(`try_count + 1`, 백오프 10→30초), <br>`RETRY_WAITING / RUNNING → FAILED`(`try_count` 3 초과) |
 | 채점 실행 이력(`judge_job_runs`) | 실행 시도마다 1행 생성, 불변 이력 |
 | Outbox(`outbox_events`) | `PENDING → PUBLISHED`, `PENDING → FAILED → PENDING`(재시도) |
-| 시험(`exams`) | `SCHEDULED → IN_PROGRESS → CLOSED → FINALIZED`
-`SCHEDULED → CANCELED`
-`FINALIZED → FINALIZED`(관리자 재확정, 감사 로그) |
-| 시험 참가자(`exam_participants`) | `REGISTERED → STARTED → FINISHED`(수동 종료·자동 제출 완료)
-`REGISTERED → ABSENT`(종료 시까지 미입장)
-`REGISTERED → CANCELED`(시작 전 참가 취소) |
-| 시험 제출(`exam_submissions`) | `ACCEPTED → REQUESTED`(Outbox 발행) `→ JUDGED`(채점 결과 연결)
-`REQUESTED → FAILED`(연결된 제출 `FAILED`) |
+| 시험(`exams`) | `SCHEDULED → IN_PROGRESS → CLOSED → FINALIZED`, <br>`SCHEDULED → CANCELED`, <br>`FINALIZED → FINALIZED`(관리자 재확정, 감사 로그) |
+| 시험 참가자(`exam_participants`) | `REGISTERED → STARTED → FINISHED`(수동 종료·자동 제출 완료), <br>`REGISTERED → ABSENT`(종료 시까지 미입장), <br>`REGISTERED → CANCELED`(시작 전 참가 취소) |
+| 시험 제출(`exam_submissions`) | `ACCEPTED → REQUESTED`(Outbox 발행) `→ JUDGED`(채점 결과 연결), `REQUESTED → FAILED`(연결된 제출 `FAILED`) |
 | 대회(`contests`) | `SCHEDULED → RUNNING → ENDED → FINALIZED`, `SCHEDULED → CANCELED` |
 | 스터디(`studies`) | `RECRUITING ↔ ACTIVE`, `RECRUITING / ACTIVE → CLOSED`(예정·진행 중 시험이 없을 때만) |
-| 스터디 가입(`study_memberships`) | `PENDING → APPROVED / REJECTED / CANCELED / EXPIRED`
-`APPROVED → LEFT / REMOVED`
-(`INSTANT` 가입은 `APPROVED`로 바로 생성) |
+| 스터디 가입(`study_memberships`) | `PENDING → APPROVED / REJECTED / CANCELED / EXPIRED`, <br>`APPROVED → LEFT / REMOVED`(`INSTANT` 가입은 `APPROVED`로 바로 생성) |
 | 스터디 역할(`study_memberships.role`) | `MEMBER ↔ MANAGER`, `LEADER ↔ MANAGER / MEMBER`(위임 시 기존 `LEADER` 강등 → 대상 승격 순서로 한 트랜잭션에서 교체, `leader_key` 유일 인덱스로 2명 저장 차단) |
 | 문제집(`assignments`) | `SCHEDULED → OPEN → CLOSED`(마감 있음) / `SCHEDULED → OPEN`(마감 없음, 스터디 종료 시 `CLOSED`) |
-| 과제 진행(`assignment_member_status`) | `NOT_STARTED → IN_PROGRESS → COMPLETED`
-`NOT_STARTED / IN_PROGRESS → INCOMPLETE`(마감)
-`INCOMPLETE → COMPLETED`(지각 완료)
-`COMPLETED → IN_PROGRESS / INCOMPLETE`(재채점으로 인정 취소) |
+| 과제 진행(`assignment_member_status`) | `NOT_STARTED → IN_PROGRESS → COMPLETED`, <br>`NOT_STARTED / IN_PROGRESS → INCOMPLETE`(마감), <br>`INCOMPLETE → COMPLETED`(지각 완료), <br>`COMPLETED → IN_PROGRESS / INCOMPLETE`(재채점으로 인정 취소) |
 | 문제집 문제(`assignment_problems.status`) | `ACTIVE ↔ EXCLUDED`(문제 `PRIVATE` 전환·재공개) |
 | 문제 진행(`assignment_progress.completion_type`) | `PRE_SOLVED / ON_TIME / LATE` (제출 접수 시각으로 계산, 더 이른 유형 유지, 재채점 시 남은 유효 AC로 재계산하거나 기록 삭제) |
 | 진단 응시(테이블명·상태명 확정 필요) | `IN_PROGRESS → CLOSED`(최종 제출 또는 제한 시간 만료 + 자동 제출) `→ SCORED`(채점 종결 후 레벨 반영). 종료 이후의 저장·제출은 반영하지 않는다 |
 | 태그 레벨(`member_tag_levels`) | `Lv.0 → Lv.1 / Lv.2 / Lv.3 → 마스터`. 진단 재응시로는 하향하지 않고(`max`), 재채점 재계산으로만 하향될 수 있다 |
 | 힌트 요청(`hint_requests`) | `REQUESTED → GENERATING → READY` / `GENERATING → FALLBACK`(타임아웃·장애·가드레일 실패) / `REQUESTED → BLOCKED`(시험·진단 중·제한 초과) / `GENERATING → BLOCKED`(전달 직전 재확인에서 차단, 일일 횟수 미차감) |
 | GitHub 연동(`github_connections`) | `CONNECTED → DISCONNECTED`(해제·권한 만료), `DISCONNECTED → CONNECTED`(재인가) |
-| GitHub Sync Job(`github_sync_jobs`) | `PENDING → RUNNING → SUCCEEDED`
-`RUNNING → RETRY_WAITING → PENDING`
-`RUNNING → RATE_LIMITED → PENDING`
-`RETRY_WAITING → FAILED`(상한 초과), `PENDING / RETRY_WAITING → CANCELED`(연동 해제) |
+| GitHub Sync Job(`github_sync_jobs`) | `PENDING → RUNNING → SUCCEEDED`, <br>`RUNNING → RETRY_WAITING → PENDING`, <br>`RUNNING → RATE_LIMITED → PENDING`, <br>`RETRY_WAITING → FAILED`(상한 초과), `PENDING / RETRY_WAITING → CANCELED`(연동 해제) |
 | 알림(`notifications`) | `UNREAD → READ` |
 - `submissions.status`와 `judge_jobs`의 상태는 다음처럼 대응한다. 두 값이 어긋나면 5분 주기 대사 배치의 복구 대상이다.
     - `QUEUED` ↔ `PENDING`
@@ -814,8 +773,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 성능 | 제출 접수 API | 50 VU에서 p99 ≤ 300ms |
 | 성능 | Draft 저장 API | 50 VU·10초 주기에서 p99 ≤ 200ms |
 | 성능 | 평시 채점 대기(접수 → 작업 선점) | p95 ≤ 10초 |
-| 성능 | 시험 마감 폭주 시 채점 대기 | 마감 50건 동시 제출에서 p95 ≤ 60초
-(실행기 동시 처리 2 → 4 → 8 비교) |
+| 성능 | 시험 마감 폭주 시 채점 대기 | 마감 50건 동시 제출에서 p95 ≤ 60초 (실행기 동시 처리 2 → 4 → 8 비교) |
 | 성능 | 문제 목록·순위 조회 | p99 ≤ 500ms |
 | 반영 지연 | 채점 완료 → 순위 반영 | p95 ≤ 3초 |
 | 반영 지연 | 채점 완료 → SSE 알림 도착 | p95 ≤ 5초 |
@@ -867,16 +825,14 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 
 > v0.1 대비 변경 사항을 버전별로 기록한다.
 > 
-
-| 버전 | 주요 변경 |
-| --- | --- |
-| v1.0 | • 2 judge_jobs·진단 TTL 신설, 불변식 갱신
-• 3 DIAGNOSIS 문맥·Run 추가, 문맥별 공개 정책 표 신설, judge_jobs 기반 재시도 전면 개정
-• 4 문제 상태 용어 변경(PUBLIC/PRIVATE/ARCHIVED), S3 일괄 저장, ProblemStateChanged 신설
-• 7 스터디 종료 조건 변경, 문제집 태그 단위 명시
-• 8.3 태그별 진단·레벨 갱신 전면 신설
-• 9 이벤트 형식 갱신, 이벤트 표·알림 정책 갱신
-• 10 judge_jobs·진단 응시·태그 레벨 상태 신설 |
+- 버전 v1.0
+  - 2 judge_jobs·진단 TTL 신설, 불변식 갱신
+  - 3 DIAGNOSIS 문맥·Run 추가, 문맥별 공개 정책 표 신설, judge_jobs 기반 재시도 전면 개정
+  - 4 문제 상태 용어 변경(PUBLIC/PRIVATE/ARCHIVED), S3 일괄 저장, ProblemStateChanged 신설
+  - 7 스터디 종료 조건 변경, 문제집 태그 단위 명시
+  - 8.3 태그별 진단·레벨 갱신 전면 신설
+  - 9 이벤트 형식 갱신, 이벤트 표·알림 정책 갱신
+  - 10 judge_jobs·진단 응시·태그 레벨 상태 신설 |
 
 ---
 

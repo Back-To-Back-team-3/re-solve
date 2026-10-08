@@ -346,22 +346,11 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 
 | 테이블 | 서비스별 용도 |
 | --- | --- |
-| `outbox_events` |   • member: `LearningProfileUpdated`·`TagLevelChanged`·회원 이벤트 / 
-  • problem: `ProblemStateChanged` / 
-  • judge: 채점 결과 이벤트 / 
-  • contest: 시험·대회 이벤트·채점 요청 / 
-  • study: 스터디·문제집·힌트 이벤트 / 
-  • integration: `GitHubSyncFailed` |
+| `outbox_events` |   • member: `LearningProfileUpdated`·`TagLevelChanged`·회원 이벤트 / <br>• problem: `ProblemStateChanged` / <br>• judge: 채점 결과 이벤트 / <br>• contest: 시험·대회 이벤트·채점 요청 / <br>• study: 스터디·문제집·힌트 이벤트 / <br>• integration: `GitHubSyncFailed` |
 | `processed_events` | 이벤트를 소비하는 모든 서비스 |
-| `audit_logs` |   • member: 회원 정지·권한 변경 / 
-  • problem: 문제 공개·비공개·보관 / 
-  • judge: 재채점·DLQ·실패 재처리 / 
-  • contest: 재확정·0점 확정 / 
-  • study: 강제 종료(9.5.1)·복제본 재동기화(9.5.2) |
-| `shedlock` | 상태 전이 스케줄러와 만료 데이터 정리 배치
-(Outbox Relay는 `SKIP LOCKED`로 처리하므로 대상 아님) |
-| `member_replicas` |   • 닉네임·회원 상태 표시 (problem: 공유 풀이·댓글 작성자 / 
-  • contest: 순위표 / study: 구성원·게시글) |
+| `audit_logs` |   • member: 회원 정지·권한 변경 / <br>• problem: 문제 공개·비공개·보관 / <br>• judge: 재채점·DLQ·실패 재처리 / <br>• contest: 재확정·0점 확정 /<br>• study: 강제 종료(9.5.1)·복제본 재동기화(9.5.2) |
+| `shedlock` | 상태 전이 스케줄러와 만료 데이터 정리 배치 (Outbox Relay는 `SKIP LOCKED`로 처리하므로 대상 아님) |
+| `member_replicas` |   • 닉네임·회원 상태 표시 (problem: 공유 풀이·댓글 작성자 / <br>• contest: 순위표 / study: 구성원·게시글) |
 
 ### 3.1 발행 대기 이벤트 (`outbox_events`)
 
@@ -635,14 +624,13 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `diagnosis_attempt_id` | BIGINT | Y | FK → `diagnosis_attempts.id` |
 | `problem_id` | BIGINT | Y | 문제 ID (외부 참조) |
-| `problem_revision_id` | BIGINT | Y | 출제 시점 회차 
-(COMMENT: `problem.problem_revisions.id`) |
+| `problem_revision_id` | BIGINT | Y | 출제 시점 회차 (COMMENT: `problem.problem_revisions.id`) |
 | `difficulty` | INT | Y | 1 / 2 / 3 (출제 스냅샷) |
 | `is_accepted` | BOOLEAN | Y | 제한 시간 안에 AC를 한 번이라도 받았는지 (레벨 판정) |
 | `final_submission_id` | BIGINT | N | NULL 허용: 미제출. 문항별 최종 제출 (외부 참조) |
 | `final_verdict` | VARCHAR(30) | N | NULL 허용: 미제출·채점 전 |
-| `created_at` | DATETIME(6) | Y |  |
-| `updated_at` | DATETIME(6) | Y |  |
+| `created_at` | DATETIME(6) | Y | - |
+| `updated_at` | DATETIME(6) | Y | - |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
@@ -661,8 +649,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `problem_id` | BIGINT | Y | 문제 ID (외부 참조) |
 | `language` | VARCHAR(30) | Y | 언어 (공통 모듈 Enum) |
 | `source_code` | MEDIUMTEXT | Y | 작성 중 코드 |
-| `seq` | BIGINT | Y | 클라이언트 순번. 
-`WHERE seq < :incomingSeq` 조건부 UPDATE |
+| `seq` | BIGINT | Y | 클라이언트 순번. `WHERE seq < :incomingSeq` 조건부 UPDATE |
 | `saved_at` | DATETIME(6) | Y | 서버 저장 시각 |
 | `version` | BIGINT | Y | 낙관적 락 |
 | `created_at` | DATETIME(6) | Y |  |

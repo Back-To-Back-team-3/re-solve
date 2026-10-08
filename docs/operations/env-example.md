@@ -63,7 +63,9 @@ REDIS_PASSWORD=
 REDIS_HOST=redis
 REDIS_PORT=6379
 
-# ☁️ AWS / Judge0
+# ☁️ AWS / Judge0 / LocalStack
+LOCALSTACK_IMAGE=localstack/localstack:3.8
+LOCALSTACK_HOST_PORT=4566
 AWS_REGION=ap-northeast-2
 
 # Judge0 연동 주소가 정해지면 입력
@@ -97,7 +99,7 @@ NGINX_CHALLENGE_DIR=./nginx
 
 ## 3. 컨테이너 빌드 및 가동
 
-- `../../Dockerfile`은 각 모듈의 실행 JAR를 복사한다.
+- `../../Dockerfile`은 각 모듈의 실행 JAR를 복사한다.s
 
 ```bash
 # 저장소 루트에서 JAR 생성 후 컨테이너 빌드·실행
