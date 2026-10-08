@@ -1,0 +1,62 @@
+# Re:Solve 문서
+
+프로젝트 문서와 첨부 자료는 이 디렉터리에서 관리합니다. 새 자료는 아래 분류에 맞춰 저장하고 문서 목록에 링크를 추가합니다.
+
+## 문서 목록
+
+| 분류 | 문서 | 내용 |
+| --- | --- | --- |
+| 개발·협업 가이드 | [Git/GitHub 매뉴얼](guides/git-github.md) | 브랜치·Issue·PR·리뷰·병합 규칙과 작업 흐름 |
+| 개발·협업 가이드 | [컨벤션·빌드 매뉴얼](guides/convention-build-manual.md) | Spotless·Checkstyle·빌드 규칙 |
+| 기획 | [기획서](dev/planning/planning.md) | 서비스 개요, 기능 목록, 마일스톤 |
+| 기획 | [정책 및 상태](dev/planning/policy-and-state.md) | 도메인 정책, 상태 전이, 불변식 |
+| 아키텍처 | [시스템 구성도](dev/architecture/system-architecture.md) | 전체 아키텍처 구조 |
+| 아키텍처 | [다이어그램](dev/architecture/diagrams.md) | 서비스 간 시퀀스, 상태 전이 흐름 |
+| 명세 | [API 명세서](dev/specifications/api-spec.md) | 서비스 외부 인터페이스 |
+| 명세 | [ERD](dev/specifications/erd.md) | 도메인·DB 구조 |
+| 명세 | [이벤트 계약서](dev/specifications/event-contract.md) | 서비스 간 내부 인터페이스 |
+| 명세 | [스케줄러](dev/specifications/scheduler.md) | 예약 작업 정의 |
+| 명세 | [에러 코드 표](dev/specifications/error-codes.md) | 공통 에러 코드 |
+| 운영 | [환경 변수 예시](operations/env-example.md) | 로컬·Docker 환경 변수 설정 예시 |
+
+## 디렉터리 구분
+
+| 경로 | 저장할 자료 |
+| --- | --- |
+| `dev/planning/` | 기획서, 정책 및 상태, 개발 일정 |
+| `dev/architecture/` | 시스템 구성도, 서비스 간 처리 다이어그램 |
+| `dev/specifications/` | API 명세, 에러코드 표, 도메인·DB, 이벤트 계약, 스케줄러 정의 |
+| `guides/` | Git/GitHub, 코드 컨벤션, 로컬 개발·실행 방법 |
+| `operations/` | AWS 구성, 배포 절차, 모니터링, 장애 대응 절차 |
+| `records/` | 회의록, 결정 근거, 테스트·성능 측정·운영 결과 |
+| `assets/diagrams/` | 구성도·ERD·처리 흐름의 첨부 이미지 |
+| `assets/screenshots/` | 화면과 검증 결과의 스크린샷 |
+
+- 폴더는 실제 자료를 추가할 때 만듭니다. 빈 폴더나 보존용 파일을 미리 만들지 않습니다.
+- 공통 문서는 분류 폴더 바로 아래에 둡니다. 도메인별 문서가 늘어나면 `specifications/contest/`처럼 나눕니다.
+- 기능·계약의 정의는 `specifications/`, 사용하는 방법은 `guides/`, 실행·검증 결과는 `records/`에 둡니다.
+- 같은 내용을 여러 곳에 복사하지 않고 해당 문서로 연결합니다.
+
+## 파일 이름과 링크
+
+- 문서 파일명은 내용을 설명하는 영문 소문자와 하이픈을 사용합니다. 예: `git-github.md`, `event-contracts.md`.
+- 회의·측정 등 날짜별 기록은 `records/<분야>/YYYY-MM/YYYY-MM-DD-주제.md` 형식으로 관리합니다.
+- 파일명과 디렉터리에 공백을 넣지 않습니다.
+- 저장소 안의 문서와 이미지는 상대 경로로 연결합니다. 예: `[Git/GitHub 메뉴얼](guides/git-github.md)`.
+- 자료를 옮기거나 파일명을 바꾸면 이 문서의 목록과 해당 자료를 참조하는 링크도 함께 수정합니다.
+
+## 이미지와 스크린샷
+
+- 이미지는 `assets/diagrams/<분야>/`, 스크린샷은 `assets/screenshots/<도메인>/`에 둡니다.
+- 파일명에는 용도와 관련 작업을 넣습니다. 예: `assets/screenshots/contest/issue-12-exam-start.png`.
+- 같은 작업의 이미지가 여러 장이면 `issue-12-exam-start-01.png`처럼 구분합니다.
+- 문서에서는 자료가 설명하는 위치에 이미지 링크를 넣습니다. 파일만 저장하고 참조 위치를 남기지 않는 방식은 피합니다.
+- 화면이나 로그의 비밀번호·토큰·웹훅 URL 등 비밀값을 제외한 자료만 저장합니다.
+
+## 현재 문서와 과거 자료
+
+- 현재 기준 문서는 고정된 파일명으로 관리하고 변경 이력은 Git으로 남깁니다.
+- 별도 보존이 필요한 초안·과거 버전은 해당 분류의 `archive/`에 두고 현재 문서에서 보관 위치를 연결합니다.
+- Notion에서 옮긴 문서는 원본의 위치·버전과 내용 반영 여부를 확인합니다. 버전 이름만으로 최신 기준을 판단하지 않습니다.
+- 저장소와 Notion은 자동으로 동기화되지 않으므로 이후 내용 변경 시 반영할 위치를 확인합니다.
+- 비밀번호 문서와 실제 `.env` 등 비밀값이 있는 자료는 저장소에 추가하지 않습니다.

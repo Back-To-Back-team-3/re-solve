@@ -1,0 +1,47 @@
+{
+  "name": "resolve-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "node scripts/next.mjs dev --hostname 0.0.0.0",
+    "build": "node scripts/next.mjs build --webpack",
+    "start": "node scripts/start.mjs",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=./node_modules/.cache/ms-playwright playwright test",
+    "postinstall": "node scripts/copy-monaco.mjs",
+    "test:install": "PLAYWRIGHT_BROWSERS_PATH=./node_modules/.cache/ms-playwright playwright install chromium"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "lucide-react": "^0.468.0",
+    "monaco-editor": "^0.57.0",
+    "next": "^16.0.0",
+    "radix-ui": "^1.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.0.0",
+    "remark-gfm": "^4.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.0.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.3"
+  },
+  "overrides": {
+    "dompurify": "^3.4.16"
+  }
+}
