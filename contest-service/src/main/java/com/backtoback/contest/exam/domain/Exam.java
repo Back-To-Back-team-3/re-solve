@@ -20,7 +20,14 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 시험 설정과 전체 진행 상태를 저장한다. 외부 서비스의 자원은 ID로만 참조한다.
+ * 시험 설정과 전체 진행 상태를 저장한다.
+ * <p>생성 팩토리로 초기 상태를 가진 객체를 만들고 Repository로 저장한다.
+ * 스터디와 개설자는 외부 서비스의 ID로만 참조하며 외부 DB에 FK를 만들지 않는다.
+ * 생성 권한·입력 검증·상태 전이·이벤트 발행은 이 저장 모델에서 수행하지 않는다.
+ * <p>기준 문서:
+ * <ul>
+ * <li>도메인 및 데이터베이스 v1.0 / §4.4.1 시험 (exams): 컬럼·상태·설정 및 결과 순번·낙관적 락</li>
+ * </ul>
  */
 @Getter
 @Entity
@@ -74,6 +81,7 @@ public class Exam extends BaseTimeEntity {
     @Column(nullable = false)
     private LocalDateTime endsAt;
 
+    // FIXED에서는 null이며, WINDOW에서 참가자별 제한 시간을 분 단위로 나타낸다.
     private Integer durationMinutes;
 
     @Enumerated(EnumType.STRING)
@@ -84,6 +92,7 @@ public class Exam extends BaseTimeEntity {
     )
     private ExamStatus status;
 
+    // 시험 설정 변경의 이벤트 순서 값이다. 참가 등록으로 증가시키는 값이나 JPA version과 다르다.
     @Column(nullable = false)
     private Integer examRevision;
 
@@ -94,19 +103,37 @@ public class Exam extends BaseTimeEntity {
     )
     private BigDecimal totalScore;
 
+    // 실제 종료 전에는 null이며 예정 종료 시간인 endsAt과 구분한다.
     private LocalDateTime closedAt;
 
+    // 잠정 결과 갱신·최초 확정·재확정의 순서 값이다. 현재 모델은 초기값 0만 설정한다.
     @Column(nullable = false)
     private Long resultRevision;
 
+    // 최초 결과 확정 전에는 null이다.
     private LocalDateTime finalizedAt;
 
+    // 취소되지 않은 시험은 null이며 취소 상태에서도 시험 행은 보존한다.
     private LocalDateTime canceledAt;
 
+    // JPA UPDATE 경합을 검출하는 값이며 설정·결과의 업무 순번을 대신하지 않는다.
     @Version
     @Column(nullable = false)
     private Long version;
 
+    /**
+     * 전달받은 설정을 저장 모델에 옮기고 생성 시 사용할 상태·순번을 초기화한다.
+     * 식별자와 낙관적 락 버전은 저장 시 JPA가 관리한다.
+     *
+     * @param studyId 소속 스터디 ID
+     * @param creatorId 개설자 회원 ID
+     * @param title 시험 제목
+     * @param mode 시험 진행 방식
+     * @param startsAt 시작 시간
+     * @param endsAt 예정 종료 시간
+     * @param durationMinutes WINDOW 제한 시간(분), FIXED는 null
+     * @param totalScore 시험 배점 합계
+     */
     private Exam(
         Long studyId,
         Long creatorId,
@@ -131,7 +158,18 @@ public class Exam extends BaseTimeEntity {
     }
 
     /**
-     * 저장할 시험 모델을 만든다. 생성 권한과 자원 상태 검증은 서비스에서 처리한다.
+     * 저장 전 시험 객체를 만든다. DB 저장이나 외부 자원 조회는 수행하지 않는다.
+     * 생성 권한·자원 상태·시간 범위·배점 검증은 호출하는 서비스에서 처리해야 한다.
+     *
+     * @param studyId 시험을 개설할 스터디의 외부 참조 ID
+     * @param creatorId 생성 권한을 확인한 개설자의 외부 참조 ID
+     * @param title 저장할 시험 제목
+     * @param mode FIXED 또는 WINDOW 진행 방식
+     * @param startsAt Asia/Seoul 기준 시작 시간
+     * @param endsAt Asia/Seoul 기준 예정 종료 시간
+     * @param durationMinutes WINDOW 개인 제한 시간(분), FIXED에서는 null
+     * @param totalScore 문제별 배점 합계
+     * @return SCHEDULED 상태, 설정 순번 1, 결과 순번 0인 미저장 시험 객체
      */
     public static Exam create(
         Long studyId,

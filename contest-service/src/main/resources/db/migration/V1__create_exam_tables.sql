@@ -1,3 +1,7 @@
+-- 기준 문서: 도메인 및 데이터베이스 v1.0 / §4.4.1 시험 (exams),
+-- §4.4.2 시험 문제 (exam_problems), §4.4.3 시험 참가자 (exam_participants).
+-- 서비스 내부 시험 관계만 FK로 연결하고 외부 서비스 자원은 ID로 보존한다.
+-- active_member_id는 DB가 계산한다. 취소된 행은 NULL로 남겨 이력 보존과 재신청을 함께 허용한다.
 CREATE TABLE exams
 (
     id                  BIGINT         NOT NULL AUTO_INCREMENT,

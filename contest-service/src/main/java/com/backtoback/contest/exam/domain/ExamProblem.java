@@ -22,6 +22,14 @@ import lombok.NoArgsConstructor;
 
 /**
  * 시험에 편입한 문제의 고정 회차와 표시 정보를 저장한다.
+ * <p>편입 시 전달받은 회차 ID·제목·표시용 회차 번호를 보존하므로
+ * 원본 문제의 이후 수정과 별개로 시험에서 사용할 회차를 식별할 수 있다.
+ * 문제 서비스 자원은 ID로만 참조하며, 소속 시험만 내부 FK와 지연 로딩 관계로 연결한다.
+ * cascade 저장·삭제는 사용하지 않으므로 시험 저장과 문제 저장은 호출자가 명시적으로 수행한다.
+ * <p>기준 문서:
+ * <ul>
+ * <li>도메인 및 데이터베이스 v1.0 / §4.4.2 시험 문제 (exam_problems): 고정 회차·표시 정보·시험별 문제 유일 제약</li>
+ * </ul>
  */
 @Getter
 @Entity
@@ -60,6 +68,7 @@ public class ExamProblem extends BaseTimeEntity {
     @Column(nullable = false)
     private Long problemId;
 
+    // 시험에 사용할 회차의 외부 참조 ID이며 문제의 최신 회차를 자동으로 따라가지 않는다.
     @Column(nullable = false)
     private Long problemRevisionId;
 
@@ -69,6 +78,7 @@ public class ExamProblem extends BaseTimeEntity {
     )
     private String problemTitle;
 
+    // 회차의 DB 식별자인 problemRevisionId와 구분하는 표시용 번호다.
     @Column(nullable = false)
     private Integer revisionNumber;
 
@@ -79,9 +89,21 @@ public class ExamProblem extends BaseTimeEntity {
     )
     private BigDecimal score;
 
+    // 1부터 연속하는 시험 안의 표시 순서다. 연속성 검증은 편입을 담당하는 서비스의 책임이다.
     @Column(nullable = false)
     private Integer displayOrder;
 
+    /**
+     * 호출자가 선택한 문제 회차와 표시 정보를 그대로 저장 모델에 옮긴다.
+     *
+     * @param exam 소속 시험
+     * @param problemId 외부 문제 ID
+     * @param problemRevisionId 고정할 외부 회차 ID
+     * @param problemTitle 편입 시 문제 제목
+     * @param revisionNumber 표시용 회차 번호
+     * @param score 문제 배점
+     * @param displayOrder 시험 안의 표시 순서
+     */
     private ExamProblem(
         Exam exam,
         Long problemId,
@@ -100,6 +122,20 @@ public class ExamProblem extends BaseTimeEntity {
         this.displayOrder = displayOrder;
     }
 
+    /**
+     * 편입할 문제의 미저장 스냅샷을 만든다.
+     * 공개 상태·회차 유효성·배점·표시 순서 검증은 호출하는 서비스가 수행한다.
+     * 같은 시험의 중복 문제는 저장 시 DB 유일 제약으로도 차단된다.
+     *
+     * @param exam 먼저 저장할 소속 시험
+     * @param problemId 문제 서비스에서 확인한 문제 ID
+     * @param problemRevisionId 시험에서 사용할 고정 회차 ID
+     * @param problemTitle 선택한 회차의 문제 제목 스냅샷
+     * @param revisionNumber 선택한 회차의 표시용 번호 스냅샷
+     * @param score 해당 문제의 시험 배점
+     * @param displayOrder 1부터 연속하도록 호출자가 결정한 표시 순서
+     * @return 전달한 고정 회차·표시 정보·배점을 가진 미저장 시험 문제 객체
+     */
     public static ExamProblem create(
         Exam exam,
         Long problemId,
