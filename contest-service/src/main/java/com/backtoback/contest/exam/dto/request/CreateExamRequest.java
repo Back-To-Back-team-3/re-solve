@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 import com.backtoback.contest.exam.validation.ValidExamCreation;
+import com.backtoback.contest.global.config.StrictStringDeserializer;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Future;
@@ -11,6 +12,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
  * 시험 생성의 HTTP 입력을 받는다. 문자열 ID·점수와 시차를 포함한 시각을 그대로 유지한다.
@@ -26,8 +28,8 @@ import jakarta.validation.constraints.Size;
  */
 @ValidExamCreation
 public record CreateExamRequest(
-    @NotBlank @Size(max = 200) String title,
-    @NotNull @Pattern(regexp = "FIXED") String mode,
+    @JsonDeserialize(using = StrictStringDeserializer.class) @NotBlank @Size(max = 200) String title,
+    @JsonDeserialize(using = StrictStringDeserializer.class) @NotNull @Pattern(regexp = "FIXED") String mode,
     @NotNull @Future OffsetDateTime startsAt,
     @NotNull OffsetDateTime endsAt,
     @NotNull
@@ -44,8 +46,12 @@ public record CreateExamRequest(
      * @param displayOrder 1부터 문제 수까지의 표시 순서
      */
     public record Problem(
-        @NotNull @Pattern(regexp = "[1-9][0-9]{0,18}") String problemId,
-        @NotNull @Pattern(regexp = "(?:0|[1-9][0-9]{0,3})\\.[0-9]{2}") String score,
+        @JsonDeserialize(using = StrictStringDeserializer.class)
+        @NotNull
+        @Pattern(regexp = "[1-9][0-9]{0,18}") String problemId,
+        @JsonDeserialize(using = StrictStringDeserializer.class)
+        @NotNull
+        @Pattern(regexp = "(?:0|[1-9][0-9]{0,3})\\.[0-9]{2}") String score,
         @NotNull @jakarta.validation.constraints.Min(1) Integer displayOrder
     ) {
     }

@@ -1,6 +1,7 @@
 package com.backtoback.contest.exam.validation;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
@@ -77,6 +78,11 @@ public class ExamCreationValidator implements ConstraintValidator<ValidExamCreat
             }
             if (problem.problemId() != null && !ids.add(problem.problemId())) {
                 reject(context, "problems", "같은 문제를 중복 지정할 수 없습니다.");
+                valid = false;
+            }
+            if (problem.problemId() != null && problem.problemId().matches("[1-9][0-9]{0,18}")
+                && new BigInteger(problem.problemId()).compareTo(BigInteger.valueOf(Long.MAX_VALUE)) > 0) {
+                reject(context, "problems", "문제 ID는 양의 BIGINT 범위여야 합니다.");
                 valid = false;
             }
             Integer order = problem.displayOrder();
