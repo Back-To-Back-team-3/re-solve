@@ -15,7 +15,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import com.backtoback.contest.global.response.ErrorResponse;
 
 /**
- * 시험 Controller의 업무 오류와 HTTP 입력 오류를 공통 실패 봉투로 변환한다.
+ * 시험 Controller의 업무 오류와 HTTP 입력 오류를 공통 오류 응답 형식으로 변환한다.
  * 알 수 없는 내부 예외의 메시지·원문 요청·비밀값은 응답으로 전달하지 않는다.
  * <p>기준 문서: API 명세서 v1.1 / §0.3 공통 성공 / 에러 응답, 에러 코드 표 / Common · Auth: 실패 구조.
  */
@@ -25,10 +25,10 @@ public class ExamExceptionHandler {
      * 명세 오류 코드를 해당 HTTP 상태로 반환한다.
      *
      * @param exception 서비스에서 전달한 명세 오류
-     * @return 세부 검증 목록이 없는 실패 봉투
+     * @return 세부 검증 목록이 없는 공통 오류 응답 형식
      */
-    @ExceptionHandler(ExamApiException.class)
-    public ResponseEntity<ErrorResponse> handleBusiness(ExamApiException exception) {
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ErrorResponse> handleBusiness(BusinessException exception) {
         return respond(exception.getErrorCode(), List.of());
     }
 
@@ -126,7 +126,7 @@ public class ExamExceptionHandler {
     }
 
     /**
-     * 코드가 정의한 상태와 공통 실패 봉투를 함께 만든다.
+     * 코드가 정의한 상태와 공통 오류 응답을 함께 만든다.
      *
      * @param code 반환할 명세 오류
      * @param details 입력 검증 세부 사항

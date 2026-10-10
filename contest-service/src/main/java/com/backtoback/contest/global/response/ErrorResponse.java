@@ -5,7 +5,7 @@ import java.util.List;
 import com.backtoback.contest.global.error.ErrorCode;
 
 /**
- * 성공 데이터와 분리된 외부 API 실패 봉투다. 입력 오류에만 필드별 details를 제공한다.
+ * 성공 데이터와 분리된 외부 API 공통 오류 응답 형식이다. 입력 오류에만 필드별 details를 제공한다.
  * <p>기준 문서: API 명세서 v1.1 / §0.3 공통 성공 / 에러 응답: success·error 구조.
  *
  * @param success 항상 false
@@ -13,7 +13,7 @@ import com.backtoback.contest.global.error.ErrorCode;
  */
 public record ErrorResponse(boolean success, ErrorBody error) {
     /**
-     * 명세 오류와 검증 세부 정보를 공통 실패 봉투로 변환한다.
+     * 명세 오류와 검증 세부 정보를 공통 오류 응답 형식으로 변환한다.
      *
      * @param code 반환할 오류 코드
      * @param details 검증 오류 목록, 업무 오류는 빈 목록

@@ -15,8 +15,8 @@ import com.backtoback.contest.exam.domain.ExamStatus;
 import com.backtoback.contest.exam.dto.request.CreateExamRequest;
 import com.backtoback.contest.exam.dto.response.ExamResponses;
 import com.backtoback.contest.exam.service.ExamService;
+import com.backtoback.contest.global.error.BusinessException;
 import com.backtoback.contest.global.error.ErrorCode;
-import com.backtoback.contest.global.error.ExamApiException;
 import com.backtoback.contest.global.response.ApiResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -42,13 +42,14 @@ public class ExamController {
     private final ExamService examService;
 
     /**
-     * 생성 입력을 검증하고 서비스 결과를 201로 반환한다.
+     * 4.1.1 시험 생성
+     * <p>생성 입력을 검증하고 서비스 결과를 201로 반환한다.
      *
      * @param studyId 대상 스터디 문자열 ID
      * @param memberId Gateway 사용자 ID
      * @param request 검증할 시험 설정
-     * @return 생성 성공 봉투
-     * @throws ExamApiException 식별자가 잘못됐거나 서비스가 명세 오류를 반환한 경우
+     * @return 생성 결과를 담은 공통 성공 응답
+     * @throws BusinessException 식별자가 잘못됐거나 서비스가 명세 오류를 반환한 경우
      */
     @PostMapping("/studies/{studyId}/exams")
     @Operation(
@@ -66,7 +67,8 @@ public class ExamController {
     }
 
     /**
-     * 목록 입력 기본값과 허용 범위를 확인한다. 문제 ID·본문은 목록 DTO에 포함되지 않는다.
+     * 4.1.2 스터디 시험 목록
+     * <p>목록 입력 기본값과 허용 범위를 확인한다. 문제 ID·본문은 목록 DTO에 포함되지 않는다.
      *
      * @param studyId 대상 스터디 ID
      * @param memberId Gateway 사용자 ID
@@ -75,7 +77,7 @@ public class ExamController {
      * @param size 기본 20, 최대 100
      * @param sort startsAt·createdAt과 asc·desc 조합
      * @return 공통 페이지 형식의 시험 목록
-     * @throws ExamApiException 식별자 또는 서비스 판정 오류
+     * @throws BusinessException 식별자 또는 서비스 판정 오류
      */
     @GetMapping("/studies/{studyId}/exams")
     @Operation(summary = "스터디 시험 목록")
@@ -96,12 +98,13 @@ public class ExamController {
     }
 
     /**
-     * 입장 상태를 바꾸지 않는 상세 조회를 연결한다.
+     * 4.1.3 시험 상세
+     * <p>입장 상태를 바꾸지 않는 상세 조회를 연결한다.
      *
      * @param examId 시험 ID
      * @param memberId Gateway 사용자 ID
      * @return 설정과 본인 참가 정보를 담은 상세
-     * @throws ExamApiException 식별자 또는 서비스 판정 오류
+     * @throws BusinessException 식별자 또는 서비스 판정 오류
      */
     @GetMapping("/exams/{examId}")
     @Operation(summary = "시험 상세")
@@ -113,12 +116,13 @@ public class ExamController {
     }
 
     /**
-     * 신규 참가와 기존 활성 참가의 HTTP 상태를 구분한다. 바디에서 요청자 ID를 받지 않는다.
+     * 4.2.1 시험 참가 등록
+     * <p>신규 참가와 기존 활성 참가의 HTTP 상태를 구분한다. 바디에서 요청자 ID를 받지 않는다.
      *
      * @param examId 시험 ID
      * @param memberId Gateway 사용자 ID
      * @return 신규 등록은 201, 기존 참가 반환은 200
-     * @throws ExamApiException 식별자 또는 서비스 판정 오류
+     * @throws BusinessException 식별자 또는 서비스 판정 오류
      */
     @PostMapping("/exams/{examId}/participants")
     @Operation(summary = "시험 참가 등록")
@@ -133,12 +137,13 @@ public class ExamController {
     }
 
     /**
-     * 활성 등록 본인의 입장 서비스 계약을 연결한다.
+     * 4.2.2 시험 입장
+     * <p>활성 등록 본인의 입장 서비스 계약을 연결한다.
      *
      * @param examId 시험 ID
      * @param memberId Gateway 사용자 ID
      * @return 최초 입장·개인 마감 정보를 가진 응답
-     * @throws ExamApiException 식별자 또는 서비스 판정 오류
+     * @throws BusinessException 식별자 또는 서비스 판정 오류
      */
     @PostMapping("/exams/{examId}/start")
     @Operation(summary = "시험 입장")
@@ -150,12 +155,13 @@ public class ExamController {
     }
 
     /**
-     * 입장한 본인의 고정 문제 회차 조회를 연결한다. Controller에서 외부 문제 서비스를 직접 호출하지 않는다.
+     * 4.2.3 시험 문제 목록·본문
+     * <p>입장한 본인의 고정 문제 회차 조회를 연결한다. Controller에서 외부 문제 서비스를 직접 호출하지 않는다.
      *
      * @param examId 시험 ID
      * @param memberId Gateway 사용자 ID
      * @return 공개 본문·함수 명세·예제
-     * @throws ExamApiException 식별자 또는 서비스 판정 오류
+     * @throws BusinessException 식별자 또는 서비스 판정 오류
      */
     @GetMapping("/exams/{examId}/problems")
     @Operation(summary = "시험 문제 목록·본문")
@@ -173,7 +179,7 @@ public class ExamController {
      * @param value 확인할 식별자
      * @param authentication Gateway 사용자 헤더인지 여부
      * @return 변환하지 않은 식별자 문자열
-     * @throws ExamApiException 숫자 형식·범위가 유효하지 않은 경우
+     * @throws BusinessException 숫자 형식·범위가 유효하지 않은 경우
      */
     private String identifier(String value, boolean authentication) {
         try {
@@ -182,7 +188,7 @@ public class ExamController {
             }
             return value;
         } catch (NumberFormatException exception) {
-            throw new ExamApiException(
+            throw new BusinessException(
                 authentication ? ErrorCode.AUTH_TOKEN_INVALID : ErrorCode.COMMON_INVALID_REQUEST
             );
         }

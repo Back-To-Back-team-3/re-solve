@@ -4,10 +4,10 @@ import lombok.Getter;
 
 /**
  * 서비스 계약에서 명세 오류를 전달한다. HTTP 변환은 공통 예외 처리기가 담당한다.
- * stub은 지정된 오류 예시를 이 예외로 전달하며 실제 권한·DB 판정을 수행하지 않는다.
+ * 도메인 예외가 상속하며, 공통 인증·입력 오류는 해당 코드로 직접 전달할 수 있다.
  */
 @Getter
-public class ExamApiException extends RuntimeException {
+public class BusinessException extends RuntimeException {
     private final ErrorCode errorCode;
 
     /**
@@ -15,7 +15,7 @@ public class ExamApiException extends RuntimeException {
      *
      * @param errorCode 호출자에게 반환할 명세 오류
      */
-    public ExamApiException(ErrorCode errorCode) {
+    public BusinessException(ErrorCode errorCode) {
         super(errorCode.getMessage());
         this.errorCode = errorCode;
     }

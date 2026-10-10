@@ -3,8 +3,19 @@ package com.backtoback.contest.exam.stub;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import com.backtoback.contest.exam.exception.ContestDependencyUnavailableException;
+import com.backtoback.contest.exam.exception.ContestOperationBlockedException;
+import com.backtoback.contest.exam.exception.ExamAlreadyFinishedException;
+import com.backtoback.contest.exam.exception.ExamCanceledException;
+import com.backtoback.contest.exam.exception.ExamClosedException;
+import com.backtoback.contest.exam.exception.ExamNotEligibleException;
+import com.backtoback.contest.exam.exception.ExamNotFoundException;
+import com.backtoback.contest.exam.exception.ExamNotRegisteredException;
+import com.backtoback.contest.exam.exception.ExamNotStartedException;
+import com.backtoback.contest.exam.exception.ExamProblemNotAvailableException;
+import com.backtoback.contest.exam.exception.ExamStudyClosedException;
+import com.backtoback.contest.global.error.BusinessException;
 import com.backtoback.contest.global.error.ErrorCode;
-import com.backtoback.contest.global.error.ExamApiException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +34,7 @@ public class ExamStubScenario {
     /**
      * SUCCESS와 EXISTING_PARTICIPANT 외 값은 명세 오류 이름으로 해석한다.
      *
-     * @throws ExamApiException 선택한 명세 오류 또는 알 수 없는 시나리오의 입력 오류
+     * @throws BusinessException 선택한 명세 오류 또는 알 수 없는 시나리오의 입력 오류
      */
     public void raiseIfRequested() {
         String scenario = request.getHeader("X-Exam-Stub-Scenario");
@@ -34,9 +45,33 @@ public class ExamStubScenario {
         try {
             code = ErrorCode.valueOf(scenario);
         } catch (IllegalArgumentException exception) {
-            throw new ExamApiException(ErrorCode.COMMON_INVALID_REQUEST);
+            throw new BusinessException(ErrorCode.COMMON_INVALID_REQUEST);
         }
-        throw new ExamApiException(code);
+        throw scenarioException(code);
+    }
+
+    /**
+     * 시나리오의 도메인 코드는 상황별 예외로, 공통 코드는 공통 업무 예외로 변환한다.
+     * 이 변환은 개발 응답 예시를 선택할 뿐 실제 업무 조건을 판정하지 않는다.
+     *
+     * @param code 선택한 명세 오류 코드
+     * @return 해당 코드가 고정된 도메인 예외 또는 공통 예외
+     */
+    private BusinessException scenarioException(ErrorCode code) {
+        return switch (code) {
+            case EXAM_NOT_FOUND -> new ExamNotFoundException();
+            case EXAM_NOT_ELIGIBLE -> new ExamNotEligibleException();
+            case EXAM_NOT_REGISTERED -> new ExamNotRegisteredException();
+            case EXAM_NOT_STARTED -> new ExamNotStartedException();
+            case EXAM_CLOSED -> new ExamClosedException();
+            case EXAM_CANCELED -> new ExamCanceledException();
+            case EXAM_ALREADY_FINISHED -> new ExamAlreadyFinishedException();
+            case EXAM_STUDY_CLOSED -> new ExamStudyClosedException();
+            case EXAM_PROBLEM_NOT_AVAILABLE -> new ExamProblemNotAvailableException();
+            case CONTEST_OPERATION_BLOCKED -> new ContestOperationBlockedException();
+            case CONTEST_DEPENDENCY_UNAVAILABLE -> new ContestDependencyUnavailableException();
+            default -> new BusinessException(code);
+        };
     }
 
     /**

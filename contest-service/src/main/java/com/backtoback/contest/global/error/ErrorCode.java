@@ -58,7 +58,7 @@ public enum ErrorCode {
     // 고정 회차 본문 등 내부 조회 실패
     COMMON_DEPENDENCY_UNAVAILABLE(503, "필요한 서비스를 조회할 수 없습니다.");
 
-    // 공통 실패 봉투를 응답할 HTTP 상태 값.
+    // 공통 오류 응답을 응답할 HTTP 상태 값.
     private final int status;
 
     // 내부 예외 내용이나 인증 비밀값을 포함하지 않는 사용자 안내.

@@ -50,7 +50,7 @@ public class StubExamService implements ExamService {
      * @param memberId 요청자, 실제 권한 판정에는 사용하지 않음
      * @param request 검증한 생성 입력
      * @return 요청과 배점·고정 회차가 연결된 생성 예시
-     * @throws com.backtoback.contest.global.error.ExamApiException 선택한 오류 시나리오
+     * @throws com.backtoback.contest.global.error.BusinessException 선택한 오류 시나리오
      */
     @Override
     public ExamResponses.Created create(String studyId, String memberId, CreateExamRequest request) {
