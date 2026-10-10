@@ -58,6 +58,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ExamParticipant extends BaseTimeEntity {
 
+    // 저장 전에는 null이며 INSERT 시 DB가 식별자를 생성한다.
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(nullable = false)
@@ -119,6 +120,7 @@ public class ExamParticipant extends BaseTimeEntity {
     @Column(nullable = true)
     private LocalDateTime finishedAt;
 
+    // 문제별 획득 점수의 재계산 합계(점)다. 초기값은 0이며 실제 집계는 후속 서비스에서 수행한다.
     @Column(
         nullable = false,
         precision = 6,
@@ -172,6 +174,7 @@ public class ExamParticipant extends BaseTimeEntity {
     /**
      * 신규 참가의 미저장 객체를 만든다. 회원 조회나 DB 저장은 수행하지 않는다.
      * Builder의 build도 이 메서드를 호출하므로 등록 상태와 초기 점수는 항상 같은 규칙으로 설정된다.
+     * Builder에서 생략한 입력은 null로 전달되며, 이 메서드는 필수 입력을 자동 검증하지 않는다.
      * 참가 자격·등록 가능 상태·중복 여부와 개인 마감 계산은 호출하는 서비스에서 처리한다.
      * 취소되지 않은 중복 참가는 저장 시 DB 유일 제약으로도 차단된다.
      *

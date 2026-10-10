@@ -53,6 +53,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Exam extends BaseTimeEntity {
 
+    // 저장 전에는 null이며 INSERT 시 DB가 식별자를 생성한다. nullable은 저장할 컬럼의 제약을 나타낸다.
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(nullable = false)
@@ -78,9 +79,11 @@ public class Exam extends BaseTimeEntity {
     )
     private ExamMode mode;
 
+    // 시간대 정보 없이 Asia/Seoul 기준의 시험 시작 시간을 저장한다.
     @Column(nullable = false)
     private LocalDateTime startsAt;
 
+    // 예정 종료 시간이며 수동 종료 등으로 기록하는 실제 종료 시간 closedAt과 구분한다.
     @Column(nullable = false)
     private LocalDateTime endsAt;
 
@@ -100,6 +103,7 @@ public class Exam extends BaseTimeEntity {
     @Column(nullable = false)
     private Integer examRevision;
 
+    // 문제별 배점의 합계(점)다. 생성 시 전달받은 값을 사용하며 이 모델에서 합계를 계산하지 않는다.
     @Column(
         nullable = false,
         precision = 6,
@@ -167,6 +171,7 @@ public class Exam extends BaseTimeEntity {
     /**
      * 저장 전 시험 객체를 만든다. DB 저장이나 외부 자원 조회는 수행하지 않는다.
      * Builder의 build도 이 메서드를 호출하므로 생성 방식과 관계없이 같은 초기값을 사용한다.
+     * Builder에서 생략한 입력은 null로 전달되며, 이 메서드는 필수 입력을 자동 검증하지 않는다.
      * 생성 권한·자원 상태·시간 범위·배점 검증은 호출하는 서비스에서 처리해야 한다.
      *
      * @param studyId 시험을 개설할 스터디의 외부 참조 ID

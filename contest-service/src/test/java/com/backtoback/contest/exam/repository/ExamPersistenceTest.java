@@ -37,6 +37,7 @@ import jakarta.persistence.EntityManager;
 /**
  * Flyway로 만든 MySQL 스키마에서 생성 컬럼과 시험별 유니크·FK 계약을 검증한다.
  * <p>Testcontainers가 테스트 전용 MySQL을 시작하고 Flyway가 테이블을 만든 뒤 JPA 매핑을 검증한다.
+ * 각 저장 모델은 Builder로 생성하며 DB 왕복 후 초기 상태·순번·점수도 함께 확인한다.
  * 각 테스트는 DataJpaTest의 트랜잭션에서 실행하고 종료 시 롤백한다.
  * saveAndFlush로 SQL을 실제 실행하며 재조회 전 영속성 컨텍스트를 비워 메모리 객체만 검증하는 것을 피한다.
  * 참가 자격·서비스 상태 전이·이력·Outbox·결과 집계의 동작은 이 저장 계약 테스트에 포함하지 않는다.

@@ -26,6 +26,7 @@ import lombok.Getter;
 @EntityListeners(AuditingEntityListener.class)
 public abstract class BaseTimeEntity {
 
+    // 객체 생성 직후에는 null이며 JPA 감사 리스너가 저장 전에 설정한다. 최초 저장 후에는 수정하지 않는다.
     @CreatedDate
     @Column(
         nullable = false,
@@ -33,6 +34,7 @@ public abstract class BaseTimeEntity {
     )
     private LocalDateTime createdAt;
 
+    // 객체 생성 직후에는 null이며 JPA를 통한 저장·변경 시 갱신한다. 직접 SQL 실행에는 자동 반영되지 않는다.
     @LastModifiedDate
     @Column(nullable = false)
     private LocalDateTime updatedAt;

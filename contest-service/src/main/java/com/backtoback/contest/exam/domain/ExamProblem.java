@@ -52,6 +52,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ExamProblem extends BaseTimeEntity {
 
+    // 저장 전에는 null이며 INSERT 시 DB가 식별자를 생성한다.
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(nullable = false)
@@ -75,6 +76,7 @@ public class ExamProblem extends BaseTimeEntity {
     @Column(nullable = false)
     private Long problemRevisionId;
 
+    // 선택한 문제 회차의 제목 스냅샷이며 원본 문제의 제목 변경을 자동 반영하지 않는다.
     @Column(
         nullable = false,
         length = 200
@@ -85,6 +87,7 @@ public class ExamProblem extends BaseTimeEntity {
     @Column(nullable = false)
     private Integer revisionNumber;
 
+    // 이 문제의 시험 배점(점)이며 참가자가 획득한 점수와 구분한다.
     @Column(
         nullable = false,
         precision = 6,
@@ -128,6 +131,7 @@ public class ExamProblem extends BaseTimeEntity {
     /**
      * 편입할 문제의 미저장 스냅샷을 만든다.
      * Builder의 build도 이 메서드를 호출하며 입력 이름으로 회차·배점·표시 순서를 구분할 수 있다.
+     * Builder에서 생략한 입력은 null로 전달되며, 이 메서드는 필수 입력을 자동 검증하지 않는다.
      * 공개 상태·회차 유효성·배점·표시 순서 검증은 호출하는 서비스가 수행한다.
      * 같은 시험의 중복 문제는 저장 시 DB 유일 제약으로도 차단된다.
      *
