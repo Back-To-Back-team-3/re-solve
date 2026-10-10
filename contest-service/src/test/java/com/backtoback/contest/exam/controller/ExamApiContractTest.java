@@ -432,6 +432,12 @@ class ExamApiContractTest {
                 Arguments.of("배점 합계 초과", creationBody(PROBLEMS.replace("30.00", "9999.99"))),
                 Arguments.of("숫자 점수 JSON", creationBody(PROBLEMS.replace("\"30.00\"", "30.01"))),
                 Arguments.of("숫자 문제 ID JSON", creationBody(PROBLEMS.replace("\"101\"", "101"))),
+                Arguments
+                    .of("실수 표시 순서", creationBody(PROBLEMS.replace("\"displayOrder\": 1", "\"displayOrder\": 1.5"))),
+                Arguments
+                    .of("문자열 표시 순서", creationBody(PROBLEMS.replace("\"displayOrder\": 1", "\"displayOrder\": \"1\""))),
+                Arguments.of("숫자 시작 시각", creationBody(PROBLEMS).replace("\"" + STARTS_AT + "\"", "1234567890")),
+                Arguments.of("시차 없는 시각", creationBody("시험", "FIXED", "2099-10-20T20:00:00", ENDS_AT, PROBLEMS)),
                 Arguments.of("BIGINT 범위 밖 문제 ID", creationBody(PROBLEMS.replace("\"101\"", "\"9223372036854775808\"")))
             );
     }

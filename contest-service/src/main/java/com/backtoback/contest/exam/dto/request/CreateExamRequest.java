@@ -4,6 +4,8 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 import com.backtoback.contest.exam.validation.ValidExamCreation;
+import com.backtoback.contest.global.config.StrictIntegerDeserializer;
+import com.backtoback.contest.global.config.StrictOffsetDateTimeDeserializer;
 import com.backtoback.contest.global.config.StrictStringDeserializer;
 
 import jakarta.validation.Valid;
@@ -30,8 +32,8 @@ import tools.jackson.databind.annotation.JsonDeserialize;
 public record CreateExamRequest(
     @JsonDeserialize(using = StrictStringDeserializer.class) @NotBlank @Size(max = 200) String title,
     @JsonDeserialize(using = StrictStringDeserializer.class) @NotNull @Pattern(regexp = "FIXED") String mode,
-    @NotNull @Future OffsetDateTime startsAt,
-    @NotNull OffsetDateTime endsAt,
+    @JsonDeserialize(using = StrictOffsetDateTimeDeserializer.class) @NotNull @Future OffsetDateTime startsAt,
+    @JsonDeserialize(using = StrictOffsetDateTimeDeserializer.class) @NotNull OffsetDateTime endsAt,
     @NotNull
     @Size(
         min = 1,
@@ -52,7 +54,9 @@ public record CreateExamRequest(
         @JsonDeserialize(using = StrictStringDeserializer.class)
         @NotNull
         @Pattern(regexp = "(?:0|[1-9][0-9]{0,3})\\.[0-9]{2}") String score,
-        @NotNull @jakarta.validation.constraints.Min(1) Integer displayOrder
+        @JsonDeserialize(using = StrictIntegerDeserializer.class)
+        @NotNull
+        @jakarta.validation.constraints.Min(1) Integer displayOrder
     ) {
     }
 }
