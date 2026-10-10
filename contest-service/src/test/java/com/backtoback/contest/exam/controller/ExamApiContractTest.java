@@ -53,7 +53,7 @@ class ExamApiContractTest {
     private MockMvc mockMvc;
 
     /**
-     * 생성 입력이 문자열 회차·점수와 201 성공 봉투로 연결되는지 확인한다.
+     * 생성 입력이 문자열 회차·점수와 201 공통 성공 응답로 연결되는지 확인한다.
      * 마이크로초 표기와 +09:00 시차도 검증해 DB 시간 형태를 그대로 노출하는 일을 막는다.
      *
      * @throws Exception MVC 요청·검증 실패
@@ -252,7 +252,7 @@ class ExamApiContractTest {
     }
 
     /**
-     * 명세 코드와 HTTP 상태가 실패 봉투에 연결되는지 개발 오류 예시로 검증한다.
+     * 명세 코드와 HTTP 상태가 공통 오류 응답에 연결되는지 개발 오류 예시로 검증한다.
      * 특정 API의 실제 업무 발생 조건을 판정한 테스트는 아니다.
      *
      * @param code 개발 헤더로 지정할 명세 오류
@@ -260,7 +260,7 @@ class ExamApiContractTest {
      */
     @ParameterizedTest
     @EnumSource(ErrorCode.class)
-    @DisplayName("개발 오류 시나리오는 명세 코드와 HTTP 상태를 공통 실패 봉투로 반환한다")
+    @DisplayName("개발 오류 시나리오는 명세 코드와 HTTP 상태를 공통 오류 응답으로 반환한다")
     void errorScenariosReturnCodeAndStatus(ErrorCode code) throws Exception {
         // given
         MockHttpServletRequestBuilder request
@@ -468,6 +468,44 @@ class ExamApiContractTest {
         return """
             {"problemId": "%s", "score": "%s", "displayOrder": %d}
             """.formatted(problemId, score, order);
+    }
+
+    /**
+     * 지원하지 않는 바디·응답 미디어 형식을 내부 장애로 오인하지 않는지 실제 MVC 경로로 확인한다.
+     * 공통 오류는 Accept 헤더와 관계없이 명세의 JSON 형식으로 반환한다.
+     *
+     * @param mediaLocation Content-Type 또는 Accept를 잘못 지정할 위치
+     * @throws Exception MVC 요청·검증 실패
+     */
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "CONTENT_TYPE",
+            "ACCEPT"
+        }
+    )
+    @DisplayName("지원하지 않는 미디어 형식은 공통 JSON 입력 오류 400을 반환한다")
+    void unsupportedMediaReturnsInvalidRequest(String mediaLocation) throws Exception {
+        // given
+        MockHttpServletRequestBuilder request
+            = "CONTENT_TYPE".equals(mediaLocation)
+                ? authenticated(post("/api/v1/studies/12/exams"))
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .content(creationBody(PROBLEMS))
+                : authenticated(get("/api/v1/exams/55")).accept(MediaType.TEXT_PLAIN);
+
+        // when & then
+        mockMvc
+            .perform(request)
+            .andExpect(status().isBadRequest())
+            .andExpect(
+                org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                    .content()
+                    .contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+            )
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
+            .andExpect(jsonPath("$.error.details[0].field").value("request"));
     }
 
     /**
