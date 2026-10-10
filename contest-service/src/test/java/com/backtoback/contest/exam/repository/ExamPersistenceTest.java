@@ -283,16 +283,16 @@ class ExamPersistenceTest {
     private Exam saveExam(String title) {
         Exam exam
             = Exam
-                .create(
-                    STUDY_ID,
-                    CREATOR_ID,
-                    title,
-                    ExamMode.FIXED,
-                    STARTS_AT,
-                    ENDS_AT,
-                    null,
-                    new BigDecimal("100.00")
-                );
+                .builder()
+                .studyId(STUDY_ID)
+                .creatorId(CREATOR_ID)
+                .title(title)
+                .mode(ExamMode.FIXED)
+                .startsAt(STARTS_AT)
+                .endsAt(ENDS_AT)
+                .durationMinutes(null)
+                .totalScore(new BigDecimal("100.00"))
+                .build();
         return examRepository.saveAndFlush(exam);
     }
 
@@ -317,7 +317,16 @@ class ExamPersistenceTest {
      * @return 기본 문제 ID·고정 회차·배점·표시 순서를 가진 미저장 객체
      */
     private ExamProblem createProblem(Exam exam) {
-        return ExamProblem.create(exam, PROBLEM_ID, PROBLEM_REVISION_ID, "고정 회차 문제", 1, new BigDecimal("33.33"), 1);
+        return ExamProblem
+            .builder()
+            .exam(exam)
+            .problemId(PROBLEM_ID)
+            .problemRevisionId(PROBLEM_REVISION_ID)
+            .problemTitle("고정 회차 문제")
+            .revisionNumber(1)
+            .score(new BigDecimal("33.33"))
+            .displayOrder(1)
+            .build();
     }
 
     /**
@@ -327,7 +336,13 @@ class ExamPersistenceTest {
      * @return 시험 종료 시간을 개인 마감으로 가진 기본 회원의 미저장 참가 객체
      */
     private ExamParticipant createParticipant(Exam exam) {
-        return ExamParticipant.create(exam, MEMBER_ID, STARTS_AT.minusHours(1), ENDS_AT);
+        return ExamParticipant
+            .builder()
+            .exam(exam)
+            .memberId(MEMBER_ID)
+            .registeredAt(STARTS_AT.minusHours(1))
+            .personalEndsAt(ENDS_AT)
+            .build();
     }
 
     /**

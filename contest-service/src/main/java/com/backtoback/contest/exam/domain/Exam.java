@@ -16,12 +16,14 @@ import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
  * 시험 설정과 전체 진행 상태를 저장한다.
- * <p>생성 팩토리로 초기 상태를 가진 객체를 만들고 Repository로 저장한다.
+ * <p>Builder 또는 생성 팩토리로 초기 상태를 가진 객체를 만들고 Repository로 저장한다.
+ * Builder는 create의 입력만 받으므로 식별자·상태·순번·감사 시간을 직접 지정하지 않는다.
  * 스터디와 개설자는 외부 서비스의 ID로만 참조하며 외부 DB에 FK를 만들지 않는다.
  * 생성 권한·입력 검증·상태 전이·이벤트 발행은 이 저장 모델에서 수행하지 않는다.
  * <p>기준 문서:
@@ -53,6 +55,7 @@ public class Exam extends BaseTimeEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(nullable = false)
     private Long id;
 
     @Column(nullable = false)
@@ -82,6 +85,7 @@ public class Exam extends BaseTimeEntity {
     private LocalDateTime endsAt;
 
     // FIXED에서는 null이며, WINDOW에서 참가자별 제한 시간을 분 단위로 나타낸다.
+    @Column(nullable = true)
     private Integer durationMinutes;
 
     @Enumerated(EnumType.STRING)
@@ -104,6 +108,7 @@ public class Exam extends BaseTimeEntity {
     private BigDecimal totalScore;
 
     // 실제 종료 전에는 null이며 예정 종료 시간인 endsAt과 구분한다.
+    @Column(nullable = true)
     private LocalDateTime closedAt;
 
     // 잠정 결과 갱신·최초 확정·재확정의 순서 값이다. 현재 모델은 초기값 0만 설정한다.
@@ -111,9 +116,11 @@ public class Exam extends BaseTimeEntity {
     private Long resultRevision;
 
     // 최초 결과 확정 전에는 null이다.
+    @Column(nullable = true)
     private LocalDateTime finalizedAt;
 
     // 취소되지 않은 시험은 null이며 취소 상태에서도 시험 행은 보존한다.
+    @Column(nullable = true)
     private LocalDateTime canceledAt;
 
     // JPA UPDATE 경합을 검출하는 값이며 설정·결과의 업무 순번을 대신하지 않는다.
@@ -159,6 +166,7 @@ public class Exam extends BaseTimeEntity {
 
     /**
      * 저장 전 시험 객체를 만든다. DB 저장이나 외부 자원 조회는 수행하지 않는다.
+     * Builder의 build도 이 메서드를 호출하므로 생성 방식과 관계없이 같은 초기값을 사용한다.
      * 생성 권한·자원 상태·시간 범위·배점 검증은 호출하는 서비스에서 처리해야 한다.
      *
      * @param studyId 시험을 개설할 스터디의 외부 참조 ID
@@ -171,6 +179,7 @@ public class Exam extends BaseTimeEntity {
      * @param totalScore 문제별 배점 합계
      * @return SCHEDULED 상태, 설정 순번 1, 결과 순번 0인 미저장 시험 객체
      */
+    @Builder
     public static Exam create(
         Long studyId,
         Long creatorId,

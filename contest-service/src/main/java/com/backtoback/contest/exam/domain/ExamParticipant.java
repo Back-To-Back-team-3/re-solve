@@ -24,11 +24,13 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
  * 회원의 시험 참가와 개인 마감·결과 정보를 저장한다.
+ * Builder는 create의 입력만 받으며 참가 상태·순번·점수·생성 컬럼은 직접 지정하지 않는다.
  * <p>참가 객체를 생성한 뒤 소속 시험과 별도로 저장한다. 회원은 외부 ID로만 참조하며
  * 시험 관계에는 cascade 저장·삭제를 사용하지 않는다. 취소된 참가 행도 보존하고 재신청은 새 행으로 표현한다.
  * 참가 자격 검증과 상태 전이·이력·Outbox 기록은 후속 서비스 구현의 책임이며 이 클래스에는 구현하지 않는다.
@@ -58,6 +60,7 @@ public class ExamParticipant extends BaseTimeEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(nullable = false)
     private Long id;
 
     @ManyToOne(
@@ -91,6 +94,7 @@ public class ExamParticipant extends BaseTimeEntity {
         }
     )
     @Column(
+        nullable = true,
         insertable = false,
         updatable = false
     )
@@ -104,6 +108,7 @@ public class ExamParticipant extends BaseTimeEntity {
     private LocalDateTime registeredAt;
 
     // 최초 입장 전에는 null이다. 참가 등록만 한 회원과 실제 입장한 회원을 구분하는 기준이다.
+    @Column(nullable = true)
     private LocalDateTime enteredAt;
 
     // FIXED는 시험의 endsAt을 전달받는다. 이 모델이 개인 마감을 계산하거나 수동 종료에 맞춰 갱신하지는 않는다.
@@ -111,6 +116,7 @@ public class ExamParticipant extends BaseTimeEntity {
     private LocalDateTime personalEndsAt;
 
     // 참가 종료 시간이 기록되기 전에는 null이다.
+    @Column(nullable = true)
     private LocalDateTime finishedAt;
 
     @Column(
@@ -121,9 +127,11 @@ public class ExamParticipant extends BaseTimeEntity {
     private BigDecimal totalScore;
 
     // 유효 제출이 없으면 null이며, 결과 집계 시 동점 정렬에 사용하는 시간이다.
+    @Column(nullable = true)
     private LocalDateTime lastValidSubmittedAt;
 
     // 자동 제출 완료 전에는 null이다. 후속 서비스는 제출 생성·FINISHED 전이와 같은 트랜잭션에서 기록해야 한다.
+    @Column(nullable = true)
     private LocalDateTime autoSubmittedAt;
 
     // 순위 포함 여부다. 신규 참가자는 제출이 없으므로 false로 시작한다.
@@ -134,6 +142,7 @@ public class ExamParticipant extends BaseTimeEntity {
     private boolean ranked;
 
     // 확정 순위가 없으면 null이다. 미제출자의 순위를 임의로 생성하지 않는다.
+    @Column(nullable = true)
     private Integer finalRank;
 
     // 참가자 결과 UPDATE의 경합을 검출한다. 참가 상태의 업무 순번을 대신하지 않는다.
@@ -162,6 +171,7 @@ public class ExamParticipant extends BaseTimeEntity {
 
     /**
      * 신규 참가의 미저장 객체를 만든다. 회원 조회나 DB 저장은 수행하지 않는다.
+     * Builder의 build도 이 메서드를 호출하므로 등록 상태와 초기 점수는 항상 같은 규칙으로 설정된다.
      * 참가 자격·등록 가능 상태·중복 여부와 개인 마감 계산은 호출하는 서비스에서 처리한다.
      * 취소되지 않은 중복 참가는 저장 시 DB 유일 제약으로도 차단된다.
      *
@@ -171,6 +181,7 @@ public class ExamParticipant extends BaseTimeEntity {
      * @param personalEndsAt 서비스에서 결정한 Asia/Seoul 기준 개인 마감 시간
      * @return REGISTERED 상태, 참가 순번 1, 점수 0인 미저장 참가 객체
      */
+    @Builder
     public static ExamParticipant create(
         Exam exam,
         Long memberId,

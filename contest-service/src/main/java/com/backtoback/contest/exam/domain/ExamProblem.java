@@ -17,11 +17,13 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
  * 시험에 편입한 문제의 고정 회차와 표시 정보를 저장한다.
+ * Builder는 create의 입력만 받으며 DB 식별자와 감사 시간은 저장 과정에서 설정된다.
  * <p>편입 시 전달받은 회차 ID·제목·표시용 회차 번호를 보존하므로
  * 원본 문제의 이후 수정과 별개로 시험에서 사용할 회차를 식별할 수 있다.
  * 문제 서비스 자원은 ID로만 참조하며, 소속 시험만 내부 FK와 지연 로딩 관계로 연결한다.
@@ -52,6 +54,7 @@ public class ExamProblem extends BaseTimeEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(nullable = false)
     private Long id;
 
     @ManyToOne(
@@ -124,6 +127,7 @@ public class ExamProblem extends BaseTimeEntity {
 
     /**
      * 편입할 문제의 미저장 스냅샷을 만든다.
+     * Builder의 build도 이 메서드를 호출하며 입력 이름으로 회차·배점·표시 순서를 구분할 수 있다.
      * 공개 상태·회차 유효성·배점·표시 순서 검증은 호출하는 서비스가 수행한다.
      * 같은 시험의 중복 문제는 저장 시 DB 유일 제약으로도 차단된다.
      *
@@ -136,6 +140,7 @@ public class ExamProblem extends BaseTimeEntity {
      * @param displayOrder 1부터 연속하도록 호출자가 결정한 표시 순서
      * @return 전달한 고정 회차·표시 정보·배점을 가진 미저장 시험 문제 객체
      */
+    @Builder
     public static ExamProblem create(
         Exam exam,
         Long problemId,
