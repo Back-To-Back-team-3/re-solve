@@ -21,6 +21,7 @@ import com.backtoback.contest.exam.domain.ExamStatus;
 import com.backtoback.contest.exam.dto.request.CreateExamRequest;
 import com.backtoback.contest.exam.dto.response.ExamResponses;
 import com.backtoback.contest.exam.service.ExamService;
+import com.backtoback.contest.global.error.BusinessException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -50,7 +51,7 @@ public class StubExamService implements ExamService {
      * @param memberId 요청자, 실제 권한 판정에는 사용하지 않음
      * @param request 검증한 생성 입력
      * @return 요청과 배점·고정 회차가 연결된 생성 예시
-     * @throws com.backtoback.contest.global.error.BusinessException 선택한 오류 시나리오
+     * @throws BusinessException 선택한 오류 시나리오
      */
     @Override
     public ExamResponses.Created create(String studyId, String memberId, CreateExamRequest request) {
@@ -97,6 +98,7 @@ public class StubExamService implements ExamService {
      * @param size 요청 크기
      * @param sort 단일 예시이므로 정렬 결과에 영향 없음
      * @return 목록 필터와 페이지 계약 예시
+     * @throws BusinessException 선택한 오류 시나리오
      */
     @Override
     public ExamResponses.Page list(
@@ -132,6 +134,7 @@ public class StubExamService implements ExamService {
      * @param examId 응답에 사용할 시험 ID
      * @param memberId 요청자
      * @return 미등록 상태와 서버 시각을 포함한 상세 예시
+     * @throws BusinessException 선택한 오류 시나리오
      */
     @Override
     public ExamResponses.Detail getDetail(String examId, String memberId) {
@@ -161,6 +164,7 @@ public class StubExamService implements ExamService {
      * @param examId 시험 ID
      * @param memberId 요청자
      * @return 신규 여부와 등록 응답 예시
+     * @throws BusinessException 선택한 오류 시나리오
      */
     @Override
     public Registration register(String examId, String memberId) {
@@ -185,6 +189,7 @@ public class StubExamService implements ExamService {
      * @param examId 시험 ID
      * @param memberId 요청자
      * @return STARTED 상태와 개인 마감 예시
+     * @throws BusinessException 선택한 오류 시나리오
      */
     @Override
     public ExamResponses.Started start(String examId, String memberId) {
@@ -206,6 +211,7 @@ public class StubExamService implements ExamService {
      * @param examId 호출 문맥
      * @param memberId 요청자, 실제 참가·입장 판정은 후속 구현
      * @return 공개 문제 세 건과 서버 시각
+     * @throws BusinessException 선택한 오류 시나리오
      */
     @Override
     public ExamResponses.Problems getProblems(String examId, String memberId) {

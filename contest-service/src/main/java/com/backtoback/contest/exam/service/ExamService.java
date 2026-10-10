@@ -3,6 +3,7 @@ package com.backtoback.contest.exam.service;
 import com.backtoback.contest.exam.domain.ExamStatus;
 import com.backtoback.contest.exam.dto.request.CreateExamRequest;
 import com.backtoback.contest.exam.dto.response.ExamResponses;
+import com.backtoback.contest.global.error.BusinessException;
 
 /**
  * 여섯 외부 API를 연결하는 애플리케이션 서비스 계약이다.
@@ -18,6 +19,7 @@ public interface ExamService {
      * @param memberId Gateway가 전달한 요청자
      * @param request 검증한 생성 입력
      * @return 생성 시험과 고정 회차
+     * @throws BusinessException 개발 대역에서 명세 오류 시나리오가 선택된 경우
      */
     ExamResponses.Created create(String studyId, String memberId, CreateExamRequest request);
 
@@ -31,6 +33,7 @@ public interface ExamService {
      * @param size 최대 100의 페이지 크기
      * @param sort startsAt·createdAt 및 asc·desc 정렬
      * @return 문제 정보를 노출하지 않는 목록
+     * @throws BusinessException 개발 대역에서 명세 오류 시나리오가 선택된 경우
      */
     ExamResponses.Page list(String studyId, String memberId, ExamStatus status, int page, int size, String sort);
 
@@ -40,6 +43,7 @@ public interface ExamService {
      * @param examId 시험 ID
      * @param memberId 요청자
      * @return 시험 설정과 본인 참가 정보
+     * @throws BusinessException 개발 대역에서 명세 오류 시나리오가 선택된 경우
      */
     ExamResponses.Detail getDetail(String examId, String memberId);
 
@@ -49,6 +53,7 @@ public interface ExamService {
      * @param examId 시험 ID
      * @param memberId 인증 정보의 요청자
      * @return 신규 여부와 참가 데이터, HTTP 201·200 판단에 사용
+     * @throws BusinessException 개발 대역에서 명세 오류 시나리오가 선택된 경우
      */
     Registration register(String examId, String memberId);
 
@@ -58,6 +63,7 @@ public interface ExamService {
      * @param examId 시험 ID
      * @param memberId 활성 등록 본인
      * @return 최초 입장 시각과 개인 마감
+     * @throws BusinessException 개발 대역에서 명세 오류 시나리오가 선택된 경우
      */
     ExamResponses.Started start(String examId, String memberId);
 
@@ -68,6 +74,7 @@ public interface ExamService {
      * @param examId 시험 ID
      * @param memberId 입장한 본인
      * @return 화면 본문과 공개 실행 예제
+     * @throws BusinessException 개발 대역에서 명세 오류 시나리오가 선택된 경우
      */
     ExamResponses.Problems getProblems(String examId, String memberId);
 
