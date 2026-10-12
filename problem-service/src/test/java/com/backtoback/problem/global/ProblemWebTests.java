@@ -206,22 +206,25 @@ class ProblemWebTests {
     }
 
     @Test
-    void explicitServerErrorPreservesStatusWithoutExposingReason() throws Exception {
+    void explicitServerErrorPreservesStatusAndLogsReason(CapturedOutput output) throws Exception {
         mvc
             .perform(get("/api/v1/test/unavailable").header("X-User-Id", "12").header("X-User-Role", "USER"))
             .andExpect(status().isServiceUnavailable())
             .andExpect(jsonPath("$.error.code").value("COMMON_INTERNAL_SERVER_ERROR"))
             .andExpect(jsonPath("$.error.message").value("서버 오류가 발생했습니다."));
+        assertThat(output.getAll())
+            .contains("ResponseStatusException", "secret-exception-body", "TestController.unavailable");
     }
 
     @Test
-    void unexpectedErrorDoesNotExposeExceptionMessage(CapturedOutput output) throws Exception {
+    void unexpectedErrorLogsExceptionWithoutExposingItInResponse(CapturedOutput output) throws Exception {
         mvc
             .perform(get("/api/v1/test/failure").header("X-User-Id", "12").header("X-User-Role", "USER"))
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.error.code").value("COMMON_INTERNAL_SERVER_ERROR"))
             .andExpect(jsonPath("$.error.message").value("서버 오류가 발생했습니다."));
-        assertThat(output.getAll()).doesNotContain("secret-exception-body");
+        assertThat(output.getAll())
+            .contains("IllegalStateException", "secret-exception-body", "TestController.failure");
     }
 
     @Test
