@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.ConversionNotSupportedException;
 import org.springframework.beans.TypeMismatchException;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.ErrorResponse;
@@ -18,6 +17,7 @@ import com.backtoback.problem.global.api.ApiErrorResponse;
 public class GlobalExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    // @Valid 요청 본문의 검증 실패: 400 응답에 필드별 오류를 포함한다.
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(MethodArgumentNotValidException exception) {
         var details
@@ -30,9 +30,10 @@ public class GlobalExceptionHandler {
         return ResponseEntity
             .status(exception.getStatusCode())
             .headers(exception.getHeaders())
-            .body(ApiErrorResponse.of("COMMON_INVALID_REQUEST", "입력값을 확인해 주세요.", details));
+            .body(ApiErrorResponse.of(ErrorCode.COMMON_INVALID_REQUEST, "입력값을 확인해 주세요.", details));
     }
 
+    // 숫자 자리에 문자 입력, 잘못된 JSON 등 요청값을 읽거나 변환할 수 없는 경우 400으로 응답한다.
     @ExceptionHandler(
         {
             TypeMismatchException.class,
@@ -41,33 +42,34 @@ public class GlobalExceptionHandler {
     )
     public ResponseEntity<ApiErrorResponse> handleInvalidRequest(Exception exception) {
         return ResponseEntity
-            .status(HttpStatus.BAD_REQUEST)
-            .body(ApiErrorResponse.of("COMMON_INVALID_REQUEST", "요청을 확인해 주세요."));
+            .status(ErrorCode.COMMON_INVALID_REQUEST.getStatus())
+            .body(ApiErrorResponse.of(ErrorCode.COMMON_INVALID_REQUEST));
     }
 
+    // 필요한 타입 변환기가 없는 서버 설정 문제: 일반 입력 타입 오류(400)와 구분하여 500으로 응답한다.
     @ExceptionHandler(ConversionNotSupportedException.class)
     public ResponseEntity<ApiErrorResponse> handleConversionNotSupported(ConversionNotSupportedException exception) {
         return ResponseEntity
-            .status(HttpStatus.INTERNAL_SERVER_ERROR)
-            .body(ApiErrorResponse.of("COMMON_INTERNAL_SERVER_ERROR", "서버 오류가 발생했습니다."));
+            .status(ErrorCode.COMMON_INTERNAL_SERVER_ERROR.getStatus())
+            .body(ApiErrorResponse.of(ErrorCode.COMMON_INTERNAL_SERVER_ERROR));
     }
 
+    // 나머지 예외: Spring이 지정한 상태 코드와 헤더가 있으면 유지하고, 그 외에는 500으로 응답한다.
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpectedException(Exception exception) {
         // Spring 표준 예외에 지정된 상태 코드와 Allow 등 응답 헤더를 유지한다.
         if (exception instanceof ErrorResponse error) {
             boolean serverError = error.getStatusCode().is5xxServerError();
-            String code = serverError ? "COMMON_INTERNAL_SERVER_ERROR" : "COMMON_INVALID_REQUEST";
-            String message = serverError ? "서버 오류가 발생했습니다." : "요청을 확인해 주세요.";
+            ErrorCode code = serverError ? ErrorCode.COMMON_INTERNAL_SERVER_ERROR : ErrorCode.COMMON_INVALID_REQUEST;
             return ResponseEntity
                 .status(error.getStatusCode())
                 .headers(error.getHeaders())
-                .body(ApiErrorResponse.of(code, message));
+                .body(ApiErrorResponse.of(code));
         }
         // 예외 메시지와 스택에는 SQL·요청 본문이 포함될 수 있으므로 종류만 기록한다.
         LOG.error("Request failed: exceptionType={}", exception.getClass().getSimpleName());
         return ResponseEntity
-            .status(HttpStatus.INTERNAL_SERVER_ERROR)
-            .body(ApiErrorResponse.of("COMMON_INTERNAL_SERVER_ERROR", "서버 오류가 발생했습니다."));
+            .status(ErrorCode.COMMON_INTERNAL_SERVER_ERROR.getStatus())
+            .body(ApiErrorResponse.of(ErrorCode.COMMON_INTERNAL_SERVER_ERROR));
     }
 }
