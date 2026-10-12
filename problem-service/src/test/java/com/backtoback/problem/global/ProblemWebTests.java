@@ -30,8 +30,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.backtoback.problem.global.api.ApiResponse;
 import com.backtoback.problem.global.exception.GlobalExceptionHandler;
 import com.backtoback.problem.global.logging.CorrelationIdFilter;
-import com.backtoback.problem.global.security.GatewayUser;
 import com.backtoback.problem.global.security.SecurityConfiguration;
+import com.backtoback.problem.global.security.user.GatewayUser;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
