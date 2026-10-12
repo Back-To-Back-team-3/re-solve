@@ -3,6 +3,7 @@ package com.backtoback.problem.global;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -18,6 +19,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -25,7 +27,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.backtoback.problem.global.api.ApiResponse;
 import com.backtoback.problem.global.exception.GlobalExceptionHandler;
@@ -143,6 +147,74 @@ class ProblemWebTests {
     }
 
     @Test
+    void missingOrInvalidQueryParameterRemainsBadRequest() throws Exception {
+        mvc
+            .perform(get("/api/v1/test/number").header("X-User-Id", "12").header("X-User-Role", "USER"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+        mvc
+            .perform(
+                get("/api/v1/test/number").param("value", "abc").header("X-User-Id", "12").header("X-User-Role", "USER")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
+
+    @Test
+    void unsupportedMethodPreservesStatusAndAllowHeader() throws Exception {
+        mvc
+            .perform(put("/api/v1/test").header("X-User-Id", "12").header("X-User-Role", "USER"))
+            .andExpect(status().isMethodNotAllowed())
+            .andExpect(header().string("Allow", org.hamcrest.Matchers.containsString("GET")))
+            .andExpect(header().string("Allow", org.hamcrest.Matchers.containsString("POST")))
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
+
+    @Test
+    void unsupportedContentTypeRemainsUnsupportedMediaType() throws Exception {
+        mvc
+            .perform(
+                post("/api/v1/test")
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .content("invalid-input")
+            )
+            .andExpect(status().isUnsupportedMediaType())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
+
+    @Test
+    void unsupportedAcceptHeaderRemainsNotAcceptable() throws Exception {
+        mvc
+            .perform(
+                get("/api/v1/test/image")
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "USER")
+                    .accept(MediaType.APPLICATION_JSON)
+            )
+            .andExpect(status().isNotAcceptable())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
+
+    @Test
+    void missingResourceRemainsNotFound() throws Exception {
+        mvc
+            .perform(get("/api/v1/test/missing").header("X-User-Id", "12").header("X-User-Role", "USER"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
+
+    @Test
+    void explicitServerErrorPreservesStatusWithoutExposingReason() throws Exception {
+        mvc
+            .perform(get("/api/v1/test/unavailable").header("X-User-Id", "12").header("X-User-Role", "USER"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INTERNAL_SERVER_ERROR"))
+            .andExpect(jsonPath("$.error.message").value("서버 오류가 발생했습니다."));
+    }
+
+    @Test
     void unexpectedErrorDoesNotExposeExceptionMessage(CapturedOutput output) throws Exception {
         mvc
             .perform(get("/api/v1/test/failure").header("X-User-Id", "12").header("X-User-Role", "USER"))
@@ -198,6 +270,16 @@ class ProblemWebTests {
         @GetMapping("/api/v1/test/failure")
         void failure() {
             throw new IllegalStateException("secret-exception-body");
+        }
+
+        @GetMapping("/api/v1/test/number")
+        int number(@RequestParam int value) {
+            return value;
+        }
+
+        @GetMapping("/api/v1/test/unavailable")
+        void unavailable() {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "secret-exception-body");
         }
 
         @GetMapping("/api/v1/test/empty")
