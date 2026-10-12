@@ -138,6 +138,9 @@ services:
       <<: *db-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/problem_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
     depends_on:
       mysql:
         condition: service_healthy
