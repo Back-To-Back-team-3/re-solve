@@ -143,12 +143,14 @@ services:
       <<: *backend-build
       context: ./problem-service
     environment:
-      <<: *db-environment
+      <<: *db-redis-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/problem_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
     depends_on:
       mysql:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   judge-service:
