@@ -14,6 +14,12 @@ public enum ErrorCode {
     private final HttpStatus status;
     private final String message;
 
+    /**
+     * 오류 코드의 HTTP 상태와 사용자 안내 메시지를 설정한다.
+     *
+     * @param status 응답 HTTP 상태
+     * @param message 사용자에게 전달할 오류 메시지
+     */
     ErrorCode(HttpStatus status, String message) {
         this.status = status;
         this.message = message;

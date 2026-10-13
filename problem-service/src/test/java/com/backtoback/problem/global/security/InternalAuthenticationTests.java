@@ -30,6 +30,11 @@ class InternalAuthenticationTests {
             .withUserConfiguration(SecurityTestConfiguration.class)
             .withBean(ObjectMapper.class, () -> JsonMapper.builder().build());
 
+    /**
+     * 각 프로필에서 내부 API 허용과 외부 API 권한 검사를 함께 검증한다.
+     *
+     * @param profile 검증할 활성 프로필 또는 프로필 조합
+     */
     @ParameterizedTest
     @ValueSource(
         strings = {
@@ -79,6 +84,11 @@ class InternalAuthenticationTests {
     @TestComponent
     @RestController
     static class ProbeController {
+        /**
+         * 보안 경계 검증용 요청에 정상 응답을 반환한다.
+         *
+         * @return 테스트용 정상 응답 문자열
+         */
         @GetMapping(
             {
                 "/internal/v1/probe",
@@ -90,6 +100,11 @@ class InternalAuthenticationTests {
             return "ok";
         }
 
+        /**
+         * 보안 경계 검증용 요청에 정상 응답을 반환한다.
+         *
+         * @return 테스트용 정상 응답 문자열
+         */
         @PostMapping("/internal/v1/probe")
         String write() {
             return "ok";

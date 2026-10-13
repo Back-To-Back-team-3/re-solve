@@ -25,6 +25,16 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
     private static final Pattern VALID_ID = Pattern.compile("[A-Za-z0-9._:-]{1,128}");
     private static final Logger LOG = LoggerFactory.getLogger(CorrelationIdFilter.class);
 
+    /**
+     * 요청 추적 ID를 MDC와 응답 헤더에 설정하고 처리 후 기존 MDC를 복원한다.
+     * 유효하지 않은 요청 추적 ID는 새 UUID로 대체한다.
+     *
+     * @param request 현재 HTTP 요청
+     * @param response 현재 HTTP 응답
+     * @param chain 다음 필터와 요청 처리기로 이어지는 체인
+     * @throws ServletException 후속 요청 처리에서 서블릿 오류가 발생한 경우
+     * @throws IOException 후속 요청 처리 중 입출력 오류가 발생한 경우
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
         throws ServletException,

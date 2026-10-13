@@ -14,6 +14,11 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 class CorrelationIdTests {
+    /**
+     * 안전하지 않은 추적 ID를 교체하고 기존 MDC를 복원하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
     @Test
     void replacesUnsafeIncomingIdAndRestoresPreviousMdc() throws Exception {
         var request = new MockHttpServletRequest("GET", "/api/v1/problems");
@@ -31,6 +36,9 @@ class CorrelationIdTests {
         }
     }
 
+    /**
+     * 현재 추적 ID를 나가는 HTTP 요청에 전달하는지 검증한다.
+     */
     @Test
     void propagatesCurrentCorrelationIdToOutgoingHttpRequest() {
         var builder = RestClient.builder();

@@ -9,6 +9,11 @@ import org.springframework.context.annotation.Configuration;
 @Configuration(proxyBeanMethods = false)
 public class HttpClientConfiguration {
 
+    /**
+     * 현재 요청의 추적 ID를 외부 HTTP 호출 헤더로 전달하도록 설정한다.
+     *
+     * @return MDC의 추적 ID를 전달하는 RestClient 설정 함수
+     */
     @Bean
     RestClientCustomizer correlationIdCustomizer() {
         return builder -> builder.requestInterceptor((request, body, execution) -> {
