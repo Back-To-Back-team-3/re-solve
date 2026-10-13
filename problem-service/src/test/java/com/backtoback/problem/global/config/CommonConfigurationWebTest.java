@@ -54,7 +54,7 @@ import jakarta.validation.constraints.NotBlank;
 /**
  * 공통 웹 설정과 문제 전용 예외 처리기가 함께 적용된 HTTP 응답을 확인한다.
  */
-@WebMvcTest
+@WebMvcTest(controllers = CommonConfigurationWebTest.TestController.class)
 @Import(
     {
         CommonConfigurationWebTest.TestController.class,
