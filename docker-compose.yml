@@ -108,6 +108,14 @@ services:
       INTEGRATION_SERVICE_URL: ${INTEGRATION_SERVICE_URL:-http://integration-service:8080}
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8080}
       ANALYTICS_SERVICE_URL: ${ANALYTICS_SERVICE_URL:-http://analytics-service:8080}
+      SPRING_DATA_REDIS_HOST: ${REDIS_HOST:-redis}
+      SPRING_DATA_REDIS_PORT: ${REDIS_PORT:-6379}
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:-}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+    depends_on:
+      redis:
+        condition: service_healthy
 
   member-service:
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-member-service:${IMAGE_TAG:-local}
