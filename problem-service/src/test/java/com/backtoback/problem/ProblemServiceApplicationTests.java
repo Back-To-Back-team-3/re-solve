@@ -76,7 +76,7 @@ class ProblemServiceApplicationTests {
     @Test
     void applicationConnectsToProblemDatabaseAndAppliesMigrations() {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("problem_db");
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM setup_probe", Integer.class)).isZero();
     }
 
