@@ -1,11 +1,14 @@
 package com.backtoback.problem.global.exception;
 
+import org.hibernate.exception.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.ConversionNotSupportedException;
 import org.springframework.beans.TypeMismatchException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -16,6 +19,64 @@ import com.backtoback.problem.global.api.ApiErrorResponse;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    /**
+     * 도메인 예외에 정의된 상태와 오류 코드로 응답한다.
+     *
+     * @param exception 요청 처리 중 발생한 예외
+     * @return 도메인 오류 응답
+     */
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ApiErrorResponse> handleBusiness(BusinessException exception) {
+        ErrorCode code = exception.getErrorCode();
+        LOG.warn("Request rejected: code={}", code.name());
+        return ResponseEntity.status(code.getStatus()).body(ApiErrorResponse.of(code));
+    }
+
+    /**
+     * DB 제약 이름과 MySQL 오류 코드로 태그 중복·사용 중 오류를 구분한다.
+     * 알 수 없는 제약 위반은 서버 오류로 응답하고 실제 예외는 로그에만 남긴다.
+     *
+     * @param exception 요청 처리 중 발생한 DB 제약 위반
+     * @return 태그 오류 또는 공통 서버 오류 응답
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleDataIntegrity(DataIntegrityViolationException exception) {
+        ErrorCode code = ErrorCode.COMMON_INTERNAL_SERVER_ERROR;
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation && violation.getConstraintName() != null) {
+                // MySQL이 반환한 테이블 접두사를 제외하고 제약 이름을 비교한다.
+                String name = violation.getConstraintName();
+                name = name.substring(name.lastIndexOf('.') + 1);
+                if (violation.getErrorCode() == 1062 && "uk_tags_name".equals(name)) {
+                    code = ErrorCode.PROBLEM_TAG_DUPLICATED;
+                } else if (violation.getErrorCode() == 1451 && "fk_problem_revision_tags_tag".equals(name)) {
+                    code = ErrorCode.PROBLEM_TAG_IN_USE;
+                }
+                break;
+            }
+        }
+        if (code == ErrorCode.COMMON_INTERNAL_SERVER_ERROR) {
+            LOG.error("DB constraint violation", exception);
+        } else {
+            LOG.warn("DB constraint violation: code={}", code.name(), exception);
+        }
+        return ResponseEntity.status(code.getStatus()).body(ApiErrorResponse.of(code));
+    }
+
+    /**
+     * 낙관적 락 충돌을 재조회가 필요한 변경 충돌로 응답한다.
+     *
+     * @param exception 요청 처리 중 발생한 예외
+     * @return 409 변경 충돌 응답
+     */
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ApiErrorResponse> handleOptimisticLock(ObjectOptimisticLockingFailureException exception) {
+        LOG.warn("Concurrent update rejected: exceptionType={}", exception.getClass().getSimpleName());
+        return ResponseEntity
+            .status(ErrorCode.PROBLEM_VERSION_CONFLICT.getStatus())
+            .body(ApiErrorResponse.of(ErrorCode.PROBLEM_VERSION_CONFLICT));
+    }
 
     /**
      * 요청 본문의 검증 오류를 필드별 안내와 함께 응답한다.
