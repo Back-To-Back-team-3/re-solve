@@ -90,6 +90,16 @@ class JwtTokenValidatorTest {
             .hasMessageContaining("로그아웃된 인증 토큰");
     }
 
+    @Test
+    @DisplayName("jti(토큰 식별자)가 없는 토큰은 JwtException이 발생한다")
+    void throwsExceptionWhenJtiIsMissing() throws Exception {
+        String tokenWithoutJti = createToken("7", "USER", null, 3600);
+
+        assertThatThrownBy(() -> validator.validate(tokenWithoutJti).block())
+            .isInstanceOf(JwtException.class)
+            .hasMessageContaining("식별자(jti)");
+    }
+
     private String createToken(String sub, String role, String jti, long ttlSeconds) throws Exception {
         return createTokenWithSecret(sub, role, jti, ttlSeconds, TEST_SECRET);
     }
@@ -97,17 +107,19 @@ class JwtTokenValidatorTest {
     private String createTokenWithSecret(String sub, String role, String jti, long ttlSeconds, String secret)
         throws Exception {
         Instant now = Instant.now();
-        JWTClaimsSet claims
+        JWTClaimsSet.Builder builder
             = new JWTClaimsSet.Builder()
                 .issuer("re-solve")
                 .subject(sub)
-                .jwtID(jti)
                 .issueTime(Date.from(now))
                 .expirationTime(Date.from(now.plusSeconds(ttlSeconds)))
-                .claim("role", role)
-                .build();
+                .claim("role", role);
 
-        SignedJWT signedJwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+        if (jti != null) {
+            builder.jwtID(jti);
+        }
+
+        SignedJWT signedJwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), builder.build());
         signedJwt.sign(new MACSigner(secret.getBytes(StandardCharsets.UTF_8)));
         return signedJwt.serialize();
     }

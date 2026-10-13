@@ -65,7 +65,10 @@ public class JwtTokenValidator {
 
     private Mono<Void> checkBlocklist(Jwt jwt) {
         String jti = jwt.getId();
-        if (!StringUtils.hasText(jti) || redisTemplate == null) {
+        if (!StringUtils.hasText(jti)) {
+            return Mono.error(new JwtException("토큰에 식별자(jti)가 존재하지 않습니다."));
+        }
+        if (redisTemplate == null) {
             return Mono.empty();
         }
 

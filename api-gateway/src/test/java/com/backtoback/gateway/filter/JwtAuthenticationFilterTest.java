@@ -1,6 +1,7 @@
 package com.backtoback.gateway.filter;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 
@@ -147,5 +148,26 @@ class JwtAuthenticationFilterTest {
 
         assertThat(chainCalled.get()).isFalse();
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("다운스트림 서비스의 오류는 401로 변환되지 않고 그대로 전파된다")
+    void propagatesDownstreamErrorWithoutConvertingTo401() {
+        given(tokenValidator.validate("valid-token")).willReturn(Mono.just(new UserPrincipal("7", "USER")));
+
+        MockServerHttpRequest request
+            = MockServerHttpRequest
+                .post("/api/v1/problems")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer valid-token")
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+        GatewayFilterChain chain = mutatedExchange -> Mono.error(new IllegalStateException("Downstream failure"));
+
+        assertThatThrownBy(() -> filter.filter(exchange, chain).block())
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("Downstream failure");
+
+        assertThat(exchange.getResponse().getStatusCode()).isNull();
     }
 }

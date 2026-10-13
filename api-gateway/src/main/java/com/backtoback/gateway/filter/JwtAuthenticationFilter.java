@@ -76,20 +76,23 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
         // 3. 토큰이 있는 경우 검증
         String token = authHeader.substring(BEARER_PREFIX.length()).trim();
-        return tokenValidator.validate(token).flatMap(principal -> {
-            ServerHttpRequest mutatedRequest
-                = exchange
-                    .getRequest()
-                    .mutate()
-                    .header(RemoveExternalHeadersFilter.USER_ID_HEADER, principal.memberId())
-                    .header(RemoveExternalHeadersFilter.USER_ROLE_HEADER, principal.role())
-                    .build();
-            return chain.filter(exchange.mutate().request(mutatedRequest).build());
-        })
+        return tokenValidator
+            .validate(token)
             .onErrorResume(
                 error -> ErrorResponseWriter
                     .write(exchange, HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "인증 정보가 유효하지 않습니다.")
-            );
+                    .then(Mono.empty())
+            )
+            .flatMap(principal -> {
+                ServerHttpRequest mutatedRequest
+                    = exchange
+                        .getRequest()
+                        .mutate()
+                        .header(RemoveExternalHeadersFilter.USER_ID_HEADER, principal.memberId())
+                        .header(RemoveExternalHeadersFilter.USER_ROLE_HEADER, principal.role())
+                        .build();
+                return chain.filter(exchange.mutate().request(mutatedRequest).build());
+            });
     }
 
     @Override
