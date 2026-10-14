@@ -1235,6 +1235,47 @@ class TagApiTest {
             .andExpect(status().isBadRequest());
     }
 
+    /**
+     * 비 ASCII 문자가 포함된 멱등키를 거부하고 태그와 요청 기록을 남기지 않는지 검증한다.
+     *
+     * @param key 비 ASCII 문자가 포함된 멱등키
+     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "key-¡",
+            "key-é",
+            "key-한글",
+            "key-😀"
+        }
+    )
+    void nonAsciiIdempotencyKeysAreRejected(String key) throws Exception {
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH)).header("Idempotency-Key", key).content("{\"name\":\"태그\",\"displayOrder\":0}")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isZero();
+    }
+
+    /**
+     * ASCII 멱등키의 길이 경계와 기호를 허용하고 동일 요청에 최초 결과를 반환하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void asciiIdempotencyKeysAcceptLengthBoundariesAndSymbols() throws Exception {
+        for (String key : List.of("a", "k".repeat(100), "ABC-123_./:~")) {
+            String id = create(key, key, 0);
+            assertThat(create(key, key, 0)).isEqualTo(id);
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(3);
+    }
+
     @ParameterizedTest
     @ValueSource(
         strings = {
