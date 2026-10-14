@@ -20,6 +20,7 @@ public class AuthProperties {
     private String jwtSecret;
     private boolean bypassEnabled;
 
+    @Autowired
     public AuthProperties(Environment environment) {
         this.environment = environment;
     }
