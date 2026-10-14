@@ -66,7 +66,7 @@ spring:
         - id: ai-service
           uri: ${AI_SERVICE_URL:http://ai-service:8080}
           predicates:
-            - Path=/api/v1/hints/**
+            - Path=/api/v1/hint-requests/**
 
         # analytics-service
         - id: analytics-service
