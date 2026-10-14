@@ -17,7 +17,12 @@ import com.backtoback.judge.global.api.ApiErrorResponse;
 public class GlobalExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    // @Valid 요청 본문의 검증 실패: 400 응답에 필드별 오류를 포함한다.
+    /**
+     * 요청 본문의 검증 오류를 필드별 안내와 함께 응답한다.
+     *
+     * @param exception 요청 처리 중 발생한 예외
+     * @return 입력값 검증 실패 응답
+     */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(MethodArgumentNotValidException exception) {
         // 검증 예외에는 입력값이 포함될 수 있으므로 예외 종류만 기록한다.
@@ -35,7 +40,12 @@ public class GlobalExceptionHandler {
             .body(ApiErrorResponse.of(ErrorCode.COMMON_INVALID_REQUEST, "입력값을 확인해 주세요.", details));
     }
 
-    // 숫자 자리에 문자 입력, 잘못된 JSON 등 요청값을 읽거나 변환할 수 없는 경우 400으로 응답한다.
+    /**
+     * 읽거나 변환할 수 없는 요청값을 잘못된 요청으로 응답한다.
+     *
+     * @param exception 요청 처리 중 발생한 예외
+     * @return 400 요청 오류 응답
+     */
     @ExceptionHandler(
         {
             TypeMismatchException.class,
@@ -50,7 +60,12 @@ public class GlobalExceptionHandler {
             .body(ApiErrorResponse.of(ErrorCode.COMMON_INVALID_REQUEST));
     }
 
-    // 필요한 타입 변환기가 없는 서버 설정 문제: 일반 입력 타입 오류(400)와 구분하여 500으로 응답한다.
+    /**
+     * 서버의 타입 변환 설정 오류를 기록하고 공통 서버 오류로 응답한다.
+     *
+     * @param exception 요청 처리 중 발생한 예외
+     * @return 500 서버 오류 응답
+     */
     @ExceptionHandler(ConversionNotSupportedException.class)
     public ResponseEntity<ApiErrorResponse> handleConversionNotSupported(ConversionNotSupportedException exception) {
         LOG.error("Request conversion failed", exception);
@@ -59,7 +74,13 @@ public class GlobalExceptionHandler {
             .body(ApiErrorResponse.of(ErrorCode.COMMON_INTERNAL_SERVER_ERROR));
     }
 
-    // 나머지 예외: Spring이 지정한 상태 코드와 헤더가 있으면 유지하고, 그 외에는 500으로 응답한다.
+    /**
+     * 처리되지 않은 예외를 공통 오류 응답으로 변환한다.
+     * Spring이 지정한 상태와 헤더는 유지하고, 서버 예외의 상세 내용은 로그에만 기록한다.
+     *
+     * @param exception 요청 처리 중 발생한 예외
+     * @return Spring 지정 상태 또는 500 상태의 오류 응답
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpectedException(Exception exception) {
         // Spring 표준 예외에 지정된 상태 코드와 Allow 등 응답 헤더를 유지한다.

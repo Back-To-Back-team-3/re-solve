@@ -8,6 +8,11 @@ import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoCon
 @SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
 public class JudgeServiceApplication {
 
+    /**
+     * 채점 서비스를 실행한다.
+     *
+     * @param args 애플리케이션 실행 인자
+     */
     public static void main(String[] args) {
         SpringApplication.run(JudgeServiceApplication.class, args);
     }

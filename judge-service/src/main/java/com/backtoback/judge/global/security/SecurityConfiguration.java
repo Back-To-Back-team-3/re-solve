@@ -13,6 +13,15 @@ import tools.jackson.databind.ObjectMapper;
 @Configuration(proxyBeanMethods = false)
 public class SecurityConfiguration {
 
+    /**
+     * Gateway 사용자 정보를 기준으로 외부 API 권한을 검사하는 필터 체인을 구성한다.
+     * 내부 API는 내부 인증 계약이 준비되기 전까지 인증 없이 허용한다.
+     *
+     * @param http Spring Security HTTP 보안 설정
+     * @param mapper 보안 오류 응답을 직렬화할 매퍼
+     * @return 상태를 저장하지 않는 보안 필터 체인
+     * @throws Exception 보안 필터 체인을 구성하지 못한 경우
+     */
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectMapper mapper) throws Exception {
         return http

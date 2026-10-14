@@ -67,6 +67,11 @@ class JudgeServiceApplicationTests {
     @Autowired
     private MockMvc mvc;
 
+    /**
+     * 테스트 컨테이너의 DB·Redis·SNS·SQS 연결 정보를 Spring 설정에 등록한다.
+     *
+     * @param registry 테스트 실행 시 사용할 동적 속성 등록기
+     */
     @DynamicPropertySource
     static void infrastructureProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
@@ -81,6 +86,9 @@ class JudgeServiceApplicationTests {
         registry.add("spring.cloud.aws.credentials.secret-key", LOCALSTACK::getSecretKey);
     }
 
+    /**
+     * Judge 전용 DB 연결과 Flyway 마이그레이션 적용 결과를 검증한다.
+     */
     @Test
     void applicationConnectsToJudgeDatabaseAndAppliesMigrations() {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("judge_db");
@@ -88,12 +96,18 @@ class JudgeServiceApplicationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM setup_probe", Integer.class)).isZero();
     }
 
+    /**
+     * 설정된 Redis 클라이언트로 값을 저장하고 조회할 수 있는지 검증한다.
+     */
     @Test
     void configuredRedisClientCanWriteAndRead() {
         redis.opsForValue().set("judge:setup:probe", "connected", Duration.ofMinutes(1));
         assertThat(redis.opsForValue().get("judge:setup:probe")).isEqualTo("connected");
     }
 
+    /**
+     * 설정된 SNS·SQS 클라이언트로 LocalStack에서 메시지를 발행하고 수신할 수 있는지 검증한다.
+     */
     @Test
     void configuredMessagingClientsCanPublishAndReceiveThroughLocalStack() {
         String topicArn = sns.createTopic(request -> request.name("judge-setup-topic")).topicArn();
@@ -136,6 +150,11 @@ class JudgeServiceApplicationTests {
         assertThat(messages).singleElement().satisfies(message -> assertThat(message.body()).isEqualTo("connected"));
     }
 
+    /**
+     * 인증 없이 헬스 체크를 조회할 수 있고 인프라 연결 상태가 정상인지 검증한다.
+     *
+     * @throws Exception 헬스 체크 요청 처리 중 오류가 발생한 경우
+     */
     @Test
     void healthIsAvailableWithoutAuthentication() throws Exception {
         mvc.perform(get("/actuator/health")).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("UP"));
