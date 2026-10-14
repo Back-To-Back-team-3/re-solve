@@ -20,6 +20,7 @@ import com.backtoback.problem.tag.service.TagService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 
@@ -33,14 +34,14 @@ public class AdminTagController {
      * API 명세서 2.5.2 태그 생성 — 멱등키를 확인하고 최초 생성 결과를 응답한다.
      *
      * @param user Gateway에서 인증된 관리자
-     * @param key 관리자별 중복 요청 식별 키
+     * @param key 1~100자의 ASCII 문자로 구성된 관리자별 중복 요청 식별 키
      * @param request 등록할 태그 이름과 표시 순서
      * @return 201 상태의 태그 생성 응답
      */
     @PostMapping("/api/v1/admin/problems/tags")
     public ResponseEntity<ApiResponse<TagResponse>> create(
         @AuthenticationPrincipal GatewayUser user,
-        @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 100) String key,
+        @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 100) @Pattern(regexp = "\\p{ASCII}+") String key,
         @Valid @RequestBody TagCreateRequest request
     ) {
         return ResponseEntity
