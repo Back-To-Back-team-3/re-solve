@@ -16,8 +16,10 @@ import com.backtoback.member.auth.token.SecureTokenGenerator;
 /**
  * Refresh Token을 Redis에 사용자별로 저장하고 재발급 때 교체한다(정책 및 상태 §1). 원문 대신 SHA-256 해시를 키로 쓴다.
  * <ul>
- * <li>{@code auth:refresh-token:{hash}}: 해시 {@code memberId}, {@code status}(ACTIVE·ROTATED), {@code rotatedAt}</li>
+ * <li>{@code auth:refresh-token:{hash}}: 해시 {@code memberId}, {@code status}(ACTIVE·ROTATED), {@code rotatedAt},
+ * {@code sid}</li>
  * <li>{@code auth:member-refresh-tokens:{memberId}}: 회원의 토큰 해시 목록. 재사용 감지 시 모두 폐기할 때 쓴다.</li>
+ * <li>{@code auth:refresh-session:{sid}}: 로그인 1회(세션)의 토큰 해시 목록. 로그아웃 시 교체 전·후 토큰을 함께 폐기한다.</li>
  * </ul>
  * 상태 확인과 변경은 Lua 스크립트로 한 번에 처리한다.
  */
@@ -26,7 +28,9 @@ public class RefreshTokenStore {
 
     static final String TOKEN_KEY_PREFIX = "auth:refresh-token:";
     static final String MEMBER_TOKENS_KEY_PREFIX = "auth:member-refresh-tokens:";
+    static final String SESSION_TOKENS_KEY_PREFIX = "auth:refresh-session:";
     private static final String RESULT_SEPARATOR = ":";
+    private static final String NONE = "";
 
     private static final RedisScript<Long> ISSUE_SCRIPT = script("redis/refresh-token-issue.lua", Long.class);
     private static final RedisScript<String> ROTATE_SCRIPT = script("redis/refresh-token-rotate.lua", String.class);
@@ -51,22 +55,32 @@ public class RefreshTokenStore {
         this.reuseGrace = authProperties.refreshToken().reuseGrace();
     }
 
-    public String issue(Long memberId) {
+    /**
+     * 로그인할 때 새 세션과 그 세션의 첫 Refresh Token을 만든다.
+     */
+    public IssuedRefreshToken issue(Long memberId) {
         String refreshToken = tokenGenerator.generate();
         String tokenHash = tokenGenerator.hash(refreshToken);
+        String sessionId = tokenGenerator.generate();
         redisTemplate
             .execute(
                 ISSUE_SCRIPT,
-                List.of(TOKEN_KEY_PREFIX + tokenHash, MEMBER_TOKENS_KEY_PREFIX + memberId),
+                List
+                    .of(
+                        TOKEN_KEY_PREFIX + tokenHash,
+                        MEMBER_TOKENS_KEY_PREFIX + memberId,
+                        SESSION_TOKENS_KEY_PREFIX + sessionId
+                    ),
                 String.valueOf(memberId),
                 String.valueOf(ttl.toMillis()),
-                tokenHash
+                tokenHash,
+                sessionId
             );
-        return refreshToken;
+        return new IssuedRefreshToken(refreshToken, sessionId);
     }
 
     /**
-     * 제출된 Refresh Token을 새 토큰으로 바꾼다.
+     * 제출된 Refresh Token을 같은 세션의 새 토큰으로 바꾼다.
      * 이미 교체된 토큰이면 유예 시간 안에서는 {@link RotationOutcome#GRACE}, 지난 뒤에는 회원의 토큰을 모두 폐기하고
      * {@link RotationOutcome#REUSED}를 돌려준다.
      */
@@ -83,30 +97,46 @@ public class RefreshTokenStore {
                     String.valueOf(ttl.toMillis()),
                     newTokenHash,
                     MEMBER_TOKENS_KEY_PREFIX,
-                    TOKEN_KEY_PREFIX
+                    TOKEN_KEY_PREFIX,
+                    SESSION_TOKENS_KEY_PREFIX
                 );
 
         if (result == null || !result.contains(RESULT_SEPARATOR)) {
-            return new RotationResult(RotationOutcome.INVALID, null, null);
+            return new RotationResult(RotationOutcome.INVALID, null, null, null);
         }
-        String[] parts = result.split(RESULT_SEPARATOR, 2);
+        String[] parts = result.split(RESULT_SEPARATOR, 3);
         RotationOutcome outcome = RotationOutcome.valueOf(parts[0]);
         Long memberId = Long.valueOf(parts[1]);
-        return new RotationResult(outcome, memberId, outcome == RotationOutcome.ROTATED ? newRefreshToken : null);
+        String sessionId = parts.length > 2 && !parts[2].isEmpty() ? parts[2] : null;
+        return new RotationResult(
+            outcome,
+            memberId,
+            sessionId,
+            outcome == RotationOutcome.ROTATED ? newRefreshToken : null
+        );
     }
 
     /**
-     * 로그아웃할 때 본인 Refresh Token 하나를 폐기한다. 없거나 다른 회원의 토큰이면 아무것도 하지 않는다.
+     * 로그아웃할 때 세션의 Refresh Token을 모두 폐기한다. Access Token의 세션 ID와 쿠키로 받은 토큰의 세션을 함께 폐기하며,
+     * 다른 회원의 토큰은 건드리지 않는다.
+     *
+     * @param sessionId Access Token의 {@code sid}. 없으면 {@code null}
+     * @param refreshToken Refresh Token 쿠키 값. 없으면 {@code null}
+     * @return 폐기한 토큰 수
      */
-    public void revoke(Long memberId, String refreshToken) {
-        String tokenHash = tokenGenerator.hash(refreshToken);
-        redisTemplate
-            .execute(
-                REVOKE_SCRIPT,
-                List.of(TOKEN_KEY_PREFIX + tokenHash, MEMBER_TOKENS_KEY_PREFIX + memberId),
-                String.valueOf(memberId),
-                tokenHash
-            );
+    public long revokeSession(Long memberId, String sessionId, String refreshToken) {
+        String presentedTokenHash = tokenGenerator.hash(refreshToken == null ? NONE : refreshToken);
+        Long revoked
+            = redisTemplate
+                .execute(
+                    REVOKE_SCRIPT,
+                    List.of(TOKEN_KEY_PREFIX + presentedTokenHash, MEMBER_TOKENS_KEY_PREFIX + memberId),
+                    String.valueOf(memberId),
+                    sessionId == null ? NONE : sessionId,
+                    SESSION_TOKENS_KEY_PREFIX,
+                    TOKEN_KEY_PREFIX
+                );
+        return revoked == null ? 0 : revoked;
     }
 
     public Duration ttl() {
@@ -118,6 +148,12 @@ public class RefreshTokenStore {
         script.setLocation(new ClassPathResource(path));
         script.setResultType(resultType);
         return script;
+    }
+
+    /**
+     * @param sessionId 로그인 1회를 나타내는 세션 ID. Access Token의 {@code sid} 클레임에 넣는다.
+     */
+    public record IssuedRefreshToken(String refreshToken, String sessionId) {
     }
 
     public enum RotationOutcome {
@@ -140,8 +176,9 @@ public class RefreshTokenStore {
     }
 
     /**
+     * @param sessionId 토큰이 속한 세션 ID
      * @param newRefreshToken {@link RotationOutcome#ROTATED}일 때만 값이 있다
      */
-    public record RotationResult(RotationOutcome outcome, Long memberId, String newRefreshToken) {
+    public record RotationResult(RotationOutcome outcome, Long memberId, String sessionId, String newRefreshToken) {
     }
 }

@@ -21,7 +21,7 @@ import com.backtoback.member.member.domain.Member;
 class AccessTokenProviderTest {
 
     @Test
-    @DisplayName("회원 ID를 sub, 권한을 role 클레임에 담고 1시간 뒤 만료되는 HS256 토큰을 발급한다")
+    @DisplayName("회원 ID를 sub, 권한을 role, 로그인 세션을 sid 클레임에 담고 1시간 뒤 만료되는 HS256 토큰을 발급한다")
     void issuesSignedAccessToken() {
         Instant issuedAt = Instant.now();
         Clock clock = Clock.fixed(issuedAt, ZoneOffset.UTC);
@@ -29,7 +29,7 @@ class AccessTokenProviderTest {
         Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
         ReflectionTestUtils.setField(member, "id", 7L);
 
-        String token = provider.issue(member);
+        String token = provider.issue(member, "sid-1");
 
         SecretKeySpec key
             = new SecretKeySpec(AuthPropertiesFixture.JWT_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
@@ -37,6 +37,7 @@ class AccessTokenProviderTest {
         assertThat(jwt.getSubject()).isEqualTo("7");
         assertThat(jwt.getClaimAsString(AccessTokenProvider.ROLE_CLAIM)).isEqualTo("USER");
         assertThat(jwt.getId()).isNotBlank();
+        assertThat(jwt.getClaimAsString(AccessTokenProvider.SESSION_CLAIM)).isEqualTo("sid-1");
         assertThat(jwt.getExpiresAt()).isEqualTo(jwt.getIssuedAt().plusSeconds(3600));
         assertThat(provider.expiresInSeconds()).isEqualTo(3600L);
     }

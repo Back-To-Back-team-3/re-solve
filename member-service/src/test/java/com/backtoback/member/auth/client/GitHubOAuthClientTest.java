@@ -107,6 +107,37 @@ class GitHubOAuthClientTest {
     }
 
     @Test
+    @DisplayName("이메일 조회가 실패해도 이메일 없이 가입·로그인을 계속한다")
+    void continuesWithoutEmailWhenEmailLookupFails() {
+        server
+            .expect(requestTo(TOKEN_URI))
+            .andRespond(withSuccess("{\"access_token\":\"gho_x\"}", MediaType.APPLICATION_JSON));
+        server
+            .expect(requestTo("https://api.github.com/user"))
+            .andRespond(withSuccess("{\"id\":1001,\"login\":\"kim-dev\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.github.com/user/emails")).andRespond(withServerError());
+
+        GitHubUser user = client.fetchUser("auth-code");
+
+        assertThat(user).isEqualTo(new GitHubUser(1001L, "kim-dev", null, null));
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("사용자 정보 조회가 실패하면 AUTH_OAUTH_FAILED")
+    void failsWhenUserLookupFails() {
+        server
+            .expect(requestTo(TOKEN_URI))
+            .andRespond(withSuccess("{\"access_token\":\"gho_x\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.github.com/user")).andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.fetchUser("auth-code"))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(ErrorCode.AUTH_OAUTH_FAILED);
+    }
+
+    @Test
     @DisplayName("GitHub이 200과 함께 error를 돌려주면 AUTH_OAUTH_FAILED")
     void failsWhenCodeIsRejected() {
         server

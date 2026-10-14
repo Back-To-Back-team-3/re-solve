@@ -33,6 +33,7 @@ import com.backtoback.member.auth.store.LoginCodeStore.LoginCodeClaim;
 import com.backtoback.member.auth.store.OAuthStateStore;
 import com.backtoback.member.auth.store.OAuthStateStore.OAuthState;
 import com.backtoback.member.auth.store.RefreshTokenStore;
+import com.backtoback.member.auth.store.RefreshTokenStore.IssuedRefreshToken;
 import com.backtoback.member.auth.store.RefreshTokenStore.RotationOutcome;
 import com.backtoback.member.auth.store.RefreshTokenStore.RotationResult;
 import com.backtoback.member.auth.token.AccessTokenProvider;
@@ -92,9 +93,9 @@ class AuthServiceTest {
     void refreshRotatesToken() {
         Member member = memberWithId(7L);
         given(refreshTokenStore.rotate("old-refresh"))
-            .willReturn(new RotationResult(RotationOutcome.ROTATED, 7L, "new-refresh"));
+            .willReturn(new RotationResult(RotationOutcome.ROTATED, 7L, "sid-1", "new-refresh"));
         given(memberService.findMember(7L)).willReturn(Optional.of(member));
-        given(accessTokenProvider.issue(member)).willReturn("new-access");
+        given(accessTokenProvider.issue(member, "sid-1")).willReturn("new-access");
         given(accessTokenProvider.expiresInSeconds()).willReturn(3600L);
 
         TokenRefreshResult result = authService.refresh("old-refresh");
@@ -109,9 +110,10 @@ class AuthServiceTest {
     @DisplayName("재발급: 유예 시간 안의 중복 요청은 Access Token만 주고 Refresh Token은 바꾸지 않는다")
     void refreshWithinGraceIssuesAccessTokenOnly() {
         Member member = memberWithId(7L);
-        given(refreshTokenStore.rotate("just-rotated")).willReturn(new RotationResult(RotationOutcome.GRACE, 7L, null));
+        given(refreshTokenStore.rotate("just-rotated"))
+            .willReturn(new RotationResult(RotationOutcome.GRACE, 7L, "sid-1", null));
         given(memberService.findMember(7L)).willReturn(Optional.of(member));
-        given(accessTokenProvider.issue(member)).willReturn("new-access");
+        given(accessTokenProvider.issue(member, "sid-1")).willReturn("new-access");
 
         TokenRefreshResult result = authService.refresh("just-rotated");
 
@@ -132,7 +134,8 @@ class AuthServiceTest {
     @Test
     @DisplayName("재발급: 없거나 만료된 토큰은 AUTH_REFRESH_TOKEN_INVALID")
     void refreshWithUnknownTokenFails() {
-        given(refreshTokenStore.rotate("unknown")).willReturn(new RotationResult(RotationOutcome.INVALID, null, null));
+        given(refreshTokenStore.rotate("unknown"))
+            .willReturn(new RotationResult(RotationOutcome.INVALID, null, null, null));
 
         assertThatThrownBy(() -> authService.refresh("unknown"))
             .isInstanceOf(BusinessException.class)
@@ -144,7 +147,8 @@ class AuthServiceTest {
     @Test
     @DisplayName("재발급: 유예가 지난 교체 토큰을 다시 쓰면 AUTH_REFRESH_TOKEN_REUSED")
     void refreshWithReusedTokenFails() {
-        given(refreshTokenStore.rotate("stolen")).willReturn(new RotationResult(RotationOutcome.REUSED, 7L, null));
+        given(refreshTokenStore.rotate("stolen"))
+            .willReturn(new RotationResult(RotationOutcome.REUSED, 7L, "sid-1", null));
 
         assertThatThrownBy(() -> authService.refresh("stolen"))
             .isInstanceOf(BusinessException.class)
@@ -159,36 +163,39 @@ class AuthServiceTest {
         Member withdrawn = memberWithId(7L);
         ReflectionTestUtils.setField(withdrawn, "status", MemberStatus.WITHDRAWN);
         given(refreshTokenStore.rotate("old-refresh"))
-            .willReturn(new RotationResult(RotationOutcome.ROTATED, 7L, "new-refresh"));
+            .willReturn(new RotationResult(RotationOutcome.ROTATED, 7L, "sid-1", "new-refresh"));
         given(memberService.findMember(7L)).willReturn(Optional.of(withdrawn));
 
         assertThatThrownBy(() -> authService.refresh("old-refresh"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
             .isEqualTo(ErrorCode.AUTH_REFRESH_TOKEN_INVALID);
-        verify(refreshTokenStore).revoke(7L, "new-refresh");
+        verify(refreshTokenStore).revokeSession(7L, "sid-1", "new-refresh");
     }
 
     @Test
-    @DisplayName("로그아웃: Access Token을 남은 수명만큼 차단하고 Refresh Token을 폐기한다")
-    void logoutBlocksAccessTokenAndRevokesRefreshToken() {
+    @DisplayName("로그아웃: Access Token과 같은 세션의 Access Token을 차단하고 세션의 Refresh Token을 모두 폐기한다")
+    void logoutRevokesWholeSession() {
         given(accessTokenProvider.decode("access")).willReturn(Optional.of(accessJwt("7", NOW.plusSeconds(1200))));
+        given(accessTokenProvider.accessTokenTtl()).willReturn(Duration.ofHours(1));
 
         authService.logout(7L, "Bearer access", "refresh");
 
         verify(accessTokenBlocklist).block("jti-1", Duration.ofSeconds(1200));
-        verify(refreshTokenStore).revoke(7L, "refresh");
+        verify(accessTokenBlocklist).blockSession("sid-1", Duration.ofHours(1));
+        verify(refreshTokenStore).revokeSession(7L, "sid-1", "refresh");
     }
 
     @Test
-    @DisplayName("로그아웃: Refresh Token 쿠키가 없어도 Access Token은 차단한다")
+    @DisplayName("로그아웃: Refresh Token 쿠키가 없어도 Access Token의 세션 ID로 세션을 폐기한다")
     void logoutWithoutRefreshCookie() {
         given(accessTokenProvider.decode("access")).willReturn(Optional.of(accessJwt("7", NOW.plusSeconds(60))));
+        given(accessTokenProvider.accessTokenTtl()).willReturn(Duration.ofHours(1));
 
         authService.logout(7L, "Bearer access", null);
 
         verify(accessTokenBlocklist).block("jti-1", Duration.ofSeconds(60));
-        verifyNoInteractions(refreshTokenStore);
+        verify(refreshTokenStore).revokeSession(7L, "sid-1", null);
     }
 
     @Test
@@ -213,6 +220,7 @@ class AuthServiceTest {
             .header("alg", "HS256")
             .subject(subject)
             .jti("jti-1")
+            .claim(AccessTokenProvider.SESSION_CLAIM, "sid-1")
             .issuedAt(NOW.minusSeconds(60))
             .expiresAt(expiresAt)
             .build();
@@ -383,9 +391,9 @@ class AuthServiceTest {
         given(loginCodeStore.consume("lc_abc")).willReturn(Optional.of(new LoginCodeClaim(7L, true, "hash-1")));
         given(tokenGenerator.hash("nonce-1")).willReturn("hash-1");
         given(memberService.getMember(7L)).willReturn(member);
-        given(accessTokenProvider.issue(member)).willReturn("access-token");
+        given(accessTokenProvider.issue(member, "sid-1")).willReturn("access-token");
         given(accessTokenProvider.expiresInSeconds()).willReturn(3600L);
-        given(refreshTokenStore.issue(7L)).willReturn("refresh-token");
+        given(refreshTokenStore.issue(7L)).willReturn(new IssuedRefreshToken("refresh-token", "sid-1"));
 
         LoginResult result = authService.exchangeLoginCode("lc_abc", "nonce-1");
 

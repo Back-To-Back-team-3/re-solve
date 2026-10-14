@@ -28,12 +28,13 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 /**
  * Access Token(JWT, HS256)을 발급한다. 요청 인증은 같은 서명 키를 가진 API Gateway가 검증한다.
- * {@code jti}는 로그아웃 시 남은 수명 동안 차단 목록에 올릴 때 쓴다.
+ * {@code jti}와 {@code sid}(로그인 세션 ID)는 로그아웃 시 차단 목록에 올릴 때 쓴다.
  */
 @Component
 public class AccessTokenProvider {
 
     public static final String ROLE_CLAIM = "role";
+    public static final String SESSION_CLAIM = "sid";
     static final String ISSUER = "re-solve";
 
     private final JwtEncoder jwtEncoder;
@@ -50,7 +51,10 @@ public class AccessTokenProvider {
         this.clock = clock;
     }
 
-    public String issue(Member member) {
+    /**
+     * @param sessionId 로그인 세션 ID. 같은 로그인에서 재발급된 Access Token은 같은 값을 가진다.
+     */
+    public String issue(Member member, String sessionId) {
         Instant now = clock.instant();
         JwtClaimsSet claims
             = JwtClaimsSet
@@ -61,6 +65,7 @@ public class AccessTokenProvider {
                 .issuedAt(now)
                 .expiresAt(now.plus(accessTokenTtl))
                 .claim(ROLE_CLAIM, member.getRole().name())
+                .claim(SESSION_CLAIM, sessionId)
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
         return jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
@@ -75,6 +80,10 @@ public class AccessTokenProvider {
         } catch (JwtException exception) {
             return Optional.empty();
         }
+    }
+
+    public Duration accessTokenTtl() {
+        return accessTokenTtl;
     }
 
     public long expiresInSeconds() {

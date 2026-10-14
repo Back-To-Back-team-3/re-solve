@@ -19,6 +19,7 @@ import com.backtoback.member.auth.store.LoginCodeStore.LoginCodeClaim;
 import com.backtoback.member.auth.store.OAuthStateStore;
 import com.backtoback.member.auth.store.OAuthStateStore.OAuthState;
 import com.backtoback.member.auth.store.RefreshTokenStore;
+import com.backtoback.member.auth.store.RefreshTokenStore.IssuedRefreshToken;
 import com.backtoback.member.auth.store.RefreshTokenStore.RotationResult;
 import com.backtoback.member.auth.token.AccessTokenProvider;
 import com.backtoback.member.auth.token.SecureTokenGenerator;
@@ -134,12 +135,12 @@ public class AuthService {
             throw new BusinessException(ErrorCode.AUTH_ACCESS_DENIED);
         }
 
-        String accessToken = accessTokenProvider.issue(member);
-        String refreshToken = refreshTokenStore.issue(member.getId());
+        IssuedRefreshToken issued = refreshTokenStore.issue(member.getId());
+        String accessToken = accessTokenProvider.issue(member, issued.sessionId());
         return new LoginResult(
             accessToken,
             accessTokenProvider.expiresInSeconds(),
-            refreshToken,
+            issued.refreshToken(),
             member,
             claim.newMember()
         );
@@ -169,18 +170,20 @@ public class AuthService {
         Member member
             = memberService.findMember(rotation.memberId()).filter(found -> !found.isWithdrawn()).orElse(null);
         if (member == null) {
-            if (rotation.newRefreshToken() != null) {
-                refreshTokenStore.revoke(rotation.memberId(), rotation.newRefreshToken());
-            }
+            refreshTokenStore.revokeSession(rotation.memberId(), rotation.sessionId(), rotation.newRefreshToken());
             throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID);
         }
 
-        String accessToken = accessTokenProvider.issue(member);
+        String accessToken = accessTokenProvider.issue(member, rotation.sessionId());
         return new TokenRefreshResult(accessToken, accessTokenProvider.expiresInSeconds(), rotation.newRefreshToken());
     }
 
     /**
-     * Refresh Token을 폐기하고, Access Token은 남은 수명 동안 차단 목록에 올린다.
+     * 로그인 세션 단위로 로그아웃한다.
+     * <ul>
+     * <li>세션의 Refresh Token을 교체 전·후 모두 폐기한다. 유예 시간 안의 이전 토큰으로도 재발급할 수 없다.</li>
+     * <li>요청에 쓴 Access Token은 남은 수명 동안, 같은 세션의 다른 Access Token은 Access Token 수명 동안 차단한다.</li>
+     * </ul>
      *
      * @param memberId Gateway가 전달한 요청자 ID ({@code X-User-Id})
      * @param authorization {@code Authorization} 헤더 값
@@ -194,10 +197,10 @@ public class AuthService {
                 .filter(decoded -> String.valueOf(memberId).equals(decoded.getSubject()))
                 .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_TOKEN_INVALID));
 
+        String sessionId = jwt.getClaimAsString(AccessTokenProvider.SESSION_CLAIM);
         accessTokenBlocklist.block(jwt.getId(), Duration.between(clock.instant(), jwt.getExpiresAt()));
-        if (StringUtils.hasText(refreshToken)) {
-            refreshTokenStore.revoke(memberId, refreshToken);
-        }
+        accessTokenBlocklist.blockSession(sessionId, accessTokenProvider.accessTokenTtl());
+        refreshTokenStore.revokeSession(memberId, sessionId, StringUtils.hasText(refreshToken) ? refreshToken : null);
     }
 
     private UriComponentsBuilder frontendCallback() {

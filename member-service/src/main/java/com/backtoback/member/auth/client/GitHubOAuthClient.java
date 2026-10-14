@@ -19,16 +19,22 @@ import com.backtoback.member.global.error.BusinessException;
 import com.backtoback.member.global.error.ErrorCode;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * GitHub OAuth2 인가 코드 교환과 사용자 정보 조회. 로그인 인가 범위는 {@code read:user}, {@code user:email}로 제한한다.
  */
+@Slf4j
 @Component
 public class GitHubOAuthClient {
 
     static final String LOGIN_SCOPE = "read:user user:email";
 
+    /**
+     * GitHub 호출 타임아웃 (API 명세서 1.1.2 외부 의존): 연결 2초, 응답 읽기 3초.
+     */
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
-    private static final Duration READ_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(3);
     private static final String GITHUB_API_VERSION = "2022-11-28";
 
     private final AuthProperties.GitHub properties;
@@ -66,16 +72,18 @@ public class GitHubOAuthClient {
 
     /**
      * 인가 코드를 GitHub 액세스 토큰으로 바꾼 뒤 사용자 정보를 조회한다. GitHub 토큰은 저장하지 않는다.
+     * 토큰 교환·사용자 조회가 실패하면 로그인을 실패시키지만, 이메일 조회 실패는 {@code email = null}로 계속 진행한다.
      */
     public GitHubUser fetchUser(String authorizationCode) {
+        String gitHubAccessToken;
+        UserResponse user;
         try {
-            String gitHubAccessToken = exchangeCode(authorizationCode);
-            UserResponse user = getUser(gitHubAccessToken);
-            String email = findPrimaryVerifiedEmail(gitHubAccessToken);
-            return new GitHubUser(user.id(), user.login(), email, user.avatarUrl());
+            gitHubAccessToken = exchangeCode(authorizationCode);
+            user = getUser(gitHubAccessToken);
         } catch (RestClientException exception) {
             throw new BusinessException(ErrorCode.AUTH_OAUTH_FAILED, exception);
         }
+        return new GitHubUser(user.id(), user.login(), findPrimaryVerifiedEmail(gitHubAccessToken), user.avatarUrl());
     }
 
     private String exchangeCode(String authorizationCode) {
@@ -111,7 +119,13 @@ public class GitHubOAuthClient {
     }
 
     private String findPrimaryVerifiedEmail(String gitHubAccessToken) {
-        EmailResponse[] emails = apiGet("/user/emails", gitHubAccessToken, EmailResponse[].class);
+        EmailResponse[] emails;
+        try {
+            emails = apiGet("/user/emails", gitHubAccessToken, EmailResponse[].class);
+        } catch (RestClientException exception) {
+            log.warn("GitHub email lookup failed. Continuing without email: {}", exception.getMessage());
+            return null;
+        }
         if (emails == null) {
             return null;
         }
