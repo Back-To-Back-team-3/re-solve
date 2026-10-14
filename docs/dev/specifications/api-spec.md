@@ -30,7 +30,7 @@
 | 항목 | 값 |
 | --- | --- |
 | 외부 Base URL | `/api/v1` (API Gateway 경유) |
-| 내부 Base URL | `/internal/v1` (서비스 간 호출 전용, Gateway 라우팅 제외, 외부 비공개, 서비스 계정 인증) |
+| 내부 Base URL | `/internal/v1` (서비스 간 호출 전용, Gateway 라우팅 제외, 외부 비공개, 내부 네트워크 신뢰(서비스 토큰 없음)) |
 | 인증 방식 | `Authorization: Bearer {accessToken}` (JWT). Gateway가 검증 후 `X-User-Id`, `X-User-Role` 전달. 외부에서 보낸 같은 이름의 헤더는 Gateway가 제거 |
 | 관리자 경로 | `/api/v1/admin/**`은 Gateway와 소유 서비스 양쪽에서 `ADMIN`을 검증한다. `ADMIN`이 아닌 사용자도 호출하는 운영 API는 `/admin` 아래에 두지 않는다 |
 | 상관관계 ID | Gateway가 `X-Correlation-Id` 발급, HTTP·메시지 전 구간 전파 |
@@ -50,7 +50,7 @@
 | `Authorization` | 로그인 필요 API | `Bearer {accessToken}`. 공개 API는 선택 |
 | `Idempotency-Key` | 멱등 지정 API | 1~100자 ASCII. 같은 본문 재요청에 재사용 |
 | `X-Correlation-Id` | 전체 | 없으면 Gateway 발급 |
-| `Authorization` (내부) | `/internal/v1/**` | `Bearer {serviceToken}`. 호출 서비스 allowlist 검증 |
+- 내부 API는 인증 헤더를 요구하지 않는다.
 
 ### 0.2 식별자(ID) 규칙
 
@@ -196,7 +196,7 @@
 | AI | 힌트 요청·조회 | 로그인 필요 (`SUSPENDED` 차단) | 본인 요청 | D |
 | notification | 알림·SSE·수신 설정 | 로그인 필요 | 본인 알림 | A |
 | integration | GitHub 연동·동기화 | 로그인 필요 (수동 동기화는 `SUSPENDED` 차단) | 본인 연동 | A |
-| 공통 | 내부 API `/internal/v1/**` | 서비스 계정 | 호출 서비스별 허용 목록 | 공통 |
+| 공통 | 내부 API `/internal/v1/**` | 내부 네트워크 | 수신 서비스 업무 규칙 검증 | 공통 |
 
 ### **0.7 작성 규칙**
 
@@ -209,7 +209,7 @@
 ```
 #### N.N.N API 이름
 - **Method / URI:**
-- **인증:** 공개 / 로그인 필요 / 로그인 필요 (`SUSPENDED` 차단) / `ADMIN` / 서비스 계정
+- **인증:** 공개 / 로그인 필요 / 로그인 필요 (`SUSPENDED` 차단) / `ADMIN` / 내부 호출
 - **Idempotency:**
 - **Rate Limit:**
 - **대응 테이블:**
@@ -5465,7 +5465,7 @@
 
 ### 4.7 내부 API — C 제공
 
-> 공통 규칙: 서비스 계정 Bearer 토큰·호출 서비스 allowlist·내부 네트워크. `/internal/**`는 Gateway 공개 라우팅에서 제외. 조회 타임아웃 2초. 검증 조회 실패는 fail-closed.
+> 공통 규칙: 내부 네트워크 전용. `/internal/**`는 Gateway 공개 라우팅에서 제외. 조회 타임아웃 2초. 검증 조회 실패는 fail-closed.
 > 
 
 #### 4.7.1 실행 문맥·열람 권한 검증
@@ -5955,7 +5955,7 @@
 
 ### 4.8 내부 API — C가 사용하는 외부 서비스
 
-> 공통 규칙: contest-service 서비스 계정. 조회 타임아웃 2초. 검증 실패는 503 `CONTEST_DEPENDENCY_UNAVAILABLE`. 
+> 공통 규칙: contest-service 내부 호출. 조회 타임아웃 2초. 검증 실패는 503 `CONTEST_DEPENDENCY_UNAVAILABLE`. 
 재시도: 연결 실패·502/503/504만 최대 2회, 100ms·300ms 지수 백오프.
 > 
 
