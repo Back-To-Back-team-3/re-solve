@@ -18,6 +18,7 @@
 | 명세 | [스케줄러](dev/specifications/scheduler.md) | 예약 작업 정의 |
 | 명세 | [에러 코드 표](dev/specifications/error-codes.md) | 공통 에러 코드 |
 | 운영 | [환경 변수 예시](operations/env-example.md) | 로컬·Docker 환경 변수 설정 예시 |
+| 기록 | [결정 기록](records/decisions/) | 서비스 간 계약·설계 결정과 근거 |
 
 ## 디렉터리 구분
 
