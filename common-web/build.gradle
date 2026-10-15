@@ -34,6 +34,12 @@ checkstyle {
 }
 
 dependencies {
+    // 공개 예외 처리 메서드에서 사용하는 공통 응답과 오류 코드
+    api project(':common-core')
+
+    // 요청 검증 결과 조회와 예외 로깅
+    implementation 'org.springframework:spring-context'
+    implementation 'org.slf4j:slf4j-api'
 }
 
 tasks.named('test') {
