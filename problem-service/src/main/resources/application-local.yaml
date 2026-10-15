@@ -3,9 +3,9 @@ spring:
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3308}/problem_db
   cloud:
     aws:
-      endpoint: ${AWS_ENDPOINT_URL:http://localhost:4566}
+      endpoint: ${LOCALSTACK_ENDPOINT:http://localhost:4566}
       credentials:
-        access-key: ${AWS_ACCESS_KEY_ID:test}
-        secret-key: ${AWS_SECRET_ACCESS_KEY:test}
+        access-key: test
+        secret-key: test
       s3:
         path-style-access-enabled: true
