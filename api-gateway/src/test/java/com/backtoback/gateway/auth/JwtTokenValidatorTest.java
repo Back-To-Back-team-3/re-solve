@@ -100,8 +100,47 @@ class JwtTokenValidatorTest {
             .hasMessageContaining("식별자(jti)");
     }
 
+    @Test
+    @DisplayName("토큰 식별자(jti)가 차단되지 않았더라도 로그인 세션(sid)이 차단 목록에 있으면 차단된다")
+    void blocksTokenWhenSessionIsInRedisBlocklist() throws Exception {
+        String jti = UUID.randomUUID().toString();
+        String sid = UUID.randomUUID().toString();
+        String token = createTokenWithSession("7", "USER", jti, sid, 3600);
+
+        given(redisTemplate.hasKey(eq(JwtTokenValidator.BLOCKLIST_KEY_PREFIX + jti))).willReturn(Mono.just(false));
+        given(redisTemplate.hasKey(eq(JwtTokenValidator.SESSION_BLOCKLIST_KEY_PREFIX + sid)))
+            .willReturn(Mono.just(true));
+
+        assertThatThrownBy(() -> validator.validate(token).block())
+            .isInstanceOf(JwtException.class)
+            .hasMessageContaining("로그아웃된 인증 토큰");
+    }
+
     private String createToken(String sub, String role, String jti, long ttlSeconds) throws Exception {
         return createTokenWithSecret(sub, role, jti, ttlSeconds, TEST_SECRET);
+    }
+
+    private String createTokenWithSession(String sub, String role, String jti, String sid, long ttlSeconds)
+        throws Exception {
+        Instant now = Instant.now();
+        JWTClaimsSet.Builder builder
+            = new JWTClaimsSet.Builder()
+                .issuer("re-solve")
+                .subject(sub)
+                .issueTime(Date.from(now))
+                .expirationTime(Date.from(now.plusSeconds(ttlSeconds)))
+                .claim("role", role);
+
+        if (jti != null) {
+            builder.jwtID(jti);
+        }
+        if (sid != null) {
+            builder.claim(JwtTokenValidator.SESSION_CLAIM, sid);
+        }
+
+        SignedJWT signedJwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), builder.build());
+        signedJwt.sign(new MACSigner(TEST_SECRET.getBytes(StandardCharsets.UTF_8)));
+        return signedJwt.serialize();
     }
 
     private String createTokenWithSecret(String sub, String role, String jti, long ttlSeconds, String secret)

@@ -7,6 +7,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.jwt.JwtValidationException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ServerWebExchange;
@@ -77,24 +78,38 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
         // 3. 토큰이 있는 경우 검증
         String token = authHeader.substring(BEARER_PREFIX.length()).trim();
-        return tokenValidator
-            .validate(token)
-            .onErrorResume(
-                JwtException.class,
-                error -> ErrorResponseWriter
-                    .write(exchange, HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "인증 정보가 유효하지 않습니다.")
-                    .then(Mono.empty())
-            )
-            .flatMap(principal -> {
-                ServerHttpRequest mutatedRequest
-                    = exchange
-                        .getRequest()
-                        .mutate()
-                        .header(RemoveExternalHeadersFilter.USER_ID_HEADER, principal.memberId())
-                        .header(RemoveExternalHeadersFilter.USER_ROLE_HEADER, principal.role())
-                        .build();
-                return chain.filter(exchange.mutate().request(mutatedRequest).build());
-            });
+        return tokenValidator.validate(token).onErrorResume(JwtException.class, error -> {
+            if (isExpired(error)) {
+                return ErrorResponseWriter
+                    .write(exchange, HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_EXPIRED", "인증 토큰이 만료되었습니다.")
+                    .then(Mono.empty());
+            }
+            return ErrorResponseWriter
+                .write(exchange, HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "인증 정보가 유효하지 않습니다.")
+                .then(Mono.empty());
+        }).flatMap(principal -> {
+            ServerHttpRequest mutatedRequest
+                = exchange
+                    .getRequest()
+                    .mutate()
+                    .header(RemoveExternalHeadersFilter.USER_ID_HEADER, principal.memberId())
+                    .header(RemoveExternalHeadersFilter.USER_ROLE_HEADER, principal.role())
+                    .build();
+            return chain.filter(exchange.mutate().request(mutatedRequest).build());
+        });
+    }
+
+    private boolean isExpired(JwtException exception) {
+        if (exception instanceof JwtValidationException validationException) {
+            return validationException
+                .getErrors()
+                .stream()
+                .anyMatch(
+                    error -> error.getDescription() != null && error.getDescription().toLowerCase().contains("expired")
+                );
+        }
+        String message = exception.getMessage();
+        return message != null && message.toLowerCase().contains("expired");
     }
 
     @Override

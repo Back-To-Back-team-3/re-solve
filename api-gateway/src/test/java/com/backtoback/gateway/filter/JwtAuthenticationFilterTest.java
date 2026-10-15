@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -21,7 +22,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.jwt.JwtValidationException;
 
 import com.backtoback.gateway.auth.JwtTokenValidator;
 import com.backtoback.gateway.auth.UserPrincipal;
@@ -148,6 +151,34 @@ class JwtAuthenticationFilterTest {
 
         assertThat(chainCalled.get()).isFalse();
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(exchange.getResponse().getBodyAsString().block()).contains("AUTH_TOKEN_INVALID");
+    }
+
+    @Test
+    @DisplayName("만료된 토큰이면 401 Unauthorized와 AUTH_TOKEN_EXPIRED 에러 코드를 반환한다")
+    void returnsAuthTokenExpiredWhenTokenIsExpired() {
+        OAuth2Error oauth2Error = new OAuth2Error("invalid_token", "Jwt expired at 2026-10-15T00:00:00Z", null);
+        given(tokenValidator.validate(anyString()))
+            .willReturn(Mono.error(new JwtValidationException("Token expired", List.of(oauth2Error))));
+
+        MockServerHttpRequest request
+            = MockServerHttpRequest
+                .post("/api/v1/problems")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer expired-token")
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = mutatedExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        filter.filter(exchange, chain).block();
+
+        assertThat(chainCalled.get()).isFalse();
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(exchange.getResponse().getBodyAsString().block()).contains("AUTH_TOKEN_EXPIRED");
     }
 
     @Test

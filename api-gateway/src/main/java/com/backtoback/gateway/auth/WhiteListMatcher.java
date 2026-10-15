@@ -42,13 +42,13 @@ public class WhiteListMatcher {
 
         // 3. 공개 GET 조회 API
         if (HttpMethod.GET.equals(method)) {
-            if (pathMatcher.match("/api/v1/problems/**", path) && !pathMatcher.match("/api/v1/admin/**", path)) {
+            if (pathMatcher.match("/api/v1/problems/**", path)) {
                 return true;
             }
-            if (pathMatcher.match("/api/v1/contests/**", path) && !pathMatcher.match("/api/v1/admin/**", path)) {
+            if (pathMatcher.match("/api/v1/contests/**", path)) {
                 return true;
             }
-            if (pathMatcher.match("/api/v1/studies/**", path) && !pathMatcher.match("/api/v1/admin/**", path)) {
+            if (pathMatcher.match("/api/v1/studies/**", path)) {
                 return true;
             }
             if (pathMatcher.match("/api/v1/judge/languages", path)) {
