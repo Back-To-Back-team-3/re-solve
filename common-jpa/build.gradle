@@ -1,0 +1,45 @@
+plugins {
+    id 'java-library'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'checkstyle'
+}
+
+group = 'com.backtoback'
+version = '1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencyManagement {
+    imports {
+        mavenBom 'org.springframework.boot:spring-boot-dependencies:4.1.1'
+    }
+}
+
+checkstyle {
+    toolVersion = '10.12.5'
+    configFile = rootProject.file('config/naver-checkstyle-rules.xml')
+    configProperties = [
+        'suppressionFile': rootProject.file('config/naver-checkstyle-suppressions.xml')
+    ]
+    ignoreFailures = false
+    maxWarnings = 0
+}
+
+dependencies {
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
