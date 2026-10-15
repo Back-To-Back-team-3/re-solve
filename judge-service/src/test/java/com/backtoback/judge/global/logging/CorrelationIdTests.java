@@ -21,7 +21,7 @@ class CorrelationIdTests {
      */
     @Test
     void replacesUnsafeIncomingIdAndRestoresPreviousMdc() throws Exception {
-        var request = new MockHttpServletRequest("GET", "/api/v1/problems");
+        var request = new MockHttpServletRequest("GET", "/api/v1/submissions");
         request.addHeader(CorrelationIdFilter.HEADER, "untrusted\nforged-log");
         var response = new MockHttpServletResponse();
         MDC.put(CorrelationIdFilter.MDC_KEY, "previous");

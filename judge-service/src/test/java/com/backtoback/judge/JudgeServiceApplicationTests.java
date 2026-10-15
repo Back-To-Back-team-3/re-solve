@@ -80,10 +80,8 @@ class JudgeServiceApplicationTests {
         registry.add("spring.data.redis.host", REDIS::getHost);
         registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
         registry.add("spring.data.redis.password", () -> REDIS_PASSWORD);
-        registry.add("spring.cloud.aws.endpoint", LOCALSTACK::getEndpoint);
+        registry.add("LOCALSTACK_ENDPOINT", LOCALSTACK::getEndpoint);
         registry.add("spring.cloud.aws.region.static", LOCALSTACK::getRegion);
-        registry.add("spring.cloud.aws.credentials.access-key", LOCALSTACK::getAccessKey);
-        registry.add("spring.cloud.aws.credentials.secret-key", LOCALSTACK::getSecretKey);
     }
 
     /**
