@@ -30,7 +30,7 @@
 | 항목 | 값 |
 | --- | --- |
 | 외부 Base URL | `/api/v1` (API Gateway 경유) |
-| 내부 Base URL | `/internal/v1` (서비스 간 호출 전용, Gateway 라우팅 제외, 외부 비공개, 서비스 계정 인증) |
+| 내부 Base URL | `/internal/v1` (서비스 간 호출 전용, Gateway 라우팅 제외, 외부 비공개, 내부 네트워크 신뢰(서비스 토큰 없음)) |
 | 인증 방식 | `Authorization: Bearer {accessToken}` (JWT). Gateway가 검증 후 `X-User-Id`, `X-User-Role` 전달. 외부에서 보낸 같은 이름의 헤더는 Gateway가 제거 |
 | 관리자 경로 | `/api/v1/admin/**`은 Gateway와 소유 서비스 양쪽에서 `ADMIN`을 검증한다. `ADMIN`이 아닌 사용자도 호출하는 운영 API는 `/admin` 아래에 두지 않는다 |
 | 상관관계 ID | Gateway가 `X-Correlation-Id` 발급, HTTP·메시지 전 구간 전파 |
@@ -50,7 +50,7 @@
 | `Authorization` | 로그인 필요 API | `Bearer {accessToken}`. 공개 API는 선택 |
 | `Idempotency-Key` | 멱등 지정 API | 1~100자 ASCII. 같은 본문 재요청에 재사용 |
 | `X-Correlation-Id` | 전체 | 없으면 Gateway 발급 |
-| `Authorization` (내부) | `/internal/v1/**` | `Bearer {serviceToken}`. 호출 서비스 allowlist 검증 |
+- 내부 API는 인증 헤더를 요구하지 않는다.
 
 ### 0.2 식별자(ID) 규칙
 
@@ -196,7 +196,7 @@
 | AI | 힌트 요청·조회 | 로그인 필요 (`SUSPENDED` 차단) | 본인 요청 | D |
 | notification | 알림·SSE·수신 설정 | 로그인 필요 | 본인 알림 | A |
 | integration | GitHub 연동·동기화 | 로그인 필요 (수동 동기화는 `SUSPENDED` 차단) | 본인 연동 | A |
-| 공통 | 내부 API `/internal/v1/**` | 서비스 계정 | 호출 서비스별 허용 목록 | 공통 |
+| 공통 | 내부 API `/internal/v1/**` | 내부 네트워크 | 수신 서비스 업무 규칙 검증 | 공통 |
 
 ### **0.7 작성 규칙**
 
@@ -209,7 +209,7 @@
 ```
 #### N.N.N API 이름
 - **Method / URI:**
-- **인증:** 공개 / 로그인 필요 / 로그인 필요 (`SUSPENDED` 차단) / `ADMIN` / 서비스 계정
+- **인증:** 공개 / 로그인 필요 / 로그인 필요 (`SUSPENDED` 차단) / `ADMIN` / 내부 호출
 - **Idempotency:**
 - **Rate Limit:**
 - **대응 테이블:**
@@ -1111,7 +1111,7 @@
 #### 1.7.1 회원 상태 조회 (내부)
 
 - **Method / URI:** `GET /internal/v1/members/{memberId}/status`
-- **인증:** 서비스 계정
+- **인증:** 내부 호출
 - **대응 테이블:** `members`
 - **설명:** `SUSPENDED` 차단 확인용. 각 서비스는 `MemberSuspended` 복제본을 우선 쓰고, 복제본이 없을 때만 호출한다.
 - **응답 (200):**
@@ -1128,7 +1128,7 @@
 #### 1.7.2 태그 레벨 조회 (내부)
 
 - **Method / URI:** `GET /internal/v1/members/{memberId}/tag-levels`
-- **인증:** 서비스 계정
+- **인증:** 내부 호출
 - **대응 테이블:** `member_tag_levels`
 - **설명:** judge가 `PRACTICE` 제출 전 레벨 접근 제한(난이도 ≤ 레벨)을 확인할 때 호출한다.
     - **다중 태그 문제의 판정 기준(최고·최저 레벨)은 확정 필요.**
@@ -2095,7 +2095,7 @@
 #### 2.6.1 채점 대상 사전 검증
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/validation`
-- **인증:** 서비스 계정 (judge)
+- **인증:** 내부 호출 (judge)
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`
 - **설명:** 지정 회차의 존재·문제 일치·함수 명세·실행 제한·테스트 연결·파일 준비 상태를 확인한다. 최신 회차 여부는 검사하지 않는다. 사용 기록을 만들지 않으므로 GET으로 둔다(기존 목록의 POST 표기 정정).
 - **응답 (200):**
@@ -2120,7 +2120,7 @@
 #### 2.6.2 채점 기준 데이터 조회
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/data`
-- **인증:** 서비스 계정 (judge)
+- **인증:** 내부 호출 (judge)
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`
 - **설명:** 고정 회차의 함수 명세·실행 제한·테스트 파일 참조를 반환한다. 제출 가능 여부는 다시 검사하지 않는다. 테스트 원문은 judge 실행기가 제한된 S3 읽기 권한으로 가져온다.
 - **응답 (200):**
@@ -2161,7 +2161,7 @@
 #### 2.6.3 고정 회차 본문 조회
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content`
-- **인증:** 서비스 계정 (contest, member) + 호출 맥락 헤더 `X-Access-Context: EXAM:{examId}` / `CONTEST:{contestId}` / `DIAGNOSIS:{diagnosisId}`
+- **인증:** 내부 호출 (contest, member) + 호출 맥락 헤더 `X-Access-Context: EXAM:{examId}` / `CONTEST:{contestId}` / `DIAGNOSIS:{diagnosisId}`
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tests`, `problem_test_assets`
 - **설명:** 고정 회차의 본문·함수 명세·실행 제한·공개 예제를 반환한다. 숨김 테스트는 읽지 않는다. 참가·공개 권한은 호출 서비스가 확인한 뒤 호출한다.
 - **응답 (200):** 문제 상세 조회(2.1.2)와 같은 형식
@@ -2228,14 +2228,14 @@
 #### 2.6.4 고정 회차 본문 이미지 조회
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}`
-- **인증:** 서비스 계정 (contest, member) + `X-Access-Context`
+- **인증:** 내부 호출 (contest, member) + `X-Access-Context`
 - **대응 테이블:** `problem_body_images`, `problem_images`
 - **설명:** 고정 회차 본문에 연결된 이미지 바이너리. 브라우저에는 contest·member의 권한 검사 경로로 전달한다.
 
 #### 2.6.5 문제 선택용 요약 조회
 
 - **Method / URI:** `GET /internal/v1/problems/summaries`
-- **인증:** 서비스 계정 (study, contest)
+- **인증:** 내부 호출 (study, contest)
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`, `tags`
 - **설명:** 문제집·시험 생성 시 회차 고정·표시용 요약을 반환한다(B-2). 요청 ID 중 사용 불가 문제는 `isAvailable: false`로 표시한다.
 - **요청 파라미터:**
@@ -2273,7 +2273,7 @@
 #### 2.6.6 힌트 문맥 조회
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/hint-context`
-- **인증:** 서비스 계정 (study AI 모듈)
+- **인증:** 내부 호출 (study AI 모듈)
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tags`
 - **설명:** 힌트 입력(제목·본문·태그)과 현재 공개 회차, 힌트 가능 여부를 반환한다. 대회 전용 문제는 대회 종료 전 `isHintAvailable: false`.
 - **응답 (200):**
@@ -2293,7 +2293,7 @@
 #### 2.6.7 진단 출제 후보 조회
 
 - **Method / URI:** `GET /internal/v1/problems/diagnosis-candidates`
-- **인증:** 서비스 계정 (member)
+- **인증:** 내부 호출 (member)
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`
 - **설명:** 태그의 `GENERAL`·`PUBLIC` 문제 중 난이도 1·2·3에서 각각 1개를 무작위로 골라 현재 회차와 함께 반환한다. 난이도별 후보가 없으면 해당 항목을 `null`로 반환한다.
 - **요청 파라미터:**
@@ -2822,7 +2822,7 @@
 #### 3.3.1 시험·대회 제출 결과 조회
 
 - **Method / URI:** `GET /internal/v1/submissions/{submissionId}/result`
-- **인증:** 서비스 계정 (contest)
+- **인증:** 내부 호출 (contest)
 - **대응 테이블:** `submissions`, `judge_jobs`
 - **설명:** 이벤트 유실 복구·결과 확정 전 대사용. 점수·공개 판단은 contest가 한다.
 - **요청 파라미터:**
@@ -2842,7 +2842,7 @@
 #### 3.3.2 제출 코드 조회 (내부)
 
 - **Method / URI:** `GET /internal/v1/submissions/{submissionId}/source`
-- **인증:** 서비스 계정 (contest, problem)
+- **인증:** 내부 호출 (contest, problem)
 - **대응 테이블:** `submissions`
 - **설명:** 호출 목적별로 조건을 확인한 뒤 코드를 반환한다.
 - **요청 파라미터:**
@@ -2866,7 +2866,7 @@
 #### 3.3.3 GitHub 동기화용 정답 코드 조회
 
 - **Method / URI:** `GET /internal/v1/submissions/{submissionId}/accepted/code`
-- **인증:** 서비스 계정 (integration)
+- **인증:** 내부 호출 (integration)
 - **대응 테이블:** `submissions`
 - **설명:** `PRACTICE` AC 제출의 코드를 반환한다. 시험·대회·진단 제출은 거절한다.
 - **요청 파라미터:**
@@ -2885,7 +2885,7 @@
 #### 3.3.4 회원별 PRACTICE AC 목록 (재동기화)
 
 - **Method / URI:** `GET /internal/v1/submissions/accepted`
-- **인증:** 서비스 계정 (study, member)
+- **인증:** 내부 호출 (study, member)
 - **대응 테이블:** `submissions`
 - **설명:** 복제본 재동기화 관리자 절차 전용. 평상시 흐름에서는 호출하지 않는다.
 - **요청 파라미터:**
@@ -5465,13 +5465,13 @@
 
 ### 4.7 내부 API — C 제공
 
-> 공통 규칙: 서비스 계정 Bearer 토큰·호출 서비스 allowlist·내부 네트워크. `/internal/**`는 Gateway 공개 라우팅에서 제외. 조회 타임아웃 2초. 검증 조회 실패는 fail-closed.
+> 공통 규칙: 내부 네트워크 전용. `/internal/**`는 Gateway 공개 라우팅에서 제외. 조회 타임아웃 2초. 검증 조회 실패는 fail-closed.
 > 
 
 #### 4.7.1 실행 문맥·열람 권한 검증
 
 - **Method / URI:** `POST /internal/v1/contest/contexts/validate`
-- **인증:** 서비스 계정 (judge, problem, study)
+- **인증:** 내부 호출 (judge, problem, study)
 - **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `exam_submissions`, `contests`, `contest_problems`, `contest_participants`, `contest_submissions`
 - **설명:** 고정 문제·회차 일치 검증. `READ_BODY`/`READ_IMAGE`는 종료 후 복기와 대회 종료 공개 설정 적용. `RUN`은 입장한 `ACTIVE` 참가자의 시간 안 요청만. 본인 제출 열람은 소유권·실제 입장 추가 검증.
 - **요청 헤더:**
@@ -5955,7 +5955,7 @@
 
 ### 4.8 내부 API — C가 사용하는 외부 서비스
 
-> 공통 규칙: contest-service 서비스 계정. 조회 타임아웃 2초. 검증 실패는 503 `CONTEST_DEPENDENCY_UNAVAILABLE`. 
+> 공통 규칙: contest-service 내부 호출. 조회 타임아웃 2초. 검증 실패는 503 `CONTEST_DEPENDENCY_UNAVAILABLE`. 
 재시도: 연결 실패·502/503/504만 최대 2회, 100ms·300ms 지수 백오프.
 > 
 
@@ -6663,7 +6663,7 @@
 #### 5.7.1 스터디 구성원 목록 조회 (내부)
 
 - **Method / URI:** `GET /internal/v1/studies/{studyId}/members`
-- **인증:** 서비스 계정 (contest)
+- **인증:** 내부 호출 (contest)
 - **대응 테이블:** `studies`, `study_memberships`
 - **설명:** contest가 시험 생성·수정 권한(`LEADER`·`MANAGER`, 스터디 `CLOSED` 여부)을 확인할 때 호출한다. 참가 자격은 `StudyMemberJoined`·`StudyMemberLeft` 복제본으로 판단한다.
 - **응답 (200):**
@@ -6677,7 +6677,7 @@
 #### 5.7.2 회원의 스터디 가입 조회 (내부)
 
 - **Method / URI:** `GET /internal/v1/studies/memberships`
-- **인증:** 서비스 계정 (member)
+- **인증:** 내부 호출 (member)
 - **대응 테이블:** `study_memberships`, `studies`
 - **설명:** 회원 탈퇴 차단(스터디장 여부) 판단용.
 - **요청 파라미터:**
