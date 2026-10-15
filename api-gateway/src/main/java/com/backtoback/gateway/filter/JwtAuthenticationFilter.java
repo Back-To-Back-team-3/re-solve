@@ -6,6 +6,7 @@ import org.springframework.core.Ordered;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ServerWebExchange;
@@ -79,6 +80,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         return tokenValidator
             .validate(token)
             .onErrorResume(
+                JwtException.class,
                 error -> ErrorResponseWriter
                     .write(exchange, HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "인증 정보가 유효하지 않습니다.")
                     .then(Mono.empty())

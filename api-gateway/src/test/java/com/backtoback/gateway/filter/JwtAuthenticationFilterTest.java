@@ -170,4 +170,26 @@ class JwtAuthenticationFilterTest {
 
         assertThat(exchange.getResponse().getStatusCode()).isNull();
     }
+
+    @Test
+    @DisplayName("토큰 검증 중 JwtException이 아닌 인프라 장애(예: Redis 장애)는 401로 변환되지 않고 전파된다")
+    void propagatesNonJwtExceptionDuringValidation() {
+        given(tokenValidator.validate("valid-token"))
+            .willReturn(Mono.error(new IllegalStateException("Redis connection failure")));
+
+        MockServerHttpRequest request
+            = MockServerHttpRequest
+                .post("/api/v1/problems")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer valid-token")
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+        GatewayFilterChain chain = mutatedExchange -> Mono.empty();
+
+        assertThatThrownBy(() -> filter.filter(exchange, chain).block())
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("Redis connection failure");
+
+        assertThat(exchange.getResponse().getStatusCode()).isNull();
+    }
 }
