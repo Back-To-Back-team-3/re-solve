@@ -44,7 +44,7 @@ flowchart LR
     E --> MEM & PRB & CON & STU & NOT & INT
 ```
 
-- 점선 = 동기 내부 API(`/internal/v1`, 서비스 토큰, 2초 타임아웃), 굵은 선 = SQS 명령, 실선 버스 = SNS 이벤트. 상세 지도는 API 부록 A, 구독은 이벤트 계약서 §5.
+- 점선 = 동기 내부 API(`/internal/v1`, 2초 타임아웃), 굵은 선 = SQS 명령, 실선 버스 = SNS 이벤트. 상세 지도는 API 부록 A, 구독은 이벤트 계약서 §5.
 
 ### 0.2 인증 전달
 
@@ -74,8 +74,8 @@ sequenceDiagram
             end
             G->>S: X-User-Id · X-User-Role · X-Correlation-Id
             S->>S: 관리자 API는 서비스에서 ADMIN 재검증
-            S->>T: Bearer serviceToken + X-Correlation-Id (2초)
-            T->>T: 호출 서비스 allowlist 확인
+            S->>T: X-Correlation-Id (2초)
+            T->>T: 수신 서비스 업무 규칙 검증
             T-->>S: 응답
             S-->>C: 응답
         end
