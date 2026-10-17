@@ -32,8 +32,13 @@ public class RedisConfiguration {
         if (StringUtils.hasText(properties.getPassword())) {
             config.setPassword(properties.getPassword());
         }
-        server.setConnectTimeout(Math.toIntExact(properties.getConnectTimeout().toMillis()));
-        server.setTimeout(Math.toIntExact(properties.getTimeout().toMillis()));
+        // 미설정된 제한 시간은 Redisson 기본값을 유지한다.
+        if (properties.getConnectTimeout() != null) {
+            server.setConnectTimeout(Math.toIntExact(properties.getConnectTimeout().toMillis()));
+        }
+        if (properties.getTimeout() != null) {
+            server.setTimeout(Math.toIntExact(properties.getTimeout().toMillis()));
+        }
         // leaseTime 없이 잠금을 얻으면 Redisson이 작업 중 만료 시간을 자동 연장한다.
         config.setLockWatchdogTimeout(30_000);
         return Redisson.create(config);
