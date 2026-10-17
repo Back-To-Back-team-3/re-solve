@@ -63,8 +63,7 @@ public class WhiteListMatcher {
 
     private boolean isContestPublicPath(String path) {
         // 인증이 필요한 대회/시험 하위 경로 제외 (/me, /drafts, /problems, /results, /events)
-        if (pathMatcher.match("/api/v1/contests/**/me/**", path)
-            || pathMatcher.match("/api/v1/contests/**/me", path)
+        if (pathMatcher.match("/api/v1/contests/**/me/**", path) || pathMatcher.match("/api/v1/contests/**/me", path)
             || pathMatcher.match("/api/v1/contests/**/drafts/**", path)
             || pathMatcher.match("/api/v1/contests/**/problems/**", path)
             || pathMatcher.match("/api/v1/contests/**/results/**", path)
@@ -73,15 +72,13 @@ public class WhiteListMatcher {
         }
 
         // 공개 경로: 목록(/contests), 단건 상세(/contests/{id}), 리더보드(/contests/{id}/leaderboard)
-        return pathMatcher.match("/api/v1/contests", path)
-            || pathMatcher.match("/api/v1/contests/*", path)
+        return pathMatcher.match("/api/v1/contests", path) || pathMatcher.match("/api/v1/contests/*", path)
             || pathMatcher.match("/api/v1/contests/*/leaderboard", path);
     }
 
     private boolean isStudyPublicPath(String path) {
         // 인증이 필요한 스터디 하위 경로 제외 (/me, /recommendations, /assignments, /posts, /memberships, /exams, /drafts)
-        if (pathMatcher.match("/api/v1/studies/me", path)
-            || pathMatcher.match("/api/v1/studies/me/**", path)
+        if (pathMatcher.match("/api/v1/studies/me", path) || pathMatcher.match("/api/v1/studies/me/**", path)
             || pathMatcher.match("/api/v1/studies/recommendations", path)
             || pathMatcher.match("/api/v1/studies/**/assignments/**", path)
             || pathMatcher.match("/api/v1/studies/**/posts/**", path)
@@ -92,7 +89,6 @@ public class WhiteListMatcher {
         }
 
         // 공개 경로: 스터디 목록(/studies), 단건 상세(/studies/{id})
-        return pathMatcher.match("/api/v1/studies", path)
-            || pathMatcher.match("/api/v1/studies/*", path);
+        return pathMatcher.match("/api/v1/studies", path) || pathMatcher.match("/api/v1/studies/*", path);
     }
 }
