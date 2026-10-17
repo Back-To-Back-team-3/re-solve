@@ -40,7 +40,7 @@ import com.backtoback.problem.global.security.user.GatewayUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
-@WebMvcTest
+@WebMvcTest(controllers = ProblemWebTests.TestController.class)
 @Import(
     {
         ProblemWebTests.TestController.class,
