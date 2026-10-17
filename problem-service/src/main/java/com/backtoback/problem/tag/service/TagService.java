@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.problem.global.api.PageResponse;
 import com.backtoback.problem.global.exception.custom.CommonInvalidRequestException;
+import com.backtoback.problem.global.exception.custom.IdempotencyKeyConflictException;
 import com.backtoback.problem.global.exception.custom.ProblemTagNotFoundException;
 import com.backtoback.problem.global.exception.custom.ProblemVersionConflictException;
 import com.backtoback.problem.tag.dto.request.TagCreateRequest;
@@ -23,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 @Transactional(readOnly = true)
 public class TagService {
     private final TagRepository tagRepository;
+    private final TagCreationRecordService creationRecords;
     private final TagOrderService tagOrderService;
 
     /**
@@ -50,20 +52,33 @@ public class TagService {
     }
 
     /**
-     * 요청 순번을 보정한 위치에 태그를 등록한다.
-     * 순번 변경과 태그 저장을 같은 트랜잭션으로 처리한다.
+     * 멱등키를 확인하고 지정한 순번에 태그를 등록한다.
+     * 24시간 이내의 동일 요청은 최초 응답을 반환한다. 요청 순번을 보정한 위치에 삽입하고 기존 태그의 순번을 맞춘다.
+     * 순번 변경·태그 저장·요청 기록 완료를 같은 트랜잭션으로 처리한다.
      *
+     * @param adminId 요청한 관리자 ID
+     * @param key 관리자별 중복 요청 식별 키
      * @param request 등록할 태그 이름과 표시 순서
-     * @return 생성한 태그 ID와 이름
+     * @return 최초 생성 당시의 태그 ID와 이름
+     * @throws IdempotencyKeyConflictException 유효한 멱등키에 다른 요청 본문이 전달된 경우
      * @throws DataIntegrityViolationException 태그 이름이 중복된 경우; 전역 처리기에서 태그 중복 오류로 응답한다
      * @throws ProblemVersionConflictException 잠금 대기 시간이 초과된 경우
      */
     @Transactional
-    public TagResponse create(TagCreateRequest request) {
+    public TagResponse create(String adminId, String key, TagCreateRequest request) {
+        var savedRecord = creationRecords.lock(adminId, key, request.name(), request.displayOrder());
+        if (!savedRecord.matches(request.name(), request.displayOrder())) {
+            throw new IdempotencyKeyConflictException();
+        }
+        if (savedRecord.getResultTagId() != null) {
+            return new TagResponse(savedRecord.getResultTagId().toString(), savedRecord.getResultName());
+        }
         tagOrderService.lock();
         int displayOrder = tagOrderService.makeRoomFor(request.displayOrder());
         Tag tag = tagRepository.saveAndFlush(new Tag(request.name().strip(), displayOrder));
-        return TagResponse.from(tag);
+        TagResponse response = TagResponse.from(tag);
+        savedRecord.complete(tag.getId(), tag.getName());
+        return response;
     }
 
     /**
