@@ -1170,6 +1170,36 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | --- | --- | --- |
 | `fk_problem_statistics_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
 
+#### 4.2.15 태그 생성 멱등 기록 (`tag_creation_records`)
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `admin_id` | VARCHAR(128) | Y | 요청한 관리자 ID (외부 참조). `utf8mb4_0900_bin`으로 대소문자 구별 |
+| `idempotency_key` | VARCHAR(100) | Y | 관리자별 멱등키. 1~100자 ASCII, 공백만 입력 불가. `utf8mb4_0900_bin`으로 대소문자 구별 |
+| `request_name` | VARCHAR(200) | Y | 최초 요청 이름. 앞뒤 공백을 제거하기 전 원본 값 |
+| `request_display_order` | INT | Y | 최초 요청 순번. 허용 범위로 보정하기 전 원본 값 |
+| `expires_at` | DATETIME(6) | Y | 접수 후 24시간의 만료 시각. 만료된 키로 새 요청을 접수하면 갱신 |
+| `result_tag_id` | BIGINT | N | 최초 생성 응답의 태그 ID. 처리 완료 전 NULL. 태그 삭제 후에도 보존하므로 FK 없음 |
+| `result_name` | VARCHAR(200) | N | 최초 생성 응답의 태그 이름. 처리 완료 전 NULL. 이후 이름 변경과 무관하게 보존 |
+| `created_at` | DATETIME(6) | Y | 기록 생성 시각 |
+| `updated_at` | DATETIME(6) | Y | 기록 최종 수정 시각 |
+| `version` | BIGINT | Y | 낙관적 락 버전. 기본값 0 |
+
+**제약 및 인덱스**
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `uk_tag_creation_records_admin_key` | `(admin_id, idempotency_key)` | 관리자별 멱등키 중복 방지 (UNIQUE) |
+| `idx_tag_creation_records_expires_at` | `(expires_at, id)` | 만료 기록 정리 대상 조회 |
+
+**처리 및 보관 규칙**
+
+- 기록 행을 잠근 뒤 만료 여부와 원본 요청값을 확인한다. 유효한 동일 요청은 최초 응답을 반환하고 만료 시간을 연장하지 않는다.
+- 만료된 기록이 남아 있으면 새 요청값과 만료 시각으로 갱신하고 이전 결과를 비운다. 이미 삭제된 기록은 새로 생성한다.
+- 요청 기록·태그 생성·순번 변경·최초 응답 저장은 같은 트랜잭션에서 처리한다. 실패하면 함께 롤백한다.
+- 정리 스케줄러는 기본 1시간 간격(`fixedDelay`)으로 만료 기록을 실행당 최대 500개 삭제한다. 처리 중 잠긴 행은 `SKIP LOCKED`로 건너뛴다. 정리 전이라도 만료 시각이 지나면 새 요청으로 처리한다.
+
 ### 4.3 judge
 
 > 작성: 담당 B
