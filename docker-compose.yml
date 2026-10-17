@@ -146,6 +146,7 @@ services:
       <<: *db-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/problem_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
     depends_on:
       mysql:
         condition: service_healthy
@@ -159,6 +160,7 @@ services:
       <<: *db-redis-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/judge_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
       JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-}
     depends_on:
       mysql:

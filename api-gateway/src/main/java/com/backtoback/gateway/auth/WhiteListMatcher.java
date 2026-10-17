@@ -45,10 +45,12 @@ public class WhiteListMatcher {
             if (pathMatcher.match("/api/v1/problems/**", path)) {
                 return true;
             }
+
             if (isContestPublicPath(path)) {
                 return true;
             }
             if (isStudyPublicPath(path)) {
+
                 return true;
             }
             if (pathMatcher.match("/api/v1/judge/languages", path)) {

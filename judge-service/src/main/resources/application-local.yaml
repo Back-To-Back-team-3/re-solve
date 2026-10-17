@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3308}/judge_db
+  data:
+    redis:
+      port: ${REDIS_PORT:6380}
+  cloud:
+    aws:
+      endpoint: ${LOCALSTACK_ENDPOINT:http://localhost:4566}
+      credentials:
+        access-key: test
+        secret-key: test
