@@ -1,0 +1,13 @@
+# 개발 전용 API 계약 모드. 운영 프로필과 함께 켜면 이 문서 자체를 적용하지 않는다.
+spring:
+  config:
+    activate:
+      on-profile: "dev & exam-stub & !prod & !production"
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+      - org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration
+      - org.springframework.boot.data.jpa.autoconfigure.DataJpaRepositoriesAutoConfiguration
+      - org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
+      - io.awspring.cloud.autoconfigure.sns.SnsAutoConfiguration
+      - io.awspring.cloud.autoconfigure.sqs.SqsAutoConfiguration
