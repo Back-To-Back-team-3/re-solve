@@ -2036,9 +2036,17 @@
 
 - **Method / URI:** `POST /api/v1/admin/problems/tags`
 - **인증:** `ADMIN`
-- **Idempotency:** 있음
-- **대응 테이블:** `tags`
+- **Idempotency:** `Idempotency-Key` 헤더 필수. 같은 관리자·같은 키로 접수 후 24시간 이내에 같은 요청값을 보내면 최초 생성 응답(201)을 반환한다. 유효 기간 내 다른 요청값은 `IDEMPOTENCY_KEY_CONFLICT`(422)로 처리한다.
+- **대응 테이블:** `tags`, `tag_creation_records`
 - **설명:** 기존 태그가 n개이면 요청 순번을 0~n으로 보정하여 삽입한다. 삽입 위치부터 기존 태그를 한 칸씩 뒤로 밀며, 태그 저장과 순번 변경은 같은 트랜잭션으로 처리한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Content-Type` | Y | `application/json` | 요청 본문 형식 |
+    | `Idempotency-Key` | Y | `tag-create-001` | 관리자별 요청 식별 키. 1~100자 ASCII, 공백만 입력 불가, 대소문자 구별 |
+
 - **요청 바디:**
 
     | 필드 | 타입 | 필수 | 설명 |
@@ -2068,9 +2076,12 @@
     ```
     
 - **에러:**
-    - `COMMON_INVALID_REQUEST`(400) / 필수값 누락 또는 이름·순번 형식이 유효하지 않음
+    - `COMMON_INVALID_REQUEST`(400) / 필수값 누락 또는 이름·순번·멱등키 형식이 유효하지 않음
     - `PROBLEM_TAG_DUPLICATED`(409) / 같은 이름의 태그가 존재함
     - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
+    - `IDEMPOTENCY_KEY_CONFLICT`(422) / 유효 기간 내 같은 관리자·같은 키에 다른 요청값을 전달함
+- **동시성/멱등 보장:** `(admin_id, idempotency_key)` 유일 제약과 기록 행 잠금으로 중복 생성을 방지한다. 요청 기록·태그 생성·순번 변경·최초 응답 저장은 같은 DB 트랜잭션으로 처리한다.
+- **프론트 계약:** 응답 유실 등으로 재요청할 때는 같은 멱등키와 같은 `name`·`displayOrder`를 사용한다. 새로운 생성 요청에는 새 키를 사용한다.
 
 #### 2.5.3 태그 수정
 
