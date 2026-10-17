@@ -48,7 +48,7 @@ spring:
         - id: contest-service
           uri: ${CONTEST_SERVICE_URL:http://contest-service:8080}
           predicates:
-            - Path=/api/v1/exams/**, /api/v1/contests/**, /api/v1/admin/exams/**, /api/v1/admin/contests/**, /api/v1/admin/exam-submissions/**, /api/v1/admin/contest-submissions/**, /api/v1/admin/contest-operations/**
+            - Path=/api/v1/studies/*/exams, /api/v1/studies/*/exams/**, /api/v1/exams/**, /api/v1/contests/**, /api/v1/admin/exams/**, /api/v1/admin/contests/**, /api/v1/admin/exam-submissions/**, /api/v1/admin/contest-submissions/**, /api/v1/admin/contest-operations/**
 
         # study-service
         - id: study-service
