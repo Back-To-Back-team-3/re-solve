@@ -34,7 +34,7 @@ public class TagController {
      * 조건에 맞는 태그 목록을 페이지 단위로 응답한다.
      *
      * @param keyword 태그 이름에 포함된 검색어; 빈 문자열이면 전체 조회
-     * @param page 0부터 시작하는 페이지 번호
+     * @param page 0부터 21,474,836까지 허용하는 페이지 번호; 최대 페이지 크기에서도 JPA 조회 위치의 int 범위를 유지한다
      * @param size 페이지 크기; 1부터 100까지 허용
      * @param sort 정렬 필드와 방향; displayOrder 또는 name과 asc 또는 desc의 조합
      * @return 태그 목록과 페이지 정보를 담은 성공 응답
@@ -42,7 +42,7 @@ public class TagController {
     @GetMapping("/api/v1/problems/tags")
     public ApiResponse<PageResponse<TagResponse>> find(
         @RequestParam(defaultValue = "") @Size(max = 200) String keyword,
-        @RequestParam(defaultValue = "0") @Min(0) int page,
+        @RequestParam(defaultValue = "0") @Min(0) @Max(Integer.MAX_VALUE / 100) int page,
         @RequestParam(defaultValue = "100") @Min(1) @Max(100) int size,
         @RequestParam(defaultValue = "displayOrder,asc") @Pattern(regexp = "(displayOrder|name),(asc|desc)") String sort
     ) {
