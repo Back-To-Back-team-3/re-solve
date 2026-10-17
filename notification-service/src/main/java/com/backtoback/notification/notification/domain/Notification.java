@@ -68,7 +68,7 @@ public class Notification extends BaseTimeEntity {
     @Column(
         name = "type",
         nullable = false,
-        length = 30
+        length = 50
     )
     private NotificationType type;
 
