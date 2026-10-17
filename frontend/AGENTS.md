@@ -83,4 +83,5 @@ Put new files in the existing structure below. If a new top-level directory is n
 
 ## 8. Types and packages
 
-- Do not use `any`. If a type is unknown,
+- Do not use `any`. If a type is unknown, accept `unknown` and narrow it with a type guard.
+- To add a package, explain why and get approval, then commit `package-lock.json` together.

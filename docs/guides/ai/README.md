@@ -63,7 +63,7 @@ GitHub Issue·PR을 조회하고, 사용자 승인 후 등록할 수 있도록 G
 
 ### 4.1 준비물
 
-- Docker Desktop 실행 (`docker version`으로 확인)
+- Docker Desktop 설치 및 실행 (`docker version`으로 확인)
 - 사용하는 AI 도구 (Claude Code, Codex CLI, Gemini CLI 중 하나)
 - `re-solve` 저장소 전용 Fine-grained PAT
 
@@ -82,6 +82,7 @@ GitHub → Settings → Developer settings → Personal access tokens → Fine-g
 | Metadata | Read-only (자동) |
 
 - `Contents`를 Read and write로 올리지 않는다. 올리면 AI가 GitHub에서 파일을 직접 수정하거나 push할 수 있다.
+- Resource owner는 본인 계정이 아니라 `Back-To-Back-team-3` 조직으로 설정한다. `re-solve` 저장소가 조직 소유이기 때문이다.
 - 조직이 Fine-grained PAT 승인을 요구하면 발급 후 조직 관리자 승인을 받는다.
 
 ### 4.3 환경 변수 등록 (Windows)
@@ -110,6 +111,15 @@ setx GITHUB_PAT "발급한_토큰"
 #### Claude Code
 
 추가 설정 없음. `.mcp.json`이 저장소에 포함되어 있다.
+
+첫 실행 시 아래 순서로 화면이 뜬다.
+
+1. **신뢰 폴더 확인** — "Yes, I trust this folder" 선택
+2. **MCP 서버 허용** — "Use this and all future MCP servers in this project" 선택
+3. **fullscreen 렌더러** — 선택 무관 (UI 설정)
+4. **로그인** — `/login` 입력 후 "Claude account with subscription" 선택
+
+로그인 없이는 Issue 조회 등 MCP 기능이 동작하지 않는다.
 
 #### Codex CLI
 
@@ -147,7 +157,7 @@ GITHUB_TOOLSETS = "context,repos,issues,pull_requests"
 
 ### 4.5 연결 확인
 
-MCP 서버 이미지를 먼저 받는다.
+MCP 서버 이미지를 먼저 받는다. 이 단계를 건너뛰면 연결이 실패한다.
 
 ```bash
 docker pull ghcr.io/github/github-mcp-server
