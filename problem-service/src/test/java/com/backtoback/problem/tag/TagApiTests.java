@@ -753,9 +753,28 @@ class TagApiTests {
             .perform(user(get(LIST_PATH).param("keyword", "a".repeat(201))))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
-        mvc.perform(user(get(LIST_PATH).param("page", "-1"))).andExpect(status().isBadRequest());
+        for (String page : List.of("-1", "21474837", "2147483647")) {
+            mvc
+                .perform(user(get(LIST_PATH).param("page", page).param("size", "100")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+        }
         mvc.perform(user(get(LIST_PATH).param("size", "101"))).andExpect(status().isBadRequest());
         mvc.perform(user(get(LIST_PATH).param("size", "0"))).andExpect(status().isBadRequest());
+    }
+
+    /**
+     * 최대 페이지 번호와 최대 페이지 크기로 조회해도 JPA 조회 위치 범위 오류가 발생하지 않는지 검증한다.
+     *
+     * @throws Exception API 요청 또는 검증 중 오류가 발생한 경우
+     */
+    @Test
+    void maximumPageNumberIsAccepted() throws Exception {
+        mvc
+            .perform(user(get(LIST_PATH).param("page", "21474836").param("size", "100")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.content").isEmpty())
+            .andExpect(jsonPath("$.data.page").value(21_474_836));
     }
 
     /**
