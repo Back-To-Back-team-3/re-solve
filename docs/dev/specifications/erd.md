@@ -1033,13 +1033,17 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `name` | VARCHAR(200) | Y | 태그 이름 (프로그래머스 고득점 Kit 기준) |
-| `display_order` | INT | Y | 표시 순서 |
+| `display_order` | INT | Y | 표시 순서. 커밋 시 태그 n개의 순번은 0~(n-1)이며 중복 없이 연속됨 |
 | `created_at` | DATETIME(6) | Y |  |
 | `updated_at` | DATETIME(6) | Y |  |
+| `version` | BIGINT | Y | 낙관적 락 버전. 기본값 0 |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
 | `uk_tags_name` | `name` | 태그 이름 중복 방지 |
+| `uk_tags_display_order` | `display_order` | 표시 순서 중복 방지 (UNIQUE) |
+
+**순번 변경:** Redis 공통 잠금과 DB 행 잠금을 사용한다. 같은 트랜잭션 안에서 변경 대상에 임시 음수 순번을 배정한 뒤 최종 순번을 저장하여 UNIQUE 충돌을 피한다. 커밋된 순번은 0 이상이며, 별도 잠금 테이블은 사용하지 않는다.
 
 #### 4.2.9 회차별 태그 (`problem_revision_tags`) `[IMMUTABLE]`
 
