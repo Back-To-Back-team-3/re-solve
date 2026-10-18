@@ -49,6 +49,9 @@ dependencies {
     implementation 'org.springframework:spring-context'
     implementation 'org.slf4j:slf4j-api'
 
+    // Boot가 제공하는 RestClient.Builder에 요청 추적 인터셉터 연결
+    implementation 'org.springframework.boot:spring-boot-restclient'
+
     // 서버 없이 MVC 요청·JSON 응답과 실제 검증 예외 확인
     testImplementation 'org.springframework:spring-webmvc'
     testImplementation 'org.springframework:spring-test'
