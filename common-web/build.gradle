@@ -37,6 +37,11 @@ dependencies {
     // 공개 예외 처리 메서드에서 사용하는 공통 응답과 오류 코드
     api project(':common-core')
 
+    // 공개 인증 타입·처리기와 서비스의 JSON 매퍼 연결
+    api 'org.springframework.security:spring-security-core'
+    api 'org.springframework.security:spring-security-web'
+    api 'tools.jackson.core:jackson-databind'
+
     // 공개 MVC 예외의 Servlet 상위 타입; 실행 시에는 사용하는 서비스가 제공
     compileOnlyApi 'jakarta.servlet:jakarta.servlet-api'
 
@@ -48,7 +53,6 @@ dependencies {
     testImplementation 'org.springframework:spring-webmvc'
     testImplementation 'org.springframework:spring-test'
     testImplementation 'jakarta.servlet:jakarta.servlet-api'
-    testImplementation 'tools.jackson.core:jackson-databind'
     testImplementation 'org.hibernate.validator:hibernate-validator'
 
     // 테스트 실행·검증과 서버 오류 로그 수집
