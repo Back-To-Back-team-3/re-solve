@@ -15,11 +15,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockServletContext;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -36,14 +40,15 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 
+import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.common.web.security.user.UserRole;
 
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Gateway 헤더가 MVC 사용자 정보와 경로 권한 검사로 연결되는지 검증한다.
- * 테스트용 보안 체인에 공통 필터와 오류 처리기를 등록한다.
+ * Gateway 헤더가 MVC 사용자 정보와 경로·메서드 권한 검사로 연결되는지 검증한다.
+ * 테스트용 보안 체인과 MVC 공통 예외 처리기를 함께 등록한다.
  * <p>기준 문서</p>
  * <ul>
  * <li>API 명세서 v1.1 / §0.1 기본 규칙: Gateway 헤더 전달과 내부 API 인증 생략</li>
@@ -162,6 +167,57 @@ class GatewaySecurityTest {
     }
 
     /**
+     * URL에서 허용한 요청을 메서드 권한으로 검사해 MVC 공통 처리기가 보안 예외를 삼키지 않는지 확인한다.
+     *
+     * @param role 요청자의 역할; null이면 사용자 헤더 없이 요청
+     * @throws Exception MVC 요청 처리 또는 오류 JSON 읽기에 실패한 경우
+     */
+    @ParameterizedTest
+    @NullSource
+    @EnumSource(UserRole.class)
+    @DisplayName("메서드 권한 검사는 익명 요청에 401, USER에 403을 반환하고 ADMIN을 허용한다")
+    void preservesMethodSecurityResponses(UserRole role) throws Exception {
+        // given
+        var request
+            = userRequest("/api/v1/method-admin", role == null ? null : "12", role == null ? null : role.name());
+
+        // when
+        var response = mockMvc.perform(request).andReturn().getResponse();
+
+        // then
+        if (role == UserRole.ADMIN) {
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(response.getContentAsString()).isEqualTo("ok");
+        } else {
+            assertErrorResponse(
+                response,
+                role == null ? 401 : 403,
+                role == null ? "AUTH_TOKEN_INVALID" : "AUTH_ACCESS_DENIED"
+            );
+        }
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    /**
+     * MVC 내부에서 발생한 인증 예외도 서버 오류가 아닌 공통 인증 실패 응답으로 연결되는지 확인한다.
+     *
+     * @throws Exception MVC 요청 처리 또는 오류 JSON 읽기에 실패한 경우
+     */
+    @Test
+    @DisplayName("MVC 호출 중 인증 예외가 발생하면 공통 401을 반환한다")
+    void preservesAuthenticationFailureFromMvc() throws Exception {
+        // given
+        var request = userRequest("/api/v1/authentication-failure", "12", "USER");
+
+        // when
+        var response = mockMvc.perform(request).andReturn().getResponse();
+
+        // then
+        assertErrorResponse(response, 401, "AUTH_TOKEN_INVALID");
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    /**
      * 공개 경로는 헤더 없이 허용하고 내부 경로에서는 사용자 헤더를 해석하지 않는지 확인한다.
      *
      * @throws Exception MVC 요청 처리에 실패한 경우
@@ -238,8 +294,14 @@ class GatewaySecurityTest {
      */
     @Configuration(proxyBeanMethods = false)
     @EnableWebSecurity
+    @EnableMethodSecurity
     @EnableWebMvc
-    @Import(ProbeController.class)
+    @Import(
+        {
+            ProbeController.class,
+            GlobalExceptionHandler.class
+        }
+    )
     static class SecurityTestConfiguration {
         /**
          * MVC와 공통 오류 처리기에 사용할 JSON 매퍼를 제공한다.
@@ -270,11 +332,11 @@ class GatewaySecurityTest {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(
                     authorize -> authorize
-                        .requestMatchers("/api/v1/public", "/internal/**")
+                        .requestMatchers("/api/v1/public", "/internal/**", "/api/v1/method-admin")
                         .permitAll()
                         .requestMatchers("/api/v1/admin/**")
                         .hasRole("ADMIN")
-                        .requestMatchers("/api/v1/me")
+                        .requestMatchers("/api/v1/me", "/api/v1/authentication-failure")
                         .authenticated()
                         .anyRequest()
                         .denyAll()
@@ -303,6 +365,27 @@ class GatewaySecurityTest {
         @GetMapping("/api/v1/me")
         GatewayUser me(@AuthenticationPrincipal GatewayUser user) {
             return user;
+        }
+
+        /**
+         * URL에서 허용한 요청에 메서드의 관리자 권한 검사를 적용한다.
+         *
+         * @return 메서드 권한을 통과한 경우의 고정 응답
+         */
+        @PreAuthorize("hasRole('ADMIN')")
+        @GetMapping("/api/v1/method-admin")
+        public String methodAdmin() {
+            return "ok";
+        }
+
+        /**
+         * MVC 호출 중 인증 정보를 확인할 수 없는 상황을 재현한다.
+         *
+         * @throws AuthenticationCredentialsNotFoundException 테스트용 인증 실패
+         */
+        @GetMapping("/api/v1/authentication-failure")
+        public void authenticationFailure() {
+            throw new AuthenticationCredentialsNotFoundException("인증 정보를 확인할 수 없습니다.");
         }
 
         /**
