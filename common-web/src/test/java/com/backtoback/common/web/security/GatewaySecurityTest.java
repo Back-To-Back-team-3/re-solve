@@ -2,9 +2,11 @@ package com.backtoback.common.web.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.Callable;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
@@ -218,6 +220,39 @@ class GatewaySecurityTest {
     }
 
     /**
+     * 최초 요청 종료 후 컨텍스트가 비워져도 비동기 재진입에서 같은 사용자와 권한을 복원하는지 확인한다.
+     *
+     * @throws Exception MVC 비동기 요청 처리 또는 JSON 읽기에 실패한 경우
+     */
+    @Test
+    @DisplayName("비동기 재진입 시 세션 없이 사용자 인증을 유지하고 요청 종료 후 정리한다")
+    void retainsAuthenticationAcrossAsyncDispatch() throws Exception {
+        // given
+        var request = userRequest("/api/v1/async-me", "12", "USER");
+
+        // when: Callable 처리가 시작된 뒤 최초 요청 스레드의 인증 정리를 확인한다.
+        var initial = mockMvc.perform(request).andReturn();
+        assertThat(initial.getRequest().isAsyncStarted()).isTrue();
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        var asyncUser = (GatewayUser)initial.getAsyncResult();
+
+        // then
+        assertThat(asyncUser.userId()).isEqualTo("12");
+        assertThat(asyncUser.role()).isEqualTo(UserRole.USER);
+
+        // when: 결과를 작성하는 ASYNC dispatch에서 경로 권한을 다시 검사한다.
+        var response = mockMvc.perform(asyncDispatch(initial)).andReturn().getResponse();
+        var json = mapper.readTree(response.getContentAsString(StandardCharsets.UTF_8));
+
+        // then
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(json.get("userId").asString()).isEqualTo("12");
+        assertThat(json.get("role").asString()).isEqualTo("USER");
+        assertThat(initial.getRequest().getSession(false)).isNull();
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    /**
      * 공개 경로는 헤더 없이 허용하고 내부 경로에서는 사용자 헤더를 해석하지 않는지 확인한다.
      *
      * @throws Exception MVC 요청 처리에 실패한 경우
@@ -336,7 +371,7 @@ class GatewaySecurityTest {
                         .permitAll()
                         .requestMatchers("/api/v1/admin/**")
                         .hasRole("ADMIN")
-                        .requestMatchers("/api/v1/me", "/api/v1/authentication-failure")
+                        .requestMatchers("/api/v1/me", "/api/v1/authentication-failure", "/api/v1/async-me")
                         .authenticated()
                         .anyRequest()
                         .denyAll()
@@ -365,6 +400,16 @@ class GatewaySecurityTest {
         @GetMapping("/api/v1/me")
         GatewayUser me(@AuthenticationPrincipal GatewayUser user) {
             return user;
+        }
+
+        /**
+         * MVC 비동기 작업에서 현재 인증 principal을 읽고 결과 작성용 재진입을 발생시킨다.
+         *
+         * @return 비동기 처리 스레드에서 조회한 사용자 정보를 반환하는 작업
+         */
+        @GetMapping("/api/v1/async-me")
+        public Callable<GatewayUser> asyncMe() {
+            return () -> (GatewayUser)SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         }
 
         /**
