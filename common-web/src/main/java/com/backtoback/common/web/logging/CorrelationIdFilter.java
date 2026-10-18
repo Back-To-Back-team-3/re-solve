@@ -43,7 +43,8 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 
     /**
      * 검증한 추적 ID로 요청을 처리하고 예외 발생 여부와 관계없이 이전 MDC 상태로 정리한다.
-     * 요청 종료 로그에는 HTTP 메서드와 현재 응답 상태만 기록한다.
+     * 정상 반환 시 HTTP 메서드와 현재 응답 상태를 기록한다.
+     * 예외가 전파되면 최종 상태가 아직 정해지지 않았으므로 상태 대신 예외 종류만 기록한다.
      *
      * @param request 추적 ID 헤더를 조회할 HTTP 요청
      * @param response 같은 추적 ID를 전달할 HTTP 응답
@@ -62,11 +63,18 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
         MDC.put(MDC_KEY, correlationId);
         response.setHeader(HEADER, correlationId);
 
+        boolean completed = false;
         try {
             chain.doFilter(request, response);
+            completed = true;
+        } catch (IOException | ServletException | RuntimeException | Error exception) {
+            LOG.warn("요청 처리 예외: method={}, exceptionType={}", request.getMethod(), exception.getClass().getName());
+            throw exception;
         } finally {
             try {
-                LOG.info("요청 처리 종료: method={}, status={}", request.getMethod(), response.getStatus());
+                if (completed) {
+                    LOG.info("요청 처리 종료: method={}, status={}", request.getMethod(), response.getStatus());
+                }
             } finally {
                 // 재사용되는 스레드에 이번 요청의 ID가 남지 않도록 이전 상태를 복원한다.
                 if (previous == null) {
