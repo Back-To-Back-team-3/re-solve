@@ -48,6 +48,15 @@ dependencies {
     // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
+
+    // JPA 감사 리스너와 실제 저장·수정 동작 검증
+    testImplementation 'org.springframework:spring-orm'
+    testImplementation 'org.springframework:spring-jdbc'
+    testImplementation 'org.hibernate.orm:hibernate-core'
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.assertj:assertj-core'
+    testRuntimeOnly 'com.h2database:h2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
