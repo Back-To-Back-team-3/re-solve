@@ -8,16 +8,23 @@ import java.io.IOException;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 
 /**
  * 요청 추적 ID의 수신·응답·MDC 정리와 나가는 HTTP 요청의 연결을 검증한다.
@@ -30,22 +37,36 @@ import org.springframework.web.client.RestClient;
  */
 class CorrelationIdTest {
     private final CorrelationIdFilter filter = new CorrelationIdFilter();
+    private final Logger logger = (Logger)LoggerFactory.getLogger(CorrelationIdFilter.class);
+    private ListAppender<ILoggingEvent> appender;
 
     /**
-     * 테스트에서 설정한 추적 ID가 다음 테스트에 남지 않도록 정리한다.
+     * 필터의 종료 로그만 수집해 상태 기록과 민감한 메시지 제외 여부를 확인한다.
+     */
+    @BeforeEach
+    void setUp() {
+        appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+    }
+
+    /**
+     * 추적 ID와 로그 수집기를 정리해 다음 테스트에 영향을 주지 않도록 한다.
      */
     @AfterEach
     void tearDown() {
         MDC.remove(CorrelationIdFilter.MDC_KEY);
+        logger.detachAppender(appender);
+        appender.stop();
     }
 
     /**
-     * 요청 처리 중 MDC와 응답이 같은 ID를 사용하고 정상 종료 후 현재 ID가 제거되는지 확인한다.
+     * 요청 처리 중 같은 ID를 사용하고 정상 종료 상태가 기록된 뒤 MDC가 정리되는지 확인한다.
      *
      * @throws Exception 필터 체인의 요청 처리에 실패한 경우
      */
     @Test
-    @DisplayName("유효한 추적 ID를 MDC와 응답에 유지하고 정상 종료 후 제거한다")
+    @DisplayName("유효한 추적 ID를 유지하고 정상 종료 상태를 기록한 뒤 MDC를 정리한다")
     void preservesIncomingIdAndClearsMdc() throws Exception {
         // given
         var request = request("request-123");
@@ -54,11 +75,16 @@ class CorrelationIdTest {
         // when
         filter.doFilter(request, response, (servletRequest, servletResponse) -> {
             assertThat(MDC.get(CorrelationIdFilter.MDC_KEY)).isEqualTo("request-123");
+            response.setStatus(204);
         });
 
         // then
         assertThat(response.getHeader(CorrelationIdFilter.HEADER)).isEqualTo("request-123");
         assertThat(MDC.get(CorrelationIdFilter.MDC_KEY)).isNull();
+        assertThat(appender.list).singleElement().satisfies(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.INFO);
+            assertThat(event.getFormattedMessage()).contains("요청 처리 종료", "method=GET", "status=204");
+        });
     }
 
     /**
@@ -89,10 +115,10 @@ class CorrelationIdTest {
     }
 
     /**
-     * 요청 처리 예외를 그대로 전달하면서 기존 MDC 값을 복원하는지 확인한다.
+     * 실패한 요청의 기본 상태를 정상 종료로 기록하지 않고 원래 예외와 기존 MDC를 유지하는지 확인한다.
      */
     @Test
-    @DisplayName("요청 처리 중 예외가 발생해도 이전 MDC 추적 ID를 복원한다")
+    @DisplayName("요청 처리 예외는 상태 없이 기록하고 이전 MDC 추적 ID를 복원한다")
     void restoresPreviousMdcAfterFailure() {
         // given
         var request = request("current-request");
@@ -107,6 +133,13 @@ class CorrelationIdTest {
         })).isSameAs(failure);
         assertThat(response.getHeader(CorrelationIdFilter.HEADER)).isEqualTo("current-request");
         assertThat(MDC.get(CorrelationIdFilter.MDC_KEY)).isEqualTo("previous-request");
+        assertThat(appender.list).singleElement().satisfies(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
+            assertThat(event.getFormattedMessage())
+                .contains("요청 처리 예외", IOException.class.getName())
+                .doesNotContain("요청 처리 종료", "status=", failure.getMessage());
+            assertThat(event.getThrowableProxy()).isNull();
+        });
     }
 
     /**
