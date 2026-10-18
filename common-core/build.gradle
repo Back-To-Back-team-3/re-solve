@@ -38,6 +38,9 @@ dependencies {
     api 'org.springframework:spring-web'
     api 'org.springframework.data:spring-data-commons'
 
+    // 서비스에 공통 Clock Bean 제공
+    implementation 'org.springframework:spring-context'
+
     // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
