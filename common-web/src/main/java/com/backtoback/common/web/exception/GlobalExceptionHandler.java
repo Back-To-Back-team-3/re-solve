@@ -11,6 +11,8 @@ import org.springframework.beans.TypeMismatchException;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.util.StringUtils;
 import org.springframework.validation.FieldError;
 import org.springframework.web.ErrorResponse;
@@ -32,6 +34,7 @@ import com.backtoback.common.exception.ErrorCode;
 /**
  * Spring MVC 컨트롤러에서 발생한 예외를 공통 오류 응답으로 변환한다.
  * 서비스별 비즈니스 예외는 지정된 오류 코드를 사용하고, Spring 표준 예외는 상태와 응답 헤더를 유지한다.
+ * MVC 호출 중 발생한 인증·권한 예외는 보안 필터 체인의 401·403 처리에 맡긴다.
  * 서버 오류는 예외 메시지를 제외하고 타입과 발생 위치를 로그에 기록한다.
  * 사용하는 서비스에서 컴포넌트 스캔 또는 명시적 import로 등록해야 하며, 필터 예외는 처리하지 않는다.
  * <p>기준 문서</p>
@@ -193,6 +196,24 @@ public class GlobalExceptionHandler {
         return ResponseEntity
             .status(CommonErrorCode.COMMON_INTERNAL_SERVER_ERROR.getStatus())
             .body(ApiErrorResponse.of(CommonErrorCode.COMMON_INTERNAL_SERVER_ERROR));
+    }
+
+    /**
+     * MVC 호출 중 발생한 보안 예외를 다시 던져 보안 필터 체인이 인증 여부에 따라 응답하도록 한다.
+     * 이 처리기에서 상태를 고정하지 않아 익명 요청의 접근 거절도 인증 실패로 구분할 수 있다.
+     *
+     * @param exception MVC 호출에서 전달된 인증 또는 권한 예외
+     * @throws AccessDeniedException 접근 권한이 부족한 경우 원래 예외를 전달
+     * @throws AuthenticationException 인증에 실패한 경우 원래 예외를 전달
+     */
+    @ExceptionHandler(
+        {
+            AccessDeniedException.class,
+            AuthenticationException.class
+        }
+    )
+    public void propagateSecurityException(RuntimeException exception) {
+        throw exception;
     }
 
     /**
