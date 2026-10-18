@@ -7,6 +7,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationToken;
+import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.backtoback.common.web.security.user.GatewayUser;
@@ -24,6 +25,8 @@ import jakarta.servlet.http.HttpServletResponse;
  * 사용하는 서비스는 상태를 저장하지 않는 보안 체인에서 ExceptionTranslationFilter 뒤,
  * AuthorizationFilter 앞에 등록하고 공통 401·403 처리기를 연결해야 한다.
  * 보안 체인 밖의 Servlet 필터로 중복 등록하지 않으며, 요청 종료 시 인증 정보 정리는 보안 체인이 담당한다.
+ * 인증 정보는 요청 속성에 저장해 같은 요청의 비동기 재진입에서도 복원하며 세션에는 저장하지 않는다.
+ * 보안 체인의 컨텍스트 저장소도 동일한 요청 속성 저장소를 사용해야 한다.
  * <p>기준 문서</p>
  * <ul>
  * <li>API 명세서 v1.1 / §0.1 기본 규칙: Gateway 인증과 사용자 식별·역할 전달</li>
@@ -33,6 +36,8 @@ import jakarta.servlet.http.HttpServletResponse;
  */
 public class RequestAuthenticationFilter extends OncePerRequestFilter {
     private static final int MAX_USER_ID_LENGTH = 128;
+    private final RequestAttributeSecurityContextRepository contextRepository
+        = new RequestAttributeSecurityContextRepository();
 
     /**
      * 컨텍스트 경로를 제외한 /api/ 요청에만 사용자 인증 정보를 반영한다.
@@ -51,7 +56,7 @@ public class RequestAuthenticationFilter extends OncePerRequestFilter {
         IOException {
         String path = request.getRequestURI().substring(request.getContextPath().length());
         if (path.startsWith("/api/")) {
-            authenticateUser(request);
+            authenticateUser(request, response);
         }
         chain.doFilter(request, response);
     }
@@ -60,9 +65,10 @@ public class RequestAuthenticationFilter extends OncePerRequestFilter {
      * 사용자 헤더를 검증한 뒤 요청 전용 인증 컨텍스트를 설정한다.
      *
      * @param request Gateway 사용자 ID와 역할 헤더를 조회할 요청
+     * @param response 인증 정보 저장에 전달할 현재 응답
      * @throws BadCredentialsException ID가 없거나 공백·길이 초과이거나 역할이 유효하지 않은 경우
      */
-    private void authenticateUser(HttpServletRequest request) {
+    private void authenticateUser(HttpServletRequest request, HttpServletResponse response) {
         String userId = request.getHeader("X-User-Id");
         String role = request.getHeader("X-User-Role");
         if (userId == null && role == null) {
@@ -83,6 +89,7 @@ public class RequestAuthenticationFilter extends OncePerRequestFilter {
         var context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(authentication);
         SecurityContextHolder.setContext(context);
+        contextRepository.saveContext(context, request, response);
     }
 
     /**
