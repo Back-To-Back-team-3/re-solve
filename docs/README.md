@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | 개발·협업 가이드 | [Git/GitHub 매뉴얼](guides/git-github.md) | 브랜치·Issue·PR·리뷰·병합 규칙과 작업 흐름 |
 | 개발·협업 가이드 | [컨벤션·빌드 매뉴얼](guides/convention-build-manual.md) | Spotless·Checkstyle·빌드·주석 작성 규칙 |
+| 개발·협업 가이드 | [공통 모듈 적용 가이드](guides/common-module.md) | 모듈 선택·설정 등록·보안 체인 연결·기존 서비스 적용 주의점 |
 | 개발·협업 가이드 | [AI 협업 안내](guides/ai/README.md) | AI 도구별 설정 파일·세션 시작·세 도구의 GitHub MCP 연결 |
 | 기획 | [기획서](dev/planning/planning.md) | 서비스 개요, 기능 목록, 마일스톤 |
 | 기획 | [정책 및 상태](dev/planning/policy-and-state.md) | 도메인 정책, 상태 전이, 불변식 |
