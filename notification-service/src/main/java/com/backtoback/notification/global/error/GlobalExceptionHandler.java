@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -77,6 +79,28 @@ public class GlobalExceptionHandler {
             .body(ErrorResponse.of(ErrorCode.INVALID_INPUT_VALUE, details));
     }
 
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleHttpRequestMethodNotSupportedException(
+        HttpRequestMethodNotSupportedException exception
+    ) {
+        log.warn("HttpRequestMethodNotSupportedException: {}", exception.getMessage());
+        return ResponseEntity
+            .status(HttpStatus.METHOD_NOT_ALLOWED)
+            .headers(exception.getHeaders())
+            .body(ErrorResponse.of(ErrorCode.INVALID_INPUT_VALUE));
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleHttpMediaTypeNotSupportedException(
+        HttpMediaTypeNotSupportedException exception
+    ) {
+        log.warn("HttpMediaTypeNotSupportedException: {}", exception.getMessage());
+        return ResponseEntity
+            .status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+            .headers(exception.getHeaders())
+            .body(ErrorResponse.of(ErrorCode.INVALID_INPUT_VALUE));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleException(Exception exception) {
         if (exception instanceof org.springframework.web.ErrorResponse springError
@@ -89,6 +113,7 @@ public class GlobalExceptionHandler {
                 );
             return ResponseEntity
                 .status(springError.getStatusCode())
+                .headers(springError.getHeaders())
                 .body(ErrorResponse.of(ErrorCode.INVALID_INPUT_VALUE));
         }
 
