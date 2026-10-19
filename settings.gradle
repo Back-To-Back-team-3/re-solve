@@ -1,4 +1,6 @@
 rootProject.name = 're-solve'
+
+// 서비스 모듈
 include 'api-gateway'
 include 'contest-service'
 include 'integration-service'
@@ -9,3 +11,8 @@ include 'problem-service'
 include 'study-service'
 include 'ai-service'
 include 'analytics-service'
+
+// 공통 모듈
+include 'common-core'
+include 'common-web'
+include 'common-jpa'

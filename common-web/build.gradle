@@ -1,0 +1,76 @@
+plugins {
+    id 'java-library'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'checkstyle'
+}
+
+group = 'com.backtoback'
+version = '1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencyManagement {
+    imports {
+        mavenBom 'org.springframework.boot:spring-boot-dependencies:4.1.1'
+    }
+}
+
+checkstyle {
+    toolVersion = '10.12.5'
+    configFile = rootProject.file('config/naver-checkstyle-rules.xml')
+    configProperties = [
+        'suppressionFile': rootProject.file('config/naver-checkstyle-suppressions.xml')
+    ]
+    ignoreFailures = false
+    maxWarnings = 0
+}
+
+dependencies {
+    // 공개 예외 처리 메서드에서 사용하는 공통 응답과 오류 코드
+    api project(':common-core')
+
+    // 공개 인증 타입·처리기와 서비스의 JSON 매퍼 연결
+    api 'org.springframework.security:spring-security-core'
+    api 'org.springframework.security:spring-security-web'
+    api 'tools.jackson.core:jackson-databind'
+
+    // 공개 MVC 예외의 Servlet 상위 타입; 실행 시에는 사용하는 서비스가 제공
+    compileOnlyApi 'jakarta.servlet:jakarta.servlet-api'
+
+    // 요청 검증 결과 조회와 예외 로깅
+    implementation 'org.springframework:spring-context'
+    implementation 'org.slf4j:slf4j-api'
+
+    // Boot가 제공하는 RestClient.Builder에 요청 추적 인터셉터 연결
+    implementation 'org.springframework.boot:spring-boot-restclient'
+
+    // 서버 없이 MVC 요청·JSON 응답과 실제 검증 예외 확인
+    testImplementation 'org.springframework:spring-webmvc'
+    testImplementation 'org.springframework:spring-test'
+    testImplementation 'org.springframework.security:spring-security-config'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'jakarta.servlet:jakarta.servlet-api'
+    testImplementation 'org.hibernate.validator:hibernate-validator'
+
+    // 테스트 실행·검증과 서버 오류 로그 수집
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.assertj:assertj-core'
+    testImplementation 'ch.qos.logback:logback-classic'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
