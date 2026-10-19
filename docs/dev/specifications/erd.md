@@ -2289,7 +2289,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `member_id` | BIGINT | Y | 수신 회원 ID (외부 참조) |
 | `source_event_id` | VARCHAR(64) | Y | 원천 도메인 이벤트 ID (멱등성 기준) |
-| `type` | VARCHAR(30) | Y | 알림 유형 (`SUBMISSION_JUDGED`, `EXAM_FINALIZED`, `LEVEL_CHANGED` 등) |
+| `type` | VARCHAR(50) | Y | 알림 유형 (`SUBMISSION_JUDGED`, `EXAM_FINALIZED`, `LEVEL_CHANGED` 등) |
 | `title` | VARCHAR(200) | Y | 알림 제목 |
 | `content` | VARCHAR(500) | Y | 알림 본문 메시지 |
 | `link_url` | VARCHAR(500) | N | NULL 허용: 이동 경로 없는 알림 |
