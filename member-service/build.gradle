@@ -30,6 +30,9 @@ repositories {
 }
 
 dependencies {
+    // 공통 응답·예외 (common-core 포함)
+    implementation project(':common-web')
+
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'

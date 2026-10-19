@@ -23,6 +23,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import com.backtoback.common.exception.BusinessException;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.auth.AuthPropertiesFixture;
 import com.backtoback.member.auth.client.GitHubOAuthClient;
 import com.backtoback.member.auth.client.GitHubUser;
@@ -38,8 +40,7 @@ import com.backtoback.member.auth.store.RefreshTokenStore.RotationOutcome;
 import com.backtoback.member.auth.store.RefreshTokenStore.RotationResult;
 import com.backtoback.member.auth.token.AccessTokenProvider;
 import com.backtoback.member.auth.token.SecureTokenGenerator;
-import com.backtoback.member.global.error.BusinessException;
-import com.backtoback.member.global.error.ErrorCode;
+import com.backtoback.member.global.error.MemberErrorCode;
 import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.domain.MemberStatus;
 import com.backtoback.member.member.service.GitHubMemberRegistration;
@@ -127,7 +128,7 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.refresh(null))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_REFRESH_TOKEN_INVALID);
+            .isEqualTo(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID);
         verifyNoInteractions(refreshTokenStore);
     }
 
@@ -140,7 +141,7 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.refresh("unknown"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_REFRESH_TOKEN_INVALID);
+            .isEqualTo(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID);
         verifyNoInteractions(accessTokenProvider);
     }
 
@@ -153,7 +154,7 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.refresh("stolen"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_REFRESH_TOKEN_REUSED);
+            .isEqualTo(MemberErrorCode.AUTH_REFRESH_TOKEN_REUSED);
         verifyNoInteractions(accessTokenProvider);
     }
 
@@ -169,7 +170,7 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.refresh("old-refresh"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_REFRESH_TOKEN_INVALID);
+            .isEqualTo(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID);
         verify(refreshTokenStore).revokeSession(7L, "sid-1", "new-refresh");
     }
 
@@ -204,13 +205,13 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.logout(7L, null, "refresh"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
+            .isEqualTo(CommonErrorCode.AUTH_TOKEN_INVALID);
 
         given(accessTokenProvider.decode("other")).willReturn(Optional.of(accessJwt("8", NOW.plusSeconds(60))));
         assertThatThrownBy(() -> authService.logout(7L, "Bearer other", "refresh"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
+            .isEqualTo(CommonErrorCode.AUTH_TOKEN_INVALID);
         verifyNoInteractions(accessTokenBlocklist, refreshTokenStore);
     }
 
@@ -257,7 +258,7 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.startGitHubLogin("https://evil.example"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.COMMON_INVALID_REQUEST);
+            .isEqualTo(CommonErrorCode.COMMON_INVALID_REQUEST);
         verifyNoInteractions(oAuthStateStore);
     }
 
@@ -269,11 +270,11 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.completeGitHubLogin("code", "unknown", null, "nonce-1"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
+            .isEqualTo(CommonErrorCode.AUTH_TOKEN_INVALID);
         assertThatThrownBy(() -> authService.completeGitHubLogin("code", null, null, "nonce-1"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
+            .isEqualTo(CommonErrorCode.AUTH_TOKEN_INVALID);
         verify(gitHubOAuthClient, never()).fetchUser(anyString());
     }
 
@@ -287,11 +288,11 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.completeGitHubLogin("code", "state-1", null, "victim-nonce"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
+            .isEqualTo(CommonErrorCode.AUTH_TOKEN_INVALID);
         assertThatThrownBy(() -> authService.completeGitHubLogin("code", "state-2", null, null))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID);
+            .isEqualTo(CommonErrorCode.AUTH_TOKEN_INVALID);
         verify(gitHubOAuthClient, never()).fetchUser(anyString());
     }
 
@@ -304,7 +305,7 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.completeGitHubLogin(null, "state-1", "access_denied", "nonce-1"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_OAUTH_DENIED);
+            .isEqualTo(MemberErrorCode.AUTH_OAUTH_DENIED);
         verify(oAuthStateStore).consume("state-1");
         verify(gitHubOAuthClient, never()).fetchUser(anyString());
     }
@@ -319,11 +320,11 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.completeGitHubLogin(null, "state-1", "server_error", "nonce-1"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_OAUTH_FAILED);
+            .isEqualTo(MemberErrorCode.AUTH_OAUTH_FAILED);
         assertThatThrownBy(() -> authService.completeGitHubLogin(null, "state-2", null, "nonce-1"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_OAUTH_FAILED);
+            .isEqualTo(MemberErrorCode.AUTH_OAUTH_FAILED);
     }
 
     @Test
@@ -350,7 +351,7 @@ class AuthServiceTest {
     @Test
     @DisplayName("콜백 실패 주소: 오류 코드를 error로 붙인 프론트 콜백")
     void frontendCallbackErrorUrl() {
-        assertThat(authService.frontendCallbackError(ErrorCode.AUTH_OAUTH_DENIED))
+        assertThat(authService.frontendCallbackError(MemberErrorCode.AUTH_OAUTH_DENIED))
             .isEqualTo(AuthPropertiesFixture.FRONTEND_ORIGIN + "/auth/callback?error=AUTH_OAUTH_DENIED");
     }
 
@@ -362,7 +363,7 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.exchangeLoginCode("lc_used", "nonce-1"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_LOGIN_CODE_INVALID);
+            .isEqualTo(MemberErrorCode.AUTH_LOGIN_CODE_INVALID);
         verifyNoInteractions(accessTokenProvider, refreshTokenStore);
     }
 
@@ -376,11 +377,11 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.exchangeLoginCode("lc_abc", "victim-nonce"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_LOGIN_CODE_INVALID);
+            .isEqualTo(MemberErrorCode.AUTH_LOGIN_CODE_INVALID);
         assertThatThrownBy(() -> authService.exchangeLoginCode("lc_def", null))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_LOGIN_CODE_INVALID);
+            .isEqualTo(MemberErrorCode.AUTH_LOGIN_CODE_INVALID);
         verifyNoInteractions(accessTokenProvider, refreshTokenStore);
     }
 
