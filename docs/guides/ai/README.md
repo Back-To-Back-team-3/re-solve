@@ -106,6 +106,20 @@ setx GITHUB_PAT "발급한_토큰"
 
 토큰 길이(보통 90자 이상)가 출력되면 정상이다. 0이 나오면 IntelliJ 재시작 여부를 확인한다.
 
+**Codex CLI 사용자 추가 단계**
+
+Codex는 Docker 컨테이너에 `GITHUB_PERSONAL_ACCESS_TOKEN` 이름으로 값을 전달해야 한다. 셸 세션마다 아래 명령을 실행한다.
+
+```powershell
+$env:GITHUB_PERSONAL_ACCESS_TOKEN = $env:GITHUB_PAT
+```
+
+매번 실행하기 번거로우면 PowerShell 프로필(`$PROFILE`)에 추가한다.
+
+```powershell
+Add-Content $PROFILE "`n`$env:GITHUB_PERSONAL_ACCESS_TOKEN = `$env:GITHUB_PAT"
+```
+
 ### 4.4 도구별 추가 설정
 
 #### Claude Code
@@ -126,14 +140,17 @@ setx GITHUB_PAT "발급한_토큰"
 `~/.codex/config.toml`에 직접 추가한다. 파일이 없으면 새로 만든다.
 
 ```toml
-[mcp.servers.github]
+[mcp_servers.github]
 command = "docker"
 args = ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "-e", "GITHUB_TOOLSETS", "ghcr.io/github/github-mcp-server"]
+env_vars = ["GITHUB_PERSONAL_ACCESS_TOKEN"]
 
-[mcp.servers.github.env]
-GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PAT}"
+[mcp_servers.github.env]
 GITHUB_TOOLSETS = "context,repos,issues,pull_requests"
 ```
+
+- `env_vars`는 셸의 `GITHUB_PERSONAL_ACCESS_TOKEN` 값을 Docker 컨테이너에 그대로 전달한다. 4.3의 추가 단계에서 이 변수를 먼저 설정해야 한다.
+- `[mcp_servers]`가 Codex CLI 공식 문서 기준이다. `[mcp.servers]`로 쓰면 서버가 등록되지 않는다.
 
 #### Gemini CLI
 
@@ -192,9 +209,9 @@ docker pull ghcr.io/github/github-mcp-server
 | `($env:GITHUB_PAT).Length`가 0 | IntelliJ 재시작 여부 재확인, `setx` 명령을 PowerShell 관리자 권한으로 재실행 |
 | Git Bash에서 환경 변수 안 읽힘 | Git Bash는 `setx` 변수를 즉시 못 읽는 경우가 있다. `export GITHUB_PAT=$(cmd //c echo %GITHUB_PAT%)`로 임시 적용 |
 | Docker 명령을 찾을 수 없음 | Docker Desktop 실행 여부, PATH에 Docker 등록 여부 확인 |
-| 401 Bad credentials | 터미널에서 `($env:GITHUB_PAT).Length` 확인, 토큰 만료 여부 |
-| 403 Resource not accessible | PAT 저장소 범위·권한, 조직 승인 여부 |
-| Issue 생성은 되고 파일 수정은 거부됨 | 정상 (`Contents: Read-only`) |
+| 401 Bad credentials (Claude Code) | 터미널에서 `($env:GITHUB_PAT).Length` 확인, 토큰 만료 여부 |
+| 401 Bad credentials (Codex) | 셸에서 `$env:GITHUB_PERSONAL_ACCESS_TOKEN` 설정 여부 확인, 4.3 Codex 추가 단계 재실행 |
+| Codex에서 `github` 서버가 등록되지 않음 | `config.toml` 키가 `[mcp_servers]`인지 확인. `[mcp.servers]`는 동작하지 않는다 |
 
 ### 4.8 보안
 
