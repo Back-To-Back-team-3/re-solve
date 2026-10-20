@@ -18,9 +18,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import com.backtoback.common.exception.BusinessException;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.auth.client.GitHubUser;
-import com.backtoback.member.global.error.BusinessException;
-import com.backtoback.member.global.error.ErrorCode;
 import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.domain.MemberRole;
 import com.backtoback.member.member.domain.MemberStatus;
@@ -96,6 +96,6 @@ class MemberServiceTest {
         assertThatThrownBy(() -> memberService.findOrRegister(GITHUB_USER))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_ACCESS_DENIED);
+            .isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED);
     }
 }
