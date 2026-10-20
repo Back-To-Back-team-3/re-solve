@@ -9,7 +9,7 @@
 - `미통과`: 위치와 이유를 적는다.
 - `해당 없음`: 이유를 적는다.
 - `미확인`: 확인하지 못한 항목이다. 통과로 바꾸지 않는다.
-- A·H·I·J·K·M은 항상 적용한다. 나머지는 해당 변경이 있을 때 적용한다.
+- A·H·I·J·K·M은 항상 적용한다. L은 Java 코드를 바꿨을 때 적용한다. 나머지는 해당 변경이 있을 때 적용한다.
 
 ## A. 범위
 
@@ -112,7 +112,16 @@
 | K3 | 같은 규칙을 다른 문서에 옮겨 적지 않았는가 | diff에서 규칙 문장 검색 | git-github.md > 1.7 문서 기준과 결정 기록 |
 | K4 | 기준 문서 섹션 이름을 바꿨다면 AGENTS.md·프롬프트·이 체크리스트의 위치도 고쳤는가 | `grep` | AGENTS.md > 4. Reference documents |
 
-## L. 코드 구조 (D-0-5 병합 후 추가 예정)
+## L. 코드 구조 (Java 코드 변경 시)
+
+| # | 확인 | 방법 | 근거 |
+| --- | --- | --- | --- |
+| L1 | 패키지 위치가 기준과 같은가 | 변경 파일 경로 | convention-build-manual.md > 6.1 패키지 |
+| L2 | 공통 모듈에 있는 클래스를 서비스에 다시 만들지 않았는가 | `global` 변경 파일 | convention-build-manual.md > 6.2 공통 모듈 |
+| L3 | 응답·예외가 기준과 같은가 | Controller 반환 타입·`throw` 위치 | convention-build-manual.md > 6.3 응답·예외 |
+| L4 | DTO·엔티티 작성 방식이 기준과 같은가 | DTO·엔티티 파일 | convention-build-manual.md > 6.4 DTO, 6.5 엔티티 |
+| L5 | 트랜잭션·주입·설정 방식이 기준과 같은가 | 서비스·설정 파일 | convention-build-manual.md > 6.6 서비스·설정 |
+| L6 | 테스트 작성 방식이 기준과 같은가 | 테스트 파일 | convention-build-manual.md > 6.7 테스트 |
 
 ## M. 문서·AI 산출물
 
