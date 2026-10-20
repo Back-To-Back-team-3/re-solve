@@ -2,16 +2,12 @@ package com.backtoback.problem.global.exception;
 
 import org.springframework.http.HttpStatus;
 
+import com.backtoback.common.exception.ErrorCode;
+
 import lombok.Getter;
 
 @Getter
-public enum ErrorCode {
-    // 공통
-    COMMON_INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청을 확인해 주세요."),
-    COMMON_INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다."),
-    AUTH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "인증 정보가 없거나 유효하지 않습니다."),
-    AUTH_ACCESS_DENIED(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
-    IDEMPOTENCY_KEY_CONFLICT(HttpStatus.UNPROCESSABLE_CONTENT, "같은 멱등키로 다른 요청을 보낼 수 없습니다."),
+public enum ProblemErrorCode implements ErrorCode {
     // PROBLEM
     PROBLEM_TAG_NOT_FOUND(HttpStatus.NOT_FOUND, "태그를 찾을 수 없습니다."),
     PROBLEM_TAG_DUPLICATED(HttpStatus.CONFLICT, "같은 이름의 태그가 이미 존재합니다."),
@@ -27,9 +23,14 @@ public enum ErrorCode {
      * @param status 응답 HTTP 상태
      * @param message 사용자에게 전달할 오류 메시지
      */
-    ErrorCode(HttpStatus status, String message) {
+    ProblemErrorCode(HttpStatus status, String message) {
         this.status = status;
         this.message = message;
     }
 
+    /** {@inheritDoc} */
+    @Override
+    public String getCode() {
+        return name();
+    }
 }
