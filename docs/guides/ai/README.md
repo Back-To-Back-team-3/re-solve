@@ -226,13 +226,13 @@ AI에게 단계 이름으로 요청하면 `AGENTS.md` §7에 따라 해당 프�
 
 ```text
 [00 세션 시작] ─ 모든 단계 앞에서 1회
-│
+        │
 [10 계획·이슈 쪼개기] A. 카테고리 ──(Human gate)── B. 이슈 ──(Human gate)
-│                                           └ 계약 변경 필요 → 문서 Issue 먼저
+        │                                           └ 계약 변경 필요 → 문서 Issue 먼저
 [20 이슈 작성] ──(Human gate: 등록 승인)
-│
+        │
 [30 코드 구현] A. 계획 ──(Human gate)── B. 커밋마다 ──(Human gate: 커밋 승인)
-│
+        │
 [40 자체 리뷰] ── review-checklist.md ── (미통과 → 30 B)
 [50 PR 작성] ──(Human gate: 등록 승인, Draft)
 [40 리뷰 보조] (리뷰어) ── review-checklist.md ── 코멘트는 사람이 등록
