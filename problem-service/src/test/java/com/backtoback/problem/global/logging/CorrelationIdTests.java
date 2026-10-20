@@ -7,17 +7,22 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
+import org.springframework.boot.restclient.RestClientCustomizer;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import com.backtoback.common.web.logging.CorrelationIdFilter;
+import com.backtoback.problem.global.config.CommonConfiguration;
+
 class CorrelationIdTests {
     /**
      * 안전하지 않은 추적 ID를 교체하고 기존 MDC를 복원하는지 검증한다.
      *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     * @throws Exception 테스트 요청 처리 중 오류가 발생한 경우
      */
     @Test
     void replacesUnsafeIncomingIdAndRestoresPreviousMdc() throws Exception {
@@ -42,7 +47,10 @@ class CorrelationIdTests {
     @Test
     void propagatesCurrentCorrelationIdToOutgoingHttpRequest() {
         var builder = RestClient.builder();
-        new HttpClientConfiguration().correlationIdCustomizer().customize(builder);
+        new ApplicationContextRunner().withUserConfiguration(CommonConfiguration.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            context.getBean(RestClientCustomizer.class).customize(builder);
+        });
         var server = MockRestServiceServer.bindTo(builder).build();
         server
             .expect(requestTo("http://internal.test/probe"))

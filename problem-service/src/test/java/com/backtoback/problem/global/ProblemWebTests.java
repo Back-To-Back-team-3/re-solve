@@ -9,19 +9,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.SQLException;
 import java.util.Map;
 
+import org.hibernate.exception.ConstraintViolationException;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,11 +38,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.backtoback.problem.global.api.ApiResponse;
-import com.backtoback.problem.global.exception.GlobalExceptionHandler;
-import com.backtoback.problem.global.logging.CorrelationIdFilter;
+import com.backtoback.common.api.ApiResponse;
+import com.backtoback.common.web.logging.CorrelationIdFilter;
+import com.backtoback.common.web.security.user.GatewayUser;
+import com.backtoback.problem.global.config.CommonConfiguration;
+import com.backtoback.problem.global.exception.custom.ProblemTagNotFoundException;
 import com.backtoback.problem.global.security.SecurityConfiguration;
-import com.backtoback.problem.global.security.user.GatewayUser;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -45,7 +53,7 @@ import jakarta.validation.constraints.NotBlank;
     {
         ProblemWebTests.TestController.class,
         SecurityConfiguration.class,
-        GlobalExceptionHandler.class,
+        CommonConfiguration.class,
         CorrelationIdFilter.class
     }
 )
@@ -285,7 +293,8 @@ class ProblemWebTests {
             .andExpect(jsonPath("$.error.code").value("COMMON_INTERNAL_SERVER_ERROR"))
             .andExpect(jsonPath("$.error.message").value("서버 오류가 발생했습니다."));
         assertThat(output.getAll())
-            .contains("ResponseStatusException", "secret-exception-body", "TestController.unavailable");
+            .contains("ResponseStatusException", "TestController.unavailable")
+            .doesNotContain("secret-exception-body");
     }
 
     /**
@@ -302,7 +311,8 @@ class ProblemWebTests {
             .andExpect(jsonPath("$.error.code").value("COMMON_INTERNAL_SERVER_ERROR"))
             .andExpect(jsonPath("$.error.message").value("서버 오류가 발생했습니다."));
         assertThat(output.getAll())
-            .contains("IllegalStateException", "secret-exception-body", "TestController.failure");
+            .contains("IllegalStateException", "TestController.failure")
+            .doesNotContain("secret-exception-body");
     }
 
     /**
@@ -331,8 +341,64 @@ class ProblemWebTests {
             );
     }
 
+    /**
+     * 공통 처리기와 도메인 처리기를 함께 등록해도 기존 오류 계약이 유지되는지 검증한다.
+     *
+     * @param kind 발생시킬 도메인 오류
+     * @param httpStatus 기대 HTTP 상태
+     * @param code 기대 오류 코드
+     * @throws Exception 테스트 요청에 실패한 경우
+     */
+    @DisplayName("공통 예외 처리기와 문제 전용 처리기가 기존 오류 계약을 유지한다")
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "duplicate,409,PROBLEM_TAG_DUPLICATED",
+            "in-use,409,PROBLEM_TAG_IN_USE",
+            "optimistic,409,PROBLEM_VERSION_CONFLICT",
+            "missing,404,PROBLEM_TAG_NOT_FOUND"
+        }
+    )
+    void domainErrorsKeepTheirContract(String kind, int httpStatus, String code) throws Exception {
+        mvc
+            .perform(
+                get("/api/v1/test/domain-error")
+                    .param("kind", kind)
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "USER")
+            )
+            .andExpect(status().is(httpStatus))
+            .andExpect(jsonPath("$.error.code").value(code));
+    }
+
     @RestController
     static class TestController {
+        /**
+         * 처리기 우선순위 검증을 위해 지정한 도메인 오류를 발생시킨다.
+         *
+         * @param kind 발생시킬 도메인 오류
+         * @throws RuntimeException 지정된 테스트 오류
+         */
+        @GetMapping("/api/v1/test/domain-error")
+        void domainError(@RequestParam String kind) {
+            if ("missing".equals(kind)) {
+                throw new ProblemTagNotFoundException();
+            }
+            if ("optimistic".equals(kind)) {
+                throw new ObjectOptimisticLockingFailureException("Tag", 1L);
+            }
+            boolean duplicate = "duplicate".equals(kind);
+            var sqlException = new SQLException("constraint", "23000", duplicate ? 1062 : 1451);
+            var violation
+                = new ConstraintViolationException(
+                    "constraint",
+                    sqlException,
+                    "sql",
+                    duplicate ? "tags.uk_tags_name" : "fk_problem_revision_tags_tag"
+                );
+            throw new DataIntegrityViolationException("constraint", violation);
+        }
+
         /**
          * 인증 사용자와 추적 ID를 테스트 응답으로 반환한다.
          *
