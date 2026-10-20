@@ -189,6 +189,27 @@ class TagApiTest {
     void createPatchAndDeleteFollowApiContractAndAuditFields() throws Exception {
         // given
         String id = create("hash", "해시", 5);
+        LocalDateTime createdAt = LocalDateTime.of(2026, 10, 13, 9, 0);
+        // JPA 감사 시각과 직접 SQL로 등록한 멱등 기록이 같은 공통 Clock을 사용한다.
+        assertThat(jdbc.queryForObject("SELECT created_at FROM tags WHERE id = ?", LocalDateTime.class, id))
+            .isEqualTo(createdAt);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT updated_at FROM tag_creation_records WHERE idempotency_key = ?",
+                    LocalDateTime.class,
+                    "hash"
+                )
+        ).isEqualTo(createdAt);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT expires_at FROM tag_creation_records WHERE idempotency_key = ?",
+                    LocalDateTime.class,
+                    "hash"
+                )
+        ).isEqualTo(createdAt.plusHours(24));
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-13T00:01:00Z"));
 
         // when
         mvc
@@ -212,6 +233,11 @@ class TagApiTest {
         // then
         assertThat(jdbc.queryForObject("SELECT display_order FROM tags WHERE id = ?", Integer.class, id)).isZero();
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, id)).isEqualTo(1L);
+        // 수정해도 생성 시각은 유지하고, 수정 시각만 변경된 Clock을 따른다.
+        assertThat(jdbc.queryForObject("SELECT created_at FROM tags WHERE id = ?", LocalDateTime.class, id))
+            .isEqualTo(createdAt);
+        assertThat(jdbc.queryForObject("SELECT updated_at FROM tags WHERE id = ?", LocalDateTime.class, id))
+            .isEqualTo(createdAt.plusMinutes(1));
         assertThat(
             jdbc
                 .queryForObject(
