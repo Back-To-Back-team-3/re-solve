@@ -85,7 +85,29 @@ dependencies {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'judge0-live'
+    }
+}
+
+// 명시적으로 실행할 때만 실제 Judge0에 요청한다. 일반 test/check/build에는 연결하지 않는다.
+tasks.register('judge0LiveTest', Test) {
+    group = 'verification'
+    description = '지정한 실제 Judge0에 코드를 제출하고 실행 결과를 확인한다.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'judge0-live'
+    }
+    systemProperty 'judge0.live', 'true'
+    systemProperty 'judge0.live.language', providers.gradleProperty('judge0Language').getOrElse('python3')
+    // 외부 서버의 현재 상태를 확인하는 테스트이므로 이전 성공 결과를 재사용하지 않는다.
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        showStandardStreams = true
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {
