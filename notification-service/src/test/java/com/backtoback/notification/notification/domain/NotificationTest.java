@@ -1,6 +1,7 @@
 package com.backtoback.notification.notification.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDateTime;
 
@@ -74,5 +75,26 @@ class NotificationTest {
 
         assertThat(notification.isRead()).isTrue();
         assertThat(notification.getReadAt()).isEqualTo(firstReadAt);
+    }
+
+    @Test
+    @DisplayName("읽음 시각(readAt)이 null이면 예외가 발생하고 읽음 상태가 변경되지 않는다")
+    void markAsReadWithNullThrowsException() {
+        Notification notification
+            = Notification
+                .builder()
+                .memberId(1L)
+                .sourceEventId("evt-123")
+                .type(NotificationType.SUBMISSION_JUDGED)
+                .title("채점 완료")
+                .content("채점 완료")
+                .build();
+
+        assertThatThrownBy(() -> notification.markAsRead(null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("readAt은 null일 수 없습니다.");
+
+        assertThat(notification.isRead()).isFalse();
+        assertThat(notification.getReadAt()).isNull();
     }
 }

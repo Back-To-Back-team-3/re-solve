@@ -121,6 +121,9 @@ public class Notification extends BaseTimeEntity {
     }
 
     public void markAsRead(LocalDateTime readAt) {
+        if (readAt == null) {
+            throw new IllegalArgumentException("readAt은 null일 수 없습니다.");
+        }
         if (!this.isRead) {
             this.isRead = true;
             this.readAt = readAt;
