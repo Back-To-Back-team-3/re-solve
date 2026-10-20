@@ -70,3 +70,19 @@ The source of the document list is `docs/README.md`. The table below shows which
 - Reply to the user in Korean.
 - Write Issue, PR, and commit subjects and bodies in Korean. Keep `<type>(<domain>)`, code identifiers, and file paths as they are.
 - Write code comments by `docs/guides/convention-build-manual.md` > `5. 주석 작성`.
+
+## 7. Stage prompts
+
+When the user asks for one of the stages below, read the file first and follow its steps and output format. After each stage's output, wait for the user's approval. Do not move to the next stage on your own.
+
+| Request | Prompt |
+| --- | --- |
+| Start a session, declare the owner group | `docs/guides/ai/prompts/00-session-start.md` |
+| Plan a milestone, break down Issues | `docs/guides/ai/prompts/10-plan.md` |
+| Write or register an Issue | `docs/guides/ai/prompts/20-issue-write.md` |
+| Implement | `docs/guides/ai/prompts/30-implement.md` |
+| Self-review, help review a PR | `docs/guides/ai/prompts/40-review.md` |
+| Write or register a PR | `docs/guides/ai/prompts/50-pr-write.md` |
+| Build or test failure, applying review comments | `docs/guides/ai/prompts/60-troubleshoot.md` |
+
+Use only `docs/guides/ai/review-checklist.md` as the review standard.
