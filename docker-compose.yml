@@ -164,6 +164,13 @@ services:
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
       JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-http://judge0-server:2358}
+      JUDGE0_AUTH_HEADER: ${JUDGE0_AUTH_HEADER:-X-Auth-Token}
+      JUDGE0_AUTH_TOKEN: ${JUDGE0_AUTH_TOKEN:-}
+      JUDGE0_CONNECT_TIMEOUT: ${JUDGE0_CONNECT_TIMEOUT:-2s}
+      JUDGE0_READ_TIMEOUT: ${JUDGE0_READ_TIMEOUT:-5s}
+      JUDGE0_JAVA_ENABLED: ${JUDGE0_JAVA_ENABLED:-false}
+      JUDGE0_PYTHON3_ENABLED: ${JUDGE0_PYTHON3_ENABLED:-false}
+      JUDGE0_CPP_ENABLED: ${JUDGE0_CPP_ENABLED:-false}
     depends_on:
       mysql:
         condition: service_healthy
