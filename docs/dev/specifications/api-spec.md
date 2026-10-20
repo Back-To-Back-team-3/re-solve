@@ -2345,7 +2345,7 @@
 | 내부 경로 | `/internal/v1/submissions/**` |
 | 소유 테이블 | 스키마 `judge` (`submissions`, `judge_jobs`, `judge_job_runs`, `judge_test_results`) |
 | 문맥 | `PRACTICE`(외부 API), `EXAM`·`CONTEST`(SQS `exam-submission-queue`), `DIAGNOSIS`(member 경유, 경로 확정 필요) |
-| 지원 언어 | `java`(Java 17), `python3`(Python 3), `cpp`(C++17). 런타임 버전·Judge0 `language_id`는 배포 환경에서 확정 |
+| 지원 언어 | `java`(Java 17), `python3`(Python 3), `cpp`(C++17). 런타임 버전과 Judge0 `language_id`는 Judge0 목록에서 조회하여 선택한다. 서비스의 언어 활성화 설정과 지원 실행 환경의 존재 여부를 함께 확인한다. |
 | 채점 | 202는 접수 완료이며 채점 완료가 아니다. 작업 원천은 `judge_jobs`, SKIP LOCKED 선점·임대, 실행 시도 상한 3회. |
 | 회차 용어 | 채점 회차 `judgeAttempt`(재채점마다 +1), 실행 시도 `tryCount`(회차 안 재시도). 기존 초안의 `attemptId`·`attemptNo`는 `judgeAttempt`로 통일 |
 | 재채점 | `PRACTICE`는 재채점하지 않는다. 채점 서버 장애로 실패한 `EXAM` 제출만 대상 (T2-11) |
@@ -2358,24 +2358,89 @@
 
 - **Method / URI:** `GET /api/v1/judge/languages`
 - **인증:** 로그인 필요
-- **대응 테이블:** 없음 (애플리케이션 설정)
-- **설명:** 지원 언어와 활성화 여부를 반환한다. 배포 환경에서 검증하기 전 런타임은 `enabled: false`로 둔다.
-- **응답 (200):**
-    
+- **Idempotency:** 없음
+- **Rate Limit:** 없음 (API별 별도 제한 없음)
+- **대응 테이블:** 없음 (애플리케이션 설정·메모리 캐시)
+- **설명:** 지원 언어 3종과 선택된 실행 환경, 활성화 여부를 반환한다. Judge0 목록에서 지원 범위에 맞는 최신 실행 환경을 선택하며, 서비스의 언어 활성화 설정이 켜져 있고 실행 환경이 존재할 때만 `enabled: true`를 반환한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:** 없음
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+    | `X-Correlation-Id` | 요청 추적 ID | 요청 처리에 사용한 추적 ID |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `content` | array | Java, Python, C++ 순서의 언어 목록. 비활성 언어도 포함하며 페이지네이션하지 않는다 |
+    | `content[].language` | string | `java` / `python3` / `cpp` |
+    | `content[].displayName` | string | `Java 17` / `Python 3` / `C++17` |
+    | `content[].runtimeVersion` | string | 선택된 Judge0 실행 환경의 표시 정보. 예: `JDK 17.0.6`, `3.11.2`, `GCC 12.2.0`. 지원 실행 환경이 없으면 `배포 환경 확인 전` |
+    | `content[].enabled` | boolean | 서비스의 해당 언어 활성화 설정이 켜져 있고, 지원 실행 환경이 존재하면 `true` |
+
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "content": [
-            { "language": "java", "displayName": "Java 17", "runtimeVersion": "배포 환경 확인 전", "enabled": false },
-            { "language": "python3", "displayName": "Python 3", "runtimeVersion": "배포 환경 확인 전", "enabled": false },
-            { "language": "cpp", "displayName": "C++17", "runtimeVersion": "배포 환경 확인 전", "enabled": false }
-          ]
-        }
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "language": "java",
+            "displayName": "Java 17",
+            "runtimeVersion": "JDK 17.0.6",
+            "enabled": true
+          },
+          {
+            "language": "python3",
+            "displayName": "Python 3",
+            "runtimeVersion": "3.11.2",
+            "enabled": false
+          },
+          {
+            "language": "cpp",
+            "displayName": "C++17",
+            "runtimeVersion": "배포 환경 확인 전",
+            "enabled": false
+          }
+        ]
       }
+    }
     ```
-    
+
+- **에러:**
+    - `JUDGE0_CONNECTION_FAILED`(503) / Judge0 목록 조회 중 연결 실패 또는 통신 시간 초과
+    - `JUDGE0_RESPONSE_FAILED`(503) / Judge0 HTTP 오류, 본문 누락, JSON 변환 실패, 잘못된 항목 또는 중복 ID 수신
+- **동시성/멱등 보장:**
+    - 서비스 인스턴스별로 최초 목록 조회와 캐시 초기화를 직렬화한다.
+    - 초기화에 성공하면 이후 요청은 캐시를 공유한다.
+    - 초기화에 실패하면 캐시를 저장하지 않고 다음 요청에서 다시 조회한다.
+- **발행:** 없음
+- **외부 의존:**
+    - `GET /languages/` (Judge0) — 실행 환경 목록 조회
+    - 연결 제한 기본값은 2초, 응답 대기 제한 기본값은 5초이며 환경 설정으로 변경할 수 있다.
+    - 요청 한 번 안에서 자동 재시도하지 않는다.
+    - 서버 주소가 설정되지 않았으면 외부 호출 없이 모든 언어를 비활성으로 반환한다.
+- **프론트 계약:**
+    - `enabled: false`인 언어는 선택할 수 없도록 표시한다.
+    - `runtimeVersion`에 값이 있어도 `enabled: false`일 수 있으므로, 활성 여부는 `enabled`로 판단한다.
+    - 이 응답은 서비스 전체의 언어 지원 상태이며, 개별 문제의 언어별 검증 상태를 의미하지 않는다.
+- **비고:**
+    - 실행 환경 선택 범위는 Java JDK·OpenJDK 17, Python 3, GCC 기반 C++이다.
+    - 숫자 버전으로 비교해 가장 높은 정식 버전을 선택하고, 같은 최고 버전의 후보가 여러 개이면 가장 작은 Judge0 ID를 선택한다.
+    - 전체 실행 환경 목록과 언어별 선택 결과는 서비스 인스턴스의 메모리에 보관하며 자동 갱신하지 않는다. 정상 응답인 빈 목록도 캐시한다.
+    - Judge0 실행 환경 목록이나 언어 활성화 설정을 변경한 경우 judge-service를 재시작해야 한다.
+    - 이 API는 실행 환경 목록을 조회하며, 코드를 실행하여 언어의 정상 동작을 검증하지 않는다. 캐시 생성 후 Judge0의 실시간 장애 여부도 확인하지 않는다.
+    - 응답 예시의 버전은 설명용이며 배포 환경의 실제 버전을 보장하지 않는다.
 
 #### 3.1.2 일반 풀이 제출
 
