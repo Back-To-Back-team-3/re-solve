@@ -2,7 +2,7 @@ package com.backtoback.notification.notification.domain;
 
 import java.time.LocalDateTime;
 
-import com.backtoback.notification.global.entity.BaseTimeEntity;
+import com.backtoback.common.jpa.entity.BaseTimeEntity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

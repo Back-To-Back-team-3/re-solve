@@ -1,6 +1,6 @@
 package com.backtoback.notification.preference.domain;
 
-import com.backtoback.notification.global.entity.BaseTimeEntity;
+import com.backtoback.common.jpa.entity.BaseTimeEntity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
