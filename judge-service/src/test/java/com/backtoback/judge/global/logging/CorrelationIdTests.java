@@ -7,11 +7,16 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
+import org.springframework.boot.restclient.RestClientCustomizer;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+
+import com.backtoback.common.web.logging.CorrelationIdFilter;
+import com.backtoback.judge.global.config.CommonConfiguration;
 
 class CorrelationIdTests {
     /**
@@ -42,7 +47,10 @@ class CorrelationIdTests {
     @Test
     void propagatesCurrentCorrelationIdToOutgoingHttpRequest() {
         var builder = RestClient.builder();
-        new HttpClientConfiguration().correlationIdCustomizer().customize(builder);
+        new ApplicationContextRunner().withUserConfiguration(CommonConfiguration.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            context.getBean(RestClientCustomizer.class).customize(builder);
+        });
         var server = MockRestServiceServer.bindTo(builder).build();
         server
             .expect(requestTo("http://internal.test/probe"))

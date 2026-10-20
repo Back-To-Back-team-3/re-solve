@@ -13,6 +13,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -31,22 +33,25 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.backtoback.judge.global.api.ApiResponse;
-import com.backtoback.judge.global.exception.GlobalExceptionHandler;
-import com.backtoback.judge.global.logging.CorrelationIdFilter;
+import com.backtoback.common.api.ApiResponse;
+import com.backtoback.common.web.security.user.GatewayUser;
+import com.backtoback.judge.global.config.CommonConfiguration;
+import com.backtoback.judge.global.exception.JudgeErrorCode;
+import com.backtoback.judge.global.exception.custom.Judge0ConfigurationInvalidException;
+import com.backtoback.judge.global.exception.custom.Judge0ConnectionFailedException;
+import com.backtoback.judge.global.exception.custom.Judge0ResponseFailedException;
+import com.backtoback.judge.global.exception.custom.SubmissionRuntimeUnavailableException;
 import com.backtoback.judge.global.security.SecurityConfiguration;
-import com.backtoback.judge.global.security.user.GatewayUser;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
-@WebMvcTest
+@WebMvcTest(JudgeWebTests.TestController.class)
 @Import(
     {
         JudgeWebTests.TestController.class,
         SecurityConfiguration.class,
-        GlobalExceptionHandler.class,
-        CorrelationIdFilter.class
+        CommonConfiguration.class
     }
 )
 @ExtendWith(OutputCaptureExtension.class)
@@ -272,24 +277,25 @@ class JudgeWebTests {
     }
 
     /**
-     * 명시된 서버 오류 상태를 유지하고 상세 원인은 로그에 남기는지 검증한다.
+     * 명시된 서버 오류 상태를 유지하고 예외 종류·위치만 로그에 남기는지 검증한다.
      *
      * @param output 테스트 실행 중 캡처한 로그 출력
      * @throws Exception 테스트 요청 처리 중 오류가 발생한 경우
      */
     @Test
-    void explicitServerErrorPreservesStatusAndLogsReason(CapturedOutput output) throws Exception {
+    void explicitServerErrorPreservesStatusAndLogsSafeDiagnostics(CapturedOutput output) throws Exception {
         mvc
             .perform(get("/api/v1/test/unavailable").header("X-User-Id", "12").header("X-User-Role", "USER"))
             .andExpect(status().isServiceUnavailable())
             .andExpect(jsonPath("$.error.code").value("COMMON_INTERNAL_SERVER_ERROR"))
             .andExpect(jsonPath("$.error.message").value("서버 오류가 발생했습니다."));
         assertThat(output.getAll())
-            .contains("ResponseStatusException", "secret-exception-body", "TestController.unavailable");
+            .contains("ResponseStatusException", "TestController.unavailable")
+            .doesNotContain("secret-exception-body");
     }
 
     /**
-     * 예상하지 못한 예외는 로그에 기록하고 응답에서는 상세 내용을 숨기는지 검증한다.
+     * 예상하지 못한 예외의 종류·위치를 기록하고 원문은 응답과 로그에서 숨기는지 검증한다.
      *
      * @param output 테스트 실행 중 캡처한 로그 출력
      * @throws Exception 테스트 요청 처리 중 오류가 발생한 경우
@@ -302,7 +308,8 @@ class JudgeWebTests {
             .andExpect(jsonPath("$.error.code").value("COMMON_INTERNAL_SERVER_ERROR"))
             .andExpect(jsonPath("$.error.message").value("서버 오류가 발생했습니다."));
         assertThat(output.getAll())
-            .contains("IllegalStateException", "secret-exception-body", "TestController.failure");
+            .contains("IllegalStateException", "TestController.failure")
+            .doesNotContain("secret-exception-body");
     }
 
     /**
@@ -331,8 +338,74 @@ class JudgeWebTests {
             );
     }
 
+    /**
+     * Judge0 장애 유형별 오류 코드와 안내 메시지를 반환하고 내부 HTTP 상태는 숨기는지 검증한다.
+     *
+     * @param code 기대하는 오류 코드
+     * @param message 기대하는 안내 메시지
+     * @throws Exception 테스트 요청 처리 중 오류가 발생한 경우
+     */
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "JUDGE0_CONNECTION_FAILED, 채점 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+            "JUDGE0_RESPONSE_FAILED, 채점 서버의 응답을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+            "JUDGE0_CONFIGURATION_INVALID, 채점 서버 설정이 준비되지 않았습니다. 잠시 후 다시 시도해 주세요."
+        }
+    )
+    void judge0FailuresReturnDistinctErrorCodes(String code, String message) throws Exception {
+        mvc
+            .perform(
+                get("/api/v1/test/judge0").param("code", code).header("X-User-Id", "12").header("X-User-Role", "USER")
+            )
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value(code))
+            .andExpect(jsonPath("$.error.message").value(message))
+            .andExpect(jsonPath("$.error.upstreamStatus").doesNotExist());
+    }
+
+    /**
+     * 재채점 실행 환경 불일치를 팀 명세의 409 오류로 반환하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청 처리 중 오류가 발생한 경우
+     */
+    @Test
+    void unavailableRejudgeRuntimeReturnsConflict() throws Exception {
+        mvc
+            .perform(
+                get("/api/v1/test/judge0")
+                    .param("code", "SUBMISSION_RUNTIME_UNAVAILABLE")
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "USER")
+            )
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error.code").value("SUBMISSION_RUNTIME_UNAVAILABLE"))
+            .andExpect(jsonPath("$.error.message").value("기존 실행 환경을 사용할 수 없어 재채점할 수 없습니다."));
+    }
+
     @RestController
     static class TestController {
+        /**
+         * 지정한 Judge0 장애의 공통 예외 응답을 검증하기 위해 예외를 발생시킨다.
+         *
+         * @param code 검증할 Judge0 오류 코드
+         * @throws Judge0ConnectionFailedException 연결 오류 코드를 지정한 경우
+         * @throws Judge0ResponseFailedException 응답 오류 코드를 지정한 경우
+         * @throws Judge0ConfigurationInvalidException 설정 오류 코드를 지정한 경우
+         * @throws SubmissionRuntimeUnavailableException 재채점 환경 오류 코드를 지정한 경우
+         */
+        @GetMapping("/api/v1/test/judge0")
+        void judge0Failure(@RequestParam JudgeErrorCode code) {
+            switch (code) {
+                case JUDGE0_CONNECTION_FAILED -> throw new Judge0ConnectionFailedException();
+                case JUDGE0_RESPONSE_FAILED -> throw new Judge0ResponseFailedException(401);
+                case JUDGE0_CONFIGURATION_INVALID -> throw new Judge0ConfigurationInvalidException();
+                case SUBMISSION_RUNTIME_UNAVAILABLE -> throw new SubmissionRuntimeUnavailableException();
+                default -> throw new IllegalArgumentException("Unsupported test error code");
+            }
+        }
+
         /**
          * 인증 사용자와 추적 ID를 테스트 응답으로 반환한다.
          *
