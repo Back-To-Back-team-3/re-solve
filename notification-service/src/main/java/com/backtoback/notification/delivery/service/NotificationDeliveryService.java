@@ -1,6 +1,7 @@
 package com.backtoback.notification.delivery.service;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -33,6 +34,7 @@ public class NotificationDeliveryService {
 
     private final EmitterRepository emitterRepository;
     private final NotificationRepository notificationRepository;
+    private final Clock clock;
 
     /**
      * 클라이언트의 SSE 구독을 처리하고 SseEmitter를 반환한다.
@@ -134,7 +136,7 @@ public class NotificationDeliveryService {
             return false;
         }
 
-        LocalDateTime after = LocalDateTime.now().minusHours(24);
+        LocalDateTime after = LocalDateTime.now(clock).minusHours(24);
         List<Notification> missedNotifications
             = notificationRepository
                 .findByMemberIdAndIdGreaterThanAndIsReadFalseAndCreatedAtAfterOrderByIdAsc(
