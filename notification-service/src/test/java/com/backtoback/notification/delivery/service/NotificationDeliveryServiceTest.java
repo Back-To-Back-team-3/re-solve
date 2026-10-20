@@ -1,11 +1,12 @@
 package com.backtoback.notification.delivery.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -18,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.notification.delivery.repository.EmitterRepository;
 import com.backtoback.notification.delivery.repository.EmitterRepositoryImpl;
 import com.backtoback.notification.notification.domain.Notification;
@@ -26,6 +28,8 @@ import com.backtoback.notification.notification.repository.NotificationRepositor
 
 @ExtendWith(MockitoExtension.class)
 class NotificationDeliveryServiceTest {
+
+    private final Clock clock = Clock.fixed(Instant.parse("2026-10-20T12:00:00Z"), ClockConfiguration.SERVICE_ZONE);
 
     private EmitterRepository emitterRepository;
 
@@ -37,7 +41,7 @@ class NotificationDeliveryServiceTest {
     @BeforeEach
     void setUp() {
         emitterRepository = new EmitterRepositoryImpl();
-        deliveryService = new NotificationDeliveryService(emitterRepository, notificationRepository);
+        deliveryService = new NotificationDeliveryService(emitterRepository, notificationRepository, clock);
     }
 
     @Test
@@ -73,12 +77,14 @@ class NotificationDeliveryServiceTest {
                 .build();
         ReflectionTestUtils.setField(missedNotification, "id", 101L);
 
+        LocalDateTime expectedAfter = LocalDateTime.now(clock).minusHours(24);
+
         given(
             notificationRepository
                 .findByMemberIdAndIdGreaterThanAndIsReadFalseAndCreatedAtAfterOrderByIdAsc(
                     eq(memberId),
                     eq(100L),
-                    any(LocalDateTime.class)
+                    eq(expectedAfter)
                 )
         ).willReturn(List.of(missedNotification));
 
@@ -91,7 +97,7 @@ class NotificationDeliveryServiceTest {
             .findByMemberIdAndIdGreaterThanAndIsReadFalseAndCreatedAtAfterOrderByIdAsc(
                 eq(memberId),
                 eq(100L),
-                any(LocalDateTime.class)
+                eq(expectedAfter)
             );
     }
 
