@@ -18,13 +18,23 @@ public class EmitterRepositoryImpl implements EmitterRepository {
 
     private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
     private final Map<Long, Set<String>> memberEmitterIds = new ConcurrentHashMap<>();
+    private final Map<String, Long> emitterMemberIds = new ConcurrentHashMap<>();
     private final Map<String, Long> creationTimes = new ConcurrentHashMap<>();
 
     @Override
     public SseEmitter save(String emitterId, Long memberId, SseEmitter emitter) {
         emitters.put(emitterId, emitter);
         creationTimes.put(emitterId, System.currentTimeMillis());
-        memberEmitterIds.computeIfAbsent(memberId, key -> ConcurrentHashMap.newKeySet()).add(emitterId);
+        emitterMemberIds.put(emitterId, memberId);
+
+        memberEmitterIds.compute(memberId, (key, ids) -> {
+            if (ids == null) {
+                ids = ConcurrentHashMap.newKeySet();
+            }
+            ids.add(emitterId);
+            return ids;
+        });
+
         return emitter;
     }
 
@@ -59,11 +69,13 @@ public class EmitterRepositoryImpl implements EmitterRepository {
     public void deleteById(String emitterId) {
         emitters.remove(emitterId);
         creationTimes.remove(emitterId);
-        memberEmitterIds.forEach((memberId, ids) -> {
-            ids.remove(emitterId);
-            if (ids.isEmpty()) {
-                memberEmitterIds.remove(memberId, Collections.emptySet());
-            }
-        });
+        Long memberId = emitterMemberIds.remove(emitterId);
+
+        if (memberId != null) {
+            memberEmitterIds.computeIfPresent(memberId, (key, ids) -> {
+                ids.remove(emitterId);
+                return ids.isEmpty() ? null : ids;
+            });
+        }
     }
 }
