@@ -30,6 +30,10 @@ repositories {
 }
 
 dependencies {
+    implementation project(':common-core')
+    implementation project(':common-web')
+    implementation project(':common-jpa')
+
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
