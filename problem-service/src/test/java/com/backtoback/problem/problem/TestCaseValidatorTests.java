@@ -12,7 +12,8 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
-import com.backtoback.problem.global.exception.ErrorCode;
+import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.problem.global.exception.ProblemErrorCode;
 import com.backtoback.problem.global.exception.custom.CommonInvalidRequestException;
 import com.backtoback.problem.global.exception.custom.ProblemTestCaseInvalidException;
 import com.backtoback.problem.problem.dto.FunctionSpec;
@@ -180,12 +181,12 @@ class TestCaseValidatorTests {
         assertThatThrownBy(() -> validator.validate(null, List.of()))
             .isInstanceOfSatisfying(
                 CommonInvalidRequestException.class,
-                error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.COMMON_INVALID_REQUEST)
+                error -> assertThat(error.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_INVALID_REQUEST)
             );
         assertThatThrownBy(() -> validator.validate(singleParameter(scalar(TypeSpec.Kind.INT32)), List.of()))
             .isInstanceOfSatisfying(
                 ProblemTestCaseInvalidException.class,
-                error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.PROBLEM_TEST_CASE_INVALID)
+                error -> assertThat(error.getErrorCode()).isEqualTo(ProblemErrorCode.PROBLEM_TEST_CASE_INVALID)
             );
     }
 
