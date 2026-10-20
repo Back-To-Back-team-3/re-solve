@@ -18,7 +18,7 @@ Implement a settled Issue scope one commit at a time, with approval for each com
 
 1. Output only the implementation plan first.
     - Order commits so that each one compiles on its own: lower layers first. Put tests in the same commit as the code they test.
-    - Follow the package structure already used in the service. If the service has none, ask the user.
+    - Follow `docs/guides/convention-build-manual.md` > `6. 코드 구조` for packages, class names, and layers.
     - For each commit, list the files and the commit message (`git-github.md` > `1.2 커밋·Issue·PR 제목`, with the Issue's type and domain).
     - Give the grounds for each decision as `document > section > phrase`.
 2. List the following as option tables only. Do not decide them.
