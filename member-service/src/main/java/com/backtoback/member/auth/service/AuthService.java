@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.common.exception.ErrorCode;
 import com.backtoback.member.auth.client.GitHubOAuthClient;
 import com.backtoback.member.auth.client.GitHubUser;
 import com.backtoback.member.auth.config.AuthProperties;
@@ -23,8 +25,8 @@ import com.backtoback.member.auth.store.RefreshTokenStore.IssuedRefreshToken;
 import com.backtoback.member.auth.store.RefreshTokenStore.RotationResult;
 import com.backtoback.member.auth.token.AccessTokenProvider;
 import com.backtoback.member.auth.token.SecureTokenGenerator;
-import com.backtoback.member.global.error.BusinessException;
-import com.backtoback.member.global.error.ErrorCode;
+import com.backtoback.member.global.error.MemberErrorCode;
+import com.backtoback.member.global.error.MemberException;
 import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.service.GitHubMemberRegistration;
 import com.backtoback.member.member.service.MemberService;
@@ -69,7 +71,7 @@ public class AuthService {
     public GitHubLoginStart startGitHubLogin(String redirectPath) {
         String path = redirectPath == null ? RedirectPathPolicy.DEFAULT_PATH : redirectPath;
         if (!redirectPathPolicy.isAllowed(path)) {
-            throw new BusinessException(ErrorCode.COMMON_INVALID_REQUEST);
+            throw new MemberException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
         String state = tokenGenerator.generate();
         String browserNonce = tokenGenerator.generate();
@@ -87,20 +89,21 @@ public class AuthService {
      */
     public String completeGitHubLogin(String authorizationCode, String state, String gitHubError, String browserNonce) {
         if (!StringUtils.hasText(state)) {
-            throw new BusinessException(ErrorCode.AUTH_TOKEN_INVALID);
+            throw new MemberException(CommonErrorCode.AUTH_TOKEN_INVALID);
         }
         OAuthState oAuthState
-            = oAuthStateStore.consume(state).orElseThrow(() -> new BusinessException(ErrorCode.AUTH_TOKEN_INVALID));
+            = oAuthStateStore.consume(state).orElseThrow(() -> new MemberException(CommonErrorCode.AUTH_TOKEN_INVALID));
         if (!matchesBrowserNonce(browserNonce, oAuthState.browserNonceHash())) {
-            throw new BusinessException(ErrorCode.AUTH_TOKEN_INVALID);
+            throw new MemberException(CommonErrorCode.AUTH_TOKEN_INVALID);
         }
         if (StringUtils.hasText(gitHubError)) {
-            throw new BusinessException(
-                GITHUB_ACCESS_DENIED.equals(gitHubError) ? ErrorCode.AUTH_OAUTH_DENIED : ErrorCode.AUTH_OAUTH_FAILED
+            throw new MemberException(
+                GITHUB_ACCESS_DENIED.equals(gitHubError) ? MemberErrorCode.AUTH_OAUTH_DENIED
+                    : MemberErrorCode.AUTH_OAUTH_FAILED
             );
         }
         if (!StringUtils.hasText(authorizationCode)) {
-            throw new BusinessException(ErrorCode.AUTH_OAUTH_FAILED);
+            throw new MemberException(MemberErrorCode.AUTH_OAUTH_FAILED);
         }
 
         GitHubUser gitHubUser = gitHubOAuthClient.fetchUser(authorizationCode);
@@ -121,7 +124,7 @@ public class AuthService {
      * 콜백 처리에 실패했을 때 보낼 프론트 콜백 주소. 프론트는 {@code error} 값(오류 코드)으로 분기한다.
      */
     public String frontendCallbackError(ErrorCode errorCode) {
-        return frontendCallback().queryParam("error", errorCode.name()).encode().build().toUriString();
+        return frontendCallback().queryParam("error", errorCode.getCode()).encode().build().toUriString();
     }
 
     public LoginResult exchangeLoginCode(String loginCode, String browserNonce) {
@@ -129,10 +132,10 @@ public class AuthService {
             = loginCodeStore
                 .consume(loginCode)
                 .filter(consumed -> matchesBrowserNonce(browserNonce, consumed.browserNonceHash()))
-                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_LOGIN_CODE_INVALID));
+                .orElseThrow(() -> new MemberException(MemberErrorCode.AUTH_LOGIN_CODE_INVALID));
         Member member = memberService.getMember(claim.memberId());
         if (member.isWithdrawn()) {
-            throw new BusinessException(ErrorCode.AUTH_ACCESS_DENIED);
+            throw new MemberException(CommonErrorCode.AUTH_ACCESS_DENIED);
         }
 
         IssuedRefreshToken issued = refreshTokenStore.issue(member.getId());
@@ -152,15 +155,15 @@ public class AuthService {
      */
     public TokenRefreshResult refresh(String refreshToken) {
         if (!StringUtils.hasText(refreshToken)) {
-            throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID);
+            throw new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID);
         }
 
         RotationResult rotation = refreshTokenStore.rotate(refreshToken);
         switch (rotation.outcome()) {
-            case INVALID -> throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID);
+            case INVALID -> throw new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID);
             case REUSED -> {
                 log.warn("Refresh token reuse detected. All refresh tokens revoked. memberId={}", rotation.memberId());
-                throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_REUSED);
+                throw new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_REUSED);
             }
             default -> {
                 // ROTATED, GRACE
@@ -171,7 +174,7 @@ public class AuthService {
             = memberService.findMember(rotation.memberId()).filter(found -> !found.isWithdrawn()).orElse(null);
         if (member == null) {
             refreshTokenStore.revokeSession(rotation.memberId(), rotation.sessionId(), rotation.newRefreshToken());
-            throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID);
+            throw new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID);
         }
 
         String accessToken = accessTokenProvider.issue(member, rotation.sessionId());
@@ -195,7 +198,7 @@ public class AuthService {
             = accessTokenProvider
                 .decode(accessToken)
                 .filter(decoded -> String.valueOf(memberId).equals(decoded.getSubject()))
-                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_TOKEN_INVALID));
+                .orElseThrow(() -> new MemberException(CommonErrorCode.AUTH_TOKEN_INVALID));
 
         String sessionId = jwt.getClaimAsString(AccessTokenProvider.SESSION_CLAIM);
         accessTokenBlocklist.block(jwt.getId(), Duration.between(clock.instant(), jwt.getExpiresAt()));
@@ -217,7 +220,7 @@ public class AuthService {
 
     private String extractBearerToken(String authorization) {
         if (authorization == null || !authorization.startsWith(BEARER_PREFIX)) {
-            throw new BusinessException(ErrorCode.AUTH_TOKEN_INVALID);
+            throw new MemberException(CommonErrorCode.AUTH_TOKEN_INVALID);
         }
         return authorization.substring(BEARER_PREFIX.length()).trim();
     }
