@@ -30,7 +30,7 @@
 | 항목 | 값 |
 | --- | --- |
 | 외부 Base URL | `/api/v1` (API Gateway 경유) |
-| 내부 Base URL | `/internal/v1` (서비스 간 호출 전용, Gateway 라우팅 제외, 외부 비공개, 내부 네트워크 신뢰(서비스 토큰 없음)) |
+| 내부 Base URL | `/internal/v1` (서비스 간 호출 전용, Gateway 라우팅 제외, 외부 비공개) |
 | 인증 방식 | `Authorization: Bearer {accessToken}` (JWT). Gateway가 검증 후 `X-User-Id`, `X-User-Role` 전달. 외부에서 보낸 같은 이름의 헤더는 Gateway가 제거 |
 | 관리자 경로 | `/api/v1/admin/**`은 Gateway와 소유 서비스 양쪽에서 `ADMIN`을 검증한다. `ADMIN`이 아닌 사용자도 호출하는 운영 API는 `/admin` 아래에 두지 않는다 |
 | 상관관계 ID | Gateway가 `X-Correlation-Id` 발급, HTTP·메시지 전 구간 전파 |
@@ -233,7 +233,6 @@
 ## 1. 인증·회원 (member)
 
 > 작성: 담당 E · 서비스: `member-service`
-> 
 
 ### 1.0 개요
 
@@ -5466,7 +5465,6 @@
 ### 4.7 내부 API — C 제공
 
 > 공통 규칙: 내부 네트워크 전용. `/internal/**`는 Gateway 공개 라우팅에서 제외. 조회 타임아웃 2초. 검증 조회 실패는 fail-closed.
-> 
 
 #### 4.7.1 실행 문맥·열람 권한 검증
 
@@ -5474,12 +5472,7 @@
 - **인증:** 내부 호출 (judge, problem, study)
 - **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `exam_submissions`, `contests`, `contest_problems`, `contest_participants`, `contest_submissions`
 - **설명:** 고정 문제·회차 일치 검증. `READ_BODY`/`READ_IMAGE`는 종료 후 복기와 대회 종료 공개 설정 적용. `RUN`은 입장한 `ACTIVE` 참가자의 시간 안 요청만. 본인 제출 열람은 소유권·실제 입장 추가 검증.
-- **요청 헤더:**
-    
-    
-    | 헤더 | 필수 | 예시 값 | 설명 |
-    | --- | --- | --- | --- |
-    | `Authorization` | Y | `Bearer <serviceToken>` | 서비스 계정·호출 allowlist 검증 |
+- **요청 헤더:** 없음
 - **요청 본문:**
     
     
@@ -5504,13 +5497,8 @@
       "receiptId": null
     }
     ```
-    
-- **응답 헤더:**
-    
-    
-    | 헤더 | 값 | 설명 |
-    | --- | --- | --- |
-    | `Content-Type` | `application/json` | 응답 본문 형식 |
+
+- **요청 헤더:** 없음
 - **응답 본문 (200):**
     
     
@@ -5546,12 +5534,7 @@
 - **인증:** member-service.
 - **대응 테이블:** `exams`, `exam_participants`, `contests`, `contest_participants`
 - **설명:** 실제 입장·미확정 문맥 조회
-- **요청 헤더:**
-    
-    
-    | 헤더 | 필수 | 예시 값 | 설명 |
-    | --- | --- | --- | --- |
-    | `Authorization` | Y | `Bearer <serviceToken>` | 서비스 계정·호출 allowlist 검증 |
+- **요청 헤더:** 없음
 - **요청 파라미터:**
     
     
@@ -5589,12 +5572,7 @@
 - **인증:** MEMBER/WITHDRAWAL은 member-service, STUDY/STUDY_CLOSE는 study-service, PROBLEM/PROBLEM_HIDE는 problem-service만.
 - **대응 테이블:** `contest_resource_guards`, `exams`, `exam_participants`, `contests`, `contest_participants`, `exam_problems`, `contest_problems`, `outbox_events`
 - **설명:** 자원 작업 준비
-- **요청 헤더:**
-    
-    
-    | 헤더 | 필수 | 예시 값 | 설명 |
-    | --- | --- | --- | --- |
-    | `Authorization` | Y | `Bearer <serviceToken>` | 서비스 계정·호출 allowlist 검증 |
+- **요청 헤더:** 없음
 - **요청 파라미터:**
     
     
@@ -5649,12 +5627,7 @@
 - **인증:** §4.5.3의 자원 소유 서비스.
 - **대응 테이블:** `contest_resource_guards`
 - **설명:** 자원 작업 완료·취소
-- **요청 헤더:**
-    
-    
-    | 헤더 | 필수 | 예시 값 | 설명 |
-    | --- | --- | --- | --- |
-    | `Authorization` | Y | `Bearer <serviceToken>` | 서비스 계정·호출 allowlist 검증 |
+- **요청 헤더:** 없음
 - **요청 파라미터:**
     
     
@@ -5702,12 +5675,7 @@
 - **인증:** study-service.
 - **대응 테이블:** `exams`
 - **설명:** 스터디 시험 상태 조회
-- **요청 헤더:**
-    
-    
-    | 헤더 | 필수 | 예시 값 | 설명 |
-    | --- | --- | --- | --- |
-    | `Authorization` | Y | `Bearer <serviceToken>` | 서비스 계정·호출 allowlist 검증 |
+- **요청 헤더:** 없음
 - **요청 파라미터:**
     
     
@@ -5747,12 +5715,7 @@
 - **인증:** problem-service.
 - **대응 테이블:** `exams`, `exam_problems`, `contests`, `contest_problems`
 - **설명:** 고정 문제 사용 조회
-- **요청 헤더:**
-    
-    
-    | 헤더 | 필수 | 예시 값 | 설명 |
-    | --- | --- | --- | --- |
-    | `Authorization` | Y | `Bearer <serviceToken>` | 서비스 계정·호출 allowlist 검증 |
+- **요청 헤더:** 없음
 - **요청 파라미터:**
     
     
@@ -5790,12 +5753,7 @@
 - **인증:** study-service.
 - **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `contests`, `contest_problems`, `contest_participants`
 - **설명:** 힌트 차단 복구 조회
-- **요청 헤더:**
-    
-    
-    | 헤더 | 필수 | 예시 값 | 설명 |
-    | --- | --- | --- | --- |
-    | `Authorization` | Y | `Bearer <serviceToken>` | 서비스 계정·호출 allowlist 검증 |
+- **요청 헤더:** 없음
 - **요청 파라미터:**
     
     
@@ -5839,12 +5797,7 @@
 - **인증:** problem-service. 공유 요청 회원 본인 검증.
 - **대응 테이블:** `exams`, `exam_submissions`, `contests`, `contest_submissions`
 - **설명:** 제출 공유 스냅샷 조회
-- **요청 헤더:**
-    
-    
-    | 헤더 | 필수 | 예시 값 | 설명 |
-    | --- | --- | --- | --- |
-    | `Authorization` | Y | `Bearer <serviceToken>` | 서비스 계정·호출 allowlist 검증 |
+- **요청 헤더:** 없음
 - **요청 파라미터:**
     
     
@@ -5891,12 +5844,7 @@
 - **인증:** 분석 서비스(P3), study-service.
 - **대응 테이블:** `result_snapshots`
 - **설명:** 확정 결과 스냅샷 조회
-- **요청 헤더:**
-    
-    
-    | 헤더 | 필수 | 예시 값 | 설명 |
-    | --- | --- | --- | --- |
-    | `Authorization` | Y | `Bearer <serviceToken>` | 서비스 계정·호출 allowlist 검증 |
+- **요청 헤더:** 없음
 - **요청 파라미터:**
     
     
