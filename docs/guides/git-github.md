@@ -102,6 +102,7 @@ docs(contest): 시험 API 명세 반영
 - 완료 조건이나 범위가 바뀌면 Issue에도 반영한다.
 - Issue 하나의 크기는 구현 `300~800줄`(테스트 제외, 테스트 포함 최대 `1,500줄`), 엔드포인트 `1~2개`, 변경 파일 `10개` 이내를 기준으로 한다. 
   - 넘을 것으로 예상되면 착수 전에 Issue를 나눈다.
+- Issue를 게시하기 전에 HTML 안내 주석과 예시·자리표시자를 삭제한다. 저장소의 템플릿 원본 주석은 유지한다.
 
 ### 1.4 PR 작성
 
@@ -118,6 +119,7 @@ docs(contest): 시험 API 명세 반영
 - GitHub Stack 후속 PR은 선행 PR 병합 후 base가 `develop`로 변경된 뒤 병합하면 자동 종료가 적용된다.
 - `main` 대상 PR은 병합만으로 Issue가 자동 종료되지 않는다. 완료된 Issue를 직접 닫거나 `develop` 역반영 PR에 `Closes #번호`를 적는다.
 - Stack의 2번째 이상 PR에만 `🧱 stack` 라벨을 붙인다. 선행 PR이 병합되면 후속 PR의 base와 diff를 다시 확인한다.
+- PR 본문을 게시하기 전에 HTML 안내 주석과 예시·자리표시자를 삭제한다. 저장소의 템플릿 원본 주석은 유지한다.
 
 ### 1.5 병합 정책
 
@@ -150,6 +152,39 @@ docs(contest): 시험 API 명세 반영
 - 결정 기록과 기준 문서가 충돌하면 최신 결정 기록을 따르고, 충돌한 기준 문서를 고치는 Issue를 만든다.
 - 같은 규칙을 여러 문서에 옮겨 적지 않는다. 규칙은 원본 문서 한 곳에 두고 다른 문서에서는 위치만 가리킨다.
 - 문서 위치는 행 번호가 아니라 `문서 > 섹션 > 찾을 문구`로 전달한다.
+
+### 1.8 스택 브랜치 작업 규칙
+
+**브랜치 생성**
+
+선행 브랜치가 `develop`에 머지되지 않은 상태에서 그 위에 작업 브랜치를 쌓을 때 사용한다.
+
+```bash
+git switch <선행-브랜치>
+git switch -c <새-브랜치>
+git push -u origin <새-브랜치>
+```
+
+**선행 브랜치가 업데이트됐을 때**
+
+- `merge` 대신 `rebase`를 사용한다. merge를 쓰면 선행 브랜치 커밋이 히스토리에 섞여 PR diff가 오염된다.
+- 이미 push한 브랜치는 `--force-with-lease`로 강제 push한다. `--force`와 달리 원격에 다른 push가 있으면 실패해 의도치 않은 덮어쓰기를 막는다.
+
+```bash
+git fetch origin
+git rebase origin/<선행-브랜치>
+git push --force-with-lease
+```
+
+**선행 브랜치가 develop에 머지됐을 때**
+
+즉시 `develop` 기준으로 rebase한다.
+
+```bash
+git fetch origin
+git rebase origin/develop
+git push --force-with-lease
+```
 
 ---
 
