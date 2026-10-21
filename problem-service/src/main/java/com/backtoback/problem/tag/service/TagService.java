@@ -54,7 +54,7 @@ public class TagService {
      * 순번 변경과 태그 저장을 같은 트랜잭션으로 처리한다.
      *
      * @param request 등록할 태그 이름과 표시 순서
-     * @return 생성한 태그 ID와 이름
+     * @return 생성한 태그 ID·이름·보정된 순번
      * @throws DataIntegrityViolationException 태그 이름이 중복된 경우; 전역 처리기에서 태그 중복 오류로 응답한다
      * @throws ProblemException 잠금 대기 시간이 초과되어 {@code PROBLEM_VERSION_CONFLICT}가 발생한 경우
      */
@@ -72,14 +72,13 @@ public class TagService {
      *
      * @param tagId 수정할 태그 ID
      * @param request 변경할 이름 또는 표시 순서
-     * @return 수정한 태그 ID와 이름
-     * @throws ProblemException 변경값이 없거나 이름이 공백이면 {@code COMMON_INVALID_REQUEST}, 태그가 없으면 {@code PROBLEM_TAG_NOT_FOUND}
+     * @return 수정한 태그 ID·이름·보정된 순번
+     * @throws ProblemException 변경값이 없으면 {@code COMMON_INVALID_REQUEST}, 태그가 없으면 {@code PROBLEM_TAG_NOT_FOUND}
      * @throws DataIntegrityViolationException 변경할 이름이 중복된 경우; 전역 처리기에서 태그 중복 오류로 응답한다
      */
     @Transactional
     public TagResponse update(long tagId, TagUpdateRequest request) {
-        if ((request.name() == null && request.displayOrder() == null)
-            || (request.name() != null && request.name().isBlank())) {
+        if (request.name() == null && request.displayOrder() == null) {
             throw new ProblemException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
         tagOrderService.lock();
