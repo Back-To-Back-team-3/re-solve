@@ -229,9 +229,10 @@ com.backtoback.{서비스}
 
 | 패키지 (`com.backtoback.common`) | 클래스 | 역할 |
 | --- | --- | --- |
-| `response` | `ApiResponse`, `PageResponse`, `ErrorResponse` | API 명세서 0.3 공통 응답 |
-| `error` | `ErrorCode`(인터페이스), `CommonErrorCode`, `BusinessException`, `GlobalExceptionHandler` | 공통 오류 처리 |
-| `entity` | `BaseTimeEntity` | `created_at`·`updated_at` |
+| `api` | `ApiResponse`, `PageResponse`, `ApiErrorResponse` | API 명세서 0.3 공통 응답 |
+| `exception` | `ErrorCode`(인터페이스), `CommonErrorCode`, `BusinessException` | 공통 오류 처리 |
+| `web.exception` | `GlobalExceptionHandler` | 공통 예외 핸들러 |
+| `jpa.entity` | `BaseTimeEntity` | `created_at`·`updated_at` |
 
 - 서비스는 위 클래스와 같은 역할의 클래스를 만들지 않는다.
 - 공통 모듈에 클래스를 추가하려면 결정 기록을 먼저 고친다.
@@ -239,7 +240,7 @@ com.backtoback.{서비스}
 ### 6.3 응답·예외
 
 - Controller는 `ResponseEntity<ApiResponse<T>>`를 반환하고, 공통 응답을 적용하지 않는 경우는 API 명세서 0.3을 따른다.
-- 업무 오류는 `throw new BusinessException({서비스}ErrorCode.{코드})`로 던진다. 오류마다 예외 클래스를 만들지 않는다.
+- 업무 오류는 공통 `BusinessException`을 상속한 서비스별 예외 하나에 서비스 에러 코드를 전달해 던진다. 오류마다 예외 클래스를 만들지 않는다.
 - 서비스 에러 코드는 `global/error/{서비스}ErrorCode` enum 하나에 두고 `ErrorCode`를 구현한다. 이름·HTTP 상태는 에러 코드 표를 따르고, 표에 없는 코드는 문서를 먼저 고친다(Git/GitHub 메뉴얼 1.7).
 - Controller에서 예외를 잡아 응답을 만들지 않는다. 브라우저가 직접 여는 리다이렉트처럼 공통 오류 형식으로 응답할 수 없는 API만 예외로 하고, 이유를 주석으로 적는다.
 
@@ -255,7 +256,8 @@ com.backtoback.{서비스}
 - `@Getter`, `@NoArgsConstructor(access = AccessLevel.PROTECTED)`를 붙이고 `@Setter`·`@Builder`는 쓰지 않는다.
 - 생성은 `private` 생성자와 의도가 드러나는 이름의 정적 팩토리(`registerWithGitHub` 등)로 한다.
 - 상태 판단·변경은 엔티티 메서드로 한다(정책 및 상태 9.4 운영·보안 정책 > 상태 변경).
-- `BaseTimeEntity`를 상속한다. 컬럼·제약은 ERD, 마이그레이션 파일명은 ERD 7. 마이그레이션 파일 목록을 따른다.
+- 생성·수정 시간을 모두 관리하는 엔티티는 `BaseTimeEntity`를 상속한다. 생성 시간만 있는 불변 테이블은 공통 모듈 적용 가이드 2.3의 별도 시간 처리를 따른다. 
+  - 컬럼·제약은 ERD, 마이그레이션 파일명은 ERD 7. 마이그레이션 파일 목록을 따른다.
 
 ### 6.6 서비스·설정
 
