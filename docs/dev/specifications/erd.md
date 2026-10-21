@@ -1036,7 +1036,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `display_order` | INT | Y | 표시 순서. 커밋 시 태그 n개의 순번은 0~(n-1)이며 중복 없이 연속됨 |
 | `created_at` | DATETIME(6) | Y |  |
 | `updated_at` | DATETIME(6) | Y |  |
-| `version` | BIGINT | Y | 낙관적 락 버전. 기본값 0 |
+| `version` | BIGINT | Y | 낙관적 락 버전. JPA가 생성 시 0으로 초기화하며 DB DEFAULT는 사용하지 않음 |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
@@ -2618,6 +2618,19 @@ member-service/src/main/resources/db/migration/
 ```
 
 ### 7.2 Problem (`problem-service`)
+
+현재 태그 관리 구현에 적용된 마이그레이션:
+
+```text
+problem-service/src/main/resources/db/migration/
+  V1__problem_create_tags.sql
+  V2__problem_add_unique_tags.sql
+```
+
+- V1: 태그 테이블과 이름 UNIQUE 제약 생성
+- V2: 표시 순서 UNIQUE 제약 추가
+
+아래 목록은 전체 구축 계획이며, 개발 중 실제 적용 파일과 번호는 구분합니다.
 
 ```
 problem-service/src/main/resources/db/migration/

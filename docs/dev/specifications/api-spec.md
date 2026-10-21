@@ -2004,21 +2004,29 @@
 - **응답 (200):**
     
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "content": [ 
-    	      { "tagId": "1", "name": "해시" }, 
-    	      { "tagId": "2", "name": "스택/큐" } 
-          ],
-          "page": 0, 
-          "size": 100, 
-          "totalElements": 10, 
-          "totalPages": 1, 
-          "hasNext": false
-        }
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "tagId": "1",
+            "name": "해시",
+            "displayOrder": 0
+          },
+          {
+            "tagId": "2",
+            "name": "스택/큐",
+            "displayOrder": 1
+          }
+        ],
+        "page": 0,
+        "size": 100,
+        "totalElements": 10,
+        "totalPages": 1,
+        "hasNext": false
       }
+    }
     ```
     
 - **에러:**
@@ -2048,14 +2056,15 @@
 - **응답 (201):**
     
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "태그가 생성되었습니다.", 
-    	  "data": { 
-    		  "tagId": "1", 
-    		  "name": "해시" 
-    	  } 
+    {
+      "success": true,
+      "message": "태그가 생성되었습니다.",
+      "data": {
+        "tagId": "1",
+        "name": "해시",
+        "displayOrder": 0
       }
+    }
     ```
     
 - **에러:**
@@ -2094,14 +2103,15 @@
 - **응답 (200):**
     
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "태그가 수정되었습니다.", 
-    	  "data": { 
-    		  "tagId": "2", 
-    		  "name": "그리디" 
-    	  } 
+    {
+      "success": true,
+      "message": "태그가 수정되었습니다.",
+      "data": {
+        "tagId": "2",
+        "name": "그리디",
+        "displayOrder": 0
       }
+    }
     ```
     
 - **에러:**
