@@ -10,7 +10,7 @@ Write a PR body from the actual changes and verification results only, and regis
 
 ## Inputs
 
-- `git diff develop...HEAD`, `git log --oneline develop..HEAD`
+- `git diff <base>...HEAD`, `git log --oneline <base>..HEAD` — use `develop` for a normal PR and the preceding branch for a Stack PR
 - `.github/pull_request_template.md`
 - `docs/guides/git-github.md` > `1.4 PR 작성`, `1.6 AI로 Issue·PR을 작성할 때`
 - The stage 40 Mode A result

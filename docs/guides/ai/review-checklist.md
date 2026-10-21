@@ -15,10 +15,10 @@
 
 | # | 확인 | 방법 | 근거 |
 | --- | --- | --- | --- |
-| A1 | Issue 범위 밖 파일 변경이 없는가 | `git diff --stat develop...HEAD` | AGENTS.md > 3. Scope and prohibitions |
+| A1 | Issue 범위 밖 파일 변경이 없는가 | `git diff --stat <base>...HEAD` (일반: `develop`, Stack: 선행 브랜치) | AGENTS.md > 3. Scope and prohibitions |
 | A2 | 다른 담당 소유 파일을 바꿨다면 담당자 확인을 받았는가 | 변경 파일 ↔ 소유 서비스 | AGENTS.md > 3. Scope and prohibitions, planning.md > 2.1 도메인 |
-| A3 | 커밋 단위·제목이 규칙에 맞는가 | `git log --oneline develop..HEAD` | git-github.md > 1.2 커밋·Issue·PR 제목 |
-| A4 | Issue 크기 기준 안인가 | `git diff --shortstat develop...HEAD` | git-github.md > 1.3 Issue 관리 |
+| A3 | 커밋 단위·제목이 규칙에 맞는가 | `git log --oneline <base>..HEAD` (일반: `develop`, Stack: 선행 브랜치) | git-github.md > 1.2 커밋·Issue·PR 제목 |
+| A4 | Issue 크기 기준 안인가 | `git diff --shortstat <base>...HEAD` (일반: `develop`, Stack: 선행 브랜치) | git-github.md > 1.3 Issue 관리 |
 
 ## B. API 명세 (Controller·DTO 변경 시)
 

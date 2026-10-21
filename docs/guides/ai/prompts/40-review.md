@@ -18,7 +18,7 @@ Check changes against `docs/guides/ai/review-checklist.md`. Mode A is the author
 
 ## Steps — A. Self-review
 
-1. Look at `git diff --stat develop...HEAD` and choose the checklist sections that apply. Always include the sections the checklist marks as always applied.
+1. Look at `git diff --stat <base>...HEAD` — use `develop` for a normal PR and the preceding branch for a Stack PR — and choose the checklist sections that apply.
 2. Open the grounds document for each item and judge it as 통과, 미통과, 해당 없음, or 미확인. For 통과, give the file and line, or the command run and its result.
 3. Run the commands in section J. If you could not run a command, mark the item 미확인.
 4. For 미통과 items, propose a fix only. Do not change anything.
