@@ -44,9 +44,9 @@ public class ProblemExceptionHandler {
             }
         }
         if (code == CommonErrorCode.COMMON_INTERNAL_SERVER_ERROR) {
-            LOG.error("DB 제약 위반", exception);
+            LOG.error("DB 제약 위반: code={}, exceptionType={}", code.getCode(), exception.getClass().getSimpleName());
         } else {
-            LOG.warn("DB 제약 위반: code={}", code.getCode(), exception);
+            LOG.warn("DB 제약 위반: code={}, exceptionType={}", code.getCode(), exception.getClass().getSimpleName());
         }
         return ResponseEntity.status(code.getStatus()).body(ApiErrorResponse.of(code));
     }
