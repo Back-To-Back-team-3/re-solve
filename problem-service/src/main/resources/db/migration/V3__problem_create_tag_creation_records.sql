@@ -11,7 +11,7 @@ CREATE TABLE tag_creation_records (
     result_display_order INT NULL COMMENT '최초 생성 응답의 보정된 표시 순서; 이후 순번 변경과 무관하게 보존한다',
     created_at DATETIME(6) NOT NULL COMMENT '요청 기록 생성 시각',
     updated_at DATETIME(6) NOT NULL COMMENT '요청 기록 최종 수정 시각',
-    version BIGINT NOT NULL DEFAULT 0 COMMENT '요청 기록 변경 버전',
+    version BIGINT NOT NULL COMMENT '요청 기록 변경 버전',
     PRIMARY KEY (id),
     CONSTRAINT uk_tag_creation_records_admin_key UNIQUE (admin_id, idempotency_key),
     INDEX idx_tag_creation_records_expires_at (expires_at, id)
