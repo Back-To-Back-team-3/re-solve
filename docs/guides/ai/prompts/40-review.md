@@ -11,7 +11,7 @@ Check changes against `docs/guides/ai/review-checklist.md`. Mode A is the author
 
 ## Inputs
 
-- Mode A: `git diff develop...HEAD`
+- Mode A: `git diff <base>...HEAD` — use `develop` for a normal PR and the preceding branch for a Stack PR
 - Mode B: the PR number, the PR body (especially `💬 리뷰어에게`), and the file and line range chosen by the reviewer
 - Mode B: `docs/guides/git-github.md` > `4.1 리뷰어가 확인할 내용`
 - `docs/guides/ai/review-checklist.md` and the documents each item points to
