@@ -2656,10 +2656,12 @@ member-service/src/main/resources/db/migration/
 problem-service/src/main/resources/db/migration/
   V1__problem_create_tags.sql
   V2__problem_add_unique_tags.sql
+  V3__problem_create_tag_creation_records.sql
 ```
 
 - V1: 태그 테이블과 이름 UNIQUE 제약 생성
 - V2: 표시 순서 UNIQUE 제약 추가
+- V3: 태그 생성 멱등 기록 테이블 생성
 
 아래 목록은 전체 구축 계획이며, 개발 중 실제 적용 파일과 번호는 구분합니다.
 
