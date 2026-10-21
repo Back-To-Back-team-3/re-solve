@@ -45,6 +45,8 @@ class ProblemExceptionHandlerTests {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(response.getBody().error().code()).isEqualTo("COMMON_INTERNAL_SERVER_ERROR");
         assertThat(response.getBody().error().message()).isEqualTo("서버 오류가 발생했습니다.");
-        assertThat(output.getAll()).contains("internal-db-detail", "DataIntegrityViolationException");
+        assertThat(output.getAll())
+            .contains("COMMON_INTERNAL_SERVER_ERROR", "DataIntegrityViolationException")
+            .doesNotContain("internal-db-detail", "constraint failed", "DB write failed");
     }
 }
