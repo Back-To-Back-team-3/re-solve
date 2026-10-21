@@ -2,6 +2,7 @@ package com.backtoback.notification.delivery.repository;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -11,21 +12,30 @@ import org.springframework.stereotype.Repository;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * 사용자별 SseEmitter 세션을 메모리(ConcurrentHashMap)에서 스레드 안전하게 관리하는 저장소 구현체.
+ * 사용자별 SseEmitter 세션을 메모리에서 스레드 안전하게 관리하는 저장소 구현체.
+ * 세션 등록과 삭제의 원자성을 보장하여 동시 종료 시의 좀비 엔트리 잔존을 방지한다.
  */
 @Repository
 public class EmitterRepositoryImpl implements EmitterRepository {
 
-    private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
+    private static final class EmitterEntry {
+        private final Long memberId;
+        private final SseEmitter emitter;
+        private final long creationTime;
+
+        private EmitterEntry(Long memberId, SseEmitter emitter, long creationTime) {
+            this.memberId = memberId;
+            this.emitter = emitter;
+            this.creationTime = creationTime;
+        }
+    }
+
+    private final Map<String, EmitterEntry> entries = new ConcurrentHashMap<>();
     private final Map<Long, Set<String>> memberEmitterIds = new ConcurrentHashMap<>();
-    private final Map<String, Long> emitterMemberIds = new ConcurrentHashMap<>();
-    private final Map<String, Long> creationTimes = new ConcurrentHashMap<>();
 
     @Override
-    public SseEmitter save(String emitterId, Long memberId, SseEmitter emitter) {
-        emitters.put(emitterId, emitter);
-        creationTimes.put(emitterId, System.currentTimeMillis());
-        emitterMemberIds.put(emitterId, memberId);
+    public synchronized SseEmitter save(String emitterId, Long memberId, SseEmitter emitter) {
+        entries.put(emitterId, new EmitterEntry(memberId, emitter, System.currentTimeMillis()));
 
         memberEmitterIds.compute(memberId, (key, ids) -> {
             if (ids == null) {
@@ -47,9 +57,9 @@ public class EmitterRepositoryImpl implements EmitterRepository {
 
         List<SseEmitter> result = new ArrayList<>();
         for (String id : ids) {
-            SseEmitter emitter = emitters.get(id);
-            if (emitter != null) {
-                result.add(emitter);
+            EmitterEntry entry = entries.get(id);
+            if (entry != null) {
+                result.add(entry.emitter);
             }
         }
         return Collections.unmodifiableList(result);
@@ -57,22 +67,22 @@ public class EmitterRepositoryImpl implements EmitterRepository {
 
     @Override
     public Map<String, SseEmitter> findAll() {
-        return Collections.unmodifiableMap(emitters);
+        Map<String, SseEmitter> result = new HashMap<>();
+        entries.forEach((id, entry) -> result.put(id, entry.emitter));
+        return Collections.unmodifiableMap(result);
     }
 
     @Override
     public Long getCreationTime(String emitterId) {
-        return creationTimes.get(emitterId);
+        EmitterEntry entry = entries.get(emitterId);
+        return entry != null ? entry.creationTime : null;
     }
 
     @Override
-    public void deleteById(String emitterId) {
-        emitters.remove(emitterId);
-        creationTimes.remove(emitterId);
-        Long memberId = emitterMemberIds.remove(emitterId);
-
-        if (memberId != null) {
-            memberEmitterIds.computeIfPresent(memberId, (key, ids) -> {
+    public synchronized void deleteById(String emitterId) {
+        EmitterEntry removed = entries.remove(emitterId);
+        if (removed != null) {
+            memberEmitterIds.computeIfPresent(removed.memberId, (key, ids) -> {
                 ids.remove(emitterId);
                 return ids.isEmpty() ? null : ids;
             });
