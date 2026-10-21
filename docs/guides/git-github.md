@@ -155,7 +155,9 @@ docs(contest): 시험 API 명세 반영
 
 ### 1.8 스택 브랜치 작업 규칙
 
-**브랜치 생성**
+스택 브랜치란 `develop`이 아닌 다른 작업 브랜치 위에 쌓는 브랜치를 말한다. GitHub Stack 기능으로 PR을 연결하면 `Rebase stack` 버튼으로 변경을 반영하고, 선행 PR 병합 후 자동으로 base가 `develop`으로 변경된다.
+
+**브랜치 생성 및 Stack 등록**
 
 선행 브랜치가 `develop`에 머지되지 않은 상태에서 그 위에 작업 브랜치를 쌓을 때 사용한다.
 
@@ -165,10 +167,21 @@ git switch -c <새-브랜치>
 git push -u origin <새-브랜치>
 ```
 
+PR을 생성할 때 base를 선행 브랜치로 지정한 뒤 `Create stack` 또는 `Add to stack`으로 Stack에 연결한다. base 지정만으로 Stack 등록이 완료되지 않는다.
+
 **선행 브랜치가 업데이트됐을 때**
 
-- `merge` 대신 `rebase`를 사용한다. merge를 쓰면 선행 브랜치 커밋이 히스토리에 섞여 PR diff가 오염된다.
-- 이미 push한 브랜치는 `--force-with-lease`로 강제 push한다. `--force`와 달리 원격에 다른 push가 있으면 실패해 의도치 않은 덮어쓰기를 막는다.
+GitHub PR에서 `Rebase stack` 버튼이 표시되면 이를 눌러 후속 브랜치에 변경을 반영한다. 처리 완료 후 CI 결과를 확인한다.
+
+서버 rebase 후 로컬에 반영한다.
+
+```bash
+git switch <현재-브랜치>
+git fetch origin
+git reset --hard origin/<현재-브랜치>
+```
+
+`Rebase stack` 버튼이 없거나 수동 처리가 필요한 경우:
 
 ```bash
 git fetch origin
@@ -176,14 +189,16 @@ git rebase origin/<선행-브랜치>
 git push --force-with-lease
 ```
 
-**선행 브랜치가 develop에 머지됐을 때**
+**선행 PR이 develop에 머지됐을 때**
 
-즉시 `develop` 기준으로 rebase한다.
+GitHub Stack이 자동으로 후속 PR의 base를 `develop`으로 변경한다. 자동 rebase 완료 후 후속 PR의 base와 Files changed를 확인한다.
+
+로컬에서 원격 상태를 동기화한다.
 
 ```bash
+git switch <현재-브랜치>
 git fetch origin
-git rebase origin/develop
-git push --force-with-lease
+git reset --hard origin/<현재-브랜치>
 ```
 
 **GitHub에서 변경이 생겼을 때 (CodeRabbit Apply suggestion 등)**
