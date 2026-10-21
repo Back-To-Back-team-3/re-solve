@@ -2,7 +2,6 @@ package com.backtoback.member.auth.controller;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.EnumSet;
 import java.util.Set;
 
 import org.springframework.http.HttpHeaders;
@@ -18,6 +17,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.backtoback.common.api.ApiErrorResponse;
+import com.backtoback.common.api.ApiResponse;
+import com.backtoback.common.exception.BusinessException;
+import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.common.exception.ErrorCode;
 import com.backtoback.member.auth.config.AuthProperties;
 import com.backtoback.member.auth.dto.AccessTokenResponse;
 import com.backtoback.member.auth.dto.LoginCodeExchangeRequest;
@@ -27,10 +31,7 @@ import com.backtoback.member.auth.service.GitHubLoginStart;
 import com.backtoback.member.auth.service.LoginResult;
 import com.backtoback.member.auth.service.TokenRefreshResult;
 import com.backtoback.member.auth.store.OAuthStateStore;
-import com.backtoback.member.global.error.BusinessException;
-import com.backtoback.member.global.error.ErrorCode;
-import com.backtoback.member.global.response.ApiResponse;
-import com.backtoback.member.global.response.ErrorResponse;
+import com.backtoback.member.global.error.MemberErrorCode;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -51,7 +52,7 @@ public class AuthController {
      * 재발급이 이 오류로 실패하면 더 쓸 수 없는 Refresh Token 쿠키를 지운다.
      */
     private static final Set<ErrorCode> REFRESH_FAILURES
-        = EnumSet.of(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, ErrorCode.AUTH_REFRESH_TOKEN_REUSED);
+        = Set.of(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID, MemberErrorCode.AUTH_REFRESH_TOKEN_REUSED);
 
     private final AuthService authService;
     private final AuthProperties authProperties;
@@ -92,7 +93,7 @@ public class AuthController {
             return redirectToCallbackError(exception.getErrorCode());
         } catch (RuntimeException exception) {
             log.error("GitHub login callback failed unexpectedly", exception);
-            return redirectToCallbackError(ErrorCode.COMMON_INTERNAL_SERVER_ERROR);
+            return redirectToCallbackError(CommonErrorCode.COMMON_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -113,7 +114,7 @@ public class AuthController {
             .ok()
             .header(HttpHeaders.SET_COOKIE, refreshTokenCookie(result.refreshToken()).toString())
             .header(HttpHeaders.SET_COOKIE, expiredLoginNonceCookie().toString())
-            .body(ApiResponse.ok(TokenResponse.from(result)));
+            .body(ApiResponse.success(TokenResponse.from(result)));
     }
 
     /**
@@ -138,14 +139,14 @@ public class AuthController {
             return ResponseEntity
                 .status(errorCode.getStatus())
                 .header(HttpHeaders.SET_COOKIE, expiredRefreshTokenCookie().toString())
-                .body(ErrorResponse.of(errorCode));
+                .body(ApiErrorResponse.of(errorCode));
         }
 
         ResponseEntity.BodyBuilder response = ResponseEntity.ok();
         if (result.refreshTokenRotated()) {
             response.header(HttpHeaders.SET_COOKIE, refreshTokenCookie(result.newRefreshToken()).toString());
         }
-        return response.body(ApiResponse.ok(AccessTokenResponse.from(result)));
+        return response.body(ApiResponse.success(AccessTokenResponse.from(result)));
     }
 
     /**

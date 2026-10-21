@@ -19,9 +19,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import com.backtoback.common.exception.BusinessException;
 import com.backtoback.member.auth.AuthPropertiesFixture;
-import com.backtoback.member.global.error.BusinessException;
-import com.backtoback.member.global.error.ErrorCode;
+import com.backtoback.member.global.error.MemberErrorCode;
 
 class GitHubOAuthClientTest {
 
@@ -134,7 +134,7 @@ class GitHubOAuthClientTest {
         assertThatThrownBy(() -> client.fetchUser("auth-code"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_OAUTH_FAILED);
+            .isEqualTo(MemberErrorCode.AUTH_OAUTH_FAILED);
     }
 
     @Test
@@ -147,7 +147,7 @@ class GitHubOAuthClientTest {
         assertThatThrownBy(() -> client.fetchUser("bad-code"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_OAUTH_FAILED);
+            .isEqualTo(MemberErrorCode.AUTH_OAUTH_FAILED);
     }
 
     @Test
@@ -158,6 +158,6 @@ class GitHubOAuthClientTest {
         assertThatThrownBy(() -> client.fetchUser("auth-code"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
-            .isEqualTo(ErrorCode.AUTH_OAUTH_FAILED);
+            .isEqualTo(MemberErrorCode.AUTH_OAUTH_FAILED);
     }
 }

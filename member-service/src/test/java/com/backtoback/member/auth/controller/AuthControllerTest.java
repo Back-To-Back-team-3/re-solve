@@ -25,14 +25,15 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.auth.config.AuthProperties;
 import com.backtoback.member.auth.service.AuthService;
 import com.backtoback.member.auth.service.GitHubLoginStart;
 import com.backtoback.member.auth.service.LoginResult;
 import com.backtoback.member.auth.service.TokenRefreshResult;
 import com.backtoback.member.global.config.SecurityConfig;
-import com.backtoback.member.global.error.BusinessException;
-import com.backtoback.member.global.error.ErrorCode;
+import com.backtoback.member.global.error.MemberErrorCode;
+import com.backtoback.member.global.error.MemberException;
 import com.backtoback.member.member.domain.Member;
 
 import jakarta.servlet.http.Cookie;
@@ -94,7 +95,7 @@ class AuthControllerTest {
     @DisplayName("1.1.1 허용되지 않은 이동 경로는 400 COMMON_INVALID_REQUEST")
     void startGitHubLoginRejectsInvalidRedirect() throws Exception {
         given(authService.startGitHubLogin("https://evil.example"))
-            .willThrow(new BusinessException(ErrorCode.COMMON_INVALID_REQUEST));
+            .willThrow(new MemberException(CommonErrorCode.COMMON_INVALID_REQUEST));
 
         mockMvc
             .perform(get("/api/v1/auth/github").param("redirectPath", "https://evil.example"))
@@ -126,8 +127,8 @@ class AuthControllerTest {
     @DisplayName("1.1.2 콜백 실패는 JSON이 아니라 프론트 콜백 ?error=코드로 302 리다이렉트하고 nonce 쿠키를 지운다")
     void callbackFailureRedirectsWithError() throws Exception {
         given(authService.completeGitHubLogin("code", "bad", null, null))
-            .willThrow(new BusinessException(ErrorCode.AUTH_TOKEN_INVALID));
-        given(authService.frontendCallbackError(ErrorCode.AUTH_TOKEN_INVALID))
+            .willThrow(new MemberException(CommonErrorCode.AUTH_TOKEN_INVALID));
+        given(authService.frontendCallbackError(CommonErrorCode.AUTH_TOKEN_INVALID))
             .willReturn("http://localhost:8080/auth/callback?error=AUTH_TOKEN_INVALID");
 
         mockMvc
@@ -143,8 +144,8 @@ class AuthControllerTest {
     @DisplayName("1.1.2 GitHub 인가 취소(code 없이 error=access_denied)도 프론트 콜백으로 302 리다이렉트한다")
     void callbackHandlesCancel() throws Exception {
         given(authService.completeGitHubLogin(null, "state-1", "access_denied", "nonce-1"))
-            .willThrow(new BusinessException(ErrorCode.AUTH_OAUTH_DENIED));
-        given(authService.frontendCallbackError(ErrorCode.AUTH_OAUTH_DENIED))
+            .willThrow(new MemberException(MemberErrorCode.AUTH_OAUTH_DENIED));
+        given(authService.frontendCallbackError(MemberErrorCode.AUTH_OAUTH_DENIED))
             .willReturn("http://localhost:8080/auth/callback?error=AUTH_OAUTH_DENIED");
 
         mockMvc
@@ -163,7 +164,7 @@ class AuthControllerTest {
     void callbackUnexpectedFailureRedirects() throws Exception {
         given(authService.completeGitHubLogin("code", "state-1", null, "nonce-1"))
             .willThrow(new IllegalStateException("redis down"));
-        given(authService.frontendCallbackError(ErrorCode.COMMON_INTERNAL_SERVER_ERROR))
+        given(authService.frontendCallbackError(CommonErrorCode.COMMON_INTERNAL_SERVER_ERROR))
             .willReturn("http://localhost:8080/auth/callback?error=COMMON_INTERNAL_SERVER_ERROR");
 
         mockMvc
@@ -242,7 +243,7 @@ class AuthControllerTest {
     @DisplayName("1.1.3 이미 쓴 코드이거나 다른 브라우저면 401 AUTH_LOGIN_CODE_INVALID")
     void exchangeLoginCodeRejectsUsedCode() throws Exception {
         given(authService.exchangeLoginCode("lc_used", null))
-            .willThrow(new BusinessException(ErrorCode.AUTH_LOGIN_CODE_INVALID));
+            .willThrow(new MemberException(MemberErrorCode.AUTH_LOGIN_CODE_INVALID));
 
         mockMvc
             .perform(
@@ -313,8 +314,8 @@ class AuthControllerTest {
     @Test
     @DisplayName("1.1.4 재발급 실패(INVALID·REUSED)는 401과 함께 Refresh Token 쿠키를 지운다")
     void refreshFailureClearsCookie() throws Exception {
-        given(authService.refresh(null)).willThrow(new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
-        given(authService.refresh("stolen")).willThrow(new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_REUSED));
+        given(authService.refresh(null)).willThrow(new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+        given(authService.refresh("stolen")).willThrow(new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_REUSED));
 
         mockMvc
             .perform(post("/api/v1/auth/token/refresh"))

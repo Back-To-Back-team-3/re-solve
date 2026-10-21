@@ -7,7 +7,9 @@
 | 분류 | 문서 | 내용 |
 | --- | --- | --- |
 | 개발·협업 가이드 | [Git/GitHub 매뉴얼](guides/git-github.md) | 브랜치·Issue·PR·리뷰·병합 규칙과 작업 흐름 |
-| 개발·협업 가이드 | [컨벤션·빌드 매뉴얼](guides/convention-build-manual.md) | Spotless·Checkstyle·빌드 규칙 |
+| 개발·협업 가이드 | [컨벤션·빌드 매뉴얼](guides/convention-build-manual.md) | Spotless·Checkstyle·빌드·주석 작성 규칙 |
+| 개발·협업 가이드 | [공통 모듈 적용 가이드](guides/common-module.md) | 모듈 선택·설정 등록·보안 체인 연결·기존 서비스 적용 주의점 |
+| 개발·협업 가이드 | [AI 협업 안내](guides/ai/README.md) | AI 도구별 설정 파일·세션 시작·세 도구의 GitHub MCP 연결 |
 | 기획 | [기획서](dev/planning/planning.md) | 서비스 개요, 기능 목록, 마일스톤 |
 | 기획 | [정책 및 상태](dev/planning/policy-and-state.md) | 도메인 정책, 상태 전이, 불변식 |
 | 아키텍처 | [시스템 구성도](dev/architecture/system-architecture.md) | 전체 아키텍처 구조 |
@@ -27,7 +29,7 @@
 | `dev/planning/` | 기획서, 정책 및 상태, 개발 일정 |
 | `dev/architecture/` | 시스템 구성도, 서비스 간 처리 다이어그램 |
 | `dev/specifications/` | API 명세, 에러코드 표, 도메인·DB, 이벤트 계약, 스케줄러 정의 |
-| `guides/` | Git/GitHub, 코드 컨벤션, 로컬 개발·실행 방법 |
+| `guides/` | Git/GitHub, 코드 컨벤션, AI 협업, 로컬 개발·실행 방법 |
 | `operations/` | AWS 구성, 배포 절차, 모니터링, 장애 대응 절차 |
 | `records/` | 회의록, 결정 근거, 테스트·성능 측정·운영 결과 |
 | `assets/diagrams/` | 구성도·ERD·처리 흐름의 첨부 이미지 |

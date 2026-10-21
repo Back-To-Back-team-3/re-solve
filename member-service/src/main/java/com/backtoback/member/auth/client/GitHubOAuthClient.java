@@ -15,8 +15,8 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.backtoback.member.auth.config.AuthProperties;
-import com.backtoback.member.global.error.BusinessException;
-import com.backtoback.member.global.error.ErrorCode;
+import com.backtoback.member.global.error.MemberErrorCode;
+import com.backtoback.member.global.error.MemberException;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.extern.slf4j.Slf4j;
@@ -81,7 +81,7 @@ public class GitHubOAuthClient {
             gitHubAccessToken = exchangeCode(authorizationCode);
             user = getUser(gitHubAccessToken);
         } catch (RestClientException exception) {
-            throw new BusinessException(ErrorCode.AUTH_OAUTH_FAILED, exception);
+            throw new MemberException(MemberErrorCode.AUTH_OAUTH_FAILED, exception);
         }
         return new GitHubUser(user.id(), user.login(), findPrimaryVerifiedEmail(gitHubAccessToken), user.avatarUrl());
     }
@@ -105,7 +105,7 @@ public class GitHubOAuthClient {
 
         // GitHub은 잘못된 코드에도 200으로 error 필드를 돌려준다.
         if (response == null || response.accessToken() == null || response.error() != null) {
-            throw new BusinessException(ErrorCode.AUTH_OAUTH_FAILED);
+            throw new MemberException(MemberErrorCode.AUTH_OAUTH_FAILED);
         }
         return response.accessToken();
     }
@@ -113,7 +113,7 @@ public class GitHubOAuthClient {
     private UserResponse getUser(String gitHubAccessToken) {
         UserResponse user = apiGet("/user", gitHubAccessToken, UserResponse.class);
         if (user == null || user.id() == null || user.login() == null) {
-            throw new BusinessException(ErrorCode.AUTH_OAUTH_FAILED);
+            throw new MemberException(MemberErrorCode.AUTH_OAUTH_FAILED);
         }
         return user;
     }

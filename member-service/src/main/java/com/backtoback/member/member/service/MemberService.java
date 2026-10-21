@@ -6,9 +6,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.auth.client.GitHubUser;
-import com.backtoback.member.global.error.BusinessException;
-import com.backtoback.member.global.error.ErrorCode;
+import com.backtoback.member.global.error.MemberErrorCode;
+import com.backtoback.member.global.error.MemberException;
 import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.repository.MemberRepository;
 
@@ -34,14 +35,16 @@ public class MemberService {
 
         if (registration.member().isWithdrawn()) {
             // 탈퇴 회원의 재가입 정책이 확정되기 전까지 같은 GitHub 계정의 로그인을 막는다.
-            throw new BusinessException(ErrorCode.AUTH_ACCESS_DENIED);
+            throw new MemberException(CommonErrorCode.AUTH_ACCESS_DENIED);
         }
         return registration;
     }
 
     @Transactional(readOnly = true)
     public Member getMember(Long memberId) {
-        return memberRepository.findById(memberId).orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+        return memberRepository
+            .findById(memberId)
+            .orElseThrow(() -> new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
     }
 
     @Transactional(readOnly = true)
