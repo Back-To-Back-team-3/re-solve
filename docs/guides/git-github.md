@@ -186,6 +186,34 @@ git rebase origin/develop
 git push --force-with-lease
 ```
 
+**GitHub에서 변경이 생겼을 때 (CodeRabbit Apply suggestion 등)**
+
+원격 히스토리가 바뀌지 않은 경우 (Apply suggestion처럼 커밋만 추가된 경우):
+
+```bash
+git switch <수정할-브랜치>
+git pull origin <수정할-브랜치>
+```
+
+원격 히스토리가 바뀐 경우 (rebase·force push 등):
+
+```bash
+git switch <수정할-브랜치>
+git fetch origin
+git reset --hard origin/<수정할-브랜치>
+```
+
+현재 어떤 경우인지 모르겠다면 `git fetch origin` 후 `git log --oneline origin/<수정할-브랜치>`와 로컬 로그를 비교해 히스토리가 같은지 확인한다.
+
+수정할 브랜치 위에 쌓인 Stack 브랜치가 있다면 각 브랜치에서 순서대로 rebase한다.
+
+```bash
+git switch <위-스택-브랜치>
+git fetch origin
+git rebase origin/<수정할-브랜치>
+git push --force-with-lease
+```
+
 ---
 
 ## 2. 처음 작업할 때
