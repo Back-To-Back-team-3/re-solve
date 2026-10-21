@@ -1389,30 +1389,45 @@ class TagApiTest {
     }
 
     /**
-     * 태그 이름 변경이나 삭제 이후에도 최초 생성 응답을 반환하는지 검증한다.
+     * 요청 순번 보정과 태그 이름·순번 변경 및 삭제 이후에도 최초 생성 응답을 반환하는지 검증한다.
      *
      * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
      */
     @Test
+    @DisplayName("태그 순번이 변경되거나 삭제되어도 최초 보정된 순번을 재응답한다")
     void replayPreservesOriginalResponseAfterTagUpdateAndDelete() throws Exception {
         String original
             = mvc
                 .perform(
                     admin(post(ADMIN_PATH))
                         .header("Idempotency-Key", "original")
-                        .content("{\"name\":\"해시\",\"displayOrder\":0}")
+                        .content("{\"name\":\"해시\",\"displayOrder\":99}")
                 )
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.displayOrder").value(0))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
         String id = mapper.readTree(original).path("data").path("tagId").asText();
-        mvc.perform(admin(patch(ADMIN_PATH + "/" + id)).content("{\"name\":\"새 이름\"}")).andExpect(status().isOk());
+        create("another", "다른 태그", 0);
+        assertThat(displayOrder(id)).isEqualTo(1);
+        mvc
+            .perform(admin(patch(ADMIN_PATH + "/" + id)).content("{\"name\":\"새 이름\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.displayOrder").value(1));
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT result_display_order FROM tag_creation_records WHERE idempotency_key = ?",
+                    Integer.class,
+                    "original"
+                )
+        ).isZero();
         mvc
             .perform(
                 admin(post(ADMIN_PATH))
                     .header("Idempotency-Key", "original")
-                    .content("{\"displayOrder\":0,\"name\":\"해시\"}")
+                    .content("{\"displayOrder\":99,\"name\":\"해시\"}")
             )
             .andExpect(status().isCreated())
             .andExpect(content().json(original));
@@ -1421,11 +1436,11 @@ class TagApiTest {
             .perform(
                 admin(post(ADMIN_PATH))
                     .header("Idempotency-Key", "original")
-                    .content("{\"name\":\"해시\",\"displayOrder\":0}")
+                    .content("{\"name\":\"해시\",\"displayOrder\":99}")
             )
             .andExpect(status().isCreated())
             .andExpect(content().json(original));
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags WHERE id = ?", Integer.class, id)).isZero();
     }
 
     /**
@@ -1598,7 +1613,15 @@ class TagApiTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT expires_at FROM tag_creation_records", LocalDateTime.class))
             .isEqualTo(LocalDateTime.of(2026, 10, 15, 9, 0));
-        assertThat(create("ttl", "스택", 1)).isEqualTo(newId);
+        assertThat(jdbc.queryForObject("SELECT result_display_order FROM tag_creation_records", Integer.class))
+            .isEqualTo(1);
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH)).header("Idempotency-Key", "ttl").content("{\"name\":\"스택\",\"displayOrder\":1}")
+            )
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.tagId").value(newId))
+            .andExpect(jsonPath("$.data.displayOrder").value(1));
     }
 
     /**
@@ -1653,8 +1676,8 @@ class TagApiTest {
         jdbc.batchUpdate("""
             INSERT INTO tag_creation_records
                 (admin_id, idempotency_key, request_name, request_display_order, expires_at,
-                    created_at, updated_at, version, result_tag_id, result_name)
-            VALUES ('admin', ?, '태그', 1, ?, ?, ?, 1, 1, '태그')
+                    created_at, updated_at, version, result_tag_id, result_name, result_display_order)
+            VALUES ('admin', ?, '태그', 1, ?, ?, ?, 1, 1, '태그', 1)
             """, rows);
         assertThat(creationRecords.deleteExpired()).isEqualTo(500);
         assertThat(creationRecords.deleteExpired()).isEqualTo(1);
