@@ -173,9 +173,13 @@ PR을 생성할 때 base를 선행 브랜치로 지정한 뒤 `Create stack` 또
 
 GitHub PR에서 `Rebase stack` 버튼이 표시되면 이를 눌러 후속 브랜치에 변경을 반영한다. 처리 완료 후 CI 결과를 확인한다.
 
-서버 rebase 후 로컬에 반영한다.
+서버 rebase 후 로컬에 반영한다. 로컬에 미커밋 변경이나 미푸시 커밋이 있으면 먼저 보관한다.
 
 ```bash
+# 실행 전 확인
+git status                                    # 미커밋 변경 확인
+git log --oneline origin/<현재-브랜치>..HEAD  # 미푸시 커밋 확인
+# 보존할 작업이 없고 원격 상태로 맞춰도 되는 경우에만 실행
 git switch <현재-브랜치>
 git fetch origin
 git reset --hard origin/<현재-브랜치>
@@ -193,9 +197,13 @@ git push --force-with-lease
 
 GitHub Stack이 자동으로 후속 PR의 base를 `develop`으로 변경한다. 자동 rebase 완료 후 후속 PR의 base와 Files changed를 확인한다.
 
-로컬에서 원격 상태를 동기화한다.
+로컬에서 원격 상태를 동기화한다. 로컬에 미커밋 변경이나 미푸시 커밋이 있으면 먼저 보관한다.
 
 ```bash
+# 실행 전 확인
+git status                                    # 미커밋 변경 확인
+git log --oneline origin/<현재-브랜치>..HEAD  # 미푸시 커밋 확인
+# 보존할 작업이 없고 원격 상태로 맞춰도 되는 경우에만 실행
 git switch <현재-브랜치>
 git fetch origin
 git reset --hard origin/<현재-브랜치>
@@ -210,12 +218,16 @@ git switch <수정할-브랜치>
 git pull origin <수정할-브랜치>
 ```
 
-원격 히스토리가 바뀐 경우 (rebase·force push 등):
+원격 히스토리가 바뀐 경우 (rebase·force push 등): 로컬에 미커밋 변경이나 미푸시 커밋이 있으면 먼저 보관한다.
 
 ```bash
-git switch <수정할-브랜치>
+# 실행 전 확인
+git status                                    # 미커밋 변경 확인
+git log --oneline origin/<현재-브랜치>..HEAD  # 미푸시 커밋 확인
+# 보존할 작업이 없고 원격 상태로 맞춰도 되는 경우에만 실행
+git switch <현재-브랜치>
 git fetch origin
-git reset --hard origin/<수정할-브랜치>
+git reset --hard origin/<현재-브랜치>
 ```
 
 현재 어떤 경우인지 모르겠다면 `git fetch origin` 후 `git log --oneline origin/<수정할-브랜치>`와 로컬 로그를 비교해 히스토리가 같은지 확인한다.
