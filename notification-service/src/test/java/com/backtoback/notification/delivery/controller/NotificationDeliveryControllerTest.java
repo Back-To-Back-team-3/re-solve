@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -55,9 +56,13 @@ class NotificationDeliveryControllerTest {
     }
 
     @Test
-    @DisplayName("7.1.1 X-User-Id 헤더가 누락되면 401 UNAUTHORIZED를 반환한다")
+    @DisplayName("7.1.1 X-User-Id 헤더가 누락되면 401 UNAUTHORIZED와 AUTH_TOKEN_INVALID를 반환한다")
     void subscribeWithoutUserIdHeaderReturnsUnauthorized() throws Exception {
         // when & then
-        mockMvc.perform(get("/api/v1/notifications/subscribe")).andExpect(status().isUnauthorized());
+        mockMvc
+            .perform(get("/api/v1/notifications/subscribe"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
 }

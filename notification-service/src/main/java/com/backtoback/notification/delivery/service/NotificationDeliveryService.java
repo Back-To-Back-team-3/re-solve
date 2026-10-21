@@ -7,6 +7,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 실시간 알림 SSE 스트림 연결, 하트비트 전송, 미수신 알림 재전송 및 세션 종료를 담당하는 서비스.
+ * 재전송과 실시간 발송 경합 시의 순서 역전 및 누락을 방지하기 위해 세션 단위 동기화를 보장한다.
  */
 @Slf4j
 @Service
@@ -35,6 +38,7 @@ public class NotificationDeliveryService {
     private final EmitterRepository emitterRepository;
     private final NotificationRepository notificationRepository;
     private final Clock clock;
+    private final Map<SseEmitter, AtomicLong> lastSentNotificationIds = new ConcurrentHashMap<>();
 
     /**
      * 클라이언트의 SSE 구독을 처리하고 SseEmitter를 반환한다.
@@ -48,19 +52,32 @@ public class NotificationDeliveryService {
     public SseEmitter subscribe(Long memberId, String lastEventId) {
         String emitterId = generateEmitterId(memberId);
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MILLIS);
+        Long parsedLastEventId = parseLastEventId(lastEventId);
+        AtomicLong tracker = new AtomicLong(parsedLastEventId != null ? parsedLastEventId : 0L);
+        lastSentNotificationIds.put(emitter, tracker);
 
-        emitter.onCompletion(() -> emitterRepository.deleteById(emitterId));
+        emitter.onCompletion(() -> {
+            emitterRepository.deleteById(emitterId);
+            lastSentNotificationIds.remove(emitter);
+        });
         emitter.onTimeout(() -> {
             emitter.complete();
             emitterRepository.deleteById(emitterId);
+            lastSentNotificationIds.remove(emitter);
         });
-        emitter.onError(throwable -> emitterRepository.deleteById(emitterId));
+        emitter.onError(throwable -> {
+            emitterRepository.deleteById(emitterId);
+            lastSentNotificationIds.remove(emitter);
+        });
 
         emitterRepository.save(emitterId, memberId, emitter);
 
-        boolean replayed = replayMissedNotifications(emitter, memberId, lastEventId);
-        if (!replayed) {
-            sendHeartbeat(emitterId, emitter);
+        // 재전송 중 실시간 발송이 선행되어 발생하는 순서 역전과 누락을 방지하기 위해 세션 락을 점유한다.
+        synchronized (emitter) {
+            boolean replayed = replayMissedNotifications(emitter, memberId, parsedLastEventId);
+            if (!replayed) {
+                sendHeartbeat(emitterId, emitter);
+            }
         }
 
         return emitter;
@@ -68,6 +85,7 @@ public class NotificationDeliveryService {
 
     /**
      * 특정 회원에게 새 알림을 실시간으로 전송한다.
+     * 재전송 중인 세션은 동기화 대기 후 순서대로 발송하며 이미 재전송된 알림은 건너뛴다.
      *
      * @param memberId 수신 회원 ID
      * @param notification 전송할 알림 엔티티
@@ -80,17 +98,27 @@ public class NotificationDeliveryService {
 
         NotificationEventResponse response = NotificationEventResponse.from(notification);
         for (SseEmitter emitter : emitters) {
-            try {
-                emitter
-                    .send(
-                        SseEmitter
-                            .event()
-                            .id(String.valueOf(notification.getId()))
-                            .name(EVENT_NOTIFICATION)
-                            .data(response)
-                    );
-            } catch (IOException | IllegalStateException exception) {
-                log.debug("알림 SSE 전송 실패, 이미터 정리 대상: memberId={}", memberId, exception);
+            synchronized (emitter) {
+                AtomicLong tracker = lastSentNotificationIds.get(emitter);
+                if (tracker != null && notification.getId() != null && notification.getId() <= tracker.get()) {
+                    continue;
+                }
+
+                try {
+                    emitter
+                        .send(
+                            SseEmitter
+                                .event()
+                                .id(String.valueOf(notification.getId()))
+                                .name(EVENT_NOTIFICATION)
+                                .data(response)
+                        );
+                    if (tracker != null && notification.getId() != null) {
+                        tracker.set(Math.max(tracker.get(), notification.getId()));
+                    }
+                } catch (IOException | IllegalStateException exception) {
+                    log.debug("알림 SSE 전송 실패, 이미터 정리 대상: memberId={}", memberId, exception);
+                }
             }
         }
     }
@@ -115,23 +143,21 @@ public class NotificationDeliveryService {
         allEmitters.forEach((emitterId, emitter) -> {
             Long creationTime = emitterRepository.getCreationTime(emitterId);
             if (creationTime != null && (now - creationTime) >= expirationDurationMillis) {
-                try {
-                    emitter.complete();
-                } catch (Exception exception) {
-                    log.debug("Emitter 완료 처리 중 예외 발생: emitterId={}", emitterId, exception);
-                } finally {
-                    emitterRepository.deleteById(emitterId);
+                synchronized (emitter) {
+                    try {
+                        emitter.complete();
+                    } catch (Exception exception) {
+                        log.debug("Emitter 완료 처리 중 예외 발생: emitterId={}", emitterId, exception);
+                    } finally {
+                        emitterRepository.deleteById(emitterId);
+                        lastSentNotificationIds.remove(emitter);
+                    }
                 }
             }
         });
     }
 
-    private boolean replayMissedNotifications(SseEmitter emitter, Long memberId, String lastEventId) {
-        if (lastEventId == null || lastEventId.isBlank()) {
-            return false;
-        }
-
-        Long parsedLastEventId = parseLastEventId(lastEventId);
+    private boolean replayMissedNotifications(SseEmitter emitter, Long memberId, Long parsedLastEventId) {
         if (parsedLastEventId == null) {
             return false;
         }
@@ -149,6 +175,7 @@ public class NotificationDeliveryService {
             return false;
         }
 
+        AtomicLong tracker = lastSentNotificationIds.get(emitter);
         for (Notification notification : missedNotifications) {
             try {
                 emitter
@@ -159,8 +186,11 @@ public class NotificationDeliveryService {
                             .name(EVENT_NOTIFICATION)
                             .data(NotificationEventResponse.from(notification))
                     );
+                if (tracker != null && notification.getId() != null) {
+                    tracker.set(Math.max(tracker.get(), notification.getId()));
+                }
             } catch (IOException | IllegalStateException exception) {
-                log.warn("미수신 알림 재전송 실패: memberId={}, lastEventId={}", memberId, lastEventId, exception);
+                log.warn("미수신 알림 재전송 실패: memberId={}, lastEventId={}", memberId, parsedLastEventId, exception);
                 return true;
             }
         }
@@ -169,15 +199,20 @@ public class NotificationDeliveryService {
     }
 
     private void sendHeartbeat(String emitterId, SseEmitter emitter) {
-        try {
-            emitter.send(SseEmitter.event().name(EVENT_HEARTBEAT).data(Collections.emptyMap()));
-        } catch (IOException | IllegalStateException exception) {
-            log.debug("하트비트 전송 실패, 이미터 정리: emitterId={}", emitterId, exception);
-            emitterRepository.deleteById(emitterId);
+        synchronized (emitter) {
+            try {
+                emitter.send(SseEmitter.event().name(EVENT_HEARTBEAT).data(Collections.emptyMap()));
+            } catch (IOException | IllegalStateException exception) {
+                log.debug("하트비트 전송 실패, 이미터 정리: emitterId={}", emitterId, exception);
+                emitterRepository.deleteById(emitterId);
+            }
         }
     }
 
     private Long parseLastEventId(String lastEventId) {
+        if (lastEventId == null || lastEventId.isBlank()) {
+            return null;
+        }
         try {
             return Long.parseLong(lastEventId.trim());
         } catch (NumberFormatException exception) {

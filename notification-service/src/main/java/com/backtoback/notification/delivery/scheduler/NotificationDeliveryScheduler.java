@@ -28,9 +28,10 @@ public class NotificationDeliveryScheduler {
     }
 
     /**
-     * 10초마다 60초 이상 유지된 Emitter 세션을 정상 완료(complete) 처리하여 클라이언트의 재연결을 유도한다.
+     * 10초 지연마다 60초 이상 유지된 Emitter 세션을 정상 완료(complete) 처리하여 클라이언트의 재연결을 유도한다.
+     * 이전 회차 작업 완료 후 10초 대기하여 대규모 세션 순회 시 스레드 중첩 실행을 방지한다 (스케줄러 0.1, 7.0).
      */
-    @Scheduled(fixedRate = 10_000)
+    @Scheduled(fixedDelay = 10_000)
     public void closeExpiredConnections() {
         deliveryService.closeExpiredConnections(NotificationDeliveryService.SSE_TIMEOUT_MILLIS);
     }
