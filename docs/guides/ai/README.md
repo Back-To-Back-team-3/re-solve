@@ -218,7 +218,61 @@ docker pull ghcr.io/github/github-mcp-server
 - 토큰을 `.mcp.json`·`.env`·Issue·PR·스크린샷에 남기지 않는다.
 - 노출이 의심되면 즉시 GitHub에서 토큰을 폐기하고 재발급한다. push된 경우에도 커밋 정리보다 폐기를 먼저 한다.
 
-## 5. 참고 자료
+## 5. 단계별 프롬프트
+
+AI에게 단계 이름으로 요청하면 `AGENTS.md` §7에 따라 해당 프롬프트 파일을 읽고 진행한다. 프롬프트 파일은 AI가 읽는 문서라 영어로 작성했고, AI의 답변과 출력 표는 한국어다.
+
+### 파이프라인 흐름
+
+```text
+[00 세션 시작] ─ 모든 단계 앞에서 1회
+        │
+[10 계획·이슈 쪼개기] A. 카테고리 ──(Human gate)── B. 이슈 ──(Human gate)
+        │                                           └ 계약 변경 필요 → 문서 Issue 먼저
+[20 이슈 작성] ──(Human gate: 등록 승인)
+        │
+[30 코드 구현] A. 계획 ──(Human gate)── B. 커밋마다 ──(Human gate: 커밋 승인)
+        │
+[40 자체 리뷰] ── review-checklist.md ── (미통과 → 30 B)
+[50 PR 작성] ──(Human gate: 등록 승인, Draft)
+[40 리뷰 보조] (리뷰어) ── review-checklist.md ── 코멘트는 사람이 등록
+[60 트러블슈팅] ── 실패·리뷰 반영 시 → 30 B
+```
+
+### 프롬프트 구조
+
+모든 프롬프트 파일은 같은 8개 섹션으로 구성된다.
+
+| 섹션 | 내용 |
+| --- | --- |
+| Purpose | 이 단계가 만드는 것 |
+| When to use | 언제 이 단계를 시작하는가 |
+| Inputs | AI가 읽어야 할 파일·값 |
+| Steps | 순서대로 할 일 |
+| Output format | 출력 표·본문 형식 (한국어 고정) |
+| Do not | 이 단계에서 하면 안 되는 것 |
+| Human gate | 사람이 결정할 것, AI가 멈출 지점 |
+| Tool differences | Claude Code / Codex / Gemini CLI 차이 |
+
+### 사용 방법
+
+| 단계 | 프롬프트 | 요청에 포함할 내용 |
+| --- | --- | --- |
+| 세션 시작 | 00-session-start | 담당 [A~E], 이슈 #[번호] |
+| 계획·이슈 쪼개기 | 10-plan | [마일스톤] 카테고리 계획 / [카테고리] 이슈 쪼개기 |
+| 이슈 작성 | 20-issue-write | 이슈 제목 또는 10단계 확정 항목 번호 |
+| 코드 구현 | 30-implement | 이슈 #[번호] 구현 계획 / 커밋 [n] 구현 |
+| 리뷰 | 40-review | 자체 리뷰 / PR #[번호], 리뷰할 파일·범위 |
+| PR 작성 | 50-pr-write | 이슈 #[번호] |
+| 트러블슈팅 | 60-troubleshoot | 오류 메시지 전문 또는 리뷰 코멘트 |
+
+### 주의사항
+
+- 각 단계는 출력 후 사람의 승인을 기다린다. AI가 다음 단계로 스스로 넘어가지 않는다.
+- 리뷰 기준은 `docs/guides/ai/review-checklist.md` 하나만 쓴다. 사람이 리뷰할 때도 같은 기준을 쓴다.
+- 프롬프트가 실제 작업과 맞지 않으면 개인 설정에서 고쳐 쓰지 말고 개선 Issue를 만든다.
+
+## 6. 참고 자료
 
 - AGENTS.md 형식: <https://agents.md>
 - Claude Code 메모리(`CLAUDE.md`, `@import`): <https://docs.claude.com/en/docs/claude-code/memory>
