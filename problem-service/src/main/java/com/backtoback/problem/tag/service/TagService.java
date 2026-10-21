@@ -67,13 +67,17 @@ public class TagService {
             throw new ProblemException(CommonErrorCode.IDEMPOTENCY_KEY_CONFLICT);
         }
         if (savedRecord.getResultTagId() != null) {
-            return new TagResponse(savedRecord.getResultTagId().toString(), savedRecord.getResultName());
+            return new TagResponse(
+                savedRecord.getResultTagId().toString(),
+                savedRecord.getResultName(),
+                savedRecord.getResultDisplayOrder()
+            );
         }
         tagOrderService.lock();
         int displayOrder = tagOrderService.makeRoomFor(request.displayOrder());
         Tag tag = tagRepository.saveAndFlush(Tag.create(request.name().strip(), displayOrder));
         TagResponse response = TagResponse.from(tag);
-        savedRecord.complete(tag.getId(), tag.getName());
+        savedRecord.complete(tag.getId(), tag.getName(), tag.getDisplayOrder());
         return response;
     }
 

@@ -57,6 +57,7 @@ public class TagCreationRecord extends BaseEntity {
     private Long resultTagId;
     @Column(length = 200)
     private String resultName;
+    private Integer resultDisplayOrder;
 
     /**
      * 기준 시각에 요청 기록의 유효 기간이 끝났는지 확인한다.
@@ -93,17 +94,20 @@ public class TagCreationRecord extends BaseEntity {
         this.expiresAt = expiresAt;
         resultTagId = null;
         resultName = null;
+        resultDisplayOrder = null;
     }
 
     /**
-     * 생성된 태그의 ID와 이름을 최초 응답으로 보관한다.
-     * 태그의 이름 변경이나 삭제 이후에도 같은 생성 응답을 반환하기 위한 기록이다.
+     * 생성된 태그의 ID·이름·보정된 순번을 최초 응답으로 보관한다.
+     * 태그의 이름·순번 변경이나 삭제 이후에도 같은 생성 응답을 반환하기 위한 기록이다.
      *
      * @param tagId 생성된 태그 ID
      * @param name 생성 당시 태그 이름
+     * @param displayOrder 생성 당시 보정된 순번
      */
-    public void complete(long tagId, String name) {
+    public void complete(long tagId, String name, int displayOrder) {
         resultTagId = tagId;
         resultName = name;
+        resultDisplayOrder = displayOrder;
     }
 }
