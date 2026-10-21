@@ -18,6 +18,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -134,12 +135,14 @@ class TagApiTests {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.message").value("태그가 수정되었습니다."))
             .andExpect(jsonPath("$.data.tagId").value(id))
-            .andExpect(jsonPath("$.data.name").value("그리디"));
+            .andExpect(jsonPath("$.data.name").value("그리디"))
+            .andExpect(jsonPath("$.data.displayOrder").value(0));
         assertThat(jdbc.queryForObject("SELECT display_order FROM tags WHERE id = ?", Integer.class, id)).isZero();
         mvc
             .perform(admin(patch(ADMIN_PATH + "/" + id)).content("{\"displayOrder\":2}"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.name").value("그리디"));
+            .andExpect(jsonPath("$.data.name").value("그리디"))
+            .andExpect(jsonPath("$.data.displayOrder").value(0));
         assertThat(jdbc.queryForObject("SELECT display_order FROM tags WHERE id = ?", Integer.class, id)).isZero();
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, id)).isEqualTo(1L);
         assertThat(
@@ -168,12 +171,14 @@ class TagApiTests {
             .perform(user(get(LIST_PATH)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.content[0].tagId").value(first))
+            .andExpect(jsonPath("$.data.content[0].displayOrder").value(0))
             .andExpect(jsonPath("$.data.size").value(100))
             .andExpect(jsonPath("$.data.totalElements").value(2));
         mvc
             .perform(user(get(LIST_PATH).param("size", "1").param("sort", "displayOrder,desc")))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.content[0].tagId").value(second))
+            .andExpect(jsonPath("$.data.content[0].displayOrder").value(1))
             .andExpect(jsonPath("$.data.hasNext").value(true))
             .andExpect(jsonPath("$.data.totalPages").value(2));
         mvc
@@ -672,7 +677,19 @@ class TagApiTests {
         String second = create("second", "두 번째 태그", 1);
         String third = create("third", "세 번째 태그", 2);
 
-        String inserted = create("inserted", "새 태그", requestedOrder);
+        String response
+            = mvc
+                .perform(
+                    admin(post(ADMIN_PATH))
+                        .header("Idempotency-Key", "inserted")
+                        .content(mapper.writeValueAsString(new TagCreateRequest("새 태그", requestedOrder)))
+                )
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.displayOrder").value(expectedOrder))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String inserted = mapper.readTree(response).path("data").path("tagId").asText();
 
         assertThat(displayOrder(inserted)).isEqualTo(expectedOrder);
         assertThat(jdbc.queryForList("SELECT display_order FROM tags ORDER BY display_order", Integer.class))
@@ -711,7 +728,8 @@ class TagApiTests {
                 admin(patch(ADMIN_PATH + "/" + moving))
                     .content(mapper.writeValueAsString(new TagUpdateRequest(null, requestedOrder)))
             )
-            .andExpect(status().isOk());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.displayOrder").value(expectedOrder));
 
         assertThat(displayOrder(moving)).isEqualTo(expectedOrder);
         assertThat(jdbc.queryForList("SELECT display_order FROM tags ORDER BY display_order", Integer.class))
@@ -818,15 +836,75 @@ class TagApiTests {
     }
 
     /**
+     * 공백 이름을 필드 검증 오류로 거부하고 이름과 순번을 모두 유지하는지 검증한다.
+     *
+     * @param name 거부할 공백 이름
+     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "",
+            "   ",
+            "\t\n",
+            "\u2003"
+        }
+    )
+    @DisplayName("공백 이름 수정은 DTO 검증에서 실패하고 기존 태그를 보존한다")
+    void blankPatchNameReturnsFieldValidationError(String name) throws Exception {
+        String id = create("tag", "해시", 0);
+        create("following", "다음 태그", 1);
+        mvc
+            .perform(
+                admin(patch(ADMIN_PATH + "/" + id)).content(mapper.writeValueAsString(new TagUpdateRequest(name, 1)))
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
+            .andExpect(jsonPath("$.error.details[0].field").value("name"));
+        assertThat(jdbc.queryForObject("SELECT name FROM tags WHERE id = ?", String.class, id)).isEqualTo("해시");
+        assertThat(displayOrder(id)).isZero();
+    }
+
+    /**
+     * 유효한 이름의 앞뒤 공백을 제거한 값을 저장하고 응답하는지 검증한다.
+     *
+     * @param name 앞뒤 공백을 포함한 이름
+     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "  새 이름  ",
+            "\u2003새 이름\u2003"
+        }
+    )
+    @DisplayName("이름 수정은 앞뒤 공백을 제거하여 저장한다")
+    void patchStripsSurroundingWhitespace(String name) throws Exception {
+        String id = create("tag", "해시", 0);
+        mvc
+            .perform(
+                admin(patch(ADMIN_PATH + "/" + id)).content(mapper.writeValueAsString(new TagUpdateRequest(name, null)))
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.name").value("새 이름"));
+        assertThat(jdbc.queryForObject("SELECT name FROM tags WHERE id = ?", String.class, id)).isEqualTo("새 이름");
+    }
+
+    /**
      * 빈 수정 요청·공백 이름·없는 태그에 정해진 오류를 반환하는지 검증한다.
      *
      * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
      */
     @Test
+    @DisplayName("공백 이름 수정은 공통 입력 오류로 거부하고 기존 이름을 유지한다")
     void emptyOrBlankPatchAndUnknownTagsReturnExpectedErrors() throws Exception {
         String id = create("tag", "해시", 0);
         for (String body : List.of("{}", "{\"name\":\"  \"}", "{\"name\":null,\"displayOrder\":null}")) {
-            mvc.perform(admin(patch(ADMIN_PATH + "/" + id)).content(body)).andExpect(status().isBadRequest());
+            mvc
+                .perform(admin(patch(ADMIN_PATH + "/" + id)).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+            assertThat(jdbc.queryForObject("SELECT name FROM tags WHERE id = ?", String.class, id)).isEqualTo("해시");
         }
         mvc
             .perform(admin(patch(ADMIN_PATH + "/999999")).content("{\"name\":\"해시\"}"))
@@ -965,7 +1043,10 @@ class TagApiTests {
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
-        return mapper.readTree(response).path("data").path("tagId").asText();
+        var data = mapper.readTree(response).path("data");
+        String tagId = data.path("tagId").asText();
+        assertThat(data.path("displayOrder").isIntegralNumber()).isTrue();
+        return tagId;
     }
 
     /**
