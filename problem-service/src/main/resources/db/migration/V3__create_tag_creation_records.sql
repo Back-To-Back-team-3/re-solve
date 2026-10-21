@@ -8,6 +8,7 @@ CREATE TABLE tag_creation_records (
     expires_at DATETIME(6) NOT NULL COMMENT '접수 후 24시간의 만료 시각; 만료된 키로 새 요청 접수 시 갱신한다',
     result_tag_id BIGINT NULL COMMENT '최초 생성 응답의 태그 ID; 태그 삭제 후에도 보존하며 FK를 두지 않는다',
     result_name VARCHAR(200) NULL COMMENT '최초 생성 응답의 태그 이름; 이후 이름 변경과 무관하게 보존한다',
+    result_display_order INT NULL COMMENT '최초 생성 응답의 보정된 표시 순서; 이후 순번 변경과 무관하게 보존한다',
     created_at DATETIME(6) NOT NULL COMMENT '요청 기록 생성 시각',
     updated_at DATETIME(6) NOT NULL COMMENT '요청 기록 최종 수정 시각',
     version BIGINT NOT NULL DEFAULT 0 COMMENT '요청 기록 변경 버전',
