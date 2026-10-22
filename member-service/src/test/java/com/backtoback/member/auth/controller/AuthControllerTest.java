@@ -352,6 +352,19 @@ class AuthControllerTest {
     }
 
     @Test
+    @DisplayName("관리자 경로는 USER면 403 AUTH_ACCESS_DENIED, ADMIN이면 보안 체인을 통과한다")
+    void adminPathRequiresAdminRole() throws Exception {
+        mockMvc
+            .perform(get("/api/v1/admin/members").header("X-User-Id", "7").header("X-User-Role", "USER"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
+        // 아직 관리자 API가 없어 보안 체인을 통과하면 404다.
+        mockMvc
+            .perform(get("/api/v1/admin/members").header("X-User-Id", "1").header("X-User-Role", "ADMIN"))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("1.1.5 X-User-Role 없이 X-User-Id만 오면 공통 보안 필터가 401로 막는다")
     void logoutRejectsMissingRole() throws Exception {
         mockMvc
