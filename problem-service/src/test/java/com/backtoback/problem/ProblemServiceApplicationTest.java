@@ -6,6 +6,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,9 +19,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.localstack.LocalStackContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
@@ -29,16 +31,12 @@ import software.amazon.awssdk.services.s3.S3Client;
 @SpringBootTest(properties = "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration")
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
-@Testcontainers
 class ProblemServiceApplicationTest {
-    @Container
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db");
 
-    @Container
     static final LocalStackContainer LOCALSTACK
         = new LocalStackContainer("localstack/localstack:3.8").withServices("s3");
 
-    @Container
     static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7.4-alpine").withExposedPorts(6379);
 
     @Autowired
@@ -52,6 +50,21 @@ class ProblemServiceApplicationTest {
 
     @Autowired
     private MockMvc mvc;
+
+    @BeforeAll
+    static void startInfrastructure() {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(), "Docker가 없어 인프라 통합 테스트를 건너뜁니다.");
+        MYSQL.start();
+        LOCALSTACK.start();
+        REDIS.start();
+    }
+
+    @AfterAll
+    static void stopInfrastructure() {
+        REDIS.stop();
+        LOCALSTACK.stop();
+        MYSQL.stop();
+    }
 
     @DynamicPropertySource
     static void infrastructureProperties(DynamicPropertyRegistry registry) {
@@ -78,9 +91,14 @@ class ProblemServiceApplicationTest {
     @Test
     @DisplayName("설정된 S3 클라이언트로 LocalStack 객체를 저장하고 조회한다")
     void configuredS3ClientCanWriteAndReadLocalStack() {
+        // given
         String bucket = "problem-setup-test";
         s3.createBucket(request -> request.bucket(bucket));
+
+        // when
         s3.putObject(request -> request.bucket(bucket).key("probe"), RequestBody.fromString("connected"));
+
+        // then
         assertThat(s3.getObjectAsBytes(request -> request.bucket(bucket).key("probe")).asUtf8String())
             .isEqualTo("connected");
     }
