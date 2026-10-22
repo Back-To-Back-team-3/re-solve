@@ -21,6 +21,7 @@
 | 명세 | [에러 코드 표](dev/specifications/error-codes.md) | 공통 에러 코드 |
 | 운영 | [환경 변수 예시](operations/env-example.md) | 로컬·Docker 환경 변수 설정 예시 |
 | 기록 | [결정 기록](records/decisions/) | 서비스 간 계약·설계 결정과 근거 |
+| 기록 | [개발 계획서](records/progress/) | 담당별 사이클 표·이슈/PR 누적 |
 
 ## 디렉터리 구분
 
@@ -31,7 +32,7 @@
 | `dev/specifications/` | API 명세, 에러코드 표, 도메인·DB, 이벤트 계약, 스케줄러 정의 |
 | `guides/` | Git/GitHub, 코드 컨벤션, AI 협업, 로컬 개발·실행 방법 |
 | `operations/` | AWS 구성, 배포 절차, 모니터링, 장애 대응 절차 |
-| `records/` | 회의록, 결정 근거, 테스트·성능 측정·운영 결과 |
+| `records/` | 회의록, 결정 근거, 테스트·성능 측정·운영 결과, 담당별 개발 계획서 |
 | `assets/diagrams/` | 구성도·ERD·처리 흐름의 첨부 이미지 |
 | `assets/screenshots/` | 화면과 검증 결과의 스크린샷 |
 
