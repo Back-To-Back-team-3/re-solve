@@ -82,8 +82,10 @@ public class TagService {
             throw new ProblemException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
         tagOrderService.lock();
-        Tag tag = tagRepository.findById(tagId)
-            .orElseThrow(() -> new ProblemException(ProblemErrorCode.PROBLEM_TAG_NOT_FOUND));
+        Tag tag
+            = tagRepository
+                .findById(tagId)
+                .orElseThrow(() -> new ProblemException(ProblemErrorCode.PROBLEM_TAG_NOT_FOUND));
         if (request.displayOrder() != null) {
             tagOrderService.move(tag, request.displayOrder());
         }
@@ -102,8 +104,10 @@ public class TagService {
     @Transactional
     public void delete(long tagId) {
         tagOrderService.lock();
-        Tag tag = tagRepository.findById(tagId)
-            .orElseThrow(() -> new ProblemException(ProblemErrorCode.PROBLEM_TAG_NOT_FOUND));
+        Tag tag
+            = tagRepository
+                .findById(tagId)
+                .orElseThrow(() -> new ProblemException(ProblemErrorCode.PROBLEM_TAG_NOT_FOUND));
         tagRepository.delete(tag);
         tagRepository.flush();
         tagOrderService.closeGap();
