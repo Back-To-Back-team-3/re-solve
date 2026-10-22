@@ -18,6 +18,4 @@ import com.backtoback.common.web.logging.HttpClientConfiguration;
         HttpClientConfiguration.class
     }
 )
-public class CommonConfiguration {
-    // 공통 Bean은 위의 Import 목록으로만 등록한다.
-}
+public class CommonConfiguration {}
