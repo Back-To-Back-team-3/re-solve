@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,11 +25,12 @@ import org.testcontainers.mysql.MySQLContainer;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 
+/** 문제 서비스의 데이터베이스·Redis·S3 연결과 상태 조회를 확인한다. */
 @SpringBootTest(properties = "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration")
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
 @Testcontainers
-class ProblemServiceApplicationTests {
+class ProblemServiceApplicationTest {
     @Container
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db");
 
@@ -51,11 +53,6 @@ class ProblemServiceApplicationTests {
     @Autowired
     private MockMvc mvc;
 
-    /**
-     * 테스트 컨테이너의 연결 정보를 Spring 설정에 등록한다.
-     *
-     * @param registry 테스트 실행 시 사용할 동적 속성 등록기
-     */
     @DynamicPropertySource
     static void infrastructureProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.data.redis.host", REDIS::getHost);
@@ -70,20 +67,16 @@ class ProblemServiceApplicationTests {
         registry.add("spring.cloud.aws.credentials.secret-key", LOCALSTACK::getSecretKey);
     }
 
-    /**
-     * 문제 DB 연결과 Flyway 마이그레이션 적용을 검증한다.
-     */
     @Test
+    @DisplayName("문제 데이터베이스에 연결하고 마이그레이션을 적용한다")
     void applicationConnectsToProblemDatabaseAndAppliesMigrations() {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("problem_db");
         assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM setup_probe", Integer.class)).isZero();
     }
 
-    /**
-     * 설정된 S3 클라이언트가 LocalStack 객체를 저장하고 조회하는지 검증한다.
-     */
     @Test
+    @DisplayName("설정된 S3 클라이언트로 LocalStack 객체를 저장하고 조회한다")
     void configuredS3ClientCanWriteAndReadLocalStack() {
         String bucket = "problem-setup-test";
         s3.createBucket(request -> request.bucket(bucket));
@@ -92,12 +85,8 @@ class ProblemServiceApplicationTests {
             .isEqualTo("connected");
     }
 
-    /**
-     * 인증 없이 서비스 상태를 조회할 수 있는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("인증 없이 서비스 상태를 조회한다")
     void healthIsAvailableWithoutAuthentication() throws Exception {
         mvc.perform(get("/actuator/health")).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("UP"));
     }
