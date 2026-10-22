@@ -102,6 +102,7 @@ docs(contest): 시험 API 명세 반영
 - 완료 조건이나 범위가 바뀌면 Issue에도 반영한다.
 - Issue 하나의 크기는 구현 `300~800줄`(테스트 제외, 테스트 포함 최대 `1,500줄`), 엔드포인트 `1~2개`, 변경 파일 `10개` 이내를 기준으로 한다. 
   - 넘을 것으로 예상되면 착수 전에 Issue를 나눈다.
+- Issue를 게시하기 전에 HTML 안내 주석과 예시·자리표시자를 삭제한다. 저장소의 템플릿 원본 주석은 유지한다.
 
 ### 1.4 PR 작성
 
@@ -118,6 +119,7 @@ docs(contest): 시험 API 명세 반영
 - GitHub Stack 후속 PR은 선행 PR 병합 후 base가 `develop`로 변경된 뒤 병합하면 자동 종료가 적용된다.
 - `main` 대상 PR은 병합만으로 Issue가 자동 종료되지 않는다. 완료된 Issue를 직접 닫거나 `develop` 역반영 PR에 `Closes #번호`를 적는다.
 - Stack의 2번째 이상 PR에만 `🧱 stack` 라벨을 붙인다. 선행 PR이 병합되면 후속 PR의 base와 diff를 다시 확인한다.
+- PR 본문을 게시하기 전에 HTML 안내 주석과 예시·자리표시자를 삭제한다. 저장소의 템플릿 원본 주석은 유지한다.
 
 ### 1.5 병합 정책
 
@@ -150,6 +152,94 @@ docs(contest): 시험 API 명세 반영
 - 결정 기록과 기준 문서가 충돌하면 최신 결정 기록을 따르고, 충돌한 기준 문서를 고치는 Issue를 만든다.
 - 같은 규칙을 여러 문서에 옮겨 적지 않는다. 규칙은 원본 문서 한 곳에 두고 다른 문서에서는 위치만 가리킨다.
 - 문서 위치는 행 번호가 아니라 `문서 > 섹션 > 찾을 문구`로 전달한다.
+
+### 1.8 스택 브랜치 작업 규칙
+
+스택 브랜치란 `develop`이 아닌 다른 작업 브랜치 위에 쌓는 브랜치를 말한다. GitHub Stack 기능으로 PR을 연결하면 `Rebase stack` 버튼으로 변경을 반영하고, 선행 PR 병합 후 자동으로 base가 `develop`으로 변경된다.
+
+**브랜치 생성 및 Stack 등록**
+
+선행 브랜치가 `develop`에 머지되지 않은 상태에서 그 위에 작업 브랜치를 쌓을 때 사용한다.
+
+```bash
+git switch <선행-브랜치>
+git switch -c <새-브랜치>
+git push -u origin <새-브랜치>
+```
+
+PR을 생성할 때 base를 선행 브랜치로 지정한 뒤 `Create stack` 또는 `Add to stack`으로 Stack에 연결한다. base 지정만으로 Stack 등록이 완료되지 않는다.
+
+**선행 브랜치가 업데이트됐을 때**
+
+GitHub PR에서 `Rebase stack` 버튼이 표시되면 이를 눌러 후속 브랜치에 변경을 반영한다. 처리 완료 후 CI 결과를 확인한다.
+
+서버 rebase 후 로컬에 반영한다. 로컬에 미커밋 변경이나 미푸시 커밋이 있으면 먼저 보관한다.
+
+```bash
+# 실행 전 확인
+git status                                    # 미커밋 변경 확인
+git log --oneline origin/<현재-브랜치>..HEAD  # 미푸시 커밋 확인
+# 보존할 작업이 없고 원격 상태로 맞춰도 되는 경우에만 실행
+git switch <현재-브랜치>
+git fetch origin
+git reset --hard origin/<현재-브랜치>
+```
+
+`Rebase stack` 버튼이 없거나 수동 처리가 필요한 경우:
+
+```bash
+git fetch origin
+git rebase origin/<선행-브랜치>
+git push --force-with-lease
+```
+
+**선행 PR이 develop에 머지됐을 때**
+
+GitHub Stack이 자동으로 후속 PR의 base를 `develop`으로 변경한다. 자동 rebase 완료 후 후속 PR의 base와 Files changed를 확인한다.
+
+로컬에서 원격 상태를 동기화한다. 로컬에 미커밋 변경이나 미푸시 커밋이 있으면 먼저 보관한다.
+
+```bash
+# 실행 전 확인
+git status                                    # 미커밋 변경 확인
+git log --oneline origin/<현재-브랜치>..HEAD  # 미푸시 커밋 확인
+# 보존할 작업이 없고 원격 상태로 맞춰도 되는 경우에만 실행
+git switch <현재-브랜치>
+git fetch origin
+git reset --hard origin/<현재-브랜치>
+```
+
+**GitHub에서 변경이 생겼을 때 (CodeRabbit Apply suggestion 등)**
+
+원격 히스토리가 바뀌지 않은 경우 (Apply suggestion처럼 커밋만 추가된 경우):
+
+```bash
+git switch <수정할-브랜치>
+git pull origin <수정할-브랜치>
+```
+
+원격 히스토리가 바뀐 경우 (rebase·force push 등): 로컬에 미커밋 변경이나 미푸시 커밋이 있으면 먼저 보관한다.
+
+```bash
+# 실행 전 확인
+git status                                    # 미커밋 변경 확인
+git log --oneline origin/<현재-브랜치>..HEAD  # 미푸시 커밋 확인
+# 보존할 작업이 없고 원격 상태로 맞춰도 되는 경우에만 실행
+git switch <현재-브랜치>
+git fetch origin
+git reset --hard origin/<현재-브랜치>
+```
+
+현재 어떤 경우인지 모르겠다면 `git fetch origin` 후 `git log --oneline origin/<수정할-브랜치>`와 로컬 로그를 비교해 히스토리가 같은지 확인한다.
+
+수정할 브랜치 위에 쌓인 Stack 브랜치가 있다면 각 브랜치에서 순서대로 rebase한다.
+
+```bash
+git switch <위-스택-브랜치>
+git fetch origin
+git rebase origin/<수정할-브랜치>
+git push --force-with-lease
+```
 
 ---
 
