@@ -10,10 +10,10 @@ import com.backtoback.common.api.PageResponse;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
+import com.backtoback.problem.tag.domain.Tag;
 import com.backtoback.problem.tag.dto.request.TagCreateRequest;
 import com.backtoback.problem.tag.dto.request.TagUpdateRequest;
 import com.backtoback.problem.tag.dto.response.TagResponse;
-import com.backtoback.problem.tag.entity.Tag;
 import com.backtoback.problem.tag.repository.TagRepository;
 
 import lombok.RequiredArgsConstructor;

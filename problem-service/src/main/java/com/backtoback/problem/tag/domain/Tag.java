@@ -1,4 +1,4 @@
-package com.backtoback.problem.tag.entity;
+package com.backtoback.problem.tag.domain;
 
 import com.backtoback.problem.global.entity.BaseEntity;
 

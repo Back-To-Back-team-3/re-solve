@@ -8,10 +8,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
-import com.backtoback.problem.tag.entity.Tag;
+import com.backtoback.problem.tag.domain.Tag;
 
 import jakarta.persistence.LockModeType;
 
+/** 태그를 저장·검색하고, 순번 변경에 필요한 전체 태그의 비관적 락 조회를 제공한다. */
 public interface TagRepository extends JpaRepository<Tag, Long> {
     /**
      * 이름에 검색어가 포함된 태그를 대소문자 구분 없이 조회한다.

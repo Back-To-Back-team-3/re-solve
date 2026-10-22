@@ -11,7 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.global.lock.TransactionLock;
-import com.backtoback.problem.tag.entity.Tag;
+import com.backtoback.problem.tag.domain.Tag;
 import com.backtoback.problem.tag.repository.TagRepository;
 
 import lombok.RequiredArgsConstructor;
