@@ -7,6 +7,9 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.backtoback.notification.notification.domain.Notification;
 import com.backtoback.notification.notification.domain.NotificationType;
@@ -20,6 +23,12 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     long countByMemberIdAndIsReadFalse(Long memberId);
 
     Optional<Notification> findByIdAndMemberId(Long id, Long memberId);
+
+    @Modifying(clearAutomatically = true)
+    @Query(
+        "UPDATE Notification n SET n.isRead = true, n.readAt = :readAt WHERE n.memberId = :memberId AND n.isRead = false"
+    )
+    int markAllAsRead(@Param("memberId") Long memberId, @Param("readAt") LocalDateTime readAt);
 
     List<Notification> findByMemberIdAndIsReadFalse(Long memberId);
 

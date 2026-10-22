@@ -6,6 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -25,6 +26,7 @@ import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.notification.global.error.NotificationException;
 import com.backtoback.notification.notification.domain.NotificationType;
 import com.backtoback.notification.notification.dto.response.NotificationPageResponse;
+import com.backtoback.notification.notification.dto.response.NotificationReadAllResponse;
 import com.backtoback.notification.notification.dto.response.NotificationResponse;
 import com.backtoback.notification.notification.dto.response.UnreadCountResponse;
 import com.backtoback.notification.notification.service.NotificationService;
@@ -163,5 +165,66 @@ class NotificationControllerTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.success").value(false))
             .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("7.1.4 알림 단건 읽음 처리 요청 시 200 OK와 성공 메시지 및 잔여 미읽음 개수를 반환한다")
+    void markAsReadSuccess() throws Exception {
+        // given
+        given(notificationService.markAsRead(eq(1L), eq(100L))).willReturn(new UnreadCountResponse(0L));
+
+        // when & then
+        mockMvc
+            .perform(
+                patch("/api/v1/notifications/100/read").header("X-User-Id", "1").accept(MediaType.APPLICATION_JSON)
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.message").value("알림이 읽음 처리되었습니다."))
+            .andExpect(jsonPath("$.data.unreadCount").value(0));
+
+        verify(notificationService).markAsRead(eq(1L), eq(100L));
+    }
+
+    @Test
+    @DisplayName("7.1.4 단건 읽음 처리 시 X-User-Id 헤더가 누락되면 401 UNAUTHORIZED를 반환한다")
+    void markAsReadWithoutUserIdHeaderReturnsUnauthorized() throws Exception {
+        // when & then
+        mockMvc
+            .perform(patch("/api/v1/notifications/100/read"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+    }
+
+    @Test
+    @DisplayName("7.1.5 알림 전체 읽음 처리 요청 시 200 OK와 성공 메시지 및 처리 건수를 반환한다")
+    void markAllAsReadSuccess() throws Exception {
+        // given
+        given(notificationService.markAllAsRead(eq(1L))).willReturn(new NotificationReadAllResponse(5L, 0L));
+
+        // when & then
+        mockMvc
+            .perform(
+                patch("/api/v1/notifications/read-all").header("X-User-Id", "1").accept(MediaType.APPLICATION_JSON)
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.message").value("모든 알림을 읽음 처리했습니다."))
+            .andExpect(jsonPath("$.data.updatedCount").value(5))
+            .andExpect(jsonPath("$.data.unreadCount").value(0));
+
+        verify(notificationService).markAllAsRead(eq(1L));
+    }
+
+    @Test
+    @DisplayName("7.1.5 전체 읽음 처리 시 X-User-Id 헤더가 누락되면 401 UNAUTHORIZED를 반환한다")
+    void markAllAsReadWithoutUserIdHeaderReturnsUnauthorized() throws Exception {
+        // when & then
+        mockMvc
+            .perform(patch("/api/v1/notifications/read-all"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
 }
