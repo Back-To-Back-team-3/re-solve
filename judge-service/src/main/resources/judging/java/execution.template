@@ -1,0 +1,144 @@
+class Main {
+    /**
+     * 사용자 함수를 호출하고 반환값만 stdout에 기록한다.
+     * System.out 디버그 출력은 stderr로 보낸다. 두 스트림 모두 실행 환경의 출력 제한 대상이다.
+     *
+     * @param args 사용하지 않는 실행 인자
+     * @throws Exception 입력 복원 또는 사용자 실행이 실패한 경우
+     */
+    public static void main(String[] args) throws Exception {
+        java.io.PrintStream resultOutput = System.out;
+        System.setOut(System.err);
+        java.io.DataInputStream input = new java.io.DataInputStream(
+            java.util.Base64.getDecoder().wrap(System.in));
+        ${RETURN_TYPE} result = new Solution().solution(${ARGUMENTS});
+        StringBuilder json = new StringBuilder();
+        writeJson(json, result);
+        resultOutput.write(json.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        resultOutput.flush();
+    }
+
+    /**
+     * JavaInputEncoder의 타입 태그와 값을 복원한다.
+     *
+     * @param input 실행용 입력
+     * @return 선언된 Java 타입의 값
+     * @throws Exception 입력이 손상되거나 클래스를 복원할 수 없는 경우
+     */
+    private static Object readValue(java.io.DataInputStream input) throws Exception {
+        switch (input.readUnsignedByte()) {
+            case 1: return input.readInt();
+            case 2: return input.readLong();
+            case 3: return input.readDouble();
+            case 4: return readText(input);
+            case 5: return input.readBoolean();
+            case 6:
+                String name = readText(input);
+                Class<?> component = switch (name) {
+                    case "int" -> int.class;
+                    case "long" -> long.class;
+                    case "float" -> float.class;
+                    case "double" -> double.class;
+                    case "boolean" -> boolean.class;
+                    default -> Class.forName(name);
+                };
+                int length = input.readInt();
+                Object array = java.lang.reflect.Array.newInstance(component, length);
+                for (int i = 0; i < length; i++) {
+                    java.lang.reflect.Array.set(array, i, readValue(input));
+                }
+                return array;
+            case 7:
+                int size = input.readInt();
+                java.util.Map<String, Object> object = new java.util.LinkedHashMap<>();
+                for (int i = 0; i < size; i++) {
+                    object.put(readText(input), readValue(input));
+                }
+                return object;
+            case 8: return input.readFloat();
+            default: throw new IllegalArgumentException("실행 입력을 읽을 수 없습니다.");
+        }
+    }
+
+    /**
+     * 길이와 UTF-16 코드 단위로 저장된 문자열을 복원한다.
+     *
+     * @param input 실행용 입력
+     * @return 원본 문자열
+     * @throws java.io.IOException 입력을 끝까지 읽지 못한 경우
+     */
+    private static String readText(java.io.DataInputStream input) throws java.io.IOException {
+        char[] chars = new char[input.readInt()];
+        for (int i = 0; i < chars.length; i++) {
+            chars[i] = input.readChar();
+        }
+        return new String(chars);
+    }
+
+    /**
+     * 반환값을 JSON으로 표현한다. 타입·기대값 비교는 Judge에서 수행한다.
+     *
+     * @param json 출력 버퍼
+     * @param value 실제 반환값
+     * @throws IllegalArgumentException JSON으로 표현할 수 없는 값인 경우
+     */
+    private static void writeJson(StringBuilder json, Object value) {
+        if (value == null) {
+            json.append("null");
+        } else if (value instanceof String text) {
+            writeString(json, text);
+        } else if (value instanceof Boolean || value instanceof Byte || value instanceof Short
+            || value instanceof Integer || value instanceof Long || value instanceof java.math.BigInteger
+            || value instanceof java.math.BigDecimal) {
+            json.append(value);
+        } else if (value instanceof Float number && Float.isFinite(number)) {
+            json.append(number);
+        } else if (value instanceof Double number && Double.isFinite(number)) {
+            json.append(number);
+        } else if (value.getClass().isArray()) {
+            json.append('[');
+            for (int i = 0; i < java.lang.reflect.Array.getLength(value); i++) {
+                if (i > 0) json.append(',');
+                writeJson(json, java.lang.reflect.Array.get(value, i));
+            }
+            json.append(']');
+        } else if (value instanceof java.util.Map<?, ?> object) {
+            json.append('{');
+            boolean first = true;
+            for (java.util.Map.Entry<?, ?> entry : object.entrySet()) {
+                if (!(entry.getKey() instanceof String key)) {
+                    throw new IllegalArgumentException("객체 키는 문자열이어야 합니다.");
+                }
+                if (!first) json.append(',');
+                first = false;
+                writeString(json, key);
+                json.append(':');
+                writeJson(json, entry.getValue());
+            }
+            json.append('}');
+        } else {
+            throw new IllegalArgumentException("반환값을 JSON으로 표현할 수 없습니다.");
+        }
+    }
+
+    /**
+     * 공백·제어 문자·서로게이트를 보존해 JSON 문자열을 기록한다.
+     *
+     * @param json 출력 버퍼
+     * @param text 반환 문자열
+     */
+    private static void writeString(StringBuilder json, String text) {
+        json.append('"');
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '"' || c == '\\') {
+                json.append('\\').append(c);
+            } else if (c < 0x20 || Character.isSurrogate(c)) {
+                json.append(String.format("\\u%04x", (int) c));
+            } else {
+                json.append(c);
+            }
+        }
+        json.append('"');
+    }
+}
