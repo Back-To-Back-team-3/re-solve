@@ -76,8 +76,7 @@ class SecurityConfigurationTest {
             ProbeController.class
         }
     )
-    static class SecurityTestConfiguration {
-    }
+    static class SecurityTestConfiguration {}
 
     /** 내부·외부 경로의 보안 동작을 확인할 응답을 제공한다. */
     @TestComponent
