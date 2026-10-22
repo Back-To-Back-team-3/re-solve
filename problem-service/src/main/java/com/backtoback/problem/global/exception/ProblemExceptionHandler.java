@@ -14,7 +14,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.backtoback.common.api.ApiErrorResponse;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.exception.ErrorCode;
+import com.backtoback.problem.global.error.ProblemErrorCode;
 
+/**
+ * 문제 서비스의 DB 제약 위반과 낙관적 락 충돌을 오류 응답으로 변환한다.
+ * 업무 예외의 응답 변환은 공통 예외 처리기에 맡긴다.
+ */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice
 public class ProblemExceptionHandler {
@@ -22,10 +27,7 @@ public class ProblemExceptionHandler {
 
     /**
      * DB 제약 이름과 MySQL 오류 코드로 태그 중복·사용 중 오류를 구분한다.
-     * 알 수 없는 제약 위반은 서버 오류로 응답하고 실제 예외는 로그에만 남긴다.
-     *
-     * @param exception 요청 처리 중 발생한 DB 제약 위반
-     * @return 태그 오류 또는 공통 서버 오류 응답
+     * 알 수 없는 제약 위반은 서버 오류로 응답하고 로그에는 오류 코드와 예외 타입만 남긴다.
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiErrorResponse> handleDataIntegrity(DataIntegrityViolationException exception) {
@@ -53,9 +55,6 @@ public class ProblemExceptionHandler {
 
     /**
      * 낙관적 락 충돌을 재조회가 필요한 변경 충돌로 응답한다.
-     *
-     * @param exception 요청 처리 중 발생한 예외
-     * @return 409 변경 충돌 응답
      */
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
     public ResponseEntity<ApiErrorResponse> handleOptimisticLock(ObjectOptimisticLockingFailureException exception) {
