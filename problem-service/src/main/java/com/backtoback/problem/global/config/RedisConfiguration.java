@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
 
+/** Spring Redis 접속 설정을 분산 잠금용 Redisson 클라이언트에 연결한다. */
 @Configuration(proxyBeanMethods = false)
 public class RedisConfiguration {
     /**
