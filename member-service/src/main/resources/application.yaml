@@ -32,3 +32,5 @@ resolve:
       # 교체 직후 이 시간 안에 이전 토큰으로 온 재발급은 재사용으로 보지 않는다 (동시 요청·여러 탭 대응)
       reuse-grace: 10s
       cookie-secure: ${REFRESH_COOKIE_SECURE:true}
+    # 개발용 로그인(1.1.6). local·dev에서만 켠다. prod·staging 프로필에서 켜면 기동이 실패한다.
+    dev-login-enabled: ${DEV_LOGIN_ENABLED:false}
