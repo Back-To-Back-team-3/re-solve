@@ -72,6 +72,9 @@
 | `SUBMISSION_REJUDGE_INPUT_UNAVAILABLE` | 409 | 원본 회차 데이터가 없거나 손상 |
 | `RUN_RATE_LIMITED` | 429 | 코드 실행(Run) 요청 한도 초과 |
 | `RUN_IN_PROGRESS` | 429 | 같은 회원의 Run이 실행 중 (`run:{memberId}` 락) |
+| `JUDGE0_CONNECTION_FAILED` | 503 | Judge0 연결 실패 또는 통신 시간 초과 |
+| `JUDGE0_RESPONSE_FAILED` | 503 | Judge0의 HTTP 오류 또는 올바르지 않은 응답 |
+| `JUDGE0_CONFIGURATION_INVALID` | 503 | Judge0 서버 주소 미설정으로 실행 요청 불가 |
 | `RUN_TIMEOUT` | 504 | Run 동기 실행 기한(30초) 초과 |
 
 #### **Exam · Contest**
