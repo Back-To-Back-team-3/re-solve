@@ -17,6 +17,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,9 +41,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.problem.global.lock.RedisTransactionLock;
@@ -61,15 +63,12 @@ import tools.jackson.databind.ObjectMapper;
     }
 )
 @AutoConfigureMockMvc
-@Testcontainers
 class TagApiTest {
     private static final String ADMIN_PATH = "/api/v1/admin/problems/tags";
     private static final String LIST_PATH = "/api/v1/problems/tags";
 
-    @Container
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db");
 
-    @Container
     static final GenericContainer<?> REDIS
         = new GenericContainer<>("redis:7.4-alpine")
             .withExposedPorts(6379)
@@ -91,6 +90,51 @@ class TagApiTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @BeforeAll
+    static void startInfrastructure() {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(), "Docker가 없어 태그 API 통합 테스트를 건너뜁니다.");
+        try {
+            MYSQL.start();
+            REDIS.start();
+        } catch (RuntimeException | Error startupFailure) {
+            try {
+                stopInfrastructure();
+            } catch (RuntimeException | Error cleanupFailure) {
+                startupFailure.addSuppressed(cleanupFailure);
+            }
+            throw startupFailure;
+        }
+    }
+
+    @AfterAll
+    static void stopInfrastructure() {
+        Throwable cleanupFailure = null;
+        try {
+            if (REDIS.isRunning()) {
+                REDIS.stop();
+            }
+        } catch (RuntimeException | Error exception) {
+            cleanupFailure = exception;
+        }
+        try {
+            if (MYSQL.isRunning()) {
+                MYSQL.stop();
+            }
+        } catch (RuntimeException | Error exception) {
+            if (cleanupFailure == null) {
+                cleanupFailure = exception;
+            } else {
+                cleanupFailure.addSuppressed(exception);
+            }
+        }
+        if (cleanupFailure instanceof RuntimeException exception) {
+            throw exception;
+        }
+        if (cleanupFailure instanceof Error error) {
+            throw error;
+        }
+    }
+
     /**
      * 테스트 컨테이너의 연결 정보를 Spring 설정에 등록한다.
      *
@@ -111,7 +155,7 @@ class TagApiTest {
      */
     @BeforeEach
     void clearData() {
-        // 문제 회차 구현 전이므로 테스트 전용 참조 테이블로 FK 삭제 제약을 검증한다.
+        // 테스트 전용 참조 테이블로 FK 삭제 제약을 검증한다.
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS tag_usage_probe (
                 id BIGINT PRIMARY KEY,
@@ -860,7 +904,7 @@ class TagApiTest {
      * 태그 생성 API의 응답을 동시 요청 결과 비교용 문자열로 변환한다.
      *
      * @param key 태그 생성에 사용할 멱등키
-     * @return 성공 시 CREATED, 실패 시 API 응답의 오류 코드 이름
+     * @return 성공 시 {@code CREATED}, 실패 시 API 응답의 오류 코드 이름
      * @throws Exception API 요청 또는 응답 파싱 중 오류가 발생한 경우
      */
     private String createOutcome(String key) throws Exception {
