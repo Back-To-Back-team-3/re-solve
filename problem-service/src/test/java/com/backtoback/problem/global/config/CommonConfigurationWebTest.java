@@ -45,7 +45,6 @@ import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
-import com.backtoback.problem.global.security.SecurityConfiguration;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
