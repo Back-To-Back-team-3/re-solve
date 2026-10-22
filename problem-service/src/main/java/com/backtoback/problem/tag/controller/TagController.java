@@ -32,10 +32,34 @@ public class TagController {
      */
     @GetMapping("/api/v1/problems/tags")
     public ResponseEntity<ApiResponse<PageResponse<TagResponse>>> find(
-        @RequestParam(defaultValue = "") @Size(max = 200) String keyword,
-        @RequestParam(defaultValue = "0") @Min(0) @Max(Integer.MAX_VALUE / 100) int page,
-        @RequestParam(defaultValue = "100") @Min(1) @Max(100) int size,
-        @RequestParam(defaultValue = "displayOrder,asc") @Pattern(regexp = "(displayOrder|name),(asc|desc)") String sort
+        @RequestParam(defaultValue = "")
+        @Size(
+            max = 200,
+            message = "검색어는 200자 이하로 입력해 주세요."
+        ) String keyword,
+        @RequestParam(defaultValue = "0")
+        @Min(
+            value = 0,
+            message = "페이지는 0 이상이어야 합니다."
+        )
+        @Max(
+            value = Integer.MAX_VALUE / 100,
+            message = "페이지는 21,474,836 이하이어야 합니다."
+        ) int page,
+        @RequestParam(defaultValue = "100")
+        @Min(
+            value = 1,
+            message = "페이지 크기는 1 이상이어야 합니다."
+        )
+        @Max(
+            value = 100,
+            message = "페이지 크기는 100 이하여야 합니다."
+        ) int size,
+        @RequestParam(defaultValue = "displayOrder,asc")
+        @Pattern(
+            regexp = "(displayOrder|name),(asc|desc)",
+            message = "정렬 형식은 displayOrder 또는 name과 asc 또는 desc 조합이어야 합니다."
+        ) String sort
     ) {
         return ResponseEntity.ok(ApiResponse.success(tagService.find(keyword, page, size, sort)));
     }

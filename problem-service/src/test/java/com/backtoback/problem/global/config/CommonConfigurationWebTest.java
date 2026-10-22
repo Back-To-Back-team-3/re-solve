@@ -16,13 +16,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -274,6 +277,36 @@ class CommonConfigurationWebTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
             .andExpect(jsonPath("$.error.details[0].field").value("name"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidTagListParameters")
+    @DisplayName("태그 목록 조건 검증은 필드별 한국어 사유를 반환한다")
+    void invalidTagListParametersReturnKoreanReasons(String parameter, String value, String field, String reason)
+        throws Exception {
+        mvc
+            .perform(
+                get("/api/v1/problems/tags")
+                    .param(parameter, value)
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "USER")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
+            .andExpect(jsonPath("$.error.details[0].field").value(field))
+            .andExpect(jsonPath("$.error.details[0].reason").value(reason));
+    }
+
+    static Stream<Arguments> invalidTagListParameters() {
+        return Stream
+            .of(
+                Arguments.of("keyword", "x".repeat(201), "keyword", "검색어는 200자 이하로 입력해 주세요."),
+                Arguments.of("page", "-1", "page", "페이지는 0 이상이어야 합니다."),
+                Arguments.of("page", "21474837", "page", "페이지는 21,474,836 이하이어야 합니다."),
+                Arguments.of("size", "0", "size", "페이지 크기는 1 이상이어야 합니다."),
+                Arguments.of("size", "101", "size", "페이지 크기는 100 이하여야 합니다."),
+                Arguments.of("sort", "id,asc", "sort", "정렬 형식은 displayOrder 또는 name과 asc 또는 desc 조합이어야 합니다.")
+            );
     }
 
     @Test

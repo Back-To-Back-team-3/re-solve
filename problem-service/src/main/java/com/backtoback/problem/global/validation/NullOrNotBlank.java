@@ -10,7 +10,7 @@ import jakarta.validation.Constraint;
 import jakarta.validation.Payload;
 
 /**
- * null은 허용하고 빈 문자열이나 공백으로만 이루어진 문자열은 거부한다.
+ * {@code null}은 허용하고 빈 문자열이나 공백으로만 이루어진 문자열은 거부한다.
  * 문자열 자체는 변경하지 않는다.
  */
 @Documented
@@ -36,17 +36,7 @@ public @interface NullOrNotBlank {
      */
     String message() default "공백만 입력할 수 없습니다.";
 
-    /**
-     * 제약을 적용할 검증 그룹을 반환한다.
-     *
-     * @return 검증 그룹 목록
-     */
     Class<?>[] groups() default {};
 
-    /**
-     * 제약에 연결할 부가 정보를 반환한다.
-     *
-     * @return 부가 정보 타입 목록
-     */
     Class<? extends Payload>[] payload() default {};
 }
