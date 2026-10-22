@@ -1,6 +1,6 @@
 package com.backtoback.problem.tag.dto.response;
 
-import com.backtoback.problem.tag.entity.Tag;
+import com.backtoback.problem.tag.domain.Tag;
 
 /** 태그의 문자열 ID·이름·현재 표시 순번을 담는 API 응답. */
 public record TagResponse(String tagId, String name, int displayOrder) {
