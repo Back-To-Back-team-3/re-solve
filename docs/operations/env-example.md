@@ -76,7 +76,8 @@ AWS_SECRET_ACCESS_KEY=
 # docker compose --profile judge0 up -d 실행 시 2358 포트로 기동됩니다.
 # Compose 컨테이너 환경(기본값): http://judge0-server:2358
 # 호스트 로컬 IDE에서 직접 실행 시: http://localhost:2358
-JUDGE0_IMAGE=judge0/judge0:1.13.0
+# Java 17(JDK 17, language_id=91) 지원 및 보안 패치를 위해 1.13.1-extra를 기본으로 사용합니다.
+JUDGE0_IMAGE=judge0/judge0:1.13.1-extra
 JUDGE0_SERVER_PORT=2358
 JUDGE0_BASE_URL=http://judge0-server:2358
 
@@ -165,6 +166,14 @@ docker compose --profile judge0 ps
 
 # Judge0 API 응답 확인 (상태 정보)
 curl http://localhost:2358/system_info
+
+# Java 17 (JDK 17.0.6, language_id=91) 채점 테스트
+curl -X POST "http://localhost:2358/submissions?base64_encoded=false&wait=true" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "source_code": "public class Main { public static void main(String[] args) { System.out.println(\"Java 17 OK\"); } }",
+       "language_id": 91
+     }'
 
 # Judge0 서비스만 종료 (기타 MySQL, Redis 등 서비스 유지)
 docker compose stop judge0-server judge0-worker judge0-db judge0-redis

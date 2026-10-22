@@ -247,7 +247,7 @@ services:
         condition: service_healthy
 
   judge0-server:
-    image: ${JUDGE0_IMAGE:-judge0/judge0:1.13.0}
+    image: ${JUDGE0_IMAGE:-judge0/judge0:1.13.1-extra}
     volumes:
       - ./judge0.conf:/judge0.conf:ro
     ports:
@@ -262,7 +262,7 @@ services:
         condition: service_healthy
 
   judge0-worker:
-    image: ${JUDGE0_IMAGE:-judge0/judge0:1.13.0}
+    image: ${JUDGE0_IMAGE:-judge0/judge0:1.13.1-extra}
     command: ["./scripts/workers"]
     volumes:
       - ./judge0.conf:/judge0.conf:ro
