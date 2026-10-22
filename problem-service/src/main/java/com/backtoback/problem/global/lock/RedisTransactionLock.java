@@ -12,6 +12,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import lombok.RequiredArgsConstructor;
 
+/**
+ * 현재 스레드의 DB 트랜잭션 종료에 Redis 잠금 수명을 연결한다.
+ */
 @Component
 @RequiredArgsConstructor
 public class RedisTransactionLock implements TransactionLock {
@@ -44,7 +47,6 @@ public class RedisTransactionLock implements TransactionLock {
             /**
              * 커밋 전에 현재 스레드의 Redis 잠금 소유권을 확인한다.
              *
-             * @param readOnly 현재 트랜잭션의 읽기 전용 여부
              * @throws IllegalStateException 현재 스레드가 잠금을 보유하지 않은 경우
              */
             @Override
@@ -58,15 +60,13 @@ public class RedisTransactionLock implements TransactionLock {
             /**
              * 트랜잭션 종료 후 현재 스레드가 보유한 Redis 잠금을 해제한다.
              * 잠금 해제 실패는 로그로 남기고 이미 끝난 DB 트랜잭션의 결과를 유지한다.
-             *
-             * @param status 트랜잭션 완료 상태
              */
             @Override
             public void afterCompletion(int status) {
                 try {
-                    if (lock.isHeldByCurrentThread()) {
-                        lock.unlock();
-                    }
+                    // 별도 소유권 조회가 실패해도 해제 시도와 Redisson의 자동 연장 취소를 건너뛰지 않는다.
+                    // Redisson의 unlock 내부에서 소유자를 검사하므로 다른 소유자의 잠금은 해제하지 않는다.
+                    lock.unlock();
                 } catch (RuntimeException exception) {
                     // 이미 끝난 DB 작업의 결과는 유지하고 해제 실패는 로그로 남긴다.
                     LOG.error("Failed to release Redis transaction lock: key={}", key, exception);
