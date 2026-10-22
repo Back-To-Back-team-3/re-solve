@@ -303,8 +303,8 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("1.1.4 재발급 실패(INVALID·REUSED)는 401과 함께 Refresh Token 쿠키를 지운다")
-    void refreshFailureClearsCookie() throws Exception {
+    @DisplayName("1.1.4 재발급 실패(INVALID·REUSED)는 401을 주고 Refresh Token 쿠키는 그대로 둔다")
+    void refreshFailureKeepsCookie() throws Exception {
         given(authService.refresh(null)).willThrow(new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID));
         given(authService.refresh("stolen")).willThrow(new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_REUSED));
 
@@ -312,15 +312,13 @@ class AuthControllerTest {
             .perform(post("/api/v1/auth/token/refresh"))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_INVALID"))
-            .andExpect(
-                header().string("Set-Cookie", allOf(containsString("refreshToken="), containsString("Max-Age=0")))
-            );
+            .andExpect(header().doesNotExist("Set-Cookie"));
 
         mockMvc
             .perform(post("/api/v1/auth/token/refresh").cookie(new Cookie("refreshToken", "stolen")))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_REUSED"))
-            .andExpect(header().string("Set-Cookie", containsString("Max-Age=0")));
+            .andExpect(header().doesNotExist("Set-Cookie"));
     }
 
     @Test

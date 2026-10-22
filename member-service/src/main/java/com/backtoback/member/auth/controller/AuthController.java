@@ -2,7 +2,6 @@ package com.backtoback.member.auth.controller;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.Set;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -18,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.backtoback.common.api.ApiErrorResponse;
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.exception.BusinessException;
 import com.backtoback.common.exception.CommonErrorCode;
@@ -33,7 +31,6 @@ import com.backtoback.member.auth.service.GitHubLoginStart;
 import com.backtoback.member.auth.service.LoginResult;
 import com.backtoback.member.auth.service.TokenRefreshResult;
 import com.backtoback.member.auth.store.OAuthStateStore;
-import com.backtoback.member.global.error.MemberErrorCode;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -48,12 +45,6 @@ public class AuthController {
     static final String REFRESH_TOKEN_COOKIE = "refreshToken";
     static final String LOGIN_NONCE_COOKIE = "loginNonce";
     static final String AUTH_COOKIE_PATH = "/api/v1/auth";
-
-    /**
-     * 재발급이 이 오류로 실패하면 더 쓸 수 없는 Refresh Token 쿠키를 지운다.
-     */
-    private static final Set<ErrorCode> REFRESH_FAILURES
-        = Set.of(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID, MemberErrorCode.AUTH_REFRESH_TOKEN_REUSED);
 
     private final AuthService authService;
     private final AuthProperties authProperties;
@@ -123,26 +114,14 @@ public class AuthController {
      * 유예 시간 안의 중복 재발급은 Access Token만 내려주고 쿠키는 그대로 둔다.
      */
     @PostMapping("/token/refresh")
-    public ResponseEntity<?> refresh(
+    public ResponseEntity<ApiResponse<AccessTokenResponse>> refresh(
         @CookieValue(
             name = REFRESH_TOKEN_COOKIE,
             required = false
         ) String refreshToken
     ) {
-        TokenRefreshResult result;
-        try {
-            result = authService.refresh(refreshToken);
-        } catch (BusinessException exception) {
-            if (!REFRESH_FAILURES.contains(exception.getErrorCode())) {
-                throw exception;
-            }
-            ErrorCode errorCode = exception.getErrorCode();
-            return ResponseEntity
-                .status(errorCode.getStatus())
-                .header(HttpHeaders.SET_COOKIE, expiredRefreshTokenCookie().toString())
-                .body(ApiErrorResponse.of(errorCode));
-        }
-
+        // 실패하면 쿠키를 지우지 않는다. 남은 토큰은 이미 폐기돼 재발급에 다시 실패하고, 재로그인 때 덮어쓴다.
+        TokenRefreshResult result = authService.refresh(refreshToken);
         ResponseEntity.BodyBuilder response = ResponseEntity.ok();
         if (result.refreshTokenRotated()) {
             response.header(HttpHeaders.SET_COOKIE, refreshTokenCookie(result.newRefreshToken()).toString());
