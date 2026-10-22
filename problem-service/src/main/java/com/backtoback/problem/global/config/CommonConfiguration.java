@@ -18,4 +18,6 @@ import com.backtoback.common.web.logging.HttpClientConfiguration;
         HttpClientConfiguration.class
     }
 )
-public class CommonConfiguration {}
+public class CommonConfiguration {
+
+}
