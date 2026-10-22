@@ -266,15 +266,6 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("숫자가 아닌 X-User-Id는 500이 아니라 401 AUTH_TOKEN_INVALID")
-    void nonNumericUserIdIsUnauthorized() throws Exception {
-        mockMvc
-            .perform(post("/api/v1/auth/logout").header("X-User-Id", "abc").header("Authorization", "Bearer access"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
-    }
-
-    @Test
     @DisplayName("1.1.4 재발급은 새 Access Token을 주고 교체된 Refresh Token 쿠키를 설정한다")
     void refreshReturnsAccessTokenAndRotatedCookie() throws Exception {
         given(authService.refresh("old-refresh"))
@@ -339,6 +330,7 @@ class AuthControllerTest {
             .perform(
                 post("/api/v1/auth/logout")
                     .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
                     .header("Authorization", "Bearer access")
                     .cookie(new Cookie("refreshToken", "refresh"))
             )
@@ -347,7 +339,7 @@ class AuthControllerTest {
                 header().string("Set-Cookie", allOf(containsString("refreshToken="), containsString("Max-Age=0")))
             );
 
-        verify(authService).logout(7L, "Bearer access", "refresh");
+        verify(authService).logout("7", "Bearer access", "refresh");
     }
 
     @Test
@@ -355,6 +347,17 @@ class AuthControllerTest {
     void logoutRequiresAuthenticatedUser() throws Exception {
         mockMvc
             .perform(post("/api/v1/auth/logout").header("Authorization", "Bearer access"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+
+        verify(authService, never()).logout(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("1.1.5 X-User-Role 없이 X-User-Id만 오면 공통 보안 필터가 401로 막는다")
+    void logoutRejectsMissingRole() throws Exception {
+        mockMvc
+            .perform(post("/api/v1/auth/logout").header("X-User-Id", "7").header("Authorization", "Bearer access"))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
 

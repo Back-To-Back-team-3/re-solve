@@ -8,6 +8,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,6 +23,7 @@ import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.exception.BusinessException;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.exception.ErrorCode;
+import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.member.auth.config.AuthProperties;
 import com.backtoback.member.auth.dto.AccessTokenResponse;
 import com.backtoback.member.auth.dto.LoginCodeExchangeRequest;
@@ -46,7 +48,6 @@ public class AuthController {
     static final String REFRESH_TOKEN_COOKIE = "refreshToken";
     static final String LOGIN_NONCE_COOKIE = "loginNonce";
     static final String AUTH_COOKIE_PATH = "/api/v1/auth";
-    static final String USER_ID_HEADER = "X-User-Id";
 
     /**
      * 재발급이 이 오류로 실패하면 더 쓸 수 없는 Refresh Token 쿠키를 지운다.
@@ -154,7 +155,7 @@ public class AuthController {
      */
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
-        @RequestHeader(USER_ID_HEADER) Long memberId,
+        @AuthenticationPrincipal GatewayUser user,
         @RequestHeader(
             name = HttpHeaders.AUTHORIZATION,
             required = false
@@ -164,7 +165,7 @@ public class AuthController {
             required = false
         ) String refreshToken
     ) {
-        authService.logout(memberId, authorization, refreshToken);
+        authService.logout(user.userId(), authorization, refreshToken);
         return ResponseEntity
             .noContent()
             .header(HttpHeaders.SET_COOKIE, expiredRefreshTokenCookie().toString())
