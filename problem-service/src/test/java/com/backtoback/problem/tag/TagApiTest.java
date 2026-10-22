@@ -52,6 +52,7 @@ import com.backtoback.problem.tag.service.TagService;
 
 import tools.jackson.databind.ObjectMapper;
 
+/** 태그 API의 권한·검증·순번·동시성 동작을 검증한다. */
 @SpringBootTest(
     properties = {
         "spring.cloud.aws.region.static=ap-northeast-2",
@@ -61,7 +62,7 @@ import tools.jackson.databind.ObjectMapper;
 )
 @AutoConfigureMockMvc
 @Testcontainers
-class TagApiTests {
+class TagApiTest {
     private static final String ADMIN_PATH = "/api/v1/admin/problems/tags";
     private static final String LIST_PATH = "/api/v1/problems/tags";
 
@@ -122,14 +123,13 @@ class TagApiTests {
         jdbc.update("DELETE FROM tags");
     }
 
-    /**
-     * 태그 생성·부분 수정·삭제 응답과 공통 엔티티 필드 갱신을 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("태그를 생성·수정·삭제하고 감사 필드를 갱신한다")
     void createPatchAndDeleteFollowApiContractAndAuditFields() throws Exception {
+        // given
         String id = create("hash", "해시", 5);
+
+        // when
         mvc
             .perform(admin(patch(ADMIN_PATH + "/" + id)).content("{\"name\":\"그리디\"}"))
             .andExpect(status().isOk())
@@ -137,12 +137,18 @@ class TagApiTests {
             .andExpect(jsonPath("$.data.tagId").value(id))
             .andExpect(jsonPath("$.data.name").value("그리디"))
             .andExpect(jsonPath("$.data.displayOrder").value(0));
+
+        // then
         assertThat(jdbc.queryForObject("SELECT display_order FROM tags WHERE id = ?", Integer.class, id)).isZero();
+
+        // when
         mvc
             .perform(admin(patch(ADMIN_PATH + "/" + id)).content("{\"displayOrder\":2}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.name").value("그리디"))
             .andExpect(jsonPath("$.data.displayOrder").value(0));
+
+        // then
         assertThat(jdbc.queryForObject("SELECT display_order FROM tags WHERE id = ?", Integer.class, id)).isZero();
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, id)).isEqualTo(1L);
         assertThat(
@@ -152,18 +158,16 @@ class TagApiTests {
                     Integer.class
                 )
         ).isEqualTo(1);
+
+        // when & then
         mvc
             .perform(admin(delete(ADMIN_PATH + "/" + id)))
             .andExpect(status().isNoContent())
             .andExpect(content().string(""));
     }
 
-    /**
-     * 태그 목록의 기본 정렬·검색·페이지 처리·허용 정렬을 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("기본 정렬·키워드 검색·페이지 조회와 허용된 정렬을 지원한다")
     void listSupportsDefaultOrderKeywordPagingAndAllowedSort() throws Exception {
         String second = create("stack", "스택/큐", 2);
         String first = create("hash", "해시", 0);
@@ -192,12 +196,8 @@ class TagApiTests {
             .andExpect(jsonPath("$.data.content[0].tagId").value(second));
     }
 
-    /**
-     * 중복 순번 등록 시 기존 태그의 순번과 수정 정보가 갱신되는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("사용 중인 순번에 등록하면 뒤 태그를 이동하고 감사 필드를 갱신한다")
     void creatingAtOccupiedOrderShiftsFollowingTagsAndUpdatesAuditFields() throws Exception {
         String first = create("first", "첫 번째", 0);
         String second = create("second", "두 번째", 1);
@@ -220,12 +220,8 @@ class TagApiTests {
             .andExpect(jsonPath("$.data.content[2].tagId").value(second));
     }
 
-    /**
-     * 범위를 넘는 순번으로 등록하면 마지막에 추가하고 기존 태그의 순번을 유지하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("마지막을 넘는 순번에 등록하면 끝에 추가하고 기존 순번을 유지한다")
     void creatingBeyondLastOrderAppendsWithoutShiftingExistingTags() throws Exception {
         String existing = create("existing", "기존 태그", 5);
         String appended = create("appended", "마지막 태그", 2);
@@ -234,12 +230,8 @@ class TagApiTests {
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, existing)).isZero();
     }
 
-    /**
-     * 이름 중복으로 등록에 실패하면 순번 이동도 롤백되는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("이름 중복으로 등록이 실패하면 순번 이동을 롤백한다")
     void duplicateNameRollsBackShift() throws Exception {
         String existing = create("existing", "기존 태그", 0);
         mvc
@@ -253,12 +245,6 @@ class TagApiTests {
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, existing)).isZero();
     }
 
-    /**
-     * 같은 순번으로 동시에 등록해도 서로 다른 위치를 차지하는지 검증한다.
-     *
-     * @param hasExistingTag 기존 태그가 있는 상태로 검증할지 여부
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @ValueSource(
         booleans = {
@@ -266,37 +252,40 @@ class TagApiTests {
             true
         }
     )
+    @DisplayName("같은 순번에 동시에 등록해도 태그마다 연속된 순번을 배정한다")
     void concurrentCreatesAtSameOrderKeepDistinctPositions(boolean hasExistingTag) throws Exception {
+        // given
         if (hasExistingTag) {
             create("existing", "기존 태그", 2);
         }
+        // when
         List<String> ids
             = race(
                 () -> tagService.create(new TagCreateRequest("새 태그 A", 0)).tagId(),
                 () -> tagService.create(new TagCreateRequest("새 태그 B", 0)).tagId()
             );
+        // then
         assertThat(ids.get(0)).isNotEqualTo(ids.get(1));
         List<Integer> orders
             = jdbc.queryForList("SELECT display_order FROM tags ORDER BY display_order", Integer.class);
         assertThat(orders).containsExactlyElementsOf(hasExistingTag ? List.of(0, 1, 2) : List.of(0, 1));
     }
 
-    /**
-     * 서로 다른 Redis 클라이언트를 사용하는 태그 등록도 직렬화되는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("서로 다른 Redis 클라이언트의 태그 등록을 직렬화한다")
     void separateRedisClientsSerializeConcurrentTagCreation() throws Exception {
+        // given
         RedissonClient otherClient = Redisson.create(new Config(redisson.getConfig()));
         try {
             TagService otherService
                 = new TagService(tags, new TagOrderService(tags, new RedisTransactionLock(otherClient)));
             var transaction = new TransactionTemplate(transactionManager);
+            // when
             race(
                 () -> tagService.create(new TagCreateRequest("첫 태그", 2)).tagId(),
                 () -> transaction.execute(status -> otherService.create(new TagCreateRequest("두 번째 태그", 2)).tagId())
             );
+            // then
             assertThat(jdbc.queryForList("SELECT display_order FROM tags ORDER BY display_order", Integer.class))
                 .containsExactly(0, 1);
         } finally {
@@ -304,12 +293,6 @@ class TagApiTests {
         }
     }
 
-    /**
-     * Redis 잠금이 DB 트랜잭션 종료까지 유지되고 이후 해제되는지 검증한다.
-     *
-     * @param rollback 트랜잭션을 커밋하지 않고 롤백할지 여부
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @ValueSource(
         booleans = {
@@ -317,12 +300,15 @@ class TagApiTests {
             true
         }
     )
+    @DisplayName("커밋이나 롤백이 끝날 때까지 잠금을 유지한 뒤 해제한다")
     void redisLockIsHeldUntilTransactionCompletesAndReleasedAfterwards(boolean rollback) throws Exception {
+        // given
         String first = create("first", "첫 태그", 0);
         String following = create("following", "뒤 태그", 1);
         RedissonClient otherClient = Redisson.create(new Config(redisson.getConfig()));
         var otherLock = otherClient.getLock("problem:tags:order:lock");
         try {
+            // when
             new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
                 tagService.create(new TagCreateRequest("태그", 1));
                 assertThat(displayOrder(first)).isZero();
@@ -332,6 +318,7 @@ class TagApiTests {
                     transaction.setRollbackOnly();
                 }
             });
+            // then
             assertThat(otherLock.tryLock()).isTrue();
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(rollback ? 2 : 3);
             assertThat(displayOrder(following)).isEqualTo(rollback ? 1 : 2);
@@ -347,12 +334,8 @@ class TagApiTests {
         }
     }
 
-    /**
-     * 잠금 대기 시간이 초과되면 태그이 저장되지 않는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("잠금 대기가 초과되면 등록을 거부하고 태그를 저장하지 않는다")
     void busyRedisLockRejectsCreationWithoutPersistingTag() throws Exception {
         RedissonClient otherClient = Redisson.create(new Config(redisson.getConfig()));
         var otherLock = otherClient.getLock("problem:tags:order:lock");
@@ -373,12 +356,8 @@ class TagApiTests {
         }
     }
 
-    /**
-     * 정수 최대 순번을 요청해도 등록 위치를 마지막으로 보정하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("정수 최댓값 순번 등록을 마지막 위치로 보정한다")
     void maximumRequestedOrderIsClampedToLastOnCreation() throws Exception {
         String existing = create("existing", "기존 태그", Integer.MAX_VALUE);
         mvc
@@ -392,12 +371,6 @@ class TagApiTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(2);
     }
 
-    /**
-     * 앞뒤로 이동할 때 이동 구간의 순번만 조정하고 전체 순번을 연속되게 유지하는지 검증한다.
-     *
-     * @param moveForward 더 큰 순번으로 이동할지 여부
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @ValueSource(
         booleans = {
@@ -405,17 +378,21 @@ class TagApiTests {
             true
         }
     )
+    @DisplayName("기존 순번으로 이동하면 해당 구간의 순번을 조정한다")
     void updatingToOccupiedOrderShiftsOtherTags(boolean moveForward) throws Exception {
+        // given
         String first = create("first", "첫 태그", 0);
         String second = create("second", "두 번째 태그", 1);
         String third = create("third", "세 번째 태그", 2);
         String moving = moveForward ? first : third;
+        // when
         mvc
             .perform(
                 admin(patch(ADMIN_PATH + "/" + moving))
                     .content(mapper.writeValueAsString(new TagUpdateRequest(null, moveForward ? 2 : 0)))
             )
             .andExpect(status().isOk());
+        // then
         assertThat(displayOrder(moving)).isEqualTo(moveForward ? 2 : 0);
         assertThat(displayOrder(second)).isEqualTo(moveForward ? 0 : 2);
         assertThat(displayOrder(moveForward ? third : first)).isEqualTo(1);
@@ -423,12 +400,6 @@ class TagApiTests {
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, second)).isEqualTo(2L);
     }
 
-    /**
-     * 이름만 수정하거나 현재 순번을 다시 전달하면 다른 태그를 이동하지 않는지 검증한다.
-     *
-     * @param body 순번 유지 여부를 확인할 수정 요청 본문
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @ValueSource(
         strings = {
@@ -436,6 +407,7 @@ class TagApiTests {
             "{\"name\":\"새 이름\"}"
         }
     )
+    @DisplayName("이름만 수정하거나 기존 순번을 유지하면 다른 태그 순번을 바꾸지 않는다")
     void unchangedOrderDoesNotShiftOtherTags(String body) throws Exception {
         String first = create("first", "첫 태그", 0);
         String second = create("second", "두 번째 태그", 1);
@@ -445,12 +417,8 @@ class TagApiTests {
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, second)).isZero();
     }
 
-    /**
-     * 마지막을 넘는 순번으로 수정하면 끝으로 이동하고 이전 위치의 빈 순번을 메우는지 검증한다.
-     *
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("마지막을 넘는 순번으로 수정하면 끝으로 이동하고 기존 빈 순번을 메운다")
     void updatingBeyondLastOrderMovesToEndAndClosesOldGap() throws Exception {
         String moving = create("moving", "이동할 태그", 1);
         String following = create("following", "뒤 태그", 5);
@@ -459,12 +427,8 @@ class TagApiTests {
         assertThat(displayOrder(following)).isZero();
     }
 
-    /**
-     * 정수 최소 순번으로 수정하면 첫 위치로 보정하고 기존 태그를 뒤로 이동하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("정수 최솟값 순번 수정은 첫 위치로 보정한다")
     void minimumRequestedOrderMovesTagToFront() throws Exception {
         String existing = create("existing", "기존 태그", 2);
         String moving = create("moving", "이동할 태그", Integer.MAX_VALUE);
@@ -475,12 +439,8 @@ class TagApiTests {
         assertThat(displayOrder(existing)).isEqualTo(1);
     }
 
-    /**
-     * 이름 중복으로 수정이 실패하면 다른 태그의 순번 이동도 롤백되는지 검증한다.
-     *
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("이름 중복 수정이 실패하면 다른 태그의 순번 이동을 롤백한다")
     void duplicateNameRollsBackUpdateAndShift() throws Exception {
         String moving = create("moving", "이동할 태그", 1);
         String existing = create("existing", "기존 태그", 2);
@@ -497,12 +457,8 @@ class TagApiTests {
         assertThat(jdbc.queryForObject("SELECT name FROM tags WHERE id = ?", String.class, moving)).isEqualTo("이동할 태그");
     }
 
-    /**
-     * 정수 최대 순번으로 수정하면 실패 대신 마지막 위치로 이동하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("정수 최댓값 순번 수정은 마지막 위치로 보정한다")
     void maximumRequestedOrderMovesTagToEnd() throws Exception {
         String moving = create("moving", "이동할 태그", 1);
         String existing = create("existing", "기존 태그", Integer.MAX_VALUE);
@@ -516,30 +472,25 @@ class TagApiTests {
         assertThat(displayOrder(existing)).isZero();
     }
 
-    /**
-     * 서로 다른 태그를 같은 순번으로 동시에 수정해도 순번 이동이 직렬화되는지 검증한다.
-     *
-     * @throws Exception 동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("서로 다른 태그를 같은 순번으로 동시에 수정해도 순번을 직렬화한다")
     void concurrentUpdatesToSameOrderKeepDistinctPositions() throws Exception {
+        // given
         String first = create("first", "첫 태그", 1);
         String second = create("second", "두 번째 태그", 2);
         create("existing", "기존 태그", 3);
+        // when
         race(
             () -> tagService.update(Long.parseLong(first), new TagUpdateRequest(null, 3)).tagId(),
             () -> tagService.update(Long.parseLong(second), new TagUpdateRequest(null, 3)).tagId()
         );
+        // then
         assertThat(jdbc.queryForList("SELECT display_order FROM tags ORDER BY display_order", Integer.class))
             .containsExactly(0, 1, 2);
     }
 
-    /**
-     * 중간 태그를 삭제하면 이후 순번만 한 칸씩 당기고 수정 정보를 갱신하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("중간 태그 삭제 후 뒤 순번만 당기고 감사 필드를 갱신한다")
     void deletingTagShiftsOnlyFollowingOrdersAndUpdatesAuditFields() throws Exception {
         String first = create("first", "첫 태그", 1);
         String deleted = create("deleted", "삭제할 태그", 2);
@@ -560,12 +511,6 @@ class TagApiTests {
             .isAfter(LocalDateTime.of(2026, 1, 1, 0, 0));
     }
 
-    /**
-     * 첫 태그를 삭제하면 이후 순번을 당기고 마지막 태그를 삭제하면 앞 순번을 유지하는지 검증한다.
-     *
-     * @param deleteFirst 첫 태그를 삭제할지 여부
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @ValueSource(
         booleans = {
@@ -573,6 +518,7 @@ class TagApiTests {
             true
         }
     )
+    @DisplayName("첫 태그 삭제는 뒤 순번을 당기고 마지막 태그 삭제는 앞 순번을 유지한다")
     void deletingFirstOrLastTagHandlesOrderBoundaries(boolean deleteFirst) throws Exception {
         String first = create("first", "첫 태그", 1);
         String last = create("last", "마지막 태그", Integer.MAX_VALUE);
@@ -580,16 +526,14 @@ class TagApiTests {
         assertThat(displayOrder(deleteFirst ? last : first)).isZero();
     }
 
-    /**
-     * 서로 다른 태그를 동시에 삭제해도 뒤쪽 태그의 순번이 두 번 정확히 당겨지는지 검증한다.
-     *
-     * @throws Exception 동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("서로 다른 태그를 동시에 삭제해도 남은 순번을 연속되게 유지한다")
     void concurrentDeletesShiftRemainingTagTwice() throws Exception {
+        // given
         String first = create("first", "첫 태그", 1);
         String second = create("second", "두 번째 태그", 2);
         String remaining = create("remaining", "남을 태그", 3);
+        // when
         race(() -> {
             tagService.delete(Long.parseLong(first));
             return first;
@@ -597,6 +541,7 @@ class TagApiTests {
             tagService.delete(Long.parseLong(second));
             return second;
         });
+        // then
         assertThat(displayOrder(remaining)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(1);
     }
@@ -611,12 +556,8 @@ class TagApiTests {
         return jdbc.queryForObject("SELECT display_order FROM tags WHERE id = ?", Integer.class, id);
     }
 
-    /**
-     * API를 거치지 않는 직접 저장과 수정에서도 DB가 중복 순번을 거부하는지 검증한다.
-     *
-     * @throws Exception API 요청 또는 검증 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("데이터베이스 제약은 중복 표시 순번 저장을 거부한다")
     void databaseRejectsDuplicateDisplayOrders() throws Exception {
         create("first", "첫 태그", 0);
         String second = create("second", "두 번째 태그", 1);
@@ -632,12 +573,6 @@ class TagApiTests {
             .containsExactly(0, 1);
     }
 
-    /**
-     * 첫 태그는 요청 순번과 관계없이 0으로 등록되는지 검증한다.
-     *
-     * @param requestedOrder 요청할 순번
-     * @throws Exception API 요청 또는 검증 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @ValueSource(
         ints = {
@@ -648,18 +583,12 @@ class TagApiTests {
             Integer.MAX_VALUE
         }
     )
+    @DisplayName("첫 태그는 요청 순번과 관계없이 0번에 등록한다")
     void firstTagAlwaysStartsAtZero(int requestedOrder) throws Exception {
         String id = create("first", "첫 태그", requestedOrder);
         assertThat(displayOrder(id)).isZero();
     }
 
-    /**
-     * 등록 순번을 범위 안으로 보정하고 기존 태그의 상대적인 순서를 유지하는지 검증한다.
-     *
-     * @param requestedOrder 요청할 순번
-     * @param expectedOrder 보정 후 등록할 순번
-     * @throws Exception API 요청 또는 검증 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @CsvSource(
         {
@@ -672,11 +601,14 @@ class TagApiTests {
             "2147483647, 3"
         }
     )
+    @DisplayName("생성 순번을 범위 안으로 보정하고 기존 태그 순서를 유지한다")
     void creationClampsOrderAndKeepsConsecutivePositions(int requestedOrder, int expectedOrder) throws Exception {
+        // given
         String first = create("first", "첫 태그", 0);
         String second = create("second", "두 번째 태그", 1);
         String third = create("third", "세 번째 태그", 2);
 
+        // when
         String response
             = mvc
                 .perform(
@@ -691,6 +623,7 @@ class TagApiTests {
                 .getContentAsString();
         String inserted = mapper.readTree(response).path("data").path("tagId").asText();
 
+        // then
         assertThat(displayOrder(inserted)).isEqualTo(expectedOrder);
         assertThat(jdbc.queryForList("SELECT display_order FROM tags ORDER BY display_order", Integer.class))
             .containsExactly(0, 1, 2, 3);
@@ -699,13 +632,6 @@ class TagApiTests {
         ).containsExactly(first, second, third);
     }
 
-    /**
-     * 수정 순번을 범위 안으로 보정하고 이동 대상을 제외한 태그의 상대적인 순서를 유지하는지 검증한다.
-     *
-     * @param requestedOrder 요청할 순번
-     * @param expectedOrder 보정 후 이동할 순번
-     * @throws Exception API 요청 또는 검증 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @CsvSource(
         {
@@ -718,11 +644,14 @@ class TagApiTests {
             "2147483647, 2"
         }
     )
+    @DisplayName("수정 순번을 범위 안으로 보정하고 다른 태그 순서를 유지한다")
     void updateClampsOrderAndKeepsConsecutivePositions(int requestedOrder, int expectedOrder) throws Exception {
+        // given
         String first = create("first", "첫 태그", 0);
         String moving = create("moving", "이동할 태그", 1);
         String last = create("last", "마지막 태그", 2);
 
+        // when
         mvc
             .perform(
                 admin(patch(ADMIN_PATH + "/" + moving))
@@ -731,6 +660,7 @@ class TagApiTests {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.displayOrder").value(expectedOrder));
 
+        // then
         assertThat(displayOrder(moving)).isEqualTo(expectedOrder);
         assertThat(jdbc.queryForList("SELECT display_order FROM tags ORDER BY display_order", Integer.class))
             .containsExactly(0, 1, 2);
@@ -738,12 +668,8 @@ class TagApiTests {
             .containsExactly(first, last);
     }
 
-    /**
-     * SQL 와일드카드 문자를 검색어의 일반 문자로 처리하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("검색어의 SQL 와일드카드 문자를 일반 문자로 검색한다")
     void keywordTreatsSqlWildcardsAsLiteralText() throws Exception {
         create("percent", "100%", 1);
         create("other", "100개", 1);
@@ -754,12 +680,8 @@ class TagApiTests {
             .andExpect(jsonPath("$.data.content[0].name").value("100%"));
     }
 
-    /**
-     * 허용하지 않은 페이지·크기·정렬 조건을 거부하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("허용하지 않은 페이지·크기·정렬 조건을 입력 오류로 거부한다")
     void invalidListParametersAreRejected() throws Exception {
         for (String sort : List.of("id,asc", "name,invalid", "name,asc,extra", "name")) {
             mvc
@@ -781,12 +703,8 @@ class TagApiTests {
         mvc.perform(user(get(LIST_PATH).param("size", "0"))).andExpect(status().isBadRequest());
     }
 
-    /**
-     * 최대 페이지 번호와 최대 페이지 크기로 조회해도 JPA 조회 위치 범위 오류가 발생하지 않는지 검증한다.
-     *
-     * @throws Exception API 요청 또는 검증 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("최대 페이지와 페이지 크기로 조회해도 정상 응답을 반환한다")
     void maximumPageNumberIsAccepted() throws Exception {
         mvc
             .perform(user(get(LIST_PATH).param("page", "21474836").param("size", "100")))
@@ -795,12 +713,8 @@ class TagApiTests {
             .andExpect(jsonPath("$.data.page").value(21_474_836));
     }
 
-    /**
-     * 태그 조회는 인증 사용자에게, 변경은 관리자에게만 허용하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("인증 사용자는 조회하고 관리자만 태그를 변경할 수 있다")
     void onlyAuthenticatedUsersCanReadAndOnlyAdminsCanWrite() throws Exception {
         mvc.perform(get(LIST_PATH)).andExpect(status().isUnauthorized());
         mvc.perform(user(get(LIST_PATH))).andExpect(status().isOk());
@@ -813,12 +727,6 @@ class TagApiTests {
         mvc.perform(user(delete(ADMIN_PATH + "/1"))).andExpect(status().isForbidden());
     }
 
-    /**
-     * 유효하지 않은 생성 요청이 태그을 남기지 않는지 검증한다.
-     *
-     * @param body 유효하지 않은 태그 생성 JSON 본문
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @ValueSource(
         strings = {
@@ -828,6 +736,7 @@ class TagApiTests {
             "{\"name\":\"태그\"}"
         }
     )
+    @DisplayName("잘못된 생성 요청은 입력 오류로 거부하고 태그를 저장하지 않는다")
     void invalidCreateDoesNotPersistTag(String body) throws Exception {
         mvc
             .perform(admin(post(ADMIN_PATH)).header("Idempotency-Key", "invalid").content(body))
@@ -835,12 +744,6 @@ class TagApiTests {
             .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
     }
 
-    /**
-     * 공백 이름을 필드 검증 오류로 거부하고 이름과 순번을 모두 유지하는지 검증한다.
-     *
-     * @param name 거부할 공백 이름
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @ValueSource(
         strings = {
@@ -850,7 +753,7 @@ class TagApiTests {
             "\u2003"
         }
     )
-    @DisplayName("공백 이름 수정은 DTO 검증에서 실패하고 기존 태그를 보존한다")
+    @DisplayName("공백 이름 수정은 필드 검증 오류로 거부하고 태그를 보존한다")
     void blankPatchNameReturnsFieldValidationError(String name) throws Exception {
         String id = create("tag", "해시", 0);
         create("following", "다음 태그", 1);
@@ -865,12 +768,6 @@ class TagApiTests {
         assertThat(displayOrder(id)).isZero();
     }
 
-    /**
-     * 유효한 이름의 앞뒤 공백을 제거한 값을 저장하고 응답하는지 검증한다.
-     *
-     * @param name 앞뒤 공백을 포함한 이름
-     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
-     */
     @ParameterizedTest
     @ValueSource(
         strings = {
@@ -878,7 +775,7 @@ class TagApiTests {
             "\u2003새 이름\u2003"
         }
     )
-    @DisplayName("이름 수정은 앞뒤 공백을 제거하여 저장한다")
+    @DisplayName("유효한 수정 이름의 앞뒤 공백을 제거해 저장한다")
     void patchStripsSurroundingWhitespace(String name) throws Exception {
         String id = create("tag", "해시", 0);
         mvc
@@ -890,13 +787,8 @@ class TagApiTests {
         assertThat(jdbc.queryForObject("SELECT name FROM tags WHERE id = ?", String.class, id)).isEqualTo("새 이름");
     }
 
-    /**
-     * 빈 수정 요청·공백 이름·없는 태그에 정해진 오류를 반환하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
-    @DisplayName("공백 이름 수정은 공통 입력 오류로 거부하고 기존 이름을 유지한다")
+    @DisplayName("빈 수정 요청·공백 이름·없는 태그를 각각 해당 오류로 거부한다")
     void emptyOrBlankPatchAndUnknownTagsReturnExpectedErrors() throws Exception {
         String id = create("tag", "해시", 0);
         for (String body : List.of("{}", "{\"name\":\"  \"}", "{\"name\":null,\"displayOrder\":null}")) {
@@ -916,12 +808,8 @@ class TagApiTests {
             .andExpect(jsonPath("$.error.code").value("PROBLEM_TAG_NOT_FOUND"));
     }
 
-    /**
-     * 중복 이름으로 생성하거나 수정하면 변경을 롤백하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("중복 이름 생성·수정은 실패하고 기존 값을 보존한다")
     void duplicateNamesRollbackCreationAndPartialUpdate() throws Exception {
         create("first", "해시", 0);
         mvc
@@ -941,12 +829,8 @@ class TagApiTests {
         assertThat(jdbc.queryForObject("SELECT display_order FROM tags WHERE id = ?", Integer.class, id)).isEqualTo(1);
     }
 
-    /**
-     * 사용 중인 태그의 삭제는 거부하고 이름 변경은 허용하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("참조 중 태그 삭제는 거부하고 이름 변경은 허용한다")
     void referencedTagCannotBeDeletedButCanBeRenamed() throws Exception {
         String id = create("used", "해시", 0);
         String following = create("following", "뒤 태그", 1);
@@ -964,12 +848,8 @@ class TagApiTests {
         assertThat(displayOrder(following)).isZero();
     }
 
-    /**
-     * 동일 이름의 동시 생성 요청 중 하나만 성공하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
-     */
     @Test
+    @DisplayName("같은 이름의 동시 등록은 하나만 성공하고 나머지는 중복 오류를 반환한다")
     void concurrentDuplicateNamesCreateOneTagAndRejectTheOtherRequest() throws Exception {
         List<String> outcomes = race(() -> createOutcome("first"), () -> createOutcome("second"));
         assertThat(outcomes).containsExactlyInAnyOrder("CREATED", "PROBLEM_TAG_DUPLICATED");

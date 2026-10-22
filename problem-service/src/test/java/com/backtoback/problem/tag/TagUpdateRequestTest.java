@@ -15,7 +15,8 @@ import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
 
-class TagUpdateRequestTests {
+/** 태그 수정 요청 이름의 공백·널·길이 검증을 확인한다. */
+class TagUpdateRequestTest {
     private static final ValidatorFactory FACTORY = Validation.buildDefaultValidatorFactory();
     private static final Validator VALIDATOR = FACTORY.getValidator();
 
@@ -27,11 +28,6 @@ class TagUpdateRequestTests {
         FACTORY.close();
     }
 
-    /**
-     * 빈 문자열과 공백뿐인 이름을 DTO에서 거부하는지 검증한다.
-     *
-     * @param name 거부할 이름
-     */
     @ParameterizedTest
     @ValueSource(
         strings = {
@@ -42,7 +38,7 @@ class TagUpdateRequestTests {
             "\u2003"
         }
     )
-    @DisplayName("빈 이름과 공백 이름은 NullOrNotBlank 제약을 위반한다")
+    @DisplayName("빈 이름과 공백 이름은 제약을 위반한다")
     void rejectsBlankName(String name) {
         var violations = VALIDATOR.validate(new TagUpdateRequest(name, 0));
         assertThat(violations).anySatisfy(violation -> {
@@ -51,11 +47,6 @@ class TagUpdateRequestTests {
         });
     }
 
-    /**
-     * 이름 유지 요청과 유효한 이름을 허용하며 검증 과정에서 원문을 바꾸지 않는지 검증한다.
-     *
-     * @param name 유지하거나 수정할 이름
-     */
     @ParameterizedTest
     @NullSource
     @ValueSource(
@@ -65,18 +56,13 @@ class TagUpdateRequestTests {
             "\u2003해시\u2003"
         }
     )
-    @DisplayName("null과 유효한 이름은 허용하고 원문을 유지한다")
+    @DisplayName("null과 유효한 이름을 허용하고 원문을 유지한다")
     void acceptsNullOrNonBlankName(String name) {
         var request = new TagUpdateRequest(name, 0);
         assertThat(VALIDATOR.validate(request)).isEmpty();
         assertThat(request.name()).isEqualTo(name);
     }
 
-    /**
-     * 기존 이름 길이 상한을 유지하는지 검증한다.
-     *
-     * @param length 검사할 이름 길이
-     */
     @ParameterizedTest
     @ValueSource(
         ints = {
@@ -84,7 +70,7 @@ class TagUpdateRequestTests {
             201
         }
     )
-    @DisplayName("이름은 200자까지 허용한다")
+    @DisplayName("이름 길이 제한을 200자로 유지한다")
     void preservesNameLengthLimit(int length) {
         var violations = VALIDATOR.validate(new TagUpdateRequest("가".repeat(length), null));
         assertThat(violations).hasSize(length == 200 ? 0 : 1);
