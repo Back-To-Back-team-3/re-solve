@@ -1,4 +1,4 @@
-package com.backtoback.judge.global.exception;
+package com.backtoback.judge.global.error;
 
 import org.springframework.http.HttpStatus;
 
