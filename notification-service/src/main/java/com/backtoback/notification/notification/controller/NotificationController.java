@@ -5,6 +5,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -12,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.notification.notification.dto.response.NotificationPageResponse;
+import com.backtoback.notification.notification.dto.response.NotificationReadAllResponse;
 import com.backtoback.notification.notification.dto.response.UnreadCountResponse;
 import com.backtoback.notification.notification.service.NotificationService;
 
@@ -64,5 +67,35 @@ public class NotificationController {
     ) {
         UnreadCountResponse response = notificationService.getUnreadCount(memberId);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    /**
+     * 7.1.4 알림 단건 읽음 처리 — 특정 알림을 읽음 처리하고 잔여 미읽음 개수를 반환한다.
+     *
+     * @param memberId Gateway가 주입한 사용자 식별자
+     * @param notificationId 알림 식별자
+     * @return 공통 성공 응답 형식으로 감싼 잔여 미읽음 개수
+     */
+    @PatchMapping("/{notificationId}/read")
+    public ResponseEntity<ApiResponse<UnreadCountResponse>> markAsRead(
+        @RequestHeader(name = "X-User-Id") Long memberId,
+        @PathVariable(name = "notificationId") Long notificationId
+    ) {
+        UnreadCountResponse response = notificationService.markAsRead(memberId, notificationId);
+        return ResponseEntity.ok(ApiResponse.success("알림이 읽음 처리되었습니다.", response));
+    }
+
+    /**
+     * 7.1.5 알림 전체 읽음 처리 — 회원의 모든 미읽음 알림을 일괄 읽음 처리한다.
+     *
+     * @param memberId Gateway가 주입한 사용자 식별자
+     * @return 공통 성공 응답 형식으로 감싼 읽음 처리 개수 및 잔여 미읽음 개수(0)
+     */
+    @PatchMapping("/read-all")
+    public ResponseEntity<ApiResponse<NotificationReadAllResponse>> markAllAsRead(
+        @RequestHeader(name = "X-User-Id") Long memberId
+    ) {
+        NotificationReadAllResponse response = notificationService.markAllAsRead(memberId);
+        return ResponseEntity.ok(ApiResponse.success("모든 알림을 읽음 처리했습니다.", response));
     }
 }

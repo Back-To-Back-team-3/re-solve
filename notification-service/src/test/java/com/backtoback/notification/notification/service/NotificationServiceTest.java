@@ -2,12 +2,14 @@ package com.backtoback.notification.notification.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,10 +25,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.notification.global.error.NotificationErrorCode;
 import com.backtoback.notification.global.error.NotificationException;
 import com.backtoback.notification.notification.domain.Notification;
 import com.backtoback.notification.notification.domain.NotificationType;
 import com.backtoback.notification.notification.dto.response.NotificationPageResponse;
+import com.backtoback.notification.notification.dto.response.NotificationReadAllResponse;
 import com.backtoback.notification.notification.dto.response.UnreadCountResponse;
 import com.backtoback.notification.notification.repository.NotificationRepository;
 
@@ -174,5 +178,99 @@ class NotificationServiceTest {
         // then
         assertThat(response.unreadCount()).isEqualTo(5L);
         verify(notificationRepository).countByMemberIdAndIsReadFalse(eq(memberId));
+    }
+
+    @Test
+    @DisplayName("7.1.4 알림 단건 읽음 처리 시 알림을 읽음 처리하고 잔여 미읽음 개수를 반환한다")
+    void markAsReadSuccess() {
+        // given
+        Long memberId = 1L;
+        Long notificationId = 100L;
+        Notification notification
+            = Notification
+                .builder()
+                .memberId(memberId)
+                .sourceEventId("evt-1")
+                .type(NotificationType.SUBMISSION_JUDGED)
+                .title("채점 완료")
+                .content("1001번 문제 채점이 완료되었습니다.")
+                .build();
+        ReflectionTestUtils.setField(notification, "id", notificationId);
+
+        given(notificationRepository.findByIdAndMemberId(eq(notificationId), eq(memberId)))
+            .willReturn(Optional.of(notification));
+        given(notificationRepository.countByMemberIdAndIsReadFalse(eq(memberId))).willReturn(0L);
+
+        // when
+        UnreadCountResponse response = notificationService.markAsRead(memberId, notificationId);
+
+        // then
+        assertThat(notification.isRead()).isTrue();
+        assertThat(notification.getReadAt()).isNotNull();
+        assertThat(response.unreadCount()).isEqualTo(0L);
+        verify(notificationRepository).findByIdAndMemberId(eq(notificationId), eq(memberId));
+        verify(notificationRepository).countByMemberIdAndIsReadFalse(eq(memberId));
+    }
+
+    @Test
+    @DisplayName("7.1.4 이미 읽은 알림을 다시 읽음 처리해도 예외 없이 성공하며 잔여 미읽음 수를 반환한다 (Idempotent)")
+    void markAsReadIdempotent() {
+        // given
+        Long memberId = 1L;
+        Long notificationId = 100L;
+        Notification notification
+            = Notification
+                .builder()
+                .memberId(memberId)
+                .sourceEventId("evt-1")
+                .type(NotificationType.SUBMISSION_JUDGED)
+                .title("채점 완료")
+                .content("1001번 문제 채점이 완료되었습니다.")
+                .build();
+        ReflectionTestUtils.setField(notification, "id", notificationId);
+        notification.markAsRead(java.time.LocalDateTime.now().minusHours(1));
+
+        given(notificationRepository.findByIdAndMemberId(eq(notificationId), eq(memberId)))
+            .willReturn(Optional.of(notification));
+        given(notificationRepository.countByMemberIdAndIsReadFalse(eq(memberId))).willReturn(0L);
+
+        // when
+        UnreadCountResponse response = notificationService.markAsRead(memberId, notificationId);
+
+        // then
+        assertThat(notification.isRead()).isTrue();
+        assertThat(response.unreadCount()).isEqualTo(0L);
+    }
+
+    @Test
+    @DisplayName("7.1.4 존재하지 않거나 타인의 알림을 읽음 처리 요청 시 NOTIFICATION_NOT_FOUND 예외를 던진다")
+    void markAsReadNotFoundThrowsException() {
+        // given
+        Long memberId = 1L;
+        Long notificationId = 999L;
+        given(notificationRepository.findByIdAndMemberId(eq(notificationId), eq(memberId)))
+            .willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> notificationService.markAsRead(memberId, notificationId))
+            .isInstanceOf(NotificationException.class)
+            .extracting(exception -> ((NotificationException)exception).getErrorCode())
+            .isEqualTo(NotificationErrorCode.NOTIFICATION_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("7.1.5 전체 읽음 처리 시 모든 미읽음 알림을 일괄 처리하고 갱신 건수와 unreadCount(0)를 반환한다")
+    void markAllAsReadSuccess() {
+        // given
+        Long memberId = 1L;
+        given(notificationRepository.markAllAsRead(eq(memberId), any())).willReturn(5);
+
+        // when
+        NotificationReadAllResponse response = notificationService.markAllAsRead(memberId);
+
+        // then
+        assertThat(response.updatedCount()).isEqualTo(5L);
+        assertThat(response.unreadCount()).isEqualTo(0L);
+        verify(notificationRepository).markAllAsRead(eq(memberId), any());
     }
 }
