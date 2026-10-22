@@ -1,4 +1,4 @@
-package com.backtoback.problem.tag;
+package com.backtoback.problem.tag.dto.request;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -9,7 +9,6 @@ import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.backtoback.problem.global.validation.NullOrNotBlank;
-import com.backtoback.problem.tag.dto.request.TagUpdateRequest;
 
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -20,9 +19,6 @@ class TagUpdateRequestTest {
     private static final ValidatorFactory FACTORY = Validation.buildDefaultValidatorFactory();
     private static final Validator VALIDATOR = FACTORY.getValidator();
 
-    /**
-     * 검증 팩토리의 자원을 정리한다.
-     */
     @AfterAll
     static void closeFactory() {
         FACTORY.close();
@@ -44,6 +40,7 @@ class TagUpdateRequestTest {
         assertThat(violations).anySatisfy(violation -> {
             assertThat(violation.getPropertyPath().toString()).isEqualTo("name");
             assertThat(violation.getConstraintDescriptor().getAnnotation()).isInstanceOf(NullOrNotBlank.class);
+            assertThat(violation.getMessage()).isEqualTo("공백만 입력할 수 없습니다.");
         });
     }
 
@@ -73,6 +70,12 @@ class TagUpdateRequestTest {
     @DisplayName("이름 길이 제한을 200자로 유지한다")
     void preservesNameLengthLimit(int length) {
         var violations = VALIDATOR.validate(new TagUpdateRequest("가".repeat(length), null));
-        assertThat(violations).hasSize(length == 200 ? 0 : 1);
+        if (length == 200) {
+            assertThat(violations).isEmpty();
+        } else {
+            assertThat(violations)
+                .singleElement()
+                .satisfies(violation -> assertThat(violation.getMessage()).isEqualTo("태그 이름은 1자 이상 200자 이하로 입력해 주세요."));
+        }
     }
 }
