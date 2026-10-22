@@ -297,7 +297,7 @@ services:
     profiles: [judge0]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "judge0_redis_password", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 10

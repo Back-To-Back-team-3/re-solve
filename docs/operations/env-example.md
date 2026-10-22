@@ -74,11 +74,11 @@ AWS_SECRET_ACCESS_KEY=
 
 # ⚖️ Judge0 (채점 엔진 - Docker Compose 프로필: judge0)
 # docker compose --profile judge0 up -d 실행 시 2358 포트로 기동됩니다.
-# 호스트(로컬 앱)에서 접근 시: http://localhost:2358
-# Docker Compose 내부 서비스 간 통신 시: http://judge0-server:2358
+# Compose 컨테이너 환경(기본값): http://judge0-server:2358
+# 호스트 로컬 IDE에서 직접 실행 시: http://localhost:2358
 JUDGE0_IMAGE=judge0/judge0:1.13.0
 JUDGE0_SERVER_PORT=2358
-JUDGE0_BASE_URL=http://localhost:2358
+JUDGE0_BASE_URL=http://judge0-server:2358
 
 # 🌐 Nginx
 NGINX_IMAGE=nginx:stable-alpine
@@ -166,8 +166,11 @@ docker compose --profile judge0 ps
 # Judge0 API 응답 확인 (상태 정보)
 curl http://localhost:2358/system_info
 
-# Judge0 종료
-docker compose --profile judge0 stop
+# Judge0 서비스만 종료 (기타 MySQL, Redis 등 서비스 유지)
+docker compose stop judge0-server judge0-worker judge0-db judge0-redis
+
+# Judge0 컨테이너 및 볼륨 제거 (필요 시)
+docker compose rm -f -s -v judge0-server judge0-worker judge0-db judge0-redis
 ```
 
 ---
@@ -175,7 +178,7 @@ docker compose --profile judge0 stop
 ## 6. 종료 / 정리
 
 ```bash
-# 컨테이너만 종료: MySQL·Redis 데이터는 유지
+# 일반 컨테이너만 종료: MySQL·Redis 데이터는 유지
 docker compose down
 
 # Judge0 포함 전체 종료
