@@ -36,11 +36,8 @@ import org.springframework.web.server.ResponseStatusException;
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.judge.global.config.CommonConfiguration;
-import com.backtoback.judge.global.exception.JudgeErrorCode;
-import com.backtoback.judge.global.exception.custom.Judge0ConfigurationInvalidException;
-import com.backtoback.judge.global.exception.custom.Judge0ConnectionFailedException;
-import com.backtoback.judge.global.exception.custom.Judge0ResponseFailedException;
-import com.backtoback.judge.global.exception.custom.SubmissionRuntimeUnavailableException;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.exception.JudgeException;
 import com.backtoback.judge.global.security.SecurityConfiguration;
 
 import jakarta.validation.Valid;
@@ -390,20 +387,14 @@ class JudgeWebTests {
          * 지정한 Judge0 장애의 공통 예외 응답을 검증하기 위해 예외를 발생시킨다.
          *
          * @param code 검증할 Judge0 오류 코드
-         * @throws Judge0ConnectionFailedException 연결 오류 코드를 지정한 경우
-         * @throws Judge0ResponseFailedException 응답 오류 코드를 지정한 경우
-         * @throws Judge0ConfigurationInvalidException 설정 오류 코드를 지정한 경우
-         * @throws SubmissionRuntimeUnavailableException 재채점 환경 오류 코드를 지정한 경우
+         * @throws JudgeException 지정한 채점 오류를 공통 처리기로 전달하는 경우
          */
         @GetMapping("/api/v1/test/judge0")
         void judge0Failure(@RequestParam JudgeErrorCode code) {
-            switch (code) {
-                case JUDGE0_CONNECTION_FAILED -> throw new Judge0ConnectionFailedException();
-                case JUDGE0_RESPONSE_FAILED -> throw new Judge0ResponseFailedException(401);
-                case JUDGE0_CONFIGURATION_INVALID -> throw new Judge0ConfigurationInvalidException();
-                case SUBMISSION_RUNTIME_UNAVAILABLE -> throw new SubmissionRuntimeUnavailableException();
-                default -> throw new IllegalArgumentException("Unsupported test error code");
+            if (code == JudgeErrorCode.JUDGE0_RESPONSE_FAILED) {
+                throw new JudgeException(code, 401);
             }
+            throw new JudgeException(code);
         }
 
         /**
