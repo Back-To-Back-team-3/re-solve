@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mockStatic;
 
 import java.time.Duration;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
@@ -15,14 +16,10 @@ import org.redisson.api.RedissonClient;
 import org.redisson.config.Config;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisProperties;
 
-class RedisConfigurationTests {
-    /**
-     * 각 제한 시간은 설정값을 적용하고 미설정이면 Redisson 기본값을 유지하는지 검증한다.
-     *
-     * @param connectTimeoutConfigured 연결 제한 시간 설정 여부
-     * @param timeoutConfigured 응답 제한 시간 설정 여부
-     */
+/** Redisson 클라이언트에 설정된 연결·응답 제한 시간을 적용한다. */
+class RedisConfigurationTest {
     @ParameterizedTest
+    @DisplayName("각 제한 시간이 설정된 경우에만 Redisson 기본값을 덮어쓴다")
     @CsvSource(
         {
             "false,false",
