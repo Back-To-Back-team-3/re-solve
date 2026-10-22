@@ -30,7 +30,7 @@ final class JavaTypeMapper {
      * 배열 원소 클래스를 실행 환경에서 복원할 이름으로 변환한다.
      *
      * @param type 원소 타입
-     * @return Class.forName에 사용할 이름 또는 원시 타입 이름
+     * @return {@code Class.forName}에 사용할 이름 또는 원시 타입 이름
      */
     String runtimeType(TypeSpec type) {
         return switch (type.kind()) {

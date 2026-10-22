@@ -106,7 +106,7 @@ class JavaExecutionCodeGeneratorTests {
         ).isInstanceOf(IllegalArgumentException.class);
     }
 
-    /** 64비트 정수도 중간 double 변환 없이 범위를 확인한다. */
+    /** 64비트 정수도 중간 {@code double} 변환 없이 범위를 확인한다. */
     @ParameterizedTest
     @ValueSource(
         strings = {
@@ -216,6 +216,28 @@ class JavaExecutionCodeGeneratorTests {
         assertThatThrownBy(
             () -> generator.generate(spec(scalar(Kind.FLOAT32)), "class Solution {}", Map.of("value", input))
         ).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /**
+     * 입력 파싱 시 중첩 JSON도 끝까지 검사한다.
+     *
+     * @param input 잘못된 배열 입력
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "[-0.0",
+            "[-0.0,]",
+            "[-0.0] [0.0]",
+            "[true]",
+            "[-1e-50]"
+        }
+    )
+    @DisplayName("음수 0 처리에서도 불완전 JSON·후행 값·타입·언더플로를 거절한다")
+    void rejectsInvalidFloatArray(String input) {
+        var type = new TypeSpec(Kind.ARRAY, scalar(Kind.FLOAT32), null, null, null);
+        assertThatThrownBy(() -> generator.generate(spec(type), "class Solution {}", Map.of("value", input)))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     /**

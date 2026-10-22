@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 import com.backtoback.judge.judging.dto.FunctionSpec;
 
 /**
- * Solution의 public 인스턴스 메서드를 실행하는 Java 17 소스를 생성한다. (정책 및 상태 §3.1·§3.2)
+ * {@code Solution}의 {@code public} 인스턴스 메서드를 실행하는 Java 17 소스를 생성한다. (정책 및 상태 §3.1·§3.2)
  * 사용자 코드를 서버 JVM에서 실행하지 않으며 Judge0 호출·판정 비교는 수행하지 않는다.
  */
 @Service
@@ -55,11 +55,11 @@ public class JavaExecutionCodeGenerator {
     }
 
     /**
-     * 테스트 한 건을 실행할 코드와 stdin을 생성한다. 사용자 소스는 수정하지 않고 Main을 덧붙인다.
-     * 기본 코드처럼 package 없는 비공개 Solution 클래스를 사용하며, 문법 오류는 컴파일 결과로 확인한다.
+     * 테스트 한 건을 실행할 코드와 {@code stdin}을 생성한다. 사용자 소스는 수정하지 않고 {@code Main}을 덧붙인다.
+     * 기본 코드처럼 {@code package} 없는 비공개 {@code Solution} 클래스를 사용하며, 문법 오류는 컴파일 결과로 확인한다.
      *
      * @param spec 고정 회차의 함수 명세
-     * @param sourceCode 사용자가 작성한 Solution 클래스와 import
+     * @param sourceCode 사용자가 작성한 {@code Solution} 클래스와 {@code import}
      * @param argumentTexts 매개변수 이름별 입력 JSON 텍스트
      * @return 기존 실행 요청 모델에 연결할 코드와 입력
      * @throws IllegalArgumentException 명세·입력이 잘못되거나 코드가 비어 있는 경우

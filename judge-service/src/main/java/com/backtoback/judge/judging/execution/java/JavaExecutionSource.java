@@ -6,14 +6,14 @@ import com.backtoback.judge.judging.dto.request.JudgeExecutionCreateRequest;
 /**
  * 테스트 한 건의 Java 실행 코드와 입력이다. 기대값은 실행 환경에 전달하지 않는다.
  *
- * @param sourceCode 사용자 코드와 실행용 Main
- * @param stdin 생성된 Main에서 읽는 입력
+ * @param sourceCode 사용자 코드와 실행용 {@code Main}
+ * @param stdin 생성된 {@code Main}에서 읽는 입력
  */
 public record JavaExecutionSource(String sourceCode, String stdin) {
     /**
      * 생성 결과를 기존 Judge0 실행 요청 모델에 연결한다. 제한값은 고정 회차에서 가져온다.
      *
-     * @param runtime 고정 실행 환경; 최초 실행이면 null
+     * @param runtime 고정 실행 환경; 최초 실행이면 {@code null}
      * @param cpuTimeMs CPU 제한 시간
      * @param wallTimeMs 경과 시간 제한
      * @param memoryKiB 메모리 제한

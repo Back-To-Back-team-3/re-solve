@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.backtoback.judge.judging.dto.FunctionSpec;
@@ -61,7 +62,7 @@ class JavaExecutionProcessTests {
     }
 
     /**
-     * 입력이 실제 float로 전달되고 반환값이 유효한 JSON 숫자로 출력되는지 확인한다.
+     * 입력이 실제 {@code float}로 전달되고 반환값이 유효한 JSON 숫자로 출력되는지 확인한다.
      *
      * @param input 입력 JSON 숫자
      * @param expected 32비트 반올림 후의 출력
@@ -99,7 +100,92 @@ class JavaExecutionProcessTests {
     }
 
     /**
-     * 중첩 배열의 원시 float 타입과 혼합 구조 안의 Float 값을 복원한다.
+     * 실수 입력의 부호가 사용자 함수와 JSON 반환값까지 보존되는지 확인한다.
+     *
+     * @param kind 입력·반환 타입
+     * @param input 지수 표기를 포함한 음수 0
+     * @throws Exception 컴파일·실행이 실패한 경우
+     */
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "FLOAT32,-0.0",
+            "FLOAT32,-0.00",
+            "FLOAT32,-0e10",
+            "FLOAT64,-0.0",
+            "FLOAT64,-0.00",
+            "FLOAT64,-0e10"
+        }
+    )
+    @DisplayName("FLOAT32·FLOAT64의 음수 0을 입력부터 반환 출력까지 보존한다")
+    void preservesNegativeZero(Kind kind, String input) throws Exception {
+        var type = scalar(kind);
+        var spec = new FunctionSpec("solution", List.of(new Parameter("value", type)), type);
+        String javaType = types.sourceType(type);
+        String source = "class Solution { public " + javaType + " solution(" + javaType + " value) { return value; } }";
+        var result = execute(generator.generate(spec, source, Map.of("value", input)));
+        assertThat(result.exitCode()).as(result.stderr()).isZero();
+        assertThat(result.stdout()).isEqualTo("-0.0");
+    }
+
+    /**
+     * 중첩 구조 안의 양수·음수 0이 실제 계산에서도 구분되는지 확인한다.
+     *
+     * @param kind 배열·객체 안의 실수 타입
+     * @throws Exception 컴파일·실행이 실패한 경우
+     */
+    @ParameterizedTest
+    @EnumSource(
+        value = Kind.class,
+        names = {
+            "FLOAT32",
+            "FLOAT64"
+        }
+    )
+    @DisplayName("객체·중첩 배열·위치·반복 배열에서 0의 부호를 유지한다")
+    void preservesNestedSignedZeros(Kind kind) throws Exception {
+        var type = scalar(kind);
+        var array = new TypeSpec(Kind.ARRAY, type, null, null, null);
+        var matrix = new TypeSpec(Kind.ARRAY, array, null, null, null);
+        var positions = new TypeSpec(Kind.ARRAY, null, List.of(type, scalar(Kind.STRING)), null, null);
+        var repeated = new TypeSpec(Kind.ARRAY, null, null, List.of(type, scalar(Kind.INT32)), null);
+        var object
+            = new TypeSpec(
+                Kind.OBJECT,
+                null,
+                null,
+                null,
+                Map.of("matrix", matrix, "positions", positions, "repeated", repeated)
+            );
+        var returns = new TypeSpec(Kind.ARRAY, scalar(Kind.FLOAT64), null, null, null);
+        var spec = new FunctionSpec("solution", List.of(new Parameter("value", object)), returns);
+        String javaType = types.sourceType(matrix);
+        String source = """
+            class Solution {
+                public double[] solution(java.util.Map<String, Object> value) {
+                    var matrix = (%s) value.get("matrix");
+                    var positions = (Object[]) value.get("positions");
+                    var repeated = (Object[]) value.get("repeated");
+                    return new double[] {
+                        Math.copySign(1.0, matrix[0][0]),
+                        Math.copySign(1.0, matrix[0][1]),
+                        Math.copySign(1.0, ((Number) positions[0]).doubleValue()),
+                        Math.copySign(1.0, ((Number) repeated[0]).doubleValue()),
+                        Math.copySign(1.0, ((Number) repeated[2]).doubleValue())
+                    };
+                }
+            }
+            """.formatted(javaType);
+        String input = """
+            {"matrix":[[-0.0,0.0]],"positions":[-0e10,"-0.0"],"repeated":[-0.00,1,0.0,2]}
+            """;
+        var result = execute(generator.generate(spec, source, Map.of("value", input)));
+        assertThat(result.exitCode()).as(result.stderr()).isZero();
+        assertThat(result.stdout()).isEqualTo("[-1.0,1.0,-1.0,-1.0,1.0]");
+    }
+
+    /**
+     * 중첩 배열의 원시 {@code float} 타입과 혼합 구조 안의 {@code Float} 값을 복원한다.
      *
      * @throws Exception 컴파일·실행이 실패한 경우
      */
@@ -125,7 +211,7 @@ class JavaExecutionProcessTests {
     /**
      * 계산 결과의 비정상 실수가 정답 출력으로 직렬화되지 않도록 확인한다.
      *
-     * @param expression 비정상 float 값을 반환하는 식
+     * @param expression 비정상 {@code float} 값을 반환하는 식
      * @throws Exception 컴파일·실행이 실패한 경우
      */
     @ParameterizedTest
@@ -208,7 +294,7 @@ class JavaExecutionProcessTests {
     }
 
     /**
-     * import와 인자 선언 순서를 유지하며 디버그 출력이 결과에 섞이지 않게 한다.
+     * {@code import}와 인자 선언 순서를 유지하며 디버그 출력이 결과에 섞이지 않게 한다.
      *
      * @throws Exception 컴파일·실행이 실패한 경우
      */
@@ -238,7 +324,7 @@ class JavaExecutionProcessTests {
     }
 
     /**
-     * 매개변수가 없는 함수와 비공개 Solution 클래스를 실행한다.
+     * 매개변수가 없는 함수와 비공개 {@code Solution} 클래스를 실행한다.
      *
      * @throws Exception 컴파일·실행이 실패한 경우
      */
