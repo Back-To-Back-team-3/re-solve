@@ -6,4 +6,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 /** 문제 서비스의 예약 작업 실행을 활성화한다. */
 @Configuration(proxyBeanMethods = false)
 @EnableScheduling
-public class SchedulingConfig {}
+public class SchedulingConfig {
+
+}
