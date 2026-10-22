@@ -161,7 +161,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/judge_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
-      JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-}
+      JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-http://judge0-server:2358}
     depends_on:
       mysql:
         condition: service_healthy
@@ -246,7 +246,65 @@ services:
       mysql:
         condition: service_healthy
 
+  judge0-server:
+    image: ${JUDGE0_IMAGE:-judge0/judge0:1.13.0}
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    ports:
+      - "127.0.0.1:${JUDGE0_SERVER_PORT:-2358}:2358"
+    privileged: true
+    profiles: [judge0]
+    restart: unless-stopped
+    depends_on:
+      judge0-db:
+        condition: service_healthy
+      judge0-redis:
+        condition: service_healthy
+
+  judge0-worker:
+    image: ${JUDGE0_IMAGE:-judge0/judge0:1.13.0}
+    command: ["./scripts/workers"]
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    privileged: true
+    profiles: [judge0]
+    restart: unless-stopped
+    depends_on:
+      judge0-db:
+        condition: service_healthy
+      judge0-redis:
+        condition: service_healthy
+
+  judge0-db:
+    image: ${JUDGE0_DB_IMAGE:-postgres:13.0}
+    env_file: judge0.conf
+    volumes:
+      - judge0-db-data:/var/lib/postgresql/data
+    profiles: [judge0]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U judge0 -d judge0"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  judge0-redis:
+    image: ${JUDGE0_REDIS_IMAGE:-redis:6.0-alpine}
+    command: ["sh", "-c", "docker-entrypoint.sh --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    env_file: judge0.conf
+    volumes:
+      - judge0-redis-data:/data
+    profiles: [judge0]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "judge0_redis_password", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   mysql-data:
   redis-data:
   localstack-data:
+  judge0-db-data:
+  judge0-redis-data:

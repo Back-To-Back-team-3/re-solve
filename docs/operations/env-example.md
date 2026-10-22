@@ -72,8 +72,13 @@ AWS_ENDPOINT_URL=
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 
-# Judge0 연동 주소가 정해지면 입력
-JUDGE0_BASE_URL=
+# ⚖️ Judge0 (채점 엔진 - Docker Compose 프로필: judge0)
+# docker compose --profile judge0 up -d 실행 시 2358 포트로 기동됩니다.
+# 호스트(로컬 앱)에서 접근 시: http://localhost:2358
+# Docker Compose 내부 서비스 간 통신 시: http://judge0-server:2358
+JUDGE0_IMAGE=judge0/judge0:1.13.0
+JUDGE0_SERVER_PORT=2358
+JUDGE0_BASE_URL=http://localhost:2358
 
 # 🌐 Nginx
 NGINX_IMAGE=nginx:stable-alpine
@@ -146,11 +151,35 @@ docker compose logs redis
 
 ---
 
-## 5. 종료 / 정리
+## 5. Judge0 (채점 엔진) 가동 및 확인
+
+- Judge0는 리소스 관리를 위해 Compose 프로필(`judge0`)로 분리되어 있습니다.
+- 일반 `docker compose up` 명령 시에는 기동되지 않으며, `--profile judge0` 플래그를 붙여 실행합니다.
+
+```bash
+# Judge0 서비스 스택 시작
+docker compose --profile judge0 up -d
+
+# Judge0 구동 상태 확인
+docker compose --profile judge0 ps
+
+# Judge0 API 응답 확인 (상태 정보)
+curl http://localhost:2358/system_info
+
+# Judge0 종료
+docker compose --profile judge0 stop
+```
+
+---
+
+## 6. 종료 / 정리
 
 ```bash
 # 컨테이너만 종료: MySQL·Redis 데이터는 유지
 docker compose down
+
+# Judge0 포함 전체 종료
+docker compose --profile judge0 down
 ```
 
 - DB·Redis 데이터를 완전히 초기화해야 할 때만 사용한다. 삭제한 데이터는 복구되지 않는다.
