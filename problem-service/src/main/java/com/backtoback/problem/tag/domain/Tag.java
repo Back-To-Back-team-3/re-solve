@@ -13,6 +13,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+/** 태그의 이름과 표시 순서를 관리한다. */
 @Entity
 @Table(
     name = "tags",
@@ -41,22 +42,17 @@ public class Tag extends BaseEntity {
     @Column(nullable = false)
     private int displayOrder;
 
-    /**
-     * 지정한 이름과 표시 순서로 태그를 생성한다.
-     *
-     * @param name 태그 이름
-     * @param displayOrder 태그 목록의 표시 순서
-     */
-    public Tag(String name, int displayOrder) {
+    private Tag(String name, int displayOrder) {
         this.name = name;
         this.displayOrder = displayOrder;
     }
 
+    public static Tag create(String name, int displayOrder) {
+        return new Tag(name, displayOrder);
+    }
+
     /**
-     * 전달된 값이 있는 태그 속성만 수정한다.
-     *
-     * @param name 변경할 이름; null이면 유지
-     * @param displayOrder 변경할 표시 순서; null이면 유지
+     * {@code null}로 전달한 속성은 기존 값을 유지한다.
      */
     public void update(String name, Integer displayOrder) {
         if (name != null) {
