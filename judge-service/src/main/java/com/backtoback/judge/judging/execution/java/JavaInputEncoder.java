@@ -13,8 +13,9 @@ import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.TypeSpec;
 
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
 import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -24,14 +25,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 final class JavaInputEncoder {
     private final JavaTypeMapper types = new JavaTypeMapper();
-    private final JsonMapper mapper
-        = JsonMapper
-            .builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-            .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
-            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-            .build();
+    private final JsonMapper mapper = JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
 
     /**
      * 매개변수 선언 순서로 테스트 입력을 변환한다.
@@ -52,7 +46,7 @@ final class JavaInputEncoder {
                 if (text == null || text.isBlank()) {
                     throw new IllegalArgumentException("입력 JSON 텍스트가 필요합니다.");
                 }
-                write(output, parameter.type(), mapper.readTree(text));
+                write(output, parameter.type(), readInput(text));
             }
             return Base64.getEncoder().encodeToString(bytes.toByteArray());
         } catch (JacksonException | ArithmeticException exception) {
@@ -64,7 +58,68 @@ final class JavaInputEncoder {
     }
 
     /**
-     * 타입별 값을 기록한다. 태그 값은 judging/java/execution.template의 readValue와 함께 유지한다.
+     * JSON 값 하나를 읽는다. 뒤에 다른 값이 있으면 거절한다.
+     *
+     * @param text 입력 JSON 텍스트
+     * @return 정밀도와 실수 음수 0을 보존한 값
+     * @throws JacksonException JSON 형식이 잘못된 경우
+     * @throws IllegalArgumentException 값이 없거나 여러 값이 이어지는 경우
+     */
+    private JsonNode readInput(String text) {
+        try (JsonParser parser = mapper.createParser(text)) {
+            parser.nextToken();
+            JsonNode value = readNode(parser);
+            require(parser.nextToken() == null);
+            return value;
+        }
+    }
+
+    /**
+     * JSON 토큰을 트리로 변환한다. 큰 정수·소수의 정밀도를 유지하면서 음수 0을 구분한다.
+     *
+     * @param parser 현재 값을 가리키는 JSON 파서
+     * @return 현재 값과 중첩 구조
+     * @throws JacksonException JSON 형식이 잘못된 경우
+     * @throws IllegalArgumentException 값이 아닌 토큰이 들어온 경우
+     */
+    private JsonNode readNode(JsonParser parser) {
+        require(parser.currentToken() != null);
+        var nodes = mapper.getNodeFactory();
+        return switch (parser.currentToken()) {
+            case START_ARRAY -> {
+                var array = nodes.arrayNode();
+                while (parser.nextToken() != JsonToken.END_ARRAY) {
+                    array.add(readNode(parser));
+                }
+                yield array;
+            }
+            case START_OBJECT -> {
+                var object = nodes.objectNode();
+                while (parser.nextToken() != JsonToken.END_OBJECT) {
+                    require(parser.currentToken() == JsonToken.PROPERTY_NAME);
+                    String name = parser.currentName();
+                    parser.nextToken();
+                    object.set(name, readNode(parser));
+                }
+                yield object;
+            }
+            case VALUE_NUMBER_INT -> nodes.numberNode(parser.getBigIntegerValue());
+            case VALUE_NUMBER_FLOAT -> {
+                BigDecimal decimal = parser.getDecimalValue();
+                // BigDecimal은 음수 0의 부호를 잃으므로 원문 부호를 읽을 수 있을 때 보존한다.
+                yield decimal.signum() == 0 && parser.getString().startsWith("-") ? nodes.numberNode(-0.0d)
+                    : nodes.numberNode(decimal);
+            }
+            case VALUE_STRING -> nodes.stringNode(parser.getString());
+            case VALUE_TRUE -> nodes.booleanNode(true);
+            case VALUE_FALSE -> nodes.booleanNode(false);
+            case VALUE_NULL -> nodes.nullNode();
+            default -> throw new IllegalArgumentException("입력 JSON 값이 올바르지 않습니다.");
+        };
+    }
+
+    /**
+     * 타입별 값을 기록한다. 태그 값은 {@code judging/java/execution.template}의 {@code readValue}와 함께 유지한다.
      *
      * @param output 실행 입력 스트림
      * @param type 선언 타입
@@ -87,7 +142,7 @@ final class JavaInputEncoder {
             case FLOAT64 -> {
                 require(value.isNumber());
                 BigDecimal decimal = value.decimalValue();
-                double number = decimal.doubleValue();
+                double number = value.doubleValue();
                 require(Double.isFinite(number) && (number != 0 || decimal.signum() == 0));
                 output.writeByte(3);
                 output.writeDouble(number);
@@ -116,7 +171,7 @@ final class JavaInputEncoder {
                 require(value.isNumber());
                 BigDecimal decimal = value.decimalValue();
                 // double을 거치지 않고 32비트로 변환해 중간 반올림을 피한다.
-                float number = decimal.floatValue();
+                float number = value.floatValue();
                 require(Float.isFinite(number) && (number != 0 || decimal.signum() == 0));
                 output.writeByte(8);
                 output.writeFloat(number);
@@ -155,7 +210,7 @@ final class JavaInputEncoder {
     }
 
     /**
-     * 문자열 길이와 UTF-16 코드 단위를 기록한다. writeUTF의 64KiB 제한을 적용하지 않는다.
+     * 문자열 길이와 UTF-16 코드 단위를 기록한다. {@code writeUTF}의 64KiB 제한을 적용하지 않는다.
      *
      * @param output 실행 입력 스트림
      * @param text 변환할 문자열
