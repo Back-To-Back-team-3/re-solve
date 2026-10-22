@@ -5,6 +5,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.boot.restclient.RestClientCustomizer;
@@ -18,22 +19,22 @@ import org.springframework.web.client.RestClient;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.problem.global.config.CommonConfiguration;
 
-class CorrelationIdTests {
-    /**
-     * 안전하지 않은 추적 ID를 교체하고 기존 MDC를 복원하는지 검증한다.
-     *
-     * @throws Exception 테스트 요청 처리 중 오류가 발생한 경우
-     */
+/** 요청 추적 ID의 안전한 처리와 나가는 HTTP 요청으로의 전달을 확인한다. */
+class CorrelationIdTest {
     @Test
+    @DisplayName("안전하지 않은 추적 ID를 교체하고 이전 MDC 값을 복원한다")
     void replacesUnsafeIncomingIdAndRestoresPreviousMdc() throws Exception {
+        // given
         var request = new MockHttpServletRequest("GET", "/api/v1/problems");
         request.addHeader(CorrelationIdFilter.HEADER, "untrusted\nforged-log");
         var response = new MockHttpServletResponse();
         MDC.put(CorrelationIdFilter.MDC_KEY, "previous");
         try {
+            // when
             new CorrelationIdFilter().doFilter(request, response, (servletRequest, servletResponse) -> {
                 assertThat(MDC.get(CorrelationIdFilter.MDC_KEY)).matches("[0-9a-f-]{36}");
             });
+            // then
             assertThat(response.getHeader(CorrelationIdFilter.HEADER)).matches("[0-9a-f-]{36}");
             assertThat(MDC.get(CorrelationIdFilter.MDC_KEY)).isEqualTo("previous");
         } finally {
@@ -41,11 +42,10 @@ class CorrelationIdTests {
         }
     }
 
-    /**
-     * 현재 추적 ID를 나가는 HTTP 요청에 전달하는지 검증한다.
-     */
     @Test
+    @DisplayName("현재 추적 ID를 나가는 HTTP 요청에 전달한다")
     void propagatesCurrentCorrelationIdToOutgoingHttpRequest() {
+        // given
         var builder = RestClient.builder();
         new ApplicationContextRunner().withUserConfiguration(CommonConfiguration.class).run(context -> {
             assertThat(context).hasNotFailed();
@@ -58,7 +58,9 @@ class CorrelationIdTests {
             .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
         MDC.put(CorrelationIdFilter.MDC_KEY, "request-123");
         try {
+            // when
             builder.build().get().uri("http://internal.test/probe").retrieve().toBodilessEntity();
+            // then
             server.verify();
         } finally {
             MDC.clear();
