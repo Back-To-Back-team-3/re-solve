@@ -100,7 +100,7 @@ class SecurityConfigurationTest {
     }
 
     /**
-     * 아직 study 기능 Controller가 없어 경로별 권한만 확인하는 테스트용 Controller.
+     * 보안 체인의 경로별 권한만 확인하도록 각 경로에 고정 응답을 돌려준다.
      */
     @RestController
     static class ProbeController {
