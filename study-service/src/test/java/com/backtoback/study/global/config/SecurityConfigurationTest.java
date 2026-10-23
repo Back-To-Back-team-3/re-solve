@@ -1,5 +1,6 @@
 package com.backtoback.study.global.config;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -10,8 +11,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -42,6 +45,15 @@ class SecurityConfigurationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ApplicationContext context;
+
+    @Test
+    @DisplayName("Boot 기본 사용자 계정을 만들지 않는다")
+    void doesNotCreateDefaultUser() {
+        assertThat(context.getBeansOfType(UserDetailsService.class)).isEmpty();
+    }
 
     @Test
     @DisplayName("스터디 목록·상세 조회는 로그인 없이 허용한다")
