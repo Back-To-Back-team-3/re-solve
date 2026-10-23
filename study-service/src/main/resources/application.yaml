@@ -19,3 +19,9 @@ spring:
 logging:
   pattern:
     level: "%5p [correlationId=%X{correlationId:-}]"
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
