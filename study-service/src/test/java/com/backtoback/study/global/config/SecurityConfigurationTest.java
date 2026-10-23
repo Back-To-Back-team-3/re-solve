@@ -105,6 +105,13 @@ class SecurityConfigurationTest {
         mockMvc.perform(get("/internal/v1/studies/1/members")).andExpect(status().isOk());
     }
 
+    @Test
+    @DisplayName("local이 아닌 프로필에서는 Swagger 경로에 익명으로 요청하면 401을 반환한다")
+    void rejectsSwaggerOutsideLocalProfile() throws Exception {
+        mockMvc.perform(get("/v3/api-docs")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/swagger-ui/index.html")).andExpect(status().isUnauthorized());
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     @Import(ProbeController.class)
     static class ProbeConfiguration {
