@@ -19,7 +19,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.common.time.ClockConfiguration;
@@ -62,56 +61,196 @@ class ExamReminderServiceTest {
     }
 
     @Test
-    @DisplayName("7.1 시험 참가 등록 시 시작 시각 5분 전을 발화 시각으로 하여 SCHEDULED 예약을 저장한다")
+    @DisplayName("7.1 시험 참가 등록 시 시작 시각 5분 전을 발화 시각으로 하여 INSERT IGNORE로 SCHEDULED 예약을 저장한다")
     void registerReminderCreatesScheduledReminderFiveMinutesBeforeStart() {
         // given
         LocalDateTime startsAt = LocalDateTime.of(2026, 10, 20, 21, 0, 0);
-        given(reminderRepository.findByParticipantId(411L)).willReturn(Optional.empty());
+        given(
+            reminderRepository
+                .insertIgnoreReminder(
+                    7L,
+                    55L,
+                    411L,
+                    LocalDateTime.of(2026, 10, 20, 20, 55, 0),
+                    startsAt,
+                    3,
+                    "evt-reg-1",
+                    ReminderStatus.SCHEDULED.name(),
+                    fixedNow
+                )
+        ).willReturn(1);
 
         // when
         examReminderService.registerReminder("evt-reg-1", 7L, 55L, 411L, 3, startsAt);
 
         // then
-        ArgumentCaptor<NotificationReminder> captor = ArgumentCaptor.forClass(NotificationReminder.class);
-        verify(reminderRepository).saveAndFlush(captor.capture());
-
-        NotificationReminder saved = captor.getValue();
-        assertThat(saved.getMemberId()).isEqualTo(7L);
-        assertThat(saved.getExamId()).isEqualTo(55L);
-        assertThat(saved.getParticipantId()).isEqualTo(411L);
-        assertThat(saved.getStartsAt()).isEqualTo(startsAt);
-        assertThat(saved.getFireAt()).isEqualTo(LocalDateTime.of(2026, 10, 20, 20, 55, 0));
-        assertThat(saved.getContextRevision()).isEqualTo(3);
-        assertThat(saved.getSourceEventId()).isEqualTo("evt-reg-1");
-        assertThat(saved.getStatus()).isEqualTo(ReminderStatus.SCHEDULED);
+        verify(reminderRepository)
+            .insertIgnoreReminder(
+                eq(7L),
+                eq(55L),
+                eq(411L),
+                eq(LocalDateTime.of(2026, 10, 20, 20, 55, 0)),
+                eq(startsAt),
+                eq(3),
+                eq("evt-reg-1"),
+                eq(ReminderStatus.SCHEDULED.name()),
+                eq(fixedNow)
+            );
     }
 
     @Test
-    @DisplayName("7.1 이미 취소 표식(CANCELED)이 존재하는 participantId의 늦은 등록 이벤트는 무시한다")
-    void registerReminderWhenCanceledTombstoneExistsIgnoresRegistration() {
+    @DisplayName("7.1 이미 취소 표식(CANCELED)이나 중복 등록이 존재하는 participantId는 INSERT IGNORE가 0건을 반환하며 예외 없이 무시된다")
+    void registerReminderWhenDuplicateOrTombstoneExistsIgnoresWithoutException() {
         // given
-        NotificationReminder tombstone
+        LocalDateTime startsAt = LocalDateTime.of(2026, 10, 20, 21, 0, 0);
+        given(
+            reminderRepository
+                .insertIgnoreReminder(
+                    7L,
+                    55L,
+                    411L,
+                    LocalDateTime.of(2026, 10, 20, 20, 55, 0),
+                    startsAt,
+                    3,
+                    "evt-reg-1",
+                    ReminderStatus.SCHEDULED.name(),
+                    fixedNow
+                )
+        ).willReturn(0);
+
+        // when & then (예외 및 트랜잭션 rollback-only 오염 없이 정상 종료)
+        examReminderService.registerReminder("evt-reg-1", 7L, 55L, 411L, 3, startsAt);
+
+        verify(reminderRepository)
+            .insertIgnoreReminder(
+                eq(7L),
+                eq(55L),
+                eq(411L),
+                eq(LocalDateTime.of(2026, 10, 20, 20, 55, 0)),
+                eq(startsAt),
+                eq(3),
+                eq("evt-reg-1"),
+                eq(ReminderStatus.SCHEDULED.name()),
+                eq(fixedNow)
+            );
+    }
+
+    @Test
+    @DisplayName("7.1 ExamUpdated가 먼저 처리되어 더 높은 버전의 시험 스케줄 스냅샷이 있으면 지연 도착한 참가 등록에 최신 스케줄을 적용한다")
+    void registerReminderWhenNewerExamSnapshotExistsAppliesSnapshotSchedule() {
+        // given: 등록 이벤트는 이전 시각(이미 지남: 19:50, rev=1)이지만, 선행 ExamUpdated 스냅샷(21:30, rev=4)이 저장된 상태
+        LocalDateTime staleStartsAt = LocalDateTime.of(2026, 10, 20, 19, 50, 0);
+        LocalDateTime updatedStartsAt = LocalDateTime.of(2026, 10, 20, 21, 30, 0);
+        NotificationReminder snapshot
             = NotificationReminder
-                .createCanceledTombstone(7L, 55L, 411L, LocalDateTime.of(2026, 10, 20, 19, 30, 0), 3, "evt-cancel-1");
-        given(reminderRepository.findByParticipantId(411L)).willReturn(Optional.of(tombstone));
+                .builder()
+                .memberId(0L)
+                .examId(55L)
+                .participantId(ExamReminderService.examScheduleSnapshotParticipantId(55L))
+                .fireAt(updatedStartsAt.minusMinutes(5))
+                .startsAt(updatedStartsAt)
+                .contextRevision(4)
+                .sourceEventId("evt-upd-4")
+                .status(ReminderStatus.CANCELED)
+                .build();
+
+        given(reminderRepository.existsByParticipantId(ExamReminderService.examCanceledTombstoneParticipantId(55L)))
+            .willReturn(false);
+        given(reminderRepository.findByParticipantId(ExamReminderService.examScheduleSnapshotParticipantId(55L)))
+            .willReturn(Optional.of(snapshot));
+        given(
+            reminderRepository
+                .insertIgnoreReminder(
+                    7L,
+                    55L,
+                    411L,
+                    LocalDateTime.of(2026, 10, 20, 21, 25, 0),
+                    updatedStartsAt,
+                    4,
+                    "evt-upd-4",
+                    ReminderStatus.SCHEDULED.name(),
+                    fixedNow
+                )
+        ).willReturn(1);
 
         // when
-        examReminderService.registerReminder("evt-reg-1", 7L, 55L, 411L, 3, LocalDateTime.of(2026, 10, 20, 21, 0, 0));
+        examReminderService.registerReminder("evt-reg-stale", 7L, 55L, 411L, 1, staleStartsAt);
 
         // then
-        verify(reminderRepository, never()).saveAndFlush(any());
+        verify(reminderRepository)
+            .insertIgnoreReminder(
+                eq(7L),
+                eq(55L),
+                eq(411L),
+                eq(LocalDateTime.of(2026, 10, 20, 21, 25, 0)),
+                eq(updatedStartsAt),
+                eq(4),
+                eq("evt-upd-4"),
+                eq(ReminderStatus.SCHEDULED.name()),
+                eq(fixedNow)
+            );
     }
 
     @Test
-    @DisplayName("7.1 ExamUpdated 수신 시 SCHEDULED 상태이고 버전이 낮은 예약만 조건부 UPDATE로 갱신한다")
+    @DisplayName("7.1 ExamCanceled가 먼저 처리되어 시험 취소 종단 표식이 존재하면 지연 도착한 참가 등록을 CANCELED 상태로 차단한다")
+    void registerReminderWhenExamAlreadyCanceledInsertsCanceledTombstone() {
+        // given
+        LocalDateTime startsAt = LocalDateTime.of(2026, 10, 20, 21, 0, 0);
+        given(reminderRepository.existsByParticipantId(ExamReminderService.examCanceledTombstoneParticipantId(55L)))
+            .willReturn(true);
+
+        // when
+        examReminderService.registerReminder("evt-reg-late", 7L, 55L, 411L, 3, startsAt);
+
+        // then
+        verify(reminderRepository)
+            .insertIgnoreReminder(
+                eq(7L),
+                eq(55L),
+                eq(411L),
+                eq(LocalDateTime.of(2026, 10, 20, 20, 55, 0)),
+                eq(startsAt),
+                eq(3),
+                eq("evt-reg-late"),
+                eq(ReminderStatus.CANCELED.name()),
+                eq(fixedNow)
+            );
+    }
+
+    @Test
+    @DisplayName("7.1 ExamUpdated 수신 시 시험 스케줄 스냅샷을 갱신하고 SCHEDULED 상태이고 버전이 낮은 예약만 조건부 UPDATE로 갱신한다")
     void rescheduleByExamUpdatedExecutesConditionalUpdate() {
         // given
         LocalDateTime updatedStartsAt = LocalDateTime.of(2026, 10, 20, 21, 30, 0);
+        Long snapshotParticipantId = ExamReminderService.examScheduleSnapshotParticipantId(55L);
+        given(
+            reminderRepository
+                .insertIgnoreReminder(
+                    0L,
+                    55L,
+                    snapshotParticipantId,
+                    LocalDateTime.of(2026, 10, 20, 21, 25, 0),
+                    updatedStartsAt,
+                    4,
+                    "evt-upd-4",
+                    ReminderStatus.CANCELED.name(),
+                    fixedNow
+                )
+        ).willReturn(0);
 
         // when
         examReminderService.rescheduleByExamUpdated("evt-upd-4", 55L, 4, updatedStartsAt);
 
         // then
+        verify(reminderRepository)
+            .updateExamSnapshotIfNewer(
+                eq(snapshotParticipantId),
+                eq(4),
+                eq(updatedStartsAt),
+                eq(LocalDateTime.of(2026, 10, 20, 21, 25, 0)),
+                eq("evt-upd-4"),
+                eq(fixedNow)
+            );
         verify(reminderRepository)
             .rescheduleScheduledByExamId(
                 eq(55L),
@@ -124,38 +263,113 @@ class ExamReminderServiceTest {
     }
 
     @Test
-    @DisplayName("7.1 참가 취소 이벤트가 등록보다 먼저 도착하면 CANCELED 취소 표식 행을 생성한다")
+    @DisplayName("7.1 ExamCanceled 수신 시 시험 취소 종단 표식을 기록하고 발화 대기 예약을 일괄 취소한다")
+    void cancelByExamCanceledInsertsTombstoneAndCancelsAllScheduled() {
+        // when
+        examReminderService.cancelByExamCanceled(55L);
+
+        // then
+        verify(reminderRepository)
+            .insertIgnoreReminder(
+                eq(0L),
+                eq(55L),
+                eq(ExamReminderService.examCanceledTombstoneParticipantId(55L)),
+                eq(fixedNow),
+                eq(fixedNow),
+                eq(Integer.MAX_VALUE),
+                eq("EXAM_CANCELED:55"),
+                eq(ReminderStatus.CANCELED.name()),
+                eq(fixedNow)
+            );
+        verify(reminderRepository).cancelAllScheduledByExamId(55L, fixedNow);
+    }
+
+    @Test
+    @DisplayName("7.1 참가 취소 이벤트가 등록보다 먼저 도착하면 INSERT IGNORE로 CANCELED 취소 표식 행을 생성한다")
     void cancelByParticipantCanceledWhenNotFoundCreatesTombstone() {
         // given
         given(reminderRepository.cancelScheduledByParticipantId(411L, fixedNow)).willReturn(0);
-        given(reminderRepository.findByParticipantId(411L)).willReturn(Optional.empty());
         LocalDateTime canceledAt = LocalDateTime.of(2026, 10, 20, 19, 50, 0);
+        given(
+            reminderRepository
+                .insertIgnoreReminder(
+                    7L,
+                    55L,
+                    411L,
+                    canceledAt,
+                    canceledAt,
+                    3,
+                    "evt-cancel-1",
+                    ReminderStatus.CANCELED.name(),
+                    fixedNow
+                )
+        ).willReturn(1);
 
         // when
         examReminderService.cancelByParticipantCanceled("evt-cancel-1", 7L, 55L, 411L, 3, canceledAt);
 
         // then
-        ArgumentCaptor<NotificationReminder> captor = ArgumentCaptor.forClass(NotificationReminder.class);
-        verify(reminderRepository).saveAndFlush(captor.capture());
-        assertThat(captor.getValue().getStatus()).isEqualTo(ReminderStatus.CANCELED);
-        assertThat(captor.getValue().getParticipantId()).isEqualTo(411L);
+        verify(reminderRepository, times(1)).cancelScheduledByParticipantId(411L, fixedNow);
+        verify(reminderRepository)
+            .insertIgnoreReminder(
+                eq(7L),
+                eq(55L),
+                eq(411L),
+                eq(canceledAt),
+                eq(canceledAt),
+                eq(3),
+                eq("evt-cancel-1"),
+                eq(ReminderStatus.CANCELED.name()),
+                eq(fixedNow)
+            );
     }
 
     @Test
-    @DisplayName("7.1 취소 표식 생성 중 동시 등록으로 고유 제약 충돌이 발생하면 조건부 취소 UPDATE를 재실행한다")
+    @DisplayName("7.1 취소 표식 INSERT IGNORE 시점에 동시 등록이 먼저 커밋되어 0건이 반환되면 조건부 취소 UPDATE를 재실행한다")
     void cancelByParticipantCanceledWhenConcurrentInsertCollidesRetriesConditionalCancel() {
         // given
+        LocalDateTime canceledAt = LocalDateTime.of(2026, 10, 20, 19, 50, 0);
         given(reminderRepository.cancelScheduledByParticipantId(411L, fixedNow)).willReturn(0).willReturn(1);
-        given(reminderRepository.findByParticipantId(411L)).willReturn(Optional.empty());
-        given(reminderRepository.saveAndFlush(any(NotificationReminder.class)))
-            .willThrow(new DataIntegrityViolationException("uk_notification_reminders_participant_id"));
+        given(
+            reminderRepository
+                .insertIgnoreReminder(
+                    7L,
+                    55L,
+                    411L,
+                    canceledAt,
+                    canceledAt,
+                    3,
+                    "evt-cancel-1",
+                    ReminderStatus.CANCELED.name(),
+                    fixedNow
+                )
+        ).willReturn(0);
 
         // when
-        examReminderService
-            .cancelByParticipantCanceled("evt-cancel-1", 7L, 55L, 411L, 3, LocalDateTime.of(2026, 10, 20, 19, 50, 0));
+        examReminderService.cancelByParticipantCanceled("evt-cancel-1", 7L, 55L, 411L, 3, canceledAt);
 
         // then
         verify(reminderRepository, times(2)).cancelScheduledByParticipantId(411L, fixedNow);
+    }
+
+    @Test
+    @DisplayName("7.1 목록 조회 후 ExamUpdated로 fireAt이 미래로 연기되어 markAsSentIfScheduled가 0건을 반환하면 알림을 발송하지 않는다")
+    void dispatchSingleReminderWhenPostponedAfterFetchDoesNotCreateNotification() {
+        // given
+        NotificationReminder reminder
+            = NotificationReminder
+                .createScheduled(7L, 55L, 411L, LocalDateTime.of(2026, 10, 20, 20, 3, 0), 3, "evt-reg-1");
+        ReflectionTestUtils.setField(reminder, "id", 10L);
+
+        given(reminderRepository.markAsSentIfScheduled(eq(10L), eq(fixedNow))).willReturn(0);
+
+        // when
+        boolean dispatched = examReminderService.dispatchSingleReminder(reminder);
+
+        // then
+        assertThat(dispatched).isFalse();
+        verify(notificationRepository, never()).saveAndFlush(any());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
