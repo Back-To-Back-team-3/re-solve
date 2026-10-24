@@ -16,12 +16,25 @@ Write an Issue body from a settled scope, and register it after the user approve
 
 ## Steps
 
-1. Follow `git-github.md` > `1.6 AI로 Issue·PR을 작성할 때`, and choose the template that fits the kind of work.
-2. Put only the settled scope in the body. Do not write implementation choices that are not decided.
-3. Put the reference document locations and prerequisite Issue numbers in the reference section.
-4. Leave values not given in the inputs empty (due date, assignee, Issue numbers), and list them as questions outside the body.
-5. Outside the body, give one line on why you chose the priority and size.
-6. Output the body and wait for approval. Register it on GitHub only after the user says to register it.
+1. If the issue already exists (manually created):
+    - Read title and body via GitHub MCP.
+    - Compare against planned scope from 10-plan output.
+    - Report all discrepancies (title mismatch, missing fields, placeholder text remaining).
+    - Propose corrections. Wait for approval before proceeding.
+    - Do NOT assume the body is correct just because it exists.
+2. Follow `git-github.md` > `1.6 AI로 Issue·PR을 작성할 때`, and choose the template that fits the kind of work.
+3. Put only the settled scope in the body. Do not write implementation choices that are not decided.
+4. Put the reference document locations and prerequisite Issue numbers in the reference section.
+5. Leave values not given in the inputs empty (due date, assignee, Issue numbers), and list them as questions outside the body.
+6. Outside the body, give one line on why you chose the priority and size.
+7. Output the body and wait for approval. Register it on GitHub only after the user says to register it.
+8. Before posting, verify the issue body has no placeholders:
+    - 🎯 작업 목적: not "여기에 작성"
+    - ✅ 구현 내용: specific items, not "구현 상세 내용"
+    - 🧭 중요도: one checkbox checked
+    - 📏 예상 작업 규모: one checkbox checked
+    - 📅 완료 기한: actual date in yyyy-mm-dd(요일) format
+    - 이슈 확인 체크박스: leave ALL unchecked — author checks after posting, not AI
 
 ## Output format
 
