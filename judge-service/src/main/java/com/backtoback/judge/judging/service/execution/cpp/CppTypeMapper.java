@@ -1,9 +1,9 @@
-package com.backtoback.judge.judging.execution.cpp;
+package com.backtoback.judge.judging.service.execution.cpp;
 
 import com.backtoback.judge.judging.dto.TypeSpec;
-import com.backtoback.judge.judging.execution.FunctionSpecValidator;
+import com.backtoback.judge.judging.service.execution.FunctionSpecValidator;
 
-/** 공통 타입을 C++17의 고정 폭 숫자·표준 컨테이너·Value로 표현한다. */
+/** 공통 타입을 C++17의 기본 숫자 타입·표준 컨테이너·{@code Value}로 표현한다. */
 final class CppTypeMapper {
     private final FunctionSpecValidator validator = new FunctionSpecValidator();
 
@@ -17,8 +17,8 @@ final class CppTypeMapper {
     String sourceType(TypeSpec type) {
         validator.validateType(type);
         return switch (type.kind()) {
-            case INT32 -> "::std::int32_t";
-            case INT64 -> "::std::int64_t";
+            case INT32 -> "int";
+            case INT64 -> "long long";
             case FLOAT32 -> "float";
             case FLOAT64 -> "double";
             case STRING -> "::std::string";

@@ -32,8 +32,8 @@ class CppExecutionCodeGeneratorTest {
     @ParameterizedTest
     @CsvSource(
         {
-            "INT32,std::int32_t",
-            "INT64,std::int64_t",
+            "INT32,int",
+            "INT64,long long",
             "FLOAT32,float",
             "FLOAT64,double",
             "STRING,std::string",
@@ -74,9 +74,8 @@ class CppExecutionCodeGeneratorTest {
         var type = scalar(Kind.INT32);
         var function = new FunctionSpec("solution", List.of(new Parameter(name, type)), type);
         assertThatThrownBy(() -> generator.starterCode(function)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(
-            () -> generator.generate(function, "std::int32_t solution(std::int32_t x) { return x; }", Map.of(name, "1"))
-        ).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> generator.generate(function, "int solution(int x) { return x; }", Map.of(name, "1")))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     /** 실행 환경·제한값을 기존 요청 모델에 연결한다. */
@@ -87,7 +86,7 @@ class CppExecutionCodeGeneratorTest {
             = generator
                 .generate(
                     spec(scalar(Kind.INT64)),
-                    "std::int32_t solution(std::int32_t value) { return value; }",
+                    "long long solution(long long value) { return value; }",
                     Map.of("value", "1")
                 );
         var runtime = new JudgeRuntime("cpp", 54, "C++ (GCC 12.2.0)", "12.2.0", "-std=c++17");
@@ -117,7 +116,7 @@ class CppExecutionCodeGeneratorTest {
         var reverse = new LinkedHashMap<String, String>();
         reverse.put("b", "\"secret-input\"");
         reverse.put("a", "1");
-        String source = "std::string solution(std::int32_t a, std::string b) { return b; }";
+        String source = "std::string solution(int a, std::string b) { return b; }";
         var first = generator.generate(function, source, reverse);
         assertThat(first).isEqualTo(generator.generate(function, source, Map.of("a", "1", "b", "\"secret-input\"")));
         assertThat(first.sourceCode()).doesNotContain("secret-input");
@@ -151,11 +150,7 @@ class CppExecutionCodeGeneratorTest {
     void rejectsInvalidInt(String input) {
         assertThatThrownBy(
             () -> generator
-                .generate(
-                    spec(scalar(Kind.INT32)),
-                    "std::int32_t solution(std::int32_t value) { return value; }",
-                    Map.of("value", input)
-                )
+                .generate(spec(scalar(Kind.INT32)), "int solution(int value) { return value; }", Map.of("value", input))
         ).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -177,7 +172,7 @@ class CppExecutionCodeGeneratorTest {
             () -> generator
                 .generate(
                     spec(scalar(Kind.INT64)),
-                    "std::int32_t solution(std::int32_t value) { return value; }",
+                    "long long solution(long long value) { return value; }",
                     Map.of("value", input)
                 )
         ).isInstanceOf(IllegalArgumentException.class);
@@ -202,11 +197,7 @@ class CppExecutionCodeGeneratorTest {
     void rejectsFloatingOverflow(Kind kind, String input) {
         assertThatThrownBy(
             () -> generator
-                .generate(
-                    spec(scalar(kind)),
-                    "std::int32_t solution(std::int32_t value) { return value; }",
-                    Map.of("value", input)
-                )
+                .generate(spec(scalar(kind)), "int solution(int value) { return value; }", Map.of("value", input))
         ).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -230,12 +221,7 @@ class CppExecutionCodeGeneratorTest {
         assertThatThrownBy(() -> generator.generate(spec(type), " ", Map.of("value", "1")))
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(
-            () -> generator
-                .generate(
-                    spec(type),
-                    "std::int32_t solution(std::int32_t value) { return value; }",
-                    Map.of("other", "1")
-                )
+            () -> generator.generate(spec(type), "int solution(int value) { return value; }", Map.of("other", "1"))
         ).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -243,7 +229,7 @@ class CppExecutionCodeGeneratorTest {
     @Test
     @DisplayName("객체 필드 집합과 배열의 길이·순서·반복 패턴을 검사한다")
     void rejectsInvalidShapes() {
-        String source = "std::int32_t solution(std::int32_t value) { return value; }";
+        String source = "int solution(int value) { return value; }";
         var object = new TypeSpec(Kind.OBJECT, null, null, null, Map.of("n", scalar(Kind.INT32)));
         for (String json : List.of("{}", "{\"n\":1,\"extra\":2}", "{\"n\":1,\"n\":2}", "{\"n\":null}")) {
             assertThatThrownBy(() -> generator.generate(spec(object), source, Map.of("value", json)))
