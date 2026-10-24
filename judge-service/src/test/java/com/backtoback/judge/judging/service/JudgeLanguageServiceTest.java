@@ -34,6 +34,7 @@ import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.client.Judge0LanguageClient;
 import com.backtoback.judge.judging.dto.response.Judge0LanguageResponse;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 
 /**
  * 실행 환경 선택·고정 환경 검증과 캐시의 실패·동시성 계약을 검증한다.

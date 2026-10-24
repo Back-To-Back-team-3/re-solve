@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.service;
+package com.backtoback.judge.judging.service.execution.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

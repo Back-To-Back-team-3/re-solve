@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.execution.java;
+package com.backtoback.judge.judging.service.execution.java;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -16,11 +16,12 @@ import org.junit.jupiter.params.provider.ValueSource;
 import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
-import com.backtoback.judge.judging.dto.JudgeRuntime;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 
-class JavaExecutionCodeGeneratorTests {
+/** 함수 명세·입력 검증과 Java 실행 코드 생성 결과를 검증한다. */
+class JavaExecutionCodeGeneratorTest {
     private final JavaExecutionCodeGenerator generator = new JavaExecutionCodeGenerator();
 
     /**

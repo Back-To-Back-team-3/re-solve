@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.service;
+package com.backtoback.judge.judging.service.execution.dto;
 
 import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.request.JudgeExecutionCreateRequest;

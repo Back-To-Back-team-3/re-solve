@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.execution.java;
+package com.backtoback.judge.judging.service.execution.java;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,14 +26,14 @@ import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
-import com.backtoback.judge.judging.execution.ExecutionCodeGenerator;
-import com.backtoback.judge.judging.service.ExecutionSource;
+import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
+import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 
 import tools.jackson.databind.json.JsonMapper;
 
 /** 저장소의 신뢰된 테스트 코드만 별도 JVM에서 실행한다. Judge0 샌드박스 검증을 대신하지 않는다. */
 @Timeout(30)
-class JavaExecutionProcessTests {
+class JavaExecutionProcessTest {
     @TempDir
     Path directory;
     private final ExecutionCodeGenerator generator = new JavaExecutionCodeGenerator();
