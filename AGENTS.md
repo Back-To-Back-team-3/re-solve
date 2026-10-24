@@ -23,6 +23,7 @@ The reference documents are written in Korean. Locations below keep the original
 4. Read the decision records in `docs/records/decisions/` related to the task.
 5. Read the reference documents for the task from the table in §4. Do not write code based on a document you have not read.
 6. If `docs/records/progress/{owner}.md` exists, read it to confirm the current cycle and recent completed work.
+7. If `.personal/` directory exists, read files relevant to the current issue (development journal, personal reference docs) before reporting.
 
 ## 2. Document rules
 
