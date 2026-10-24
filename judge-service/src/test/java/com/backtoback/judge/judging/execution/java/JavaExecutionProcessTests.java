@@ -3,6 +3,7 @@ package com.backtoback.judge.judging.execution.java;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +37,32 @@ class JavaExecutionProcessTests {
     private final JavaExecutionCodeGenerator generator = new JavaExecutionCodeGenerator();
     private final JavaTypeMapper types = new JavaTypeMapper();
     private final JsonMapper mapper = JsonMapper.builder().build();
+
+    /**
+     * 원본 정수 JSON이 선언한 부동소수 타입으로 반올림된 뒤 함수에 전달되는지 확인한다.
+     *
+     * @param kind 선언한 부동소수 타입
+     * @param input 정밀도 경계 밖의 입력 JSON
+     * @param normalized 선언 타입에서 표현되는 숫자 값
+     * @throws Exception 컴파일·실행이 실패한 경우
+     */
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "FLOAT32,16777217,16777216",
+            "FLOAT64,9007199254740993,9007199254740992"
+        }
+    )
+    @DisplayName("함수 입력과 반환 직렬화는 선언한 부동소수 타입의 정밀도를 따른다")
+    void roundsAtDeclaredFloatingPointPrecision(Kind kind, String input, String normalized) throws Exception {
+        var type = scalar(kind);
+        var function = new FunctionSpec("solution", List.of(new Parameter("value", type)), type);
+        String javaType = types.sourceType(type);
+        String source = "class Solution { public " + javaType + " solution(" + javaType + " value) { return value; } }";
+        var result = execute(generator.generate(function, source, Map.of("value", input)));
+        assertThat(result.exitCode()).as(result.stderr()).isZero();
+        assertThat(new BigDecimal(result.stdout())).isEqualByComparingTo(normalized);
+    }
 
     /**
      * 실제 컴파일·실행으로 기본 타입의 경계값을 확인한다.
