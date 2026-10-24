@@ -26,8 +26,10 @@ public class TagOrderService {
     private final TransactionLock transactionLock;
 
     /**
-     * 태그 변경을 직렬화할 공통 잠금을 현재 트랜잭션 종료까지 획득한다.
+     * 태그 변경의 경합을 줄이는 Redis 공통 잠금을 획득한다.
      * 태그 저장 트랜잭션에서 순번 조회·변경 전에 호출한다.
+     * 커밋 직전 소유권을 확인하지만 이후 실제 DB 커밋까지의 독점은 보장하지 않는다.
+     * 최종 정합성은 DB 행 잠금·UNIQUE 제약·낙관적 락 버전 검사로 보호한다. (ERD 4.2.8 태그)
      *
      * @throws ProblemException 대기 시간 안에 잠금을 획득하지 못해 {@code PROBLEM_VERSION_CONFLICT}가 발생한 경우
      * @throws org.springframework.transaction.IllegalTransactionStateException 활성 트랜잭션이 없는 경우

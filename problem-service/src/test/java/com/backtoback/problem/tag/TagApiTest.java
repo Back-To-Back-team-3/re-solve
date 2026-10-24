@@ -11,12 +11,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
@@ -24,8 +28,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.redisson.Redisson;
 import org.redisson.api.RedissonClient;
@@ -34,8 +42,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -43,11 +54,17 @@ import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.problem.global.error.ProblemErrorCode;
+import com.backtoback.problem.global.exception.ProblemException;
+import com.backtoback.problem.global.exception.ProblemExceptionHandler;
 import com.backtoback.problem.global.lock.RedisTransactionLock;
 import com.backtoback.problem.tag.dto.request.TagCreateRequest;
 import com.backtoback.problem.tag.dto.request.TagUpdateRequest;
@@ -172,6 +189,7 @@ class TagApiTest {
             """);
         jdbc.update("DELETE FROM tag_usage_probe");
         jdbc.update("DELETE FROM tags");
+        jdbc.update("DELETE FROM lock_transaction_probe");
     }
 
     @Test
@@ -632,6 +650,303 @@ class TagApiTest {
         // then
         assertThat(displayOrder(remaining)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(1);
+    }
+
+    /**
+     * 실제 Redis 검사 콜백이 성공한 뒤 첫 트랜잭션을 멈춘다.
+     * 잠금을 새로 획득한 경쟁 요청도 DB 행 잠금을 넘지 못하며, 검사 후 소유권을 잃은 첫 요청은 커밋할 수 있다.
+     */
+    @ParameterizedTest
+    @MethodSource("commitGapScenarios")
+    @Timeout(30)
+    @DisplayName("소유권 확인 후 잠금을 잃어도 생성·이동·삭제의 DB 경합과 롤백이 순번을 보호한다")
+    void databaseLocksProtectOrdersAfterSuccessfulRedisCheck(Isolation isolation, String operation) throws Exception {
+        // given
+        String last = null;
+        if (!"EMPTY_CREATE".equals(operation)) {
+            create("first", "첫 태그", 0);
+            create("middle", "중간 태그", 1);
+            last = create("last", "끝 태그", 2);
+        }
+        String lastId = last;
+        CountDownLatch checked = new CountDownLatch(1);
+        CountDownLatch resumeCommit = new CountDownLatch(1);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = executor.submit(() -> inTransaction(isolation, () -> {
+                switch (operation) {
+                    case "CREATE", "EMPTY_CREATE" -> tagService.create(new TagCreateRequest("첫 요청 태그", 0));
+                    case "MOVE" -> tagService.update(Long.parseLong(lastId), new TagUpdateRequest(null, 0));
+                    case "DELETE" -> tagService.delete(Long.parseLong(lastId));
+                    default -> throw new IllegalArgumentException(operation);
+                }
+                tags.flush();
+                pauseAfterRedisCheck(checked, resumeCommit);
+                return "COMMITTED";
+            }));
+            try {
+                // when: 실제 소유권 검사 뒤, DB 커밋 전에 다른 소유자가 진입한다.
+                awaitSignal(checked);
+                assertThat(redisson.getLock("problem:tags:order:lock").forceUnlock()).isTrue();
+                var competing = executor.submit(() -> captureFailure(() -> inTransaction(isolation, () -> {
+                    jdbc.update("INSERT INTO lock_transaction_probe (id, payload) VALUES (1, 'competing-write')");
+                    tagService.create(new TagCreateRequest("경쟁 요청 태그", 0));
+                    return null;
+                })));
+
+                // then: Redis 획득 실패가 아니라 실제 DB 잠금 대기 실패여야 한다.
+                RuntimeException failure = competing.get(10, TimeUnit.SECONDS);
+                assertThat(failure).isInstanceOf(PessimisticLockingFailureException.class);
+                assertThat(hasMysqlError(failure, 1205)).as("MySQL 행 잠금 대기 시간 초과").isTrue();
+                assertVersionConflict(failure);
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM lock_transaction_probe", Integer.class)).isZero();
+            } finally {
+                resumeCommit.countDown();
+            }
+            assertThat(first.get(10, TimeUnit.SECONDS)).isEqualTo("COMMITTED");
+        } finally {
+            resumeCommit.countDown();
+        }
+        switch (operation) {
+            case "CREATE" -> assertTagSequence("첫 요청 태그", "첫 태그", "중간 태그", "끝 태그");
+            case "EMPTY_CREATE" -> assertTagSequence("첫 요청 태그");
+            case "MOVE" -> assertTagSequence("끝 태그", "첫 태그", "중간 태그");
+            case "DELETE" -> assertTagSequence("첫 태그", "중간 태그");
+            default -> throw new IllegalArgumentException(operation);
+        }
+    }
+
+    static Stream<Arguments> commitGapScenarios() {
+        return Stream
+            .of(Isolation.REPEATABLE_READ, Isolation.READ_COMMITTED)
+            .flatMap(
+                isolation -> Stream
+                    .of("CREATE", "EMPTY_CREATE", "MOVE", "DELETE")
+                    .map(operation -> Arguments.of(isolation, operation))
+            );
+    }
+
+    /** 먼저 읽은 엔티티의 버전이 뒤처진 경우, 태그 변경과 같은 트랜잭션의 선행 쓰기도 롤백되는지 확인한다. */
+    @ParameterizedTest
+    @EnumSource(
+        value = Isolation.class,
+        names = {
+            "REPEATABLE_READ",
+            "READ_COMMITTED"
+        }
+    )
+    @Timeout(30)
+    @DisplayName("오래된 태그 수정은 버전 충돌로 거부하고 같은 트랜잭션의 선행 쓰기를 롤백한다")
+    void staleTagVersionRollsBackEarlierWrite(Isolation isolation) throws Exception {
+        // given
+        String first = create("first", "첫 태그", 0);
+        create("last", "끝 태그", 1);
+        CountDownLatch loaded = new CountDownLatch(1);
+        CountDownLatch updated = new CountDownLatch(1);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var stale = executor.submit(() -> captureFailure(() -> inTransaction(isolation, () -> {
+                assertThat(tags.findById(Long.parseLong(first)).orElseThrow().getVersion()).isZero();
+                jdbc.update("INSERT INTO lock_transaction_probe (id, payload) VALUES (1, 'stale-write')");
+                loaded.countDown();
+                awaitSignal(updated);
+                tagService.update(Long.parseLong(first), new TagUpdateRequest("오래된 수정", null));
+                tags.flush();
+                return null;
+            })));
+            try {
+                // when: 다른 트랜잭션의 커밋 후에도 첫 영속성 컨텍스트는 이전 버전을 보유한다.
+                awaitSignal(loaded);
+                inTransaction(
+                    isolation,
+                    () -> tagService.update(Long.parseLong(first), new TagUpdateRequest("최신 태그", null))
+                );
+            } finally {
+                updated.countDown();
+            }
+            // then
+            RuntimeException failure = stale.get(10, TimeUnit.SECONDS);
+            assertThat(failure).isInstanceOf(ObjectOptimisticLockingFailureException.class);
+            assertVersionConflict(failure);
+        } finally {
+            updated.countDown();
+        }
+        assertTagSequence("최신 태그", "끝 태그");
+        assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, first)).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM lock_transaction_probe", Integer.class)).isZero();
+    }
+
+    /** 대상 삭제 후 전체 행 잠금으로 확장하는 기존 순서에서 교착을 만들고 실패 트랜잭션의 삭제·쓰기를 확인한다. */
+    @ParameterizedTest
+    @EnumSource(
+        value = Isolation.class,
+        names = {
+            "REPEATABLE_READ",
+            "READ_COMMITTED"
+        }
+    )
+    @Timeout(30)
+    @DisplayName("두 삭제의 교착은 409 충돌로 변환되고 실패한 삭제와 선행 쓰기는 롤백된다")
+    void concurrentDeleteDeadlockRollsBackFailedChanges(Isolation isolation) throws Exception {
+        // given
+        String firstId = create("first", "첫 태그", 0);
+        create("middle", "중간 태그", 1);
+        String lastId = create("last", "끝 태그", 2);
+        var originalTags = jdbc.queryForList("SELECT * FROM tags ORDER BY id");
+        CountDownLatch firstDeleted = new CountDownLatch(1);
+        CountDownLatch bothDeleted = new CountDownLatch(2);
+        TagOrderService orderTarget = AopTestUtils.getUltimateTargetObject(tagOrderService);
+        doAnswer(invocation -> {
+            firstDeleted.countDown();
+            bothDeleted.countDown();
+            awaitSignal(bothDeleted);
+            return invocation.callRealMethod();
+        }).when(orderTarget).closeGap();
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = executor.submit(() -> captureFailure(() -> inTransaction(isolation, () -> {
+                jdbc.update("INSERT INTO lock_transaction_probe (id, payload) VALUES (1, 'first-delete')");
+                tagService.delete(Long.parseLong(firstId));
+                return null;
+            })));
+            try {
+                // when: 두 요청이 서로 다른 행을 삭제한 뒤 전체 행 잠금을 요구하도록 맞춘다.
+                awaitSignal(firstDeleted);
+                assertThat(redisson.getLock("problem:tags:order:lock").forceUnlock()).isTrue();
+                var second = executor.submit(() -> captureFailure(() -> inTransaction(isolation, () -> {
+                    jdbc.update("INSERT INTO lock_transaction_probe (id, payload) VALUES (2, 'second-delete')");
+                    tagService.delete(Long.parseLong(lastId));
+                    return null;
+                })));
+                RuntimeException firstFailure = first.get(10, TimeUnit.SECONDS);
+                RuntimeException secondFailure = second.get(10, TimeUnit.SECONDS);
+
+                // then: 교착의 생존자가 첫 요청이면 Redis 유실 검사로도 롤백될 수 있다.
+                assertVersionConflict(firstFailure);
+                assertThat(hasMysqlError(firstFailure, 1213) || hasMysqlError(secondFailure, 1213))
+                    .as("MySQL이 감지한 교착의 실패 요청")
+                    .isTrue();
+                if (secondFailure != null) {
+                    assertVersionConflict(secondFailure);
+                }
+                assertThat(
+                    jdbc.queryForObject("SELECT COUNT(*) FROM lock_transaction_probe WHERE id = 1", Integer.class)
+                ).isZero();
+                assertThat(
+                    jdbc.queryForObject("SELECT COUNT(*) FROM lock_transaction_probe WHERE id = 2", Integer.class)
+                ).isEqualTo(secondFailure == null ? 1 : 0);
+                assertThat(jdbc.queryForList("SELECT * FROM tags ORDER BY id"))
+                    .isEqualTo(secondFailure == null ? originalTags.subList(0, 2) : originalTags);
+                if (secondFailure == null) {
+                    assertTagSequence("첫 태그", "중간 태그");
+                } else {
+                    assertTagSequence("첫 태그", "중간 태그", "끝 태그");
+                }
+            } finally {
+                // 준비 중 실패해도 첫 작업이 신호를 기다리며 남지 않게 한다.
+                bothDeleted.countDown();
+                bothDeleted.countDown();
+            }
+        }
+    }
+
+    /** 테스트 트랜잭션에만 격리 수준·잠금 대기 제한을 적용하고 풀에 반환하기 전 세션 설정을 복원한다. */
+    private <T> T inTransaction(Isolation isolation, Supplier<T> operation) {
+        var transaction = new TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(isolation.value());
+        return transaction.execute(status -> {
+            assertThat(jdbc.queryForObject("SELECT @@session.transaction_isolation", String.class))
+                .isEqualTo(isolation.name().replace('_', '-'));
+            int previousTimeout = jdbc.queryForObject("SELECT @@session.innodb_lock_wait_timeout", Integer.class);
+            jdbc.execute("SET SESSION innodb_lock_wait_timeout = 1");
+            Throwable operationFailure = null;
+            try {
+                return operation.get();
+            } catch (RuntimeException | Error failure) {
+                operationFailure = failure;
+                throw failure;
+            } finally {
+                try {
+                    jdbc.execute("SET SESSION innodb_lock_wait_timeout = " + previousTimeout);
+                } catch (RuntimeException restoreFailure) {
+                    if (operationFailure != null) {
+                        operationFailure.addSuppressed(restoreFailure);
+                    } else {
+                        throw restoreFailure;
+                    }
+                }
+            }
+        });
+    }
+
+    /** 실제 잠금 검사와 같은 순서값으로 나중에 등록해, 검사 성공 후 DB 커밋 전 지점에서만 멈춘다. */
+    private void pauseAfterRedisCheck(CountDownLatch checked, CountDownLatch resumeCommit) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void beforeCommit(boolean readOnly) {
+                assertThat(redisson.getLock("problem:tags:order:lock").isHeldByCurrentThread()).isTrue();
+                checked.countDown();
+                awaitSignal(resumeCommit);
+            }
+        });
+    }
+
+    /** 작업 스레드의 실패를 호출 스레드에서 검증하며, 성공은 null로 구분한다. */
+    private RuntimeException captureFailure(Runnable operation) {
+        try {
+            operation.run();
+            return null;
+        } catch (RuntimeException failure) {
+            return failure;
+        }
+    }
+
+    /** Spring·Hibernate 예외의 원인에서 실제 MySQL 오류 번호를 확인한다. */
+    private boolean hasMysqlError(Throwable failure, int errorCode) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sql && sql.getErrorCode() == errorCode) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 신호 누락을 제한 시간 내 테스트 실패로 전파하고 인터럽트 상태를 보존한다. */
+    private void awaitSignal(CountDownLatch signal) {
+        try {
+            assertThat(signal.await(10, TimeUnit.SECONDS)).as("동시 작업 신호 도착").isTrue();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("동시 작업 신호 대기가 중단됐다", interrupted);
+        }
+    }
+
+    /** 실제 서비스에서 전파된 충돌이 운영 예외 처리기의 409 계약으로 변환되는지 확인한다. */
+    private void assertVersionConflict(RuntimeException failure) {
+        assertThat(failure)
+            .isInstanceOfAny(
+                ProblemException.class,
+                PessimisticLockingFailureException.class,
+                ObjectOptimisticLockingFailureException.class
+            );
+        if (failure instanceof ProblemException problem) {
+            assertThat(problem.getErrorCode()).isEqualTo(ProblemErrorCode.PROBLEM_VERSION_CONFLICT);
+            assertThat(problem.getErrorCode().getStatus()).isEqualTo(HttpStatus.CONFLICT);
+        } else {
+            var handler = new ProblemExceptionHandler();
+            var response
+                = failure instanceof PessimisticLockingFailureException locking ? handler.handlePessimisticLock(locking)
+                    : handler.handleOptimisticLock((ObjectOptimisticLockingFailureException)failure);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(response.getBody().error().code()).isEqualTo("PROBLEM_VERSION_CONFLICT");
+        }
+    }
+
+    /** 최종 태그 이름과 순번 전체를 비교해 중복·음수·빈 순번이 남지 않는지 확인한다. */
+    private void assertTagSequence(String... names) {
+        assertThat(jdbc.queryForList("SELECT name FROM tags ORDER BY display_order", String.class))
+            .containsExactly(names);
+        assertThat(jdbc.queryForList("SELECT display_order FROM tags ORDER BY display_order", Integer.class))
+            .containsExactlyElementsOf(IntStream.range(0, names.length).boxed().toList());
     }
 
     /**

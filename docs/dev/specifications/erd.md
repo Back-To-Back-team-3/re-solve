@@ -2422,6 +2422,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | --- | --- | --- |
 | 공개 회차 불변 | `problem_revisions`는 `[IMMUTABLE]`, UPDATE API 없음. 수정은 새 회차 INSERT | `[제출]` 회차 고정 |
 | 회차 번호 중복 | `uk_problem_revisions_problem_revision_number`, 다음 번호는 `problems` 행 잠금 후 계산 | — |
+| 태그 순번 연속성·경합 | DB 행 잠금으로 순번을 조정하고 저장·삭제를 같은 트랜잭션으로 처리. `uk_tags_display_order`와 낙관적 락 버전으로 중복 순번·오래된 변경을 거부 (상세: 4.2.8 태그) | — |
 | 테스트 구성 | 회차당 공개·숨김 테스트 각 1개 이상 (작성 단계 검증) | — |
 | 기준 시간 제한 | `time_limit_ms >= max(C++ 정답 최대 실행 시간 × 3, 1000)` (작성 단계 검증) | — |
 | 공개 조건 | `visibility = PUBLIC`은 회차 1개 이상일 때만 | — |
