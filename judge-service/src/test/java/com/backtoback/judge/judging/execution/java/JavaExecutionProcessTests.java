@@ -26,6 +26,7 @@ import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
+import com.backtoback.judge.judging.execution.ExecutionCodeGenerator;
 import com.backtoback.judge.judging.service.ExecutionSource;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -35,7 +36,7 @@ import tools.jackson.databind.json.JsonMapper;
 class JavaExecutionProcessTests {
     @TempDir
     Path directory;
-    private final JavaExecutionCodeGenerator generator = new JavaExecutionCodeGenerator();
+    private final ExecutionCodeGenerator generator = new JavaExecutionCodeGenerator();
     private final JavaTypeMapper types = new JavaTypeMapper();
     private final JsonMapper mapper = JsonMapper.builder().build();
 

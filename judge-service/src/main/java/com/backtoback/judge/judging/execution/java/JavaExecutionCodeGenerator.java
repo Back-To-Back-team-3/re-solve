@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.FunctionSpec;
+import com.backtoback.judge.judging.execution.ExecutionCodeGenerator;
 import com.backtoback.judge.judging.service.ExecutionSource;
 
 /**
@@ -19,7 +20,7 @@ import com.backtoback.judge.judging.service.ExecutionSource;
  * 사용자 코드를 서버 JVM에서 실행하지 않으며 Judge0 호출·판정 비교는 수행하지 않는다.
  */
 @Service
-public class JavaExecutionCodeGenerator {
+public class JavaExecutionCodeGenerator implements ExecutionCodeGenerator {
     // Java 17 예약어와 식별자로 쓸 수 없는 리터럴을 거절하고 문맥 키워드는 허용한다.
     private static final Set<String> JAVA_RESERVED_NAMES
         = Set
@@ -97,6 +98,12 @@ public class JavaExecutionCodeGenerator {
         }
     }
 
+    /** {@inheritDoc} */
+    @Override
+    public JudgeLanguage language() {
+        return JudgeLanguage.JAVA;
+    }
+
     /**
      * 검증된 함수 명세에 맞는 사용자 기본 코드를 생성한다.
      *
@@ -104,6 +111,7 @@ public class JavaExecutionCodeGenerator {
      * @return 사용자가 함수 본문을 작성할 기본 코드
      * @throws IllegalArgumentException 함수 명세가 잘못된 경우
      */
+    @Override
     public String starterCode(FunctionSpec spec) {
         validate(spec);
         String parameters
@@ -126,6 +134,7 @@ public class JavaExecutionCodeGenerator {
      * @return 기존 실행 요청 모델에 연결할 코드와 입력
      * @throws IllegalArgumentException 명세·입력이 잘못되거나 코드가 비어 있는 경우
      */
+    @Override
     public ExecutionSource generate(FunctionSpec spec, String sourceCode, Map<String, String> argumentTexts) {
         validate(spec);
         if (sourceCode == null || sourceCode.isBlank()) {
@@ -142,7 +151,7 @@ public class JavaExecutionCodeGenerator {
             = template
                 .replace("${RETURN_TYPE}", types.sourceType(spec.returnType()))
                 .replace("${ARGUMENTS}", arguments);
-        return new ExecutionSource(JudgeLanguage.JAVA, sourceCode + "\n" + runner, inputs.encode(spec, argumentTexts));
+        return new ExecutionSource(language(), sourceCode + "\n" + runner, inputs.encode(spec, argumentTexts));
     }
 
     /**
