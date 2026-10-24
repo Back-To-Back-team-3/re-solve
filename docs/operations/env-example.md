@@ -73,13 +73,20 @@ AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 
 # ⚖️ Judge0 (채점 엔진 - Docker Compose 프로필: judge0)
-# docker compose --profile judge0 up -d 실행 시 2358 포트로 기동됩니다.
 # Compose 컨테이너 환경(기본값): http://judge0-server:2358
 # 호스트 로컬 IDE에서 직접 실행 시: http://localhost:2358
-# Java 17(JDK 17, language_id=91) 지원 및 보안 패치를 위해 1.13.1-extra를 기본으로 사용합니다.
+# 언어 ID와 런타임은 실행 중인 Judge0 서버에서 확인한다.
 JUDGE0_IMAGE=judge0/judge0:1.13.1-extra
 JUDGE0_SERVER_PORT=2358
 JUDGE0_BASE_URL=http://judge0-server:2358
+JUDGE0_AUTH_HEADER=X-Auth-Token
+JUDGE0_AUTH_TOKEN=
+JUDGE0_CONNECT_TIMEOUT=2s
+JUDGE0_READ_TIMEOUT=5s
+# ID·런타임은 Judge0에서 조회. 실제 실행 검증 후 해당 언어를 활성화
+JUDGE0_JAVA_ENABLED=false
+JUDGE0_PYTHON3_ENABLED=false
+JUDGE0_CPP_ENABLED=false
 
 # 🌐 Nginx
 NGINX_IMAGE=nginx:stable-alpine
@@ -104,6 +111,27 @@ NGINX_CHALLENGE_DIR=./nginx
 - 필수 값이 비어 있으면 Compose가 시작을 거절한다. 관리자 비밀번호와 서비스 계정 비밀번호를 같게 맞출 필요는 없다.
 - 첫 실행에서 `mysql-init`이 현재 9개 서비스 DB를 만들고 개발 계정에 권한을 부여한다.
 - 실제 비밀번호·접속 주소·토큰은 GitHub에 올리면 안되고 Issue, PR에도 적지 않는다.
+
+### Judge0 연결 설정
+
+| 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `JUDGE0_IMAGE` | `judge0/judge0:1.13.1-extra` | Judge0 서버와 worker가 사용하는 이미지 |
+| `JUDGE0_SERVER_PORT` | `2358` | 호스트의 로컬 인터페이스에 공개할 Judge0 API 포트 |
+| `JUDGE0_BASE_URL` | 실행 환경별 | Judge0 서버 주소. 같은 Docker 네트워크의 서버는 해당 서비스명으로 연결하고, 호스트에서 실행하는 judge-service는 호스트에 공개된 주소로 연결한다. |
+| `JUDGE0_AUTH_HEADER` | `X-Auth-Token` | Judge0 서버가 요구하는 인증 헤더 이름 |
+| `JUDGE0_AUTH_TOKEN` | 빈 값 | 인증 토큰. 빈 값이면 인증 헤더를 추가하지 않는다. |
+| `JUDGE0_CONNECT_TIMEOUT` | `2s` | HTTP 연결 제한 시간 |
+| `JUDGE0_READ_TIMEOUT` | `5s` | HTTP 응답 대기 제한 시간 |
+| `JUDGE0_JAVA_ENABLED` | `false` | Java 실행 환경 검증 후 활성화할 언어 설정 |
+| `JUDGE0_PYTHON3_ENABLED` | `false` | Python 3 실행 환경 검증 후 활성화할 언어 설정 |
+| `JUDGE0_CPP_ENABLED` | `false` | C++17 실행 환경 검증 후 활성화할 언어 설정 |
+
+- 공통 YAML은 주소를 미설정 상태로 두고, 로컬 프로필은 `http://localhost:2358`, Compose는 `http://judge0-server:2358`을 기본으로 사용한다. `JUDGE0_BASE_URL`을 지정하면 해당 값이 우선하므로 로컬 IDE에서 실행할 때는 호스트 주소로 지정한다.
+- Judge0가 같은 Docker 네트워크에 `judge0-server`라는 서비스명으로 실행 중이면 주소는 `http://judge0-server:2358`이다. 해당 포트를 호스트의 2358로 공개한 경우 로컬 IDE에서 실행하는 judge-service는 `http://localhost:2358`로 연결한다.
+- 연결·응답 제한에는 `2s`, `1500ms`처럼 단위를 포함한 값을 사용한다. 허용 범위는 각각 1ms 이상 2,147,483,647ms 이하이며 잘못된 값은 애플리케이션 시작 시 거부한다. 이 값은 제출 코드의 CPU 실행 시간 제한과 별개다.
+- Judge0 서버의 인증 설정에 맞춰 헤더 이름과 토큰을 지정한다. 실제 토큰은 로컬 `.env`에만 입력한다.
+- 언어 활성화 설정은 실행 환경 검증 후에만 `true`로 바꾼다. Judge0의 언어 ID와 런타임 버전은 배포 환경에서 조회·확인한다.
 
 ---
 
