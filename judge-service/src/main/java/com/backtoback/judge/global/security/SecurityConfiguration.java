@@ -15,6 +15,10 @@ import com.backtoback.common.web.security.SecurityAuthenticationEntryPoint;
 
 import tools.jackson.databind.ObjectMapper;
 
+/**
+ * Gateway 사용자 정보와 서비스 경로별 권한으로 보안 필터 체인을 구성한다.
+ * 내부 API는 내부 네트워크 신뢰 계약을 적용한다. (API 명세서 0.1 기본 규칙)
+ */
 @Configuration(proxyBeanMethods = false)
 public class SecurityConfiguration {
 

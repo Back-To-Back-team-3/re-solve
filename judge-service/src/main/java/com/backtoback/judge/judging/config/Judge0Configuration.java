@@ -1,4 +1,4 @@
-package com.backtoback.judge.judge0.config;
+package com.backtoback.judge.judging.config;
 
 import java.net.http.HttpClient;
 
@@ -10,6 +10,10 @@ import org.springframework.web.client.RestClient;
 
 import lombok.RequiredArgsConstructor;
 
+/**
+ * 검증한 통신 설정으로 Judge0 전용 HTTP 클라이언트를 등록한다.
+ * 공통 요청 추적을 유지하며 코드 실행 요청과 결과 처리는 담당하지 않는다.
+ */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(Judge0Properties.class)
 @RequiredArgsConstructor

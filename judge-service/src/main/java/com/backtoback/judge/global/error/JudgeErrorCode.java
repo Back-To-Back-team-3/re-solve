@@ -6,6 +6,9 @@ import com.backtoback.common.exception.ErrorCode;
 
 import lombok.Getter;
 
+/**
+ * 채점 서비스의 오류 코드·HTTP 상태·사용자 안내를 정의한다. (에러 코드 표 > Submission · Run)
+ */
 @Getter
 public enum JudgeErrorCode implements ErrorCode {
     JUDGE0_CONNECTION_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "채점 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."),
