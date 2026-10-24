@@ -26,7 +26,8 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
 
     @Modifying(clearAutomatically = true)
     @Query(
-        "UPDATE Notification n SET n.isRead = true, n.readAt = :readAt WHERE n.memberId = :memberId AND n.isRead = false"
+        "UPDATE Notification n SET n.isRead = true, n.readAt = :readAt "
+            + "WHERE n.memberId = :memberId AND n.isRead = false"
     )
     int markAllAsRead(@Param("memberId") Long memberId, @Param("readAt") LocalDateTime readAt);
 

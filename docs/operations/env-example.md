@@ -72,8 +72,14 @@ AWS_ENDPOINT_URL=
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 
-# Judge0 연동 주소가 정해지면 입력
-JUDGE0_BASE_URL=
+# ⚖️ Judge0 (채점 엔진 - Docker Compose 프로필: judge0)
+# docker compose --profile judge0 up -d 실행 시 2358 포트로 기동됩니다.
+# Compose 컨테이너 환경(기본값): http://judge0-server:2358
+# 호스트 로컬 IDE에서 직접 실행 시: http://localhost:2358
+# Java 17(JDK 17, language_id=91) 지원 및 보안 패치를 위해 1.13.1-extra를 기본으로 사용합니다.
+JUDGE0_IMAGE=judge0/judge0:1.13.1-extra
+JUDGE0_SERVER_PORT=2358
+JUDGE0_BASE_URL=http://judge0-server:2358
 
 # 🌐 Nginx
 NGINX_IMAGE=nginx:stable-alpine
@@ -146,11 +152,46 @@ docker compose logs redis
 
 ---
 
-## 5. 종료 / 정리
+## 5. Judge0 (채점 엔진) 가동 및 확인
+
+- Judge0는 리소스 관리를 위해 Compose 프로필(`judge0`)로 분리되어 있습니다.
+- 일반 `docker compose up` 명령 시에는 기동되지 않으며, `--profile judge0` 플래그를 붙여 실행합니다.
 
 ```bash
-# 컨테이너만 종료: MySQL·Redis 데이터는 유지
+# Judge0 서비스 스택 시작
+docker compose --profile judge0 up -d
+
+# Judge0 구동 상태 확인
+docker compose --profile judge0 ps
+
+# Judge0 API 응답 확인 (상태 정보)
+curl http://localhost:2358/system_info
+
+# Java 17 (JDK 17.0.6, language_id=91) 채점 테스트
+curl -X POST "http://localhost:2358/submissions?base64_encoded=false&wait=true" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "source_code": "public class Main { public static void main(String[] args) { System.out.println(\"Java 17 OK\"); } }",
+       "language_id": 91
+     }'
+
+# Judge0 서비스만 종료 (기타 MySQL, Redis 등 서비스 유지)
+docker compose stop judge0-server judge0-worker judge0-db judge0-redis
+
+# Judge0 컨테이너 및 볼륨 제거 (필요 시)
+docker compose rm -f -s -v judge0-server judge0-worker judge0-db judge0-redis
+```
+
+---
+
+## 6. 종료 / 정리
+
+```bash
+# 일반 컨테이너만 종료: MySQL·Redis 데이터는 유지
 docker compose down
+
+# Judge0 포함 전체 종료
+docker compose --profile judge0 down
 ```
 
 - DB·Redis 데이터를 완전히 초기화해야 할 때만 사용한다. 삭제한 데이터는 복구되지 않는다.
