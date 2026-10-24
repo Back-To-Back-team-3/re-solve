@@ -16,7 +16,7 @@
 | 아키텍처 | [시스템 구성도](dev/architecture/system-architecture.md) | 전체 아키텍처 구조 |
 | 아키텍처 | [다이어그램](dev/architecture/diagrams.md) | 서비스 간 시퀀스, 상태 전이 흐름 |
 | 명세 | [API 명세서](dev/specifications/api-spec.md) | 서비스 외부 인터페이스 |
-| 명세 | [TypeSpec 공통 타입 명세](dev/specifications/type-spec.md) | 함수 입력·반환 타입, 배열·객체 검증과 Java 타입 매핑 |
+| 명세 | [TypeSpec 공통 타입 명세](dev/specifications/type-spec.md) | 함수 입력·반환 타입, 배열·객체 검증과 언어별 타입 매핑 |
 | 명세 | [ERD](dev/specifications/erd.md) | 도메인·DB 구조 |
 | 명세 | [이벤트 계약서](dev/specifications/event-contract.md) | 서비스 간 내부 인터페이스 |
 | 명세 | [스케줄러](dev/specifications/scheduler.md) | 예약 작업 정의 |
