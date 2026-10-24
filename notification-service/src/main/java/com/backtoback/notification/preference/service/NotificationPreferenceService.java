@@ -1,5 +1,6 @@
 package com.backtoback.notification.preference.service;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +38,8 @@ public class NotificationPreferenceService {
     /**
      * 회원의 알림 수신 설정을 부분 변경한다 (API 명세서 7.1.6).
      * 설정 행이 존재하지 않으면 기본값(모두 {@code true})으로 행을 생성한 뒤 요청에 포함된 필드만 갱신한다.
+     * 최초 생성 동시 요청으로 인해 고유 제약 충돌({@link DataIntegrityViolationException})이 발생하면
+     * 먼저 생성된 행을 다시 조회하여 요청 필드를 반영한다.
      *
      * @param memberId 회원 ID
      * @param request 부분 변경할 알림 수신 설정 요청
@@ -52,6 +55,21 @@ public class NotificationPreferenceService {
                 .findByMemberId(memberId)
                 .orElseGet(() -> NotificationPreference.createDefault(memberId));
 
+        applyUpdates(preference, request);
+
+        try {
+            NotificationPreference saved = preferenceRepository.saveAndFlush(preference);
+            return NotificationPreferenceResponse.from(saved);
+        } catch (DataIntegrityViolationException exception) {
+            NotificationPreference existing
+                = preferenceRepository.findByMemberId(memberId).orElseThrow(() -> exception);
+            applyUpdates(existing, request);
+            NotificationPreference saved = preferenceRepository.saveAndFlush(existing);
+            return NotificationPreferenceResponse.from(saved);
+        }
+    }
+
+    private void applyUpdates(NotificationPreference preference, NotificationPreferenceUpdateRequest request) {
         preference
             .update(
                 request.isExamContestEnabled(),
@@ -61,8 +79,5 @@ public class NotificationPreferenceService {
                 request.isHintReadyEnabled(),
                 request.isGithubSyncEnabled()
             );
-
-        NotificationPreference saved = preferenceRepository.save(preference);
-        return NotificationPreferenceResponse.from(saved);
     }
 }

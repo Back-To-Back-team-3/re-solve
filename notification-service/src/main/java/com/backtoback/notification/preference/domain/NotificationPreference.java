@@ -1,5 +1,7 @@
 package com.backtoback.notification.preference.domain;
 
+import org.hibernate.annotations.DynamicUpdate;
+
 import com.backtoback.common.jpa.entity.BaseTimeEntity;
 
 import jakarta.persistence.Column;
@@ -15,6 +17,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
+@DynamicUpdate
 @Table(
     name = "notification_preferences",
     uniqueConstraints = {
