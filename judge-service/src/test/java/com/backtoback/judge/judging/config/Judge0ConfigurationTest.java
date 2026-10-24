@@ -171,6 +171,49 @@ class Judge0ConfigurationTest {
     }
 
     /**
+     * 로컬 주소를 적용해도 공통 인증·시간 제한 설정이 유지되는지 검증한다.
+     */
+    @Test
+    @DisplayName("로컬 프로필은 호스트 Judge0 주소와 공통 인증·시간 제한을 함께 적용한다")
+    void localProfilePreservesSharedCommunicationSettings() {
+        runner.withPropertyValues("spring.profiles.active=local").run(context -> {
+            assertThat(context).hasNotFailed().hasSingleBean(RestClient.class);
+            var properties = context.getBean(Judge0Properties.class);
+            assertThat(properties.baseUrl()).isEqualTo("http://localhost:2358");
+            assertThat(properties.authHeader()).isEqualTo("X-Auth-Token");
+            assertThat(properties.authToken()).isEmpty();
+            assertThat(properties.connectTimeout()).isEqualTo(Duration.ofSeconds(2));
+            assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(5));
+        });
+    }
+
+    /**
+     * Compose에서 전달한 주소·인증·시간 제한이 로컬 프로필 기본값보다 우선하는지 검증한다.
+     */
+    @Test
+    @DisplayName("로컬 프로필에서도 Compose가 전달한 Judge0 통신 설정을 우선 적용한다")
+    void localProfileUsesComposeCommunicationSettings() {
+        runner
+            .withPropertyValues(
+                "spring.profiles.active=local",
+                "JUDGE0_BASE_URL=http://judge0-server:2358",
+                "JUDGE0_AUTH_HEADER=X-Judge-Token",
+                "JUDGE0_AUTH_TOKEN=test-token",
+                "JUDGE0_CONNECT_TIMEOUT=1500ms",
+                "JUDGE0_READ_TIMEOUT=3s"
+            )
+            .run(context -> {
+                assertThat(context).hasNotFailed().hasSingleBean(RestClient.class);
+                var properties = context.getBean(Judge0Properties.class);
+                assertThat(properties.baseUrl()).isEqualTo("http://judge0-server:2358");
+                assertThat(properties.authHeader()).isEqualTo("X-Judge-Token");
+                assertThat(properties.authToken()).isEqualTo("test-token");
+                assertThat(properties.connectTimeout()).isEqualTo(Duration.ofMillis(1500));
+                assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(3));
+            });
+    }
+
+    /**
      * 요청 추적 적용 여부를 검증할 HTTP 클라이언트 빌더를 등록한다.
      */
     @TestConfiguration(proxyBeanMethods = false)
