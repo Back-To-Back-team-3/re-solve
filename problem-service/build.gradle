@@ -51,6 +51,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.flywaydb:flyway-mysql'
 
+    // Scheduler lock
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:7.10.1'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1'
+
     // AWS S3
     implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-s3'

@@ -101,7 +101,7 @@ class CommonConfigurationWebTest {
         var update = new TagUpdateRequest("정렬", null);
         given(tagService.find("", 0, 100, "displayOrder,asc"))
             .willReturn(new PageResponse<>(List.of(tag), 0, 100, 1L, 1, false));
-        given(tagService.create(creation)).willReturn(tag);
+        given(tagService.create("12", "tag-create", creation)).willReturn(tag);
         given(tagService.update(1L, update)).willReturn(changedTag);
 
         // when & then
@@ -152,7 +152,7 @@ class CommonConfigurationWebTest {
             .andExpect(status().isNoContent())
             .andExpect(content().string(""));
         then(tagService).should().find("", 0, 100, "displayOrder,asc");
-        then(tagService).should().create(creation);
+        then(tagService).should().create("12", "tag-create", creation);
         then(tagService).should().update(1L, update);
         then(tagService).should().delete(1L);
     }
