@@ -1,4 +1,4 @@
-package com.backtoback.judge.global.exception;
+package com.backtoback.judge.global.error;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -6,8 +6,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-
-import com.backtoback.judge.global.error.JudgeErrorCode;
 
 /**
  * 서비스 공통 예외의 오류 계약과 내부 진단 정보 보존을 검증한다.
