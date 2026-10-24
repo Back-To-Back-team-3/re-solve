@@ -118,7 +118,7 @@ class NotificationPreferenceControllerTest {
     }
 
     @Test
-    @DisplayName("7.1.6 알림 수신 설정 변경 시 잘못된 JSON 타입이 전달되면 400 BAD_REQUEST와 COMMON_INVALID_REQUEST를 반환한다")
+    @DisplayName("7.1.6 알림 수신 설정 변경 시 잘못된 JSON 형식이 전달되면 400 BAD_REQUEST와 COMMON_INVALID_REQUEST를 반환한다")
     void updatePreferencesWithMalformedBodyReturnsBadRequest() throws Exception {
         // when & then
         mockMvc
@@ -127,6 +127,22 @@ class NotificationPreferenceControllerTest {
                     .header("X-User-Id", "1")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{invalid-json}")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("7.1.6 알림 수신 설정 변경 시 boolean 대신 문자열(\"false\")이 전달되면 400 BAD_REQUEST를 반환한다")
+    void updatePreferencesWithStringBooleanReturnsBadRequest() throws Exception {
+        // when & then
+        mockMvc
+            .perform(
+                patch("/api/v1/notifications/preferences")
+                    .header("X-User-Id", "1")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"isAssignmentEnabled\":\"false\"}")
             )
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.success").value(false))
