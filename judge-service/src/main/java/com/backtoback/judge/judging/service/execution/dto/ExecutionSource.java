@@ -28,7 +28,7 @@ public record ExecutionSource(JudgeLanguage language, String sourceCode, String 
     /**
      * 생성 결과를 기존 실행 요청에 연결한다. 고정 환경을 전달하면 생성 코드와 언어가 같아야 한다.
      *
-     * @param runtime 고정 실행 환경; 최초 실행이면 null
+     * @param runtime 고정 실행 환경; 최초 실행이면 {@code null}
      * @param cpuTimeMs CPU 제한 시간
      * @param wallTimeMs 경과 시간 제한
      * @param memoryKiB 메모리 제한
