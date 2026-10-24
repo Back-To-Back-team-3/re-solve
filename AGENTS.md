@@ -41,6 +41,7 @@ The reference documents are written in Korean. Locations below keep the original
 - Write Issues and PRs by `docs/guides/git-github.md` > `1.6 AI로 Issue·PR을 작성할 때`.
 - Before each commit, follow `docs/guides/convention-build-manual.md` > `4. 평소 개발 시 — 매 커밋 전 루틴`. Report only the commands you actually ran, with their results.
 - Never write secrets (tokens, passwords, keys) to files, commits, Issues, or PRs. Leave example values empty.
+- Do not reference `.personal/` directory paths or file names in commit messages, code comments, Issue bodies, or PR bodies.
 
 ## 4. Reference documents
 
