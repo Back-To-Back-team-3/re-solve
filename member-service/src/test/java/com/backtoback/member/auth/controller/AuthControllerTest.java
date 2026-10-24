@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -21,6 +22,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
@@ -43,7 +45,8 @@ import jakarta.servlet.http.Cookie;
     properties = {
         "resolve.auth.github.client-id=client-id",
         "resolve.auth.github.client-secret=client-secret",
-        "resolve.auth.jwt.secret=test-jwt-secret-key-must-be-at-least-32-bytes"
+        "resolve.auth.jwt.secret=test-jwt-secret-key-must-be-at-least-32-bytes",
+        "resolve.auth.dev-login-enabled=true"
     }
 )
 @Import(
@@ -227,6 +230,72 @@ class AuthControllerTest {
                         hasItem(allOf(containsString("loginNonce="), containsString("Max-Age=0")))
                     )
             );
+    }
+
+    @Test
+    @DisplayName("1.1.6 개발용 로그인은 1.1.3과 같은 본문과 Refresh Token 쿠키를 준다")
+    void devLoginReturnsTokens() throws Exception {
+        Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
+        ReflectionTestUtils.setField(member, "id", 7L);
+        given(authService.devLogin(7L))
+            .willReturn(new LoginResult("access-token", 3600L, "refresh-token", member, false));
+
+        mockMvc
+            .perform(
+                post("/api/v1/auth/dev-login").contentType(MediaType.APPLICATION_JSON).content("{\"memberId\":\"7\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.accessToken").value("access-token"))
+            .andExpect(jsonPath("$.data.member.memberId").value("7"))
+            .andExpect(jsonPath("$.data.member.isNewMember").value(false))
+            .andExpect(
+                header()
+                    .string(
+                        "Set-Cookie",
+                        allOf(containsString("refreshToken=refresh-token"), containsString("HttpOnly"))
+                    )
+            );
+    }
+
+    @Test
+    @DisplayName("1.1.6 회원 ID가 숫자가 아니면 400, 없는 회원이면 404 MEMBER_NOT_FOUND")
+    void devLoginValidatesMember() throws Exception {
+        mockMvc
+            .perform(
+                post("/api/v1/auth/dev-login").contentType(MediaType.APPLICATION_JSON).content("{\"memberId\":\"abc\"}")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.details[0].field").value("memberId"));
+
+        given(authService.devLogin(99L)).willThrow(new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
+        mockMvc
+            .perform(
+                post("/api/v1/auth/dev-login").contentType(MediaType.APPLICATION_JSON).content("{\"memberId\":\"99\"}")
+            )
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error.code").value("MEMBER_NOT_FOUND"));
+    }
+
+    @Nested
+    @TestPropertySource(properties = "resolve.auth.dev-login-enabled=false")
+    class DevLoginDisabled {
+
+        @Autowired
+        private MockMvc disabledMockMvc;
+
+        @Test
+        @DisplayName("1.1.6 개발용 로그인이 꺼져 있으면 없는 경로처럼 404이고 토큰을 발급하지 않는다")
+        void devLoginIsNotFound() throws Exception {
+            disabledMockMvc
+                .perform(
+                    post("/api/v1/auth/dev-login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"memberId\":\"7\"}")
+                )
+                .andExpect(status().isNotFound());
+
+            verify(authService, never()).devLogin(any());
+        }
     }
 
     @Test

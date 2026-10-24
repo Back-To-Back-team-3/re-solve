@@ -131,6 +131,7 @@ services:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
+      DEV_LOGIN_ENABLED: ${DEV_LOGIN_ENABLED:-false}
     depends_on:
       mysql:
         condition: service_healthy

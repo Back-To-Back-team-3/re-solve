@@ -409,6 +409,37 @@ class AuthServiceTest {
         assertThat(result.newMember()).isTrue();
     }
 
+    @Test
+    @DisplayName("개발용 로그인: 지정한 회원으로 토큰을 발급하고 신규 가입이 아닌 것으로 응답한다")
+    void devLoginIssuesTokens() {
+        Member member = memberWithId(7L);
+        given(memberService.getMember(7L)).willReturn(member);
+        given(accessTokenProvider.issue(member, "sid-1")).willReturn("access-token");
+        given(accessTokenProvider.expiresInSeconds()).willReturn(3600L);
+        given(refreshTokenStore.issue(7L)).willReturn(new IssuedRefreshToken("refresh-token", "sid-1"));
+
+        LoginResult result = authService.devLogin(7L);
+
+        assertThat(result.accessToken()).isEqualTo("access-token");
+        assertThat(result.refreshToken()).isEqualTo("refresh-token");
+        assertThat(result.member()).isSameAs(member);
+        assertThat(result.newMember()).isFalse();
+    }
+
+    @Test
+    @DisplayName("개발용 로그인: 탈퇴한 회원이면 AUTH_ACCESS_DENIED이고 토큰을 발급하지 않는다")
+    void devLoginRejectsWithdrawnMember() {
+        Member withdrawn = memberWithId(7L);
+        ReflectionTestUtils.setField(withdrawn, "status", MemberStatus.WITHDRAWN);
+        given(memberService.getMember(7L)).willReturn(withdrawn);
+
+        assertThatThrownBy(() -> authService.devLogin(7L))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED);
+        verifyNoInteractions(refreshTokenStore, accessTokenProvider);
+    }
+
     private Member memberWithId(Long id) {
         Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
         ReflectionTestUtils.setField(member, "id", id);
