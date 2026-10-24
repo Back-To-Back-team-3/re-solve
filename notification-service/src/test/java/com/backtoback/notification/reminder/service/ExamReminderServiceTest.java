@@ -6,12 +6,12 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +19,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.common.time.ClockConfiguration;
@@ -36,6 +37,7 @@ class ExamReminderServiceTest {
 
     // 2026-10-20 20:00:00 KST (11:00:00Z)
     private final Clock clock = Clock.fixed(Instant.parse("2026-10-20T11:00:00Z"), ClockConfiguration.SERVICE_ZONE);
+    private final LocalDateTime fixedNow = LocalDateTime.of(2026, 10, 20, 20, 0, 0);
 
     private NotificationReminderRepository reminderRepository;
     private NotificationRepository notificationRepository;
@@ -101,38 +103,31 @@ class ExamReminderServiceTest {
     }
 
     @Test
-    @DisplayName("7.1 ExamUpdated 수신 시 저장된 contextRevision보다 큰 경우에만 발화 시각과 원천 이벤트를 갱신한다")
-    void rescheduleByExamUpdatedUpdatesOnlyWhenRevisionIsNewer() {
+    @DisplayName("7.1 ExamUpdated 수신 시 SCHEDULED 상태이고 버전이 낮은 예약만 조건부 UPDATE로 갱신한다")
+    void rescheduleByExamUpdatedExecutesConditionalUpdate() {
         // given
-        NotificationReminder olderReminder
-            = NotificationReminder
-                .createScheduled(7L, 55L, 411L, LocalDateTime.of(2026, 10, 20, 21, 0, 0), 2, "evt-reg-1");
-        NotificationReminder newerReminder
-            = NotificationReminder
-                .createScheduled(8L, 55L, 412L, LocalDateTime.of(2026, 10, 20, 22, 0, 0), 5, "evt-reg-2");
-        given(reminderRepository.findByExamIdAndStatus(55L, ReminderStatus.SCHEDULED))
-            .willReturn(List.of(olderReminder, newerReminder));
-
         LocalDateTime updatedStartsAt = LocalDateTime.of(2026, 10, 20, 21, 30, 0);
 
         // when
         examReminderService.rescheduleByExamUpdated("evt-upd-4", 55L, 4, updatedStartsAt);
 
         // then
-        assertThat(olderReminder.getStartsAt()).isEqualTo(updatedStartsAt);
-        assertThat(olderReminder.getFireAt()).isEqualTo(LocalDateTime.of(2026, 10, 20, 21, 25, 0));
-        assertThat(olderReminder.getContextRevision()).isEqualTo(4);
-        assertThat(olderReminder.getSourceEventId()).isEqualTo("evt-upd-4");
-
-        // 이미 revision 5인 예약은 버전 4 이벤트로 덮어쓰지 않는다.
-        assertThat(newerReminder.getContextRevision()).isEqualTo(5);
-        assertThat(newerReminder.getSourceEventId()).isEqualTo("evt-reg-2");
+        verify(reminderRepository)
+            .rescheduleScheduledByExamId(
+                eq(55L),
+                eq(4),
+                eq(updatedStartsAt),
+                eq(LocalDateTime.of(2026, 10, 20, 21, 25, 0)),
+                eq("evt-upd-4"),
+                eq(fixedNow)
+            );
     }
 
     @Test
     @DisplayName("7.1 참가 취소 이벤트가 등록보다 먼저 도착하면 CANCELED 취소 표식 행을 생성한다")
     void cancelByParticipantCanceledWhenNotFoundCreatesTombstone() {
         // given
+        given(reminderRepository.cancelScheduledByParticipantId(411L, fixedNow)).willReturn(0);
         given(reminderRepository.findByParticipantId(411L)).willReturn(Optional.empty());
         LocalDateTime canceledAt = LocalDateTime.of(2026, 10, 20, 19, 50, 0);
 
@@ -147,6 +142,23 @@ class ExamReminderServiceTest {
     }
 
     @Test
+    @DisplayName("7.1 취소 표식 생성 중 동시 등록으로 고유 제약 충돌이 발생하면 조건부 취소 UPDATE를 재실행한다")
+    void cancelByParticipantCanceledWhenConcurrentInsertCollidesRetriesConditionalCancel() {
+        // given
+        given(reminderRepository.cancelScheduledByParticipantId(411L, fixedNow)).willReturn(0).willReturn(1);
+        given(reminderRepository.findByParticipantId(411L)).willReturn(Optional.empty());
+        given(reminderRepository.saveAndFlush(any(NotificationReminder.class)))
+            .willThrow(new DataIntegrityViolationException("uk_notification_reminders_participant_id"));
+
+        // when
+        examReminderService
+            .cancelByParticipantCanceled("evt-cancel-1", 7L, 55L, 411L, 3, LocalDateTime.of(2026, 10, 20, 19, 50, 0));
+
+        // then
+        verify(reminderRepository, times(2)).cancelScheduledByParticipantId(411L, fixedNow);
+    }
+
+    @Test
     @DisplayName("7.1 예약 발화 시 조건부 SENT 전이에 성공하고 수신 설정이 켜져 있으면 EXAM_STARTING_SOON 알림을 생성한다")
     void dispatchSingleReminderWhenEnabledCreatesNotificationAndPublishesEvent() {
         // given
@@ -155,7 +167,7 @@ class ExamReminderServiceTest {
                 .createScheduled(7L, 55L, 411L, LocalDateTime.of(2026, 10, 20, 20, 3, 0), 3, "evt-reg-1");
         ReflectionTestUtils.setField(reminder, "id", 10L);
 
-        given(reminderRepository.markAsSentIfScheduled(eq(10L), any(LocalDateTime.class))).willReturn(1);
+        given(reminderRepository.markAsSentIfScheduled(eq(10L), eq(fixedNow))).willReturn(1);
         given(preferenceRepository.findByMemberId(7L)).willReturn(Optional.empty());
         given(
             notificationRepository
@@ -195,7 +207,7 @@ class ExamReminderServiceTest {
 
         NotificationPreference disabledPref = new NotificationPreference(7L, false, true, true, true, true, true);
 
-        given(reminderRepository.markAsSentIfScheduled(eq(10L), any(LocalDateTime.class))).willReturn(1);
+        given(reminderRepository.markAsSentIfScheduled(eq(10L), eq(fixedNow))).willReturn(1);
         given(preferenceRepository.findByMemberId(7L)).willReturn(Optional.of(disabledPref));
 
         // when

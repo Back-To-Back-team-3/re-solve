@@ -3,9 +3,9 @@ package com.backtoback.notification.reminder.service;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -64,31 +64,24 @@ public class ExamReminderService {
         }
 
         LocalDateTime now = LocalDateTime.now(clock);
-        if (!startsAt.isAfter(now)) {
-            reminderRepository
-                .saveAndFlush(
-                    NotificationReminder
-                        .createCanceledTombstone(
-                            memberId,
-                            examId,
-                            participantId,
-                            startsAt,
-                            contextRevision,
-                            sourceEventId
-                        )
-                );
-            return;
-        }
-
         NotificationReminder reminder
-            = NotificationReminder
-                .createScheduled(memberId, examId, participantId, startsAt, contextRevision, sourceEventId);
-        reminderRepository.saveAndFlush(reminder);
+            = startsAt.isAfter(now)
+                ? NotificationReminder
+                    .createScheduled(memberId, examId, participantId, startsAt, contextRevision, sourceEventId)
+                : NotificationReminder
+                    .createCanceledTombstone(memberId, examId, participantId, startsAt, contextRevision, sourceEventId);
+
+        try {
+            reminderRepository.saveAndFlush(reminder);
+        } catch (DataIntegrityViolationException exception) {
+            log.debug("동시 등록 또는 선행 취소 표식으로 인한 참가 예약 중복 저장 흡수: participantId={}", participantId);
+        }
     }
 
     /**
      * {@code ExamUpdated} 이벤트 수신 시 해당 시험의 {@link ReminderStatus#SCHEDULED} 예약 중
-     * 수신한 {@code examRevision}보다 낮은 버전의 예약만 새 시작 시각({@code startsAt - 5분})으로 갱신한다.
+     * 수신한 {@code examRevision}보다 낮은 버전의 예약만 조건부 UPDATE로 갱신한다 (스케줄러 명세서 7.1, 이벤트 계약서 5.1).
+     * 변경된 시작 시각이 이미 현재 시각 이하이면 발화하지 않도록 {@link ReminderStatus#CANCELED}로 전이한다.
      *
      * @param sourceEventId ExamUpdated 이벤트 ID
      * @param examId 시험 ID
@@ -102,21 +95,27 @@ public class ExamReminderService {
         int examRevision,
         LocalDateTime newStartsAt
     ) {
-        List<NotificationReminder> scheduledReminders
-            = reminderRepository.findByExamIdAndStatus(examId, ReminderStatus.SCHEDULED);
+        LocalDateTime now = LocalDateTime.now(clock);
+        if (!newStartsAt.isAfter(now)) {
+            reminderRepository.cancelScheduledByExamIdAndNewerRevision(examId, examRevision, sourceEventId, now);
+            return;
+        }
 
-        for (NotificationReminder reminder : scheduledReminders) {
-            reminder.rescheduleIfNewer(newStartsAt, examRevision, sourceEventId);
-        }
-        if (!scheduledReminders.isEmpty()) {
-            reminderRepository.saveAllAndFlush(scheduledReminders);
-        }
+        reminderRepository
+            .rescheduleScheduledByExamId(
+                examId,
+                examRevision,
+                newStartsAt,
+                newStartsAt.minusMinutes(5),
+                sourceEventId,
+                now
+            );
     }
 
     /**
-     * {@code ExamParticipantCanceled} 이벤트 수신 시 해당 참가자의 예약을 취소한다.
-     * 등록 이벤트보다 취소 이벤트가 먼저 도착한 경우 취소 표식({@link ReminderStatus#CANCELED}) 행을 생성하여
-     * 뒤늦게 도착하는 등록 이벤트를 차단한다.
+     * {@code ExamParticipantCanceled} 이벤트 수신 시 해당 참가자의 예약을 조건부 UPDATE로 취소한다.
+     * 등록 이벤트보다 취소 이벤트가 먼저 도착해 행이 없는 경우 취소 표식({@link ReminderStatus#CANCELED}) 행을 생성하며,
+     * 생성 도중 등록 이벤트와 동시 충돌하면 다시 조건부 취소 UPDATE를 수행하여 취소 상태를 보장한다.
      *
      * @param sourceEventId 원천 이벤트 ID
      * @param memberId 회원 ID
@@ -134,18 +133,20 @@ public class ExamReminderService {
         int contextRevision,
         LocalDateTime canceledAt
     ) {
-        Optional<NotificationReminder> existing = reminderRepository.findByParticipantId(participantId);
-        if (existing.isPresent()) {
-            NotificationReminder reminder = existing.get();
-            reminder.cancel();
-            reminderRepository.saveAndFlush(reminder);
+        LocalDateTime now = LocalDateTime.now(clock);
+        int updated = reminderRepository.cancelScheduledByParticipantId(participantId, now);
+        if (updated > 0 || reminderRepository.findByParticipantId(participantId).isPresent()) {
             return;
         }
 
         NotificationReminder tombstone
             = NotificationReminder
                 .createCanceledTombstone(memberId, examId, participantId, canceledAt, contextRevision, sourceEventId);
-        reminderRepository.saveAndFlush(tombstone);
+        try {
+            reminderRepository.saveAndFlush(tombstone);
+        } catch (DataIntegrityViolationException exception) {
+            reminderRepository.cancelScheduledByParticipantId(participantId, now);
+        }
     }
 
     /**
