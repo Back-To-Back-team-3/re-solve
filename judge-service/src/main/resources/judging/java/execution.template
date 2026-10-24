@@ -98,7 +98,9 @@ class Main {
         } else if (value.getClass().isArray()) {
             json.append('[');
             for (int i = 0; i < java.lang.reflect.Array.getLength(value); i++) {
-                if (i > 0) json.append(',');
+                if (i > 0) {
+                    json.append(',');
+                }
                 writeJson(json, java.lang.reflect.Array.get(value, i));
             }
             json.append(']');
@@ -109,7 +111,9 @@ class Main {
                 if (!(entry.getKey() instanceof String key)) {
                     throw new IllegalArgumentException("객체 키는 문자열이어야 합니다.");
                 }
-                if (!first) json.append(',');
+                if (!first) {
+                    json.append(',');
+                }
                 first = false;
                 writeString(json, key);
                 json.append(':');
@@ -130,13 +134,13 @@ class Main {
     private static void writeString(StringBuilder json, String text) {
         json.append('"');
         for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '"' || c == '\\') {
-                json.append('\\').append(c);
-            } else if (c < 0x20 || Character.isSurrogate(c)) {
-                json.append(String.format("\\u%04x", (int) c));
+            char character = text.charAt(i);
+            if (character == '"' || character == '\\') {
+                json.append('\\').append(character);
+            } else if (character < 0x20 || Character.isSurrogate(character)) {
+                json.append(String.format("\\u%04x", (int) character));
             } else {
-                json.append(c);
+                json.append(character);
             }
         }
         json.append('"');
