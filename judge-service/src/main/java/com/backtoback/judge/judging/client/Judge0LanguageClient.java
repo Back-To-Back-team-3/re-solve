@@ -1,4 +1,4 @@
-package com.backtoback.judge.judge0.client;
+package com.backtoback.judge.judging.client;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -6,49 +6,40 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
-import com.backtoback.judge.global.exception.custom.Judge0ConnectionFailedException;
-import com.backtoback.judge.global.exception.custom.Judge0ResponseFailedException;
-import com.backtoback.judge.judge0.dto.response.Judge0LanguageResponse;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.error.JudgeException;
+import com.backtoback.judge.judging.config.Judge0Properties;
+import com.backtoback.judge.judging.dto.response.Judge0LanguageResponse;
 
+import lombok.RequiredArgsConstructor;
+
+/**
+ * Judge0 언어 목록의 통신과 응답 검증을 담당한다. 실행 환경 선택과 캐시는 서비스에 위임한다.
+ */
 @Service
+@RequiredArgsConstructor
 public class Judge0LanguageClient {
     private static final Logger LOG = LoggerFactory.getLogger(Judge0LanguageClient.class);
-    private final String baseUrl;
+    private final Judge0Properties properties;
     private final RestClient client;
-
-    /**
-     * Judge0 언어 목록 조회에 필요한 접속 설정과 HTTP 클라이언트를 연결한다.
-     *
-     * @param baseUrl Judge0 서버 주소
-     * @param client 연결·응답 제한과 인증이 적용된 Judge0 클라이언트
-     */
-    public Judge0LanguageClient(
-        @Value("${judge0.base-url}") String baseUrl,
-        @Qualifier("judge0RestClient") RestClient client
-    ) {
-        this.baseUrl = baseUrl;
-        this.client = client;
-    }
 
     /**
      * Judge0의 전체 활성 실행 환경 목록을 한 번 조회하고 응답 형식을 검증한다.
      * 언어 선택과 캐시 관리는 호출하는 서비스에서 담당하며 자동 재시도하지 않는다.
      *
      * @return 검증한 수정 불가능 목록; 서버 주소 미설정이면 빈 목록
-     * @throws Judge0ConnectionFailedException 연결 실패 또는 통신 시간 초과가 발생한 경우
-     * @throws Judge0ResponseFailedException HTTP 오류 또는 올바르지 않은 응답을 받은 경우
+     * @throws JudgeException {@code JUDGE0_CONNECTION_FAILED}: 연결 실패 또는 통신 시간 초과가 발생한 경우
+     *     또는 {@code JUDGE0_RESPONSE_FAILED}: HTTP 오류 또는 올바르지 않은 응답을 받은 경우
      */
     public List<Judge0LanguageResponse> findAll() {
         // 서버 주소가 없는 개발 환경에서는 외부 호출 없이 빈 목록을 반환한다.
-        if (baseUrl == null || baseUrl.isBlank()) {
+        if (properties.baseUrl() == null || properties.baseUrl().isBlank()) {
             return List.of();
         }
         try {
@@ -73,7 +64,7 @@ public class Judge0LanguageClient {
         } catch (ResourceAccessException exception) {
             // 연결 실패·시간 초과를 응답 오류와 구분한다.
             LOG.warn("Judge0 연결 실패: exception={}", exception.getClass().getSimpleName());
-            throw new Judge0ConnectionFailedException();
+            throw new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED);
         } catch (RestClientResponseException exception) {
             // HTTP 오류는 응답 본문을 노출하지 않고 상태 코드만 오류 처리기에 전달한다.
             throw responseFailure(exception.getStatusCode().value());
@@ -89,8 +80,8 @@ public class Judge0LanguageClient {
      * @param status 외부 HTTP 상태; 확인할 수 없으면 null
      * @return 상위 실행기에 전달할 응답 오류 예외
      */
-    private Judge0ResponseFailedException responseFailure(Integer status) {
+    private JudgeException responseFailure(Integer status) {
         LOG.warn("Judge0 언어 목록 조회 실패: status={}", status);
-        return new Judge0ResponseFailedException(status);
+        return new JudgeException(JudgeErrorCode.JUDGE0_RESPONSE_FAILED, status);
     }
 }

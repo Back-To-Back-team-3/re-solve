@@ -43,6 +43,9 @@ class Judge0ConfigurationTest {
             assertThat(properties.authToken()).isEqualTo("");
             assertThat(properties.connectTimeout()).isEqualTo(Duration.ofSeconds(2));
             assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(5));
+            assertThat(properties.languages().java().enabled()).isFalse();
+            assertThat(properties.languages().python3().enabled()).isFalse();
+            assertThat(properties.languages().cpp().enabled()).isFalse();
 
         });
     }
@@ -59,7 +62,10 @@ class Judge0ConfigurationTest {
                 "JUDGE0_AUTH_HEADER=X-Judge-Token",
                 "JUDGE0_AUTH_TOKEN=test-token",
                 "JUDGE0_CONNECT_TIMEOUT=1500ms",
-                "JUDGE0_READ_TIMEOUT=3s"
+                "JUDGE0_READ_TIMEOUT=3s",
+                "JUDGE0_JAVA_ENABLED=true",
+                "JUDGE0_PYTHON3_ENABLED=false",
+                "JUDGE0_CPP_ENABLED=true"
             )
             .run(context -> {
                 assertThat(context).hasNotFailed();
@@ -69,6 +75,9 @@ class Judge0ConfigurationTest {
                 assertThat(properties.authToken()).isEqualTo("test-token");
                 assertThat(properties.connectTimeout()).isEqualTo(Duration.ofMillis(1500));
                 assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(3));
+                assertThat(properties.languages().java().enabled()).isTrue();
+                assertThat(properties.languages().python3().enabled()).isFalse();
+                assertThat(properties.languages().cpp().enabled()).isTrue();
 
             });
     }

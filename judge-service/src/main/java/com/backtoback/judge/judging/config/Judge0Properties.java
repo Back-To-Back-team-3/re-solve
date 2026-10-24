@@ -7,6 +7,7 @@ import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
 /**
@@ -17,6 +18,7 @@ import jakarta.validation.constraints.NotNull;
  * @param authToken 인증 토큰; 빈 값이면 헤더를 추가하지 않는다
  * @param connectTimeout 연결 제한 시간; 1ms 이상 int 밀리초 범위
  * @param readTimeout 응답 제한 시간; 1ms 이상 int 밀리초 범위
+ * @param languages 서비스 전체의 언어 활성화 설정
  */
 @Validated
 @ConfigurationProperties(prefix = "judge0")
@@ -25,6 +27,28 @@ public record Judge0Properties(
     String authHeader,
     String authToken,
     @NotNull @DurationMin(millis = 1) @DurationMax(millis = Integer.MAX_VALUE) Duration connectTimeout,
-    @NotNull @DurationMin(millis = 1) @DurationMax(millis = Integer.MAX_VALUE) Duration readTimeout
+    @NotNull @DurationMin(millis = 1) @DurationMax(millis = Integer.MAX_VALUE) Duration readTimeout,
+    @Valid @NotNull Languages languages
 ) {
+    /**
+     * 언어별 활성화 설정.
+     *
+     * @param java Java 설정
+     * @param python3 Python 3 설정
+     * @param cpp C++ 설정
+     */
+    public record Languages(
+        @Valid @NotNull Language java,
+        @Valid @NotNull Language python3,
+        @Valid @NotNull Language cpp
+    ) {
+    }
+
+    /**
+     * 실행 환경 검증 후 적용할 활성화 여부.
+     *
+     * @param enabled 서비스에서 해당 언어 실행을 허용하는지 여부
+     */
+    public record Language(boolean enabled) {
+    }
 }
