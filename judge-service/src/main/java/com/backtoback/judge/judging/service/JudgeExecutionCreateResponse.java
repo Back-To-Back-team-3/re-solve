@@ -1,6 +1,4 @@
-package com.backtoback.judge.judging.dto.response;
-
-import com.backtoback.judge.judging.dto.JudgeRuntime;
+package com.backtoback.judge.judging.service;
 
 /**
  * 생성한 실행의 조회 식별자와 실제 선택한 실행 환경을 반환한다.
