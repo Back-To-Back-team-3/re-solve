@@ -28,10 +28,10 @@ spring:
 
 judge0:
   base-url: ${JUDGE0_BASE_URL:}
-  auth-header: X-Auth-Token
+  auth-header: ${JUDGE0_AUTH_HEADER:X-Auth-Token}
   auth-token: ${JUDGE0_AUTH_TOKEN:}
-  connect-timeout: 2s
-  read-timeout: 5s
+  connect-timeout: ${JUDGE0_CONNECT_TIMEOUT:2s}
+  read-timeout: ${JUDGE0_READ_TIMEOUT:5s}
   languages:
     java:
       enabled: ${JUDGE0_JAVA_ENABLED:false}

@@ -1,7 +1,18 @@
 package com.backtoback.judge.judging.dto.request;
 
-import com.backtoback.judge.judging.dto.JudgeRuntime;
+import com.backtoback.judge.judging.service.JudgeRuntime;
 
+/**
+ * 실행 엔진에 전달할 코드·입력과 실행 환경 및 자원 제한을 보관한다.
+ *
+ * @param language 서비스 언어 코드
+ * @param fixedRuntime 고정 실행 환경; null이면 최신 환경을 선택한다
+ * @param sourceCode 실행할 전체 코드
+ * @param stdin 표준 입력
+ * @param cpuTimeMs CPU 제한 시간(ms)
+ * @param wallTimeMs 경과 시간 제한(ms)
+ * @param memoryKiB 메모리 제한(KiB)
+ */
 public record JudgeExecutionCreateRequest(
     String language,
     JudgeRuntime fixedRuntime,
