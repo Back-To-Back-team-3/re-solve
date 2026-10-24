@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,7 @@ import com.backtoback.notification.notification.domain.NotificationType;
 import com.backtoback.notification.notification.repository.NotificationRepository;
 import com.backtoback.notification.preference.domain.NotificationPreference;
 import com.backtoback.notification.preference.repository.NotificationPreferenceRepository;
+import com.backtoback.notification.reminder.service.ExamReminderService;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -57,6 +59,9 @@ class NotificationEventProcessorTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private ExamReminderService examReminderService;
+
     private NotificationEventProcessor eventProcessor;
 
     @BeforeEach
@@ -68,6 +73,7 @@ class NotificationEventProcessorTest {
                 preferenceRepository,
                 deliveryService,
                 eventPublisher,
+                examReminderService,
                 clock
             );
     }
@@ -206,6 +212,148 @@ class NotificationEventProcessorTest {
         assertThat(captured.getTitle()).isEqualTo("힌트 준비 완료");
         assertThat(captured.getContent()).isEqualTo("1001번 문제의 2단계 힌트가 준비되었습니다.");
         assertThat(captured.getLinkUrl()).isEqualTo("/problems/1001?hint=301");
+    }
+
+    @Test
+    @DisplayName("ExamParticipantRegistered 이벤트 수신 시 시험 시작 임박 예약 등록을 위임하고 즉시 알림은 생성하지 않는다")
+    void processExamParticipantRegisteredRegistersReminderOnly() {
+        // given
+        String eventId = "evt-exam-reg-1";
+        JsonNode payload = objectMapper.readTree("""
+            {
+              "eventId": "evt-exam-reg-1",
+              "eventType": "ExamParticipantRegistered",
+              "context": "EXAM",
+              "contextId": "55",
+              "examId": "55",
+              "participantId": "411",
+              "memberId": "7",
+              "participantRevision": "1",
+              "contextRevision": "3",
+              "problemIds": ["1001"],
+              "startsAt": "2026-10-20T22:00:00.000000+09:00",
+              "endsAt": "2026-10-20T23:30:00.000000+09:00"
+            }
+            """);
+
+        given(processedEventRepository.existsByEventId(eventId)).willReturn(false);
+
+        // when
+        eventProcessor.process(eventId, "ExamParticipantRegistered", payload);
+
+        // then
+        verify(processedEventRepository).saveAndFlush(any(ProcessedEvent.class));
+        verify(
+            examReminderService
+        ).registerReminder(eq(eventId), eq(7L), eq(55L), eq(411L), eq(3), eq(LocalDateTime.of(2026, 10, 20, 22, 0, 0)));
+        verify(notificationRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("ExamUpdated 이벤트 수신 시 예약 재설정과 EXAM_UPDATED 알림 생성을 함께 수행한다")
+    void processExamUpdatedReschedulesReminderAndCreatesNotification() {
+        // given
+        String eventId = "evt-exam-upd-1";
+        JsonNode payload = objectMapper.readTree("""
+            {
+              "eventId": "evt-exam-upd-1",
+              "eventType": "ExamUpdated",
+              "examId": "55",
+              "studyId": "12",
+              "examRevision": "4",
+              "startsAt": "2026-10-20T22:30:00.000000+09:00",
+              "endsAt": "2026-10-21T00:00:00.000000+09:00",
+              "targetMemberIds": ["7"]
+            }
+            """);
+
+        given(processedEventRepository.existsByEventId(eventId)).willReturn(false);
+        given(preferenceRepository.findByMemberId(7L)).willReturn(Optional.empty());
+        given(
+            notificationRepository.existsBySourceEventIdAndMemberIdAndType(eventId, 7L, NotificationType.EXAM_UPDATED)
+        ).willReturn(false);
+        given(notificationRepository.saveAndFlush(any(Notification.class)))
+            .willAnswer(invocation -> invocation.getArgument(0));
+
+        // when
+        eventProcessor.process(eventId, "ExamUpdated", payload);
+
+        // then
+        verify(examReminderService)
+            .rescheduleByExamUpdated(eq(eventId), eq(55L), eq(4), eq(LocalDateTime.of(2026, 10, 20, 22, 30, 0)));
+        verify(notificationRepository).saveAndFlush(any(Notification.class));
+    }
+
+    @Test
+    @DisplayName("ExamParticipantCanceled 이벤트 수신 시 참가자의 시작 임박 예약 무효화를 위임한다")
+    void processExamParticipantCanceledCancelsReminder() {
+        // given
+        String eventId = "evt-exam-part-cancel-1";
+        JsonNode payload = objectMapper.readTree("""
+            {
+              "eventId": "evt-exam-part-cancel-1",
+              "eventType": "ExamParticipantCanceled",
+              "context": "EXAM",
+              "contextId": "55",
+              "examId": "55",
+              "participantId": "411",
+              "memberId": "7",
+              "participantRevision": "2",
+              "contextRevision": "3",
+              "canceledAt": "2026-10-20T20:10:00.000000+09:00"
+            }
+            """);
+
+        given(processedEventRepository.existsByEventId(eventId)).willReturn(false);
+
+        // when
+        eventProcessor.process(eventId, "ExamParticipantCanceled", payload);
+
+        // then
+        verify(examReminderService)
+            .cancelByParticipantCanceled(
+                eq(eventId),
+                eq(7L),
+                eq(55L),
+                eq(411L),
+                eq(3),
+                eq(LocalDateTime.of(2026, 10, 20, 20, 10, 0))
+            );
+        verify(notificationRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("ExamCanceled 이벤트 수신 시 시험 예약 일괄 취소와 EXAM_CANCELED 알림 생성을 함께 수행한다")
+    void processExamCanceledCancelsRemindersAndCreatesNotification() {
+        // given
+        String eventId = "evt-exam-cancel-1";
+        JsonNode payload = objectMapper.readTree("""
+            {
+              "eventId": "evt-exam-cancel-1",
+              "eventType": "ExamCanceled",
+              "examId": "55",
+              "studyId": "12",
+              "examRevision": "4",
+              "canceledAt": "2026-10-20T20:15:00.000000+09:00",
+              "reason": "LEADER_CANCELED",
+              "targetMemberIds": ["7"]
+            }
+            """);
+
+        given(processedEventRepository.existsByEventId(eventId)).willReturn(false);
+        given(preferenceRepository.findByMemberId(7L)).willReturn(Optional.empty());
+        given(
+            notificationRepository.existsBySourceEventIdAndMemberIdAndType(eventId, 7L, NotificationType.EXAM_CANCELED)
+        ).willReturn(false);
+        given(notificationRepository.saveAndFlush(any(Notification.class)))
+            .willAnswer(invocation -> invocation.getArgument(0));
+
+        // when
+        eventProcessor.process(eventId, "ExamCanceled", payload);
+
+        // then
+        verify(examReminderService).cancelByExamCanceled(55L);
+        verify(notificationRepository).saveAndFlush(any(Notification.class));
     }
 
     @Test
