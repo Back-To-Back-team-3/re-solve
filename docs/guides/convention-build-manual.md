@@ -198,4 +198,82 @@ git push origin <branch>
 
 ---
 
+## 6. 코드 구조
+
+- `api-gateway`를 제외한 서비스에 적용한다. 계약(응답 형식·에러 코드·테이블·마이그레이션 파일명)은 명세가 원본이고, 이 절은 그 계약을 담는 코드의 배치와 이름만 정한다.
+- 채택 근거는 `docs/records/decisions/`의 백엔드 코드 구조 결정 기록에 있다.
+
+### 6.1 패키지
+
+```
+com.backtoback.{서비스}
+├── {기능}/              # 기획서 2.1 도메인의 패키지 이름 (예: auth, member, exam, submission)
+│   ├── controller/
+│   ├── service/
+│   ├── repository/
+│   ├── domain/
+│   ├── dto/
+│   ├── client/          # 다른 서비스·외부 API 호출
+│   ├── store/           # Redis 등 JPA가 아닌 저장소
+│   └── config/          # 기능 전용 설정
+└── global/
+    ├── config/
+    └── error/           # 서비스 에러 코드 enum
+```
+
+- 하위 패키지는 그 종류의 클래스가 생길 때 만든다.
+- 관리자 API는 기획서 2.1 도메인에 따라 기능 패키지 `admin`에 둔다.
+- 공통 모듈(6.2)에 있는 클래스는 `global`에 다시 만들지 않는다.
+
+### 6.2 공통 모듈
+
+| 패키지 (`com.backtoback.common`) | 클래스 | 역할 |
+| --- | --- | --- |
+| `api` | `ApiResponse`, `PageResponse`, `ApiErrorResponse` | API 명세서 0.3 공통 응답 |
+| `exception` | `ErrorCode`(인터페이스), `CommonErrorCode`, `BusinessException` | 공통 오류 처리 |
+| `web.exception` | `GlobalExceptionHandler` | 공통 예외 핸들러 |
+| `jpa.entity` | `BaseTimeEntity` | `created_at`·`updated_at` |
+
+- 서비스는 위 클래스와 같은 역할의 클래스를 만들지 않는다.
+- 공통 모듈에 클래스를 추가하려면 결정 기록을 먼저 고친다.
+
+### 6.3 응답·예외
+
+- Controller는 `ResponseEntity<ApiResponse<T>>`를 반환하고, 공통 응답을 적용하지 않는 경우는 API 명세서 0.3을 따른다.
+- 업무 오류는 공통 `BusinessException`을 상속한 서비스별 예외 하나에 서비스 에러 코드를 전달해 던진다. 오류마다 예외 클래스를 만들지 않는다.
+- 서비스 에러 코드는 `global/error/{서비스}ErrorCode` enum 하나에 두고 `ErrorCode`를 구현한다. 이름·HTTP 상태는 에러 코드 표를 따르고, 표에 없는 코드는 문서를 먼저 고친다(Git/GitHub 메뉴얼 1.7).
+- Controller에서 예외를 잡아 응답을 만들지 않는다. 브라우저가 직접 여는 리다이렉트처럼 공통 오류 형식으로 응답할 수 없는 API만 예외로 하고, 이유를 주석으로 적는다.
+
+### 6.4 DTO
+
+- 요청·응답 DTO는 record로 `dto`에 두고, 이름은 `{대상}{동작}Request`, `{대상}Response`로 짓는다.
+- 요청 검증은 Bean Validation 어노테이션과 한국어 `message`로 하고, Controller에서 `@Valid`를 붙인다.
+- 서비스 결과를 응답으로 바꾸는 일은 응답 DTO의 `static from(...)`이 맡는다. 엔티티를 응답으로 반환하지 않는다.
+- 서비스 계층끼리 주고받는 결과 record는 `service`에 둔다.
+
+### 6.5 엔티티
+
+- `@Getter`, `@NoArgsConstructor(access = AccessLevel.PROTECTED)`를 붙이고 `@Setter`·`@Builder`는 쓰지 않는다.
+- 생성은 `private` 생성자와 의도가 드러나는 이름의 정적 팩토리(`registerWithGitHub` 등)로 한다.
+- 상태 판단·변경은 엔티티 메서드로 한다(정책 및 상태 9.4 운영·보안 정책 > 상태 변경).
+- 생성·수정 시간을 모두 관리하는 엔티티는 `BaseTimeEntity`를 상속한다. 생성 시간만 있는 불변 테이블은 공통 모듈 적용 가이드 2.3의 별도 시간 처리를 따른다. 
+  - 컬럼·제약은 ERD, 마이그레이션 파일명은 ERD 7. 마이그레이션 파일 목록을 따른다.
+
+### 6.6 서비스·설정
+
+- 의존성은 `private final` 필드와 `@RequiredArgsConstructor`로 주입한다.
+- `@Transactional`은 public 메서드에 붙이고, 조회 메서드는 `readOnly = true`로 한다. 클래스에는 붙이지 않는다. 트랜잭션을 걸지 않는 public 쓰기 메서드에는 이유를 주석으로 적는다.
+- 현재 시각은 주입한 `Clock`으로 구한다.
+- 설정 값은 `@ConfigurationProperties` record와 `@Validated`로 묶는다. `@Value`는 쓰지 않는다.
+
+### 6.7 테스트
+
+- 테스트는 대상과 같은 패키지에 `{대상}Test`로 둔다.
+- 단위 테스트는 `MockitoExtension`, BDDMockito `given`, AssertJ로 작성한다.
+- Controller 테스트는 `@WebMvcTest`와 `@MockitoBean`으로 작성한다.
+- DB·Redis가 필요한 테스트는 Testcontainers를 쓰고, Docker가 없으면 `Assumptions`로 건너뛴다.
+- 테스트 메서드 주석은 5.5 테스트를 따른다.
+
+---
+
 end.
