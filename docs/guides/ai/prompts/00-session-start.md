@@ -9,14 +9,21 @@ Confirm the user, owner group, Issue, and branch, and choose the decision record
 - At the start of a new AI session
 - When switching to another Issue in the same session
 
-## Environment checklist (before reading any document)
+## Environment checklist
 
-1. Docker Desktop is running: `docker ps` returns no error
-2. GitHub MCP is connected: `/mcp` shows `github` connected
+### First-time setup (Claude Code only, once per machine)
+1. Docker Desktop is installed and running: `docker ps` returns no error
+2. Pull the GitHub MCP image: `docker pull ghcr.io/github/github-mcp-server`
+3. Register `GITHUB_PAT` as a user environment variable and restart IntelliJ + Claude Code
+4. Run `/mcp` and confirm `github` connected
+    - For Codex or Gemini CLI setup, see `docs/guides/ai/README.md` > `4.4`
+
+### Every session
+1. Working directory is the repository root
+2. If `.personal/` exists, read relevant files (development journal, reference docs)
+3. If the work involves GitHub Issues or PRs: run `/mcp` and confirm `github` connected
     - If CONNECTION_CLOSED: check `($env:GITHUB_PAT).Length` in PowerShell
     - If 0: re-run `setx GITHUB_PAT "token"` and restart IntelliJ + Claude Code
-3. Working directory is the repository root
-4. If `.personal/` exists, read relevant files (development journal, reference docs)
 
 ## Inputs
 
