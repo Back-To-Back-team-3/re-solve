@@ -9,6 +9,9 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 import com.backtoback.judge.global.error.JudgeErrorCode;
 
+/**
+ * 서비스 공통 예외의 오류 계약과 내부 진단 정보 보존을 검증한다.
+ */
 class JudgeExceptionTest {
     /**
      * 하나의 예외가 모든 채점 오류 코드와 해당 기본 메시지를 유지하는지 검증한다.

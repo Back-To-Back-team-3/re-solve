@@ -1,4 +1,4 @@
-package com.backtoback.judge.judge0.config;
+package com.backtoback.judge.judging.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,6 +20,9 @@ import org.springframework.web.client.RestClient;
 
 import com.sun.net.httpserver.HttpServer;
 
+/**
+ * Judge0 설정 바인딩·검증과 HTTP 클라이언트 정책을 검증한다.
+ */
 class Judge0ConfigurationTest {
     private final ApplicationContextRunner runner
         = new ApplicationContextRunner()
@@ -167,6 +170,9 @@ class Judge0ConfigurationTest {
         }
     }
 
+    /**
+     * 요청 추적 적용 여부를 검증할 HTTP 클라이언트 빌더를 등록한다.
+     */
     @TestConfiguration(proxyBeanMethods = false)
     static class HttpConfiguration {
         /**

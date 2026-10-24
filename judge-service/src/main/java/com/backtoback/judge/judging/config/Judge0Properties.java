@@ -1,4 +1,4 @@
-package com.backtoback.judge.judge0.config;
+package com.backtoback.judge.judging.config;
 
 import java.time.Duration;
 
@@ -10,7 +10,7 @@ import org.springframework.validation.annotation.Validated;
 import jakarta.validation.constraints.NotNull;
 
 /**
- * Judge0 통신 설정. 기본값은 application.yaml에서 관리한다.
+ * Judge0 통신 설정. 기본값은 {@code application.yaml}에서 관리한다.
  *
  * @param baseUrl Judge0 서버 주소; 미설정이면 빈 문자열
  * @param authHeader 인증 헤더 이름
