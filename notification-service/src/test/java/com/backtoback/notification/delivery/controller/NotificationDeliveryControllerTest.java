@@ -65,4 +65,15 @@ class NotificationDeliveryControllerTest {
             .andExpect(jsonPath("$.success").value(false))
             .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
+
+    @Test
+    @DisplayName("7.1.1 X-User-Id 헤더가 숫자가 아니면 401 UNAUTHORIZED와 AUTH_TOKEN_INVALID를 반환한다")
+    void subscribeWithInvalidUserIdHeaderReturnsUnauthorized() throws Exception {
+        // when & then
+        mockMvc
+            .perform(get("/api/v1/notifications/subscribe").header("X-User-Id", "abc"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+    }
 }
