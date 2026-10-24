@@ -26,6 +26,7 @@ class NotificationServiceApplicationTests {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.cloud.aws.sqs.enabled", () -> "false");
     }
 
     @Autowired
