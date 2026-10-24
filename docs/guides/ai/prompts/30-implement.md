@@ -13,6 +13,10 @@ Implement a settled Issue scope one commit at a time, with approval for each com
 - The Issue number and settled scope
 - The decision records and reference documents chosen in stage 00
 - `docs/guides/convention-build-manual.md` > `4. 평소 개발 시 — 매 커밋 전 루틴`
+- Check existing services for precedents before planning:
+  - `{similar-service}/build.gradle` — dependencies
+  - `{similar-service}/src/main/java/.../Application.java` — @Import, exclude list
+  - `{similar-service}/src/main/resources/application.yaml` — yaml structure
 
 ## Steps — A. Plan
 
@@ -34,6 +38,13 @@ Implement a settled Issue scope one commit at a time, with approval for each com
 2. Run the commands in `convention-build-manual.md` > `4. 평소 개발 시 — 매 커밋 전 루틴` and show the results.
 3. Show `git diff --stat` and the commit message, and wait for approval.
 4. Commit only after the user says to commit. Do not push.
+5. If the change affects runtime behavior (security chain, DB connection, external config, Swagger exposure), recommend manual verification before committing:
+   > PowerShell에서 직접 실행하세요. 비밀값은 Claude Code 터미널에 입력하지 않습니다.
+   > ```
+   > docker compose up -d {서비스명}
+   > # $env:DB_USERNAME='...'; $env:DB_PASSWORD='...'
+   > # ./gradlew :{서비스}:bootRun --args='--spring.profiles.active=local'
+   > ```
 
 ## Output format
 
@@ -58,6 +69,7 @@ Implement a settled Issue scope one commit at a time, with approval for each com
 - Change files owned by another owner group without that owner's confirmation (`AGENTS.md` > `3. Scope and prohibitions`).
 - Commit while compilation fails.
 - Push.
+- Ask the user to type secret values in the Claude Code terminal. Always instruct them to run commands with secrets in a separate PowerShell terminal.
 
 ## Human gate
 

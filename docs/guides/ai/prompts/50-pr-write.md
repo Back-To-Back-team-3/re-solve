@@ -36,6 +36,9 @@ Write a PR body from the actual changes and verification results only, and regis
 - Describe planned work as done.
 - Check tests that are not in the stage 40 result.
 - Register without approval.
+- Include CI check results in the PR body. CI failures are notified via Discord.
+- Include test results of services not in the diff. Report only the owner's service test result.
+- Assign reviewers by part. Always assign all team members except the author. Use the 리뷰어에게 section for part-specific requests.
 
 ## Human gate
 
