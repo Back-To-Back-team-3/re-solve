@@ -744,8 +744,8 @@ class TagApiTest {
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var first = executor.submit(() -> inTransaction(isolation, () -> {
                 switch (operation) {
-                    case "CREATE", "EMPTY_CREATE" -> tagService
-                        .create("admin", "commit-gap-first", new TagCreateRequest("첫 요청 태그", 0));
+                    case "CREATE", "EMPTY_CREATE" ->
+                        tagService.create("admin", "commit-gap-first", new TagCreateRequest("첫 요청 태그", 0));
                     case "MOVE" -> tagService.update(Long.parseLong(lastId), new TagUpdateRequest(null, 0));
                     case "DELETE" -> tagService.delete(Long.parseLong(lastId));
                     default -> throw new IllegalArgumentException(operation);
@@ -1244,13 +1244,18 @@ class TagApiTest {
      * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
      */
     @Test
+    @DisplayName("멱등키 누락·공백·길이 초과와 이름 길이 초과를 입력 오류로 거부한다")
     void missingBlankAndOversizedKeysAndNamesAreRejected() throws Exception {
         String body = "{\"name\":\"태그\",\"displayOrder\":0}";
         mvc.perform(admin(post(ADMIN_PATH)).content(body)).andExpect(status().isBadRequest());
         for (String key : List.of(" ", "k".repeat(101))) {
+            String reason = key.isBlank() ? "멱등키를 입력해 주세요." : "멱등키는 100자 이하로 입력해 주세요.";
             mvc
                 .perform(admin(post(ADMIN_PATH)).header("Idempotency-Key", key).content(body))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
+                .andExpect(jsonPath("$.error.details[0].field").value("Idempotency-Key"))
+                .andExpect(jsonPath("$.error.details[0].reason").value(reason));
         }
         mvc
             .perform(
@@ -1276,13 +1281,16 @@ class TagApiTest {
             "key-😀"
         }
     )
+    @DisplayName("비 ASCII 멱등키를 한국어 사유로 거부하고 태그와 요청 기록을 저장하지 않는다")
     void nonAsciiIdempotencyKeysAreRejected(String key) throws Exception {
         mvc
             .perform(
                 admin(post(ADMIN_PATH)).header("Idempotency-Key", key).content("{\"name\":\"태그\",\"displayOrder\":0}")
             )
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
+            .andExpect(jsonPath("$.error.details[0].field").value("Idempotency-Key"))
+            .andExpect(jsonPath("$.error.details[0].reason").value("멱등키는 ASCII 문자로 입력해 주세요."));
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isZero();
     }

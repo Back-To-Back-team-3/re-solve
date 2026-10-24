@@ -41,7 +41,16 @@ public class AdminTagController {
     @PostMapping("/api/v1/admin/problems/tags")
     public ResponseEntity<ApiResponse<TagResponse>> create(
         @AuthenticationPrincipal GatewayUser user,
-        @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 100) @Pattern(regexp = "\\p{ASCII}+") String key,
+        @RequestHeader("Idempotency-Key")
+        @NotBlank(message = "멱등키를 입력해 주세요.")
+        @Size(
+            max = 100,
+            message = "멱등키는 100자 이하로 입력해 주세요."
+        )
+        @Pattern(
+            regexp = "\\p{ASCII}+",
+            message = "멱등키는 ASCII 문자로 입력해 주세요."
+        ) String key,
         @Valid @RequestBody TagCreateRequest request
     ) {
         return ResponseEntity
