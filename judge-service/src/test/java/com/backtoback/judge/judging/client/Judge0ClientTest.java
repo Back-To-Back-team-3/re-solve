@@ -37,9 +37,9 @@ import com.backtoback.judge.judging.config.Judge0Properties;
 import com.backtoback.judge.judging.config.Judge0Properties.Language;
 import com.backtoback.judge.judging.config.Judge0Properties.Languages;
 import com.backtoback.judge.judging.dto.request.JudgeExecutionCreateRequest;
-import com.backtoback.judge.judging.service.JudgeExecutionResultResponse.State;
 import com.backtoback.judge.judging.service.JudgeLanguageService;
-import com.backtoback.judge.judging.service.JudgeRuntime;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 

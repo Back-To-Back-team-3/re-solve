@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.execution;
+package com.backtoback.judge.judging.service.execution;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -15,8 +15,8 @@ import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
-import com.backtoback.judge.judging.execution.java.JavaExecutionCodeGenerator;
-import com.backtoback.judge.judging.service.ExecutionSource;
+import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
+import com.backtoback.judge.judging.service.execution.java.JavaExecutionCodeGenerator;
 
 /** 언어별 생성기를 같은 인터페이스로 호출하고 공통 결과·요청으로 연결한다. */
 class ExecutionCodeGeneratorTest {

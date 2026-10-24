@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.execution.java;
+package com.backtoback.judge.judging.service.execution.java;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -12,8 +12,8 @@ import org.springframework.stereotype.Service;
 
 import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.FunctionSpec;
-import com.backtoback.judge.judging.execution.ExecutionCodeGenerator;
-import com.backtoback.judge.judging.service.ExecutionSource;
+import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
+import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 
 /**
  * {@code Solution}의 {@code public} 인스턴스 메서드를 실행하는 Java 17 소스를 생성한다. (정책 및 상태 §3.1·§3.2)

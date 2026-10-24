@@ -14,6 +14,7 @@ import com.backtoback.judge.judging.client.Judge0LanguageClient;
 import com.backtoback.judge.judging.config.Judge0Properties;
 import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.response.Judge0LanguageResponse;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 
 import lombok.RequiredArgsConstructor;
 

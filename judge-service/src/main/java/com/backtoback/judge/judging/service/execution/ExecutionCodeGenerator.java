@@ -1,10 +1,10 @@
-package com.backtoback.judge.judging.execution;
+package com.backtoback.judge.judging.service.execution;
 
 import java.util.Map;
 
 import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.FunctionSpec;
-import com.backtoback.judge.judging.service.ExecutionSource;
+import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 
 /**
  * 언어별 기본 코드와 테스트 한 건의 실행 코드를 생성하는 계약이다.

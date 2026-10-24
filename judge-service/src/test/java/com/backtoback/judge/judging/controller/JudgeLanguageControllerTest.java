@@ -21,7 +21,7 @@ import com.backtoback.judge.global.security.SecurityConfiguration;
 import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.service.JudgeLanguageAvailability;
 import com.backtoback.judge.judging.service.JudgeLanguageService;
-import com.backtoback.judge.judging.service.JudgeRuntime;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 
 /**
  * 언어 조회 API의 인증과 서비스 결과의 공개 응답 변환을 검증한다.

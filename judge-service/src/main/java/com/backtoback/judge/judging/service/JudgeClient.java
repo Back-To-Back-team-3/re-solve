@@ -2,6 +2,8 @@ package com.backtoback.judge.judging.service;
 
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.dto.request.JudgeExecutionCreateRequest;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionCreateResponse;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse;
 
 /** 실행 엔진에 코드를 접수하고 원시 실행 결과를 조회하는 계약을 정의한다. */
 public interface JudgeClient {
