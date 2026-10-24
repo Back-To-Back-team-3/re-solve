@@ -19,8 +19,10 @@ Group the owner group's features into categories (Step A), then split one approv
 
 ## Step A — Cycle table review (run before every issue)
 
-1. Read `docs/records/progress/{owner}.md` cycle table.
-2. Verify the next issue matches the table order and dependency.
+1. Check if `docs/records/progress/{owner}.md` exists and the cycle table is filled.
+    - If the file does not exist or the table is empty: skip to Step B. Use `planning.md` and the reference documents to plan instead.
+    - After Step B, output the issue breakdown result as a draft table so the user can record it in the progress file.
+2. Read the cycle table and verify the next issue matches the table order and dependency.
     - If a new issue was manually created, confirm its title and scope match the table.
     - If the table needs update (add / insert / change), propose changes and wait for Human gate.
 3. Confirm dependency order before proceeding to Step B.
