@@ -1199,7 +1199,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 - 기록 행을 잠근 뒤 만료 여부와 원본 요청값을 확인한다. 유효한 동일 요청은 최초 응답을 반환하고 만료 시간을 연장하지 않는다.
 - 만료된 기록이 남아 있으면 새 요청값과 만료 시각으로 갱신하고 이전 결과를 비운다. 이미 삭제된 기록은 새로 생성한다.
 - 요청 기록·태그 생성·순번 변경·최초 응답 저장은 같은 트랜잭션에서 처리한다. 실패하면 함께 롤백한다.
-- 정리 스케줄러는 기본 1시간 간격(`fixedDelay`)으로 만료 기록을 실행당 최대 500개 삭제한다. 처리 중 잠긴 행은 `SKIP LOCKED`로 건너뛴다. 정리 전이라도 만료 시각이 지나면 새 요청으로 처리한다.
+- 만료 기록 정리는 스케줄러 명세 §2.2를 따른다. 정리 전이라도 만료 시각이 지나면 새 요청으로 처리한다.
 
 ### 4.3 judge
 
@@ -2658,11 +2658,13 @@ problem-service/src/main/resources/db/migration/
   V1__problem_create_tags.sql
   V2__problem_add_unique_tags.sql
   V3__problem_create_tag_creation_records.sql
+  V4__common_create_shedlock.sql
 ```
 
 - V1: 태그 테이블과 이름 UNIQUE 제약 생성
 - V2: 표시 순서 UNIQUE 제약 추가
 - V3: 태그 생성 멱등 기록 테이블 생성
+- V4: 공통 ShedLock 테이블 생성. 태그 멱등 기록 정리 스케줄러에서 사용
 
 아래 목록은 전체 구축 계획이며, 개발 중 실제 적용 파일과 번호는 구분합니다.
 

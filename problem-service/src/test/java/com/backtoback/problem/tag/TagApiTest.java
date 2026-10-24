@@ -23,6 +23,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -62,6 +63,7 @@ import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -100,7 +102,7 @@ class TagApiTest {
     private static final String ADMIN_PATH = "/api/v1/admin/problems/tags";
     private static final String LIST_PATH = "/api/v1/problems/tags";
 
-    // 잠금 대기 관측용 연결에서만 컨테이너 root 계정을 사용한다. 서비스 연결은 기존 테스트 계정을 유지한다.
+    // 잠금 대기 관측과 테스트 DDL에서만 컨테이너 root 계정을 사용한다. 서비스 연결은 기존 테스트 계정을 유지한다.
     static final MySQLContainer MYSQL
         = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db").withEnv("MYSQL_ROOT_HOST", "%");
 
@@ -1885,15 +1887,61 @@ class TagApiTest {
      */
     @Test
     void schedulerDeletesOnlyExpiredRequestsAndKeepsTags() throws Exception {
+        // given
         create("old", "해시", 0);
         when(clock.instant()).thenReturn(Instant.parse("2026-10-13T01:00:00Z"));
         create("fresh", "스택", 1);
         when(clock.instant()).thenReturn(Instant.parse("2026-10-14T00:00:00Z"));
+        // when
         cleanupScheduler.deleteExpiredRecords();
+        // then
         assertThat(jdbc.queryForList("SELECT idempotency_key FROM tag_creation_records", String.class))
             .containsExactly("fresh");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(2);
-        assertThat(creationRecords.deleteExpired()).isZero();
+        cleanupScheduler.deleteExpiredRecords();
+        assertThat(jdbc.queryForList("SELECT idempotency_key FROM tag_creation_records", String.class))
+            .containsExactly("fresh");
+    }
+
+    /**
+     * 후보 조회 뒤 유효 기간이 연장된 기록을 삭제하지 않는지 검증한다.
+     */
+    @Test
+    @DisplayName("후보 조회 후 만료 시각이 연장된 기록은 삭제하지 않는다")
+    void cleanupRechecksExpiryAfterCandidateSelection() throws Exception {
+        // given
+        create("extended", "해시", 0);
+        Instant cleanupTime = Instant.parse("2026-10-14T00:00:00Z");
+        AtomicBoolean candidateTransactionObserved = new AtomicBoolean();
+        AtomicBoolean renewed = new AtomicBoolean();
+        when(clock.instant()).thenAnswer(invocation -> {
+            if (TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+                candidateTransactionObserved.set(true);
+            } else if (candidateTransactionObserved.get() && renewed.compareAndSet(false, true)) {
+                // 실제 후보 조회가 끝난 뒤, 첫 건별 삭제를 시작하기 전 다른 쓰기 트랜잭션으로 연장한다.
+                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                var renewalTransaction = new TransactionTemplate(transactionManager);
+                renewalTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                renewalTransaction
+                    .executeWithoutResult(
+                        status -> jdbc
+                            .update(
+                                "UPDATE tag_creation_records SET expires_at = ? WHERE idempotency_key = 'extended'",
+                                LocalDateTime.ofInstant(cleanupTime, ZoneId.of("Asia/Seoul")).plusHours(1)
+                            )
+                    );
+            }
+            return cleanupTime;
+        });
+
+        // when
+        cleanupScheduler.deleteExpiredRecords();
+
+        // then
+        assertThat(candidateTransactionObserved).isTrue();
+        assertThat(renewed).isTrue();
+        assertThat(jdbc.queryForList("SELECT idempotency_key FROM tag_creation_records", String.class))
+            .containsExactly("extended");
     }
 
     /**
@@ -1901,6 +1949,7 @@ class TagApiTest {
      */
     @Test
     void cleanupDeletesAtMost500RequestsPerRun() {
+        // given
         LocalDateTime expired = LocalDateTime.now(clock).minusHours(1);
         List<Object[]> rows
             = IntStream
@@ -1920,9 +1969,82 @@ class TagApiTest {
                     created_at, updated_at, version, result_tag_id, result_name, result_display_order)
             VALUES ('admin', ?, '태그', 1, ?, ?, ?, 1, 1, '태그', 1)
             """, rows);
-        assertThat(creationRecords.deleteExpired()).isEqualTo(500);
-        assertThat(creationRecords.deleteExpired()).isEqualTo(1);
-        assertThat(creationRecords.deleteExpired()).isZero();
+        // when
+        cleanupScheduler.deleteExpiredRecords();
+        // then
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(1);
+        cleanupScheduler.deleteExpiredRecords();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isZero();
+    }
+
+    /**
+     * 한 건의 실제 DB 삭제 실패가 앞선 삭제를 되돌리지 않고 다음 후보 처리를 허용하는지 검증한다.
+     *
+     * @throws SQLException 테스트 전용 트리거 생성·정리에 실패한 경우
+     */
+    @Test
+    @DisplayName("한 기록의 삭제 실패가 앞선 삭제를 되돌리지 않고 다음 기록 처리를 허용한다")
+    void cleanupFailureRollsBackOnlyItsOwnTransaction() throws SQLException {
+        // given
+        LocalDateTime expired = LocalDateTime.now(clock).minusHours(1);
+        List<Object[]> rows
+            = Stream
+                .of("delete-before", "fail-delete", "delete-after")
+                .map(
+                    key -> new Object[] {
+                        key,
+                        expired,
+                        expired.minusHours(24),
+                        expired.minusHours(24)
+                    }
+                )
+                .toList();
+        jdbc.batchUpdate("""
+            INSERT INTO tag_creation_records
+                (admin_id, idempotency_key, request_name, request_display_order, expires_at,
+                    created_at, updated_at, version, result_tag_id, result_name, result_display_order)
+            VALUES ('admin', ?, '태그', 1, ?, ?, ?, 1, 1, '태그', 1)
+            """, rows);
+        String trigger = "tr_test_fail_tag_creation_record_delete";
+        // DDL만 컨테이너 관리자 연결로 실행하고, 실제 삭제는 서비스 계정과 트랜잭션을 그대로 사용한다.
+        try (
+            var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), "root", MYSQL.getPassword());
+            var statement = connection.createStatement()
+        ) {
+            Throwable testFailure = null;
+            try {
+                statement.execute("DROP TRIGGER IF EXISTS " + trigger);
+                statement.execute("""
+                    CREATE TRIGGER tr_test_fail_tag_creation_record_delete
+                    BEFORE DELETE ON tag_creation_records
+                    FOR EACH ROW
+                    BEGIN
+                        IF OLD.idempotency_key = 'fail-delete' THEN
+                            SIGNAL SQLSTATE '23000' SET MESSAGE_TEXT = 'intentional cleanup test failure';
+                        END IF;
+                    END
+                    """);
+
+                // when
+                cleanupScheduler.deleteExpiredRecords();
+
+                // then
+                assertThat(jdbc.queryForList("SELECT idempotency_key FROM tag_creation_records", String.class))
+                    .containsExactly("fail-delete");
+            } catch (SQLException | RuntimeException | Error failure) {
+                testFailure = failure;
+                throw failure;
+            } finally {
+                try {
+                    statement.execute("DROP TRIGGER IF EXISTS " + trigger);
+                } catch (SQLException cleanupFailure) {
+                    if (testFailure == null) {
+                        throw cleanupFailure;
+                    }
+                    testFailure.addSuppressed(cleanupFailure);
+                }
+            }
+        }
     }
 
     /**
@@ -1932,6 +2054,7 @@ class TagApiTest {
      */
     @Test
     void cleanupSkipsLockedRequestAndDoesNotDeleteItsRenewedRecord() throws Exception {
+        // given
         create("locked", "해시", 0);
         create("unlocked", "스택", 1);
         when(clock.instant()).thenReturn(Instant.parse("2026-10-14T00:00:00Z"));
@@ -1956,12 +2079,14 @@ class TagApiTest {
             }));
             try {
                 assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
-                assertThat(creationRecords.deleteExpired()).isEqualTo(1);
+                // when
+                cleanupScheduler.deleteExpiredRecords();
             } finally {
                 renew.countDown();
             }
             String renewedId = pending.get(10, TimeUnit.SECONDS);
-            assertThat(creationRecords.deleteExpired()).isZero();
+            // then
+            cleanupScheduler.deleteExpiredRecords();
             assertThat(jdbc.queryForObject("SELECT result_tag_id FROM tag_creation_records", String.class))
                 .isEqualTo(renewedId);
         }

@@ -53,18 +53,36 @@ public class TagCreationRecordService {
     }
 
     /**
-     * 처리 중인 기록을 건너뛰고 만료된 태그 생성 요청을 최대 500개 삭제한다.
-     * READ_COMMITTED 트랜잭션에서 대상 조회와 삭제를 함께 수행한다.
+     * 만료 정리 회차에서 잠금 없이 조회할 후보 ID를 최대 500개 반환한다.
+     * 후보 조회 트랜잭션은 건별 삭제 트랜잭션과 분리해 종료한다.
      *
-     * @return 삭제한 요청 기록 수
+     * @return 만료 시각과 ID 순으로 조회한 삭제 후보 ID 목록
      */
-    @Transactional(isolation = Isolation.READ_COMMITTED)
-    public int deleteExpired() {
-        List<Long> ids = creationRecords.findExpiredIdsForUpdate(LocalDateTime.now(clock), CLEANUP_BATCH_SIZE);
-        if (ids.isEmpty()) {
-            return 0;
+    @Transactional(
+        readOnly = true,
+        isolation = Isolation.READ_COMMITTED,
+        propagation = Propagation.REQUIRES_NEW
+    )
+    public List<Long> findExpiredIdsForCleanup() {
+        return creationRecords.findExpiredIds(LocalDateTime.now(clock), CLEANUP_BATCH_SIZE);
+    }
+
+    /**
+     * 만료 후보 하나를 별도 트랜잭션에서 다시 확인하고, 아직 만료된 경우에만 삭제한다.
+     *
+     * @param id 만료 후보 요청 기록 ID
+     * @return 잠금 획득 및 재확인 후 삭제했으면 {@code true}
+     */
+    @Transactional(
+        isolation = Isolation.READ_COMMITTED,
+        propagation = Propagation.REQUIRES_NEW
+    )
+    public boolean deleteExpiredById(Long id) {
+        TagCreationRecord record = creationRecords.findByIdForUpdateSkipLocked(id).orElse(null);
+        if (record == null || !record.isExpiredAt(LocalDateTime.now(clock))) {
+            return false;
         }
-        creationRecords.deleteAllByIdInBatch(ids);
-        return ids.size();
+        creationRecords.delete(record);
+        return true;
     }
 }

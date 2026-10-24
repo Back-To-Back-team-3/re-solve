@@ -59,19 +59,32 @@ public interface TagCreationRecordRepository extends JpaRepository<TagCreationRe
     Optional<TagCreationRecord> findForUpdate(@Param("adminId") String adminId, @Param("key") String key);
 
     /**
-     * 잠기지 않은 만료 기록의 ID를 제한된 수만큼 조회하고 잠근다.
-     * READ_COMMITTED 트랜잭션에서 호출하고, 조회부터 삭제까지 잠금을 유지한다.
+     * 만료 기록의 ID 후보를 제한된 수만큼 잠금 없이 조회한다.
+     * 삭제 시점의 잠금과 만료 재확인은 별도 건별 트랜잭션에서 수행한다.
      *
      * @param now 만료 여부를 판단할 기준 시각
      * @param batchSize 한 번에 조회할 최대 기록 수
-     * @return 만료 시각과 ID 순으로 조회한 삭제 대상 ID 목록
+     * @return 만료 시각과 ID 순으로 조회한 삭제 후보 ID 목록
      */
     @Query(
         value = """
             SELECT id FROM tag_creation_records
-            WHERE expires_at <= :now ORDER BY expires_at, id LIMIT :batchSize FOR UPDATE SKIP LOCKED
+            WHERE expires_at <= :now ORDER BY expires_at, id LIMIT :batchSize
             """,
         nativeQuery = true
     )
-    List<Long> findExpiredIdsForUpdate(@Param("now") LocalDateTime now, @Param("batchSize") int batchSize);
+    List<Long> findExpiredIds(@Param("now") LocalDateTime now, @Param("batchSize") int batchSize);
+
+    /**
+     * 요청 기록을 조회하고, 잠기지 않은 행의 쓰기 잠금을 획득한다. 잠긴 행은 건너뛴다.
+     * READ_COMMITTED 트랜잭션에서 호출한다.
+     *
+     * @param id 요청 기록 ID
+     * @return 행이 없거나 잠겨 있으면 빈 Optional; 행이 있고 잠금을 획득했으면 요청 기록
+     */
+    @Query(
+        value = "SELECT * FROM tag_creation_records WHERE id = :id FOR UPDATE SKIP LOCKED",
+        nativeQuery = true
+    )
+    Optional<TagCreationRecord> findByIdForUpdateSkipLocked(@Param("id") Long id);
 }

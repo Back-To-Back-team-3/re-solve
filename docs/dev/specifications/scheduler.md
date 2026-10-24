@@ -171,6 +171,7 @@
 > 작성: 담당 B · 서비스: `problem-service`
 > 
 - `UnlinkedAssetCleanupScheduler` — 매일 04:30, 본문에 연결되지 않은 이미지·DB 실패로 남은 업로드 파일 정리
+- `TagCreationRecordCleanupScheduler` — 매시 정각, 만료된 태그 생성 멱등 기록 정리
 
 > 문제 공개·회차 전이는 관리자 API가 즉시 수행하므로 상태 전이 스케줄러는 없다. 검수 워크플로(P2, 보류)를 도입하면 심사 만료 스케줄러를 추가한다.
 > 
@@ -201,6 +202,27 @@
 | S3 삭제 실패 | 네트워크 오류 | `DELETING`에서 `PENDING`으로 복귀, 다음 날 재시도 | 행 삭제는 S3 성공 후 |
 
 **명세서와의 관계:** 정책 §4 이미지 정리 / API 2.3.1·2.4.1 / ERD 6.2 미연결 이미지 정리
+
+### 2.2 `TagCreationRecordCleanupScheduler` — 태그 생성 멱등 기록 정리
+
+| 항목 | 값 |
+| --- | --- |
+| 소유 서비스·패키지 | `problem-service` / `tag` |
+| 실행 방식 | 매시 정각 (`cron = 0 0 * * * *`, `zone = Asia/Seoul`) |
+| 잠금 | JDBC ShedLock `TagCreationRecordCleanupScheduler`, 기본 `lockAtMostFor = 30분` |
+| 후보 조회 | 잠금 없이 `expires_at <= now()` 순서로 최대 500개 ID 조회 |
+| 처리 | 후보별 별도 `READ_COMMITTED` 트랜잭션에서 현재 행을 `FOR UPDATE SKIP LOCKED`로 조회하고 만료 시각 재확인 후 삭제 |
+| 회차 제한 | 시작 후 20초가 지나면 다음 후보 처리를 시작하지 않으며, 진행 중인 DB 작업은 완료까지 기다림 |
+| 실패 처리 | 개별 데이터 접근 실패는 로그를 남기고 다음 후보 처리. DB 연결 장애는 회차를 중단해 ShedLock을 해제 |
+| 보관 | 요청 기록의 24시간 유효기간과 만료 키 재사용 규칙은 ERD 4.2.15를 따른다 |
+
+**동시성 설계 포인트:**
+
+- 후보 조회와 개별 삭제는 별도 트랜잭션이다. 각 삭제 트랜잭션은 현재 만료 상태를 다시 판정하고, 다른 작업이 잠근 행은 건너뛴다.
+- 건별 트랜잭션이므로 한 후보 실패가 앞서 커밋된 삭제를 되돌리지 않는다. 연결 장애는 이후 DB 호출도 실패할 수 있어 회차를 중단한다.
+- 20초 제한은 새 후보를 시작하는 경계이며, 실행 중인 DB 명령이나 트랜잭션을 강제 취소하지 않는다.
+
+**명세서와의 관계:** ERD 4.2.15 태그 생성 멱등 기록 / ERD 7.2 `V4__common_create_shedlock.sql`
 
 ---
 
@@ -1076,6 +1098,7 @@
 | `DiagnosisExpiryScheduler` | 진단 문항 제출 API | `diagnosis_submissions` | `uk_diagnosis_submissions_attempt_problem_seq` | 1.1 |
 | `DiagnosisScoringScheduler` | 진단 결과 이벤트 소비 | `diagnosis_attempts.status` | `WHERE status = 'CLOSED'` | 1.2 |
 | `UnlinkedAssetCleanupScheduler` | 문제 등록·회차 API | `problem_images.status` | `PENDING → DELETING` 선점 | 2.1 |
+| `TagCreationRecordCleanupScheduler` | 멱등 태그 생성 API | `tag_creation_records` | 건별 `READ_COMMITTED` + `FOR UPDATE SKIP LOCKED` + 만료 재확인 | 2.2 |
 | `JudgeJobExecutor` | 다른 실행기 | `judge_jobs` | `SKIP LOCKED` + 새 `lease_token` | 3.1 |
 | `JudgeJobExecutor` | `JudgeLeaseRecoveryScheduler` | `judge_jobs` | `lease_token` 조건부 UPDATE | 3.1·3.2 |
 | `JudgeReconciliationScheduler` | 실행기 결과 저장 | `submissions.status` | `WHERE status = :observed AND judge_attempt = :attempt` | 3.4 |

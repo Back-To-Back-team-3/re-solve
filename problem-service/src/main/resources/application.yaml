@@ -51,4 +51,3 @@ problem:
   tag-idempotency:
     cleanup:
       enabled: true
-      interval: PT1H
