@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.execution.python;
+package com.backtoback.judge.judging.service.execution.python;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -21,7 +21,8 @@ import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
-import com.backtoback.judge.judging.service.PythonExecutionSource;
+import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
+import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -30,7 +31,7 @@ import tools.jackson.databind.json.JsonMapper;
 class PythonExecutionProcessTest {
     @TempDir
     Path directory;
-    private final PythonExecutionCodeGenerator generator = new PythonExecutionCodeGenerator();
+    private final ExecutionCodeGenerator generator = new PythonExecutionCodeGenerator();
     private final JsonMapper mapper = JsonMapper.builder().build();
 
     /**
@@ -266,7 +267,7 @@ class PythonExecutionProcessTest {
      * @return 종료 코드와 원시 출력
      * @throws Exception 파일 생성 또는 실행이 실패한 경우
      */
-    private ProcessResult execute(PythonExecutionSource source) throws Exception {
+    private ProcessResult execute(ExecutionSource source) throws Exception {
         Path file = directory.resolve("main.py");
         Path stdin = directory.resolve("stdin");
         Path stdout = directory.resolve("stdout");
