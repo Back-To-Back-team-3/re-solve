@@ -2,6 +2,7 @@ package com.backtoback.problem.tag;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -37,6 +38,8 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -57,6 +60,8 @@ import tools.jackson.databind.ObjectMapper;
 /** 태그 API의 권한·검증·순번·동시성 동작을 검증한다. */
 @SpringBootTest(
     properties = {
+        // 테스트 클래스패스의 잠금 fixture도 JPA 스키마 검증 대상에 포함된다.
+        "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
         "spring.cloud.aws.region.static=ap-northeast-2",
         "spring.cloud.aws.credentials.access-key=test",
         "spring.cloud.aws.credentials.secret-key=test"
@@ -82,6 +87,8 @@ class TagApiTest {
     private ObjectMapper mapper;
     @Autowired
     private TagService tagService;
+    @MockitoSpyBean
+    private TagOrderService tagOrderService;
     @Autowired
     private RedissonClient redisson;
     @Autowired
@@ -287,6 +294,43 @@ class TagApiTest {
             .andExpect(status().isConflict());
         assertThat(displayOrder(existing)).isZero();
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, existing)).isZero();
+    }
+
+    @Test
+    @DisplayName("태그 저장 시 순번 UNIQUE 충돌은 409로 응답하고 선행 순번 변경을 롤백한다")
+    void duplicateDisplayOrderReturnsConflictAndRollsBackShift() throws Exception {
+        // given
+        create("first", "첫 태그", 0);
+        create("second", "두 번째 태그", 1);
+        var originalTags
+            = jdbc
+                .queryForList("SELECT id, name, display_order, version, created_at, updated_at FROM tags ORDER BY id");
+        TagOrderService orderTarget = AopTestUtils.getUltimateTargetObject(tagOrderService);
+        // 실제 순번 이동을 flush한 뒤 점유된 순번을 반환해 DB 저장·예외 변환·롤백 경로를 검증한다.
+        doAnswer(invocation -> {
+            int availableOrder = (int)invocation.callRealMethod();
+            return availableOrder + 1;
+        }).when(orderTarget).makeRoomFor(0);
+
+        // when
+        var response
+            = mvc
+                .perform(
+                    admin(post(ADMIN_PATH))
+                        .header("Idempotency-Key", "order-conflict")
+                        .content(mapper.writeValueAsString(new TagCreateRequest("새 태그", 0)))
+                )
+                .andReturn()
+                .getResponse();
+
+        // then
+        assertThat(response.getStatus()).isEqualTo(409);
+        var error = mapper.readTree(response.getContentAsString()).path("error");
+        assertThat(error.path("code").asText()).isEqualTo("PROBLEM_VERSION_CONFLICT");
+        assertThat(response.getContentAsString()).doesNotContain("uk_tags_display_order", "Duplicate entry");
+        assertThat(
+            jdbc.queryForList("SELECT id, name, display_order, version, created_at, updated_at FROM tags ORDER BY id")
+        ).isEqualTo(originalTags);
     }
 
     @ParameterizedTest

@@ -27,7 +27,7 @@ public class ProblemExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(ProblemExceptionHandler.class);
 
     /**
-     * DB 제약 이름과 MySQL 오류 코드로 태그 중복·사용 중 오류를 구분한다.
+     * DB 제약 이름과 MySQL 오류 코드로 태그 중복·순번 충돌·사용 중 오류를 구분한다.
      * 알 수 없는 제약 위반은 서버 오류로 응답하고 로그에는 오류 코드와 예외 타입만 남긴다.
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
@@ -40,6 +40,8 @@ public class ProblemExceptionHandler {
                 name = name.substring(name.lastIndexOf('.') + 1);
                 if (violation.getErrorCode() == 1062 && "uk_tags_name".equals(name)) {
                     code = ProblemErrorCode.PROBLEM_TAG_DUPLICATED;
+                } else if (violation.getErrorCode() == 1062 && "uk_tags_display_order".equals(name)) {
+                    code = ProblemErrorCode.PROBLEM_VERSION_CONFLICT;
                 } else if (violation.getErrorCode() == 1451 && "fk_problem_revision_tags_tag".equals(name)) {
                     code = ProblemErrorCode.PROBLEM_TAG_IN_USE;
                 }
