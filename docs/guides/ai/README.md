@@ -53,6 +53,14 @@
 | Codex CLI | "AGENTS.md §6을 요약해" 입력 | 언어·주석 규칙 요약, 한국어 답변 |
 | Gemini CLI | `/memory show` 입력 | AGENTS.md 내용이 표시됨 |
 
+**비밀값 처리 원칙**
+- DB 계정·토큰·비밀번호가 포함된 명령은 Claude Code 터미널이 아닌 별도 PowerShell에서 직접 실행한다.
+- Claude Code에 값을 직접 입력하지 않는다.
+
+**Stack PR 연결**
+- MCP로 base 브랜치 지정까지만 가능하다.
+- `Create stack` / `Add to stack` 버튼 클릭은 GitHub 웹에서 직접 한다.
+
 ## 4. GitHub MCP 연결
 
 GitHub Issue·PR을 조회하고, 사용자 승인 후 등록할 수 있도록 GitHub MCP 서버를 연결한다.
@@ -225,18 +233,29 @@ AI에게 단계 이름으로 요청하면 `AGENTS.md` §7에 따라 해당 프�
 ### 파이프라인 흐름
 
 ```text
-[00 세션 시작] ─ 모든 단계 앞에서 1회
+[00 세션 시작] — 모든 단계 앞에서 1회, .personal/ 읽기 포함
         │
-[10 계획·이슈 쪼개기] A. 카테고리 ──(Human gate)── B. 이슈 ──(Human gate)
-        │                                           └ 계약 변경 필요 → 문서 Issue 먼저
-[20 이슈 작성] ──(Human gate: 등록 승인)
+[10 사이클 표 점검·이슈 쪼개기]
+    A. 사이클 표 점검 ──(Human gate: 변경 승인)
+    B. 카테고리 계획 ──(Human gate)
+    C. 이슈 쪼개기 ──(Human gate)
+        │ 계약 변경 필요 → 문서 Issue 먼저
         │
-[30 코드 구현] A. 계획 ──(Human gate)── B. 커밋마다 ──(Human gate: 커밋 승인)
+[20 이슈 작성·확인] ──(Human gate: 등록 승인)
+        │ 수동 생성 이슈면 제목·본문 대조 후 보고
         │
-[40 자체 리뷰] ── review-checklist.md ── (미통과 → 30 B)
-[50 PR 작성] ──(Human gate: 등록 승인, Draft)
-[40 리뷰 보조] (리뷰어) ── review-checklist.md ── 코멘트는 사람이 등록
-[60 트러블슈팅] ── 실패·리뷰 반영 시 → 30 B
+[30 구현]
+    A. 커밋 계획 ──(Human gate: 계획 승인)
+    B. 커밋마다 ──(Human gate: 커밋 승인)
+        │ 런타임 영향 시 로컬 실행 확인 권장
+        │
+[40 셀프 리뷰] ── review-checklist.md ── (미통과 → 30 B)
+        │
+[50 PR 작성] ──(Human gate: Draft 등록 승인)
+        │
+[팀 리뷰] — 리뷰어가 40-review 사용, 코멘트는 사람이 직접 등록
+        │
+[60 트러블슈팅·피드백 반영] ──→ 30 B
 ```
 
 ### 프롬프트 구조
