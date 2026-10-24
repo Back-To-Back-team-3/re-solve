@@ -47,7 +47,7 @@ API 명세서 2.3.0의 `functionSpec.parameters[].type`과 `returnType`에 사�
 - null·NaN·Infinity·중복 객체 키는 허용하지 않는다. 빈 문자열·배열은 허용한다.
 - 숫자·문자열·불리언을 자동 변환하지 않는다. 정수는 선언한 비트 범위 안에 있어야 한다.
 - 문자열의 공백·대소문자·줄바꿈과 배열 순서를 그대로 비교한다. 객체 키 순서는 비교하지 않는다.
-- 부동소수 값은 [선언 타입 정규화와 정확 비교](#6-선언-타입-정규화와-정확-비교)에 따라 비교한다. 문제별 `comparatorPolicy`는 두지 않는다.
+- 부동소수 값은 [선언 타입 정규화와 정확 비교](#7-선언-타입-정규화와-정확-비교)에 따라 비교한다. 문제별 `comparatorPolicy`는 두지 않는다.
 - 관리자 입력·기대값의 타입·구조 불일치는 422로 거절한다. 정상 실행한 사용자 반환값의 타입·값 불일치는 `WA`다. 실행 실패의 판정은 정책 및 상태 3.3을 따른다.
 
 예를 들어 `values`라는 배열 인자 하나를 받는 함수의 입력은 `{"values":"[1,\"a\"]"}`로 전달한다. 인자 목록을 표현하는 바깥 배열을 추가하지 않는다. `expectedReturnText`도 반환값 하나의 JSON 텍스트다.
@@ -83,11 +83,54 @@ Python 함수는 최상위 동기 `solution`으로 작성하며, 기본 코드�
 | `ARRAY`의 세 방식 | `list` |
 | `OBJECT` | 문자열 키의 `dict` |
 
-Python `int`가 큰 정수를 표현할 수 있어도 입력은 선언한 `INT32`·`INT64` 범위 안에 있어야 한다. `FLOAT32` 입력은 binary32로 변환한 값을 Python `float`에 복원한다. Python 연산 자체가 binary32 정밀도로 고정되는 것은 아니다. 반환값의 타입·범위와 숫자 비교는 3절·6절의 공통 계약을 따른다.
+Python `int`가 큰 정수를 표현할 수 있어도 입력은 선언한 `INT32`·`INT64` 범위 안에 있어야 한다. `FLOAT32` 입력은 binary32로 변환한 값을 Python `float`에 복원한다. Python 연산 자체가 binary32 정밀도로 고정되는 것은 아니다. 반환값의 타입·범위와 숫자 비교는 3절·7절의 공통 계약을 따른다.
 
 배열을 `tuple`이나 `set`으로 자동 변환하지 않으며, 객체는 문자열 키의 `dict`로 표현한다. 동일 타입·위치별 타입·반복 패턴의 길이·순서·원소 타입과 객체의 필드 집합은 공통 TypeSpec으로 검증한다.
 
-## 6. 선언 타입 정규화와 정확 비교
+## 6. C++ 타입 매핑
+
+C++은 C++17 표준 타입과 생성기가 제공하는 `Value`를 사용한다. 사용자 함수는 전역 `solution`으로 작성하며, 기본 코드에 포함된 공통 타입 선언을 사용한다. 실행기와 직렬화기는 외부 JSON 라이브러리를 요구하지 않는다.
+
+| TypeSpec | C++ 타입 |
+| --- | --- |
+| `INT32` | `int` |
+| `INT64` | `long long` |
+| `FLOAT32` | `float` |
+| `FLOAT64` | `double` |
+| `STRING` | `std::string` |
+| `BOOLEAN` | `bool` |
+| `OBJECT` | `std::map<std::string, Value>` |
+| `ARRAY` + `elementType` | `std::vector<T>`. 예: `std::vector<int>`, `std::vector<std::vector<std::string>>` |
+| `ARRAY` + `positionTypes` 또는 `repeatTypes` | `std::vector<Value>` |
+
+`Value`의 `data`는 다음 선언 타입을 보관하는 `std::variant`다.
+
+```cpp
+using Array = std::vector<Value>;
+using Object = std::map<std::string, Value>;
+using Storage = std::variant<
+    int, long long, float, double,
+    std::string, bool, Array, Object
+>;
+```
+
+혼합 배열의 원소와 객체 필드는 선언 TypeSpec에 해당하는 대안으로 복원한다. 예를 들어 `INT32` 값은 `std::get<int>(value.data)`로 읽는다. 중첩 배열은 `Value::Array`, 중첩 객체는 `Value::Object`로 표현한다. 배열의 길이·순서·반복 패턴과 객체의 필드 집합은 공통 계약을 따르며, `std::map`의 순서는 객체 키의 비교 기준이 아니다.
+
+숫자는 사용자 함수·배열 원소·`Value::Storage`에서 동일하게 `int`·`long long`·`float`·`double`로 표현한다. `INT64`에는 플랫폼에 따라 크기가 달라지는 `long`을 사용하지 않는다. 기본형의 이름만으로 정확한 비트 폭이 보장되지는 않으므로, 생성기는 아래 조건을 `static_assert`로 검사한다. 조건에 맞지 않는 환경에서는 기본 코드와 실행 코드의 컴파일을 거절한다.
+
+| 대상 | 정적 검사 조건 |
+| --- | --- |
+| 바이트 | `CHAR_BIT == 8` |
+| `int` | 4바이트, 부호를 제외한 값 비트 31개, 최솟값 −2³¹ |
+| `long long` | 8바이트, 부호를 제외한 값 비트 63개, 최솟값 −2⁶³ |
+| `float` | 4바이트, IEEE 754 지원, 기수 2, 유효숫자 24비트, `min_exponent == -125`, `max_exponent == 128` |
+| `double` | 8바이트, IEEE 754 지원, 기수 2, 유효숫자 53비트, `min_exponent == -1021`, `max_exponent == 1024` |
+
+함수 시그니처도 입력·반환값의 기본형이 위 매핑과 정확히 같아야 한다. 매개변수의 참조·`const`는 허용하지만 암묵적 수치 변환은 허용하지 않는다. 예를 들어 `INT64` 함수에 `long`을 쓰면 `long`과 `long long`이 같은 크기인 환경에서도 거절한다. 내부 실행 스트림의 길이·비트열을 읽는 unsigned 정수는 바이트 해석용 고정 폭 타입으로 유지한다.
+
+생성기는 표준 타입 이름 앞에 전역 한정자 `::`를 붙인다. `::std::vector<...>`와 `std::vector<...>`는 같은 표준 타입을 가리킨다. 정상 실행한 반환값의 TypeSpec·범위·기대값 일치 여부는 상위 비교기가 확인한다.
+
+## 7. 선언 타입 정규화와 정확 비교
 
 기대값과 실제 반환값을 각각 TypeSpec의 선언 타입으로 정규화한 뒤, 허용 오차 없이 숫자 값이 같은지 비교한다. 원본 JSON 텍스트의 자릿수·표기 방식이나 두 값의 차이가 임의의 epsilon보다 작은지는 비교 기준으로 사용하지 않는다.
 
