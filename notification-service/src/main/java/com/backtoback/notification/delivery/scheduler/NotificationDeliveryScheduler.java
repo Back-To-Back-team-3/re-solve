@@ -9,7 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 실시간 알림 스트림의 30초 주기 Heartbeat 전송 및 60초 경과 연결 세션의 정상 종료를 담당하는 스케줄러.
+ * 실시간 알림 스트림의 30초 주기 Heartbeat 전송 및 60초 경과 연결 세션의 보조 정리(Sweeper)를 담당하는 스케줄러.
  */
 @Slf4j
 @Component
@@ -28,8 +28,10 @@ public class NotificationDeliveryScheduler {
     }
 
     /**
-     * 10초 지연마다 60초 이상 유지된 Emitter 세션을 정상 완료(complete) 처리하여 클라이언트의 재연결을 유도한다.
-     * 이전 회차 작업 완료 후 10초 대기하여 대규모 세션 순회 시 스레드 중첩 실행을 방지한다 (스케줄러 0.1, 7.0).
+     * 10초 지연마다 60초 이상 유지된 Emitter 세션을 정상 완료(complete) 처리하고 저장소에서 제거한다.
+     * 기본 타임아웃(60초)은 서블릿 컨테이너의 SseEmitter 비동기 타임아웃이 먼저 처리하며,
+     * 이 스케줄러는 컨테이너 타임아웃 콜백 지연·미발화 시 인메모리 세션이 잔존하지 않도록 보장하는 보조 스위퍼 역할을 한다.
+     * 두 경로가 동시에 겹치더라도 세션 동기화 및 예외 무시를 통해 안전하게 멱등 정리된다 (스케줄러 0.1, 7.0).
      */
     @Scheduled(fixedDelay = 10_000)
     public void closeExpiredConnections() {
