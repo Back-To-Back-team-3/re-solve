@@ -27,6 +27,9 @@ import org.redisson.client.RedisConnectionException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import com.backtoback.problem.global.error.ProblemErrorCode;
+import com.backtoback.problem.global.exception.ProblemException;
+
 /**
  * 트랜잭션 콜백의 잠금 획득·소유권 검사·해제 실패 처리를 확인한다.
  */
@@ -99,7 +102,11 @@ class RedisTransactionLockTest {
         assertThat(transactionLock.acquire("test-lock")).isTrue();
         var callback = TransactionSynchronizationManager.getSynchronizations().getFirst();
 
-        assertThatThrownBy(() -> callback.beforeCommit(false)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> callback.beforeCommit(false))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(ProblemErrorCode.PROBLEM_VERSION_CONFLICT)
+            );
         assertThatCode(() -> callback.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK))
             .doesNotThrowAnyException();
         verify(lock).unlock();

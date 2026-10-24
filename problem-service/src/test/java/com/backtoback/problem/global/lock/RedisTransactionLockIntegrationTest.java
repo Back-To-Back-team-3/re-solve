@@ -29,14 +29,21 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.redisson.client.RedisConnectionException;
 import org.redisson.config.Config;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 
+import com.backtoback.problem.global.error.ProblemErrorCode;
+import com.backtoback.problem.global.exception.ProblemException;
+
 /**
  * 실제 Redis에서 잠금 해제와 소유자 보호를 확인한다.
- * DB 트랜잭션 콜백은 직접 호출하며 연결 장애는 소유권 조회에만 주입한다.
+ * Spring 트랜잭션 동기화 경로를 검증하며 연결 장애는 소유권 조회에만 주입한다.
  */
 @ExtendWith(MockitoExtension.class)
 class RedisTransactionLockIntegrationTest {
@@ -128,7 +135,11 @@ class RedisTransactionLockIntegrationTest {
             assertThat(nextLock.tryLock()).isTrue();
         }
 
-        assertThatThrownBy(() -> callback.beforeCommit(false)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> callback.beforeCommit(false))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(ProblemErrorCode.PROBLEM_VERSION_CONFLICT)
+            );
         assertThatCode(() -> callback.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK))
             .doesNotThrowAnyException();
 
@@ -142,9 +153,55 @@ class RedisTransactionLockIntegrationTest {
         nextLock.unlock();
     }
 
+    @Test
+    @DisplayName("실제 Redis 소유권 유실은 Spring 트랜잭션을 롤백한다")
+    void lostLockRollsBackSpringTransaction() {
+        TransactionSynchronizationManager.clear();
+        var transactionManager = new RecordingTransactionManager();
+        var transactionTemplate = new TransactionTemplate(transactionManager);
+        var transactionLock = new RedisTransactionLock(owner);
+        String key = "transaction-lock-test:" + UUID.randomUUID();
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
+            assertThat(transactionLock.acquire(key)).isTrue();
+            assertThat(owner.getLock(key).forceUnlock()).isTrue();
+        }))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(ProblemErrorCode.PROBLEM_VERSION_CONFLICT)
+            );
+
+        assertThat(transactionManager.rollbackCount).isEqualTo(1);
+        assertThat(transactionManager.commitCount).isZero();
+    }
+
     private RedissonClient createClient() {
         Config config = new Config();
         config.useSingleServer().setAddress("redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(6379));
         return Redisson.create(config);
+    }
+
+    /** 커밋 전 예외가 Spring 트랜잭션의 롤백 경로를 선택하는지 기록한다. */
+    private static class RecordingTransactionManager extends AbstractPlatformTransactionManager {
+        private int commitCount;
+        private int rollbackCount;
+
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(Object transaction, TransactionDefinition definition) {}
+
+        @Override
+        protected void doCommit(DefaultTransactionStatus status) {
+            commitCount++;
+        }
+
+        @Override
+        protected void doRollback(DefaultTransactionStatus status) {
+            rollbackCount++;
+        }
     }
 }

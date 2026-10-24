@@ -24,6 +24,8 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -295,6 +297,8 @@ class CommonConfigurationWebTest {
             "duplicate,409,PROBLEM_TAG_DUPLICATED",
             "in-use,409,PROBLEM_TAG_IN_USE",
             "optimistic,409,PROBLEM_VERSION_CONFLICT",
+            "lock-timeout,409,PROBLEM_VERSION_CONFLICT",
+            "database-unavailable,500,COMMON_INTERNAL_SERVER_ERROR",
             "missing,404,PROBLEM_TAG_NOT_FOUND"
         }
     )
@@ -361,6 +365,12 @@ class CommonConfigurationWebTest {
          */
         @GetMapping("/api/v1/test/domain-error")
         void domainError(@RequestParam String kind) {
+            if ("lock-timeout".equals(kind)) {
+                throw new CannotAcquireLockException("DB lock wait timeout");
+            }
+            if ("database-unavailable".equals(kind)) {
+                throw new DataAccessResourceFailureException("DB connection unavailable");
+            }
             if ("missing".equals(kind)) {
                 throw new ProblemException(ProblemErrorCode.PROBLEM_TAG_NOT_FOUND);
             }
