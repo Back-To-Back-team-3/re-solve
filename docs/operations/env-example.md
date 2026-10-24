@@ -224,7 +224,7 @@ curl --fail --silent --show-error "${judge0_curl_headers[@]}" "$JUDGE0_BASE_URL/
 - 테스트 전용 설정은 인증 헤더 `X-Auth-Token`, 연결 제한 `2s`, 응답 대기 제한 `5s`다. 애플리케이션용 `JUDGE0_AUTH_HEADER`·`JUDGE0_CONNECT_TIMEOUT`·`JUDGE0_READ_TIMEOUT`은 이 테스트에서 읽지 않는다. 다른 헤더를 쓰는 서버는 현재 테스트 설정과 맞춰야 한다.
 - 테스트 내부에서 선택한 언어만 활성화한다. 서비스의 `JUDGE0_*_ENABLED` 값을 바꾸지는 않는다. 실제 검증이 끝난 언어만 서비스 설정에서 활성화하고 judge-service를 재시작한다. Compose 환경변수를 바꿨다면 컨테이너를 재생성한다.
 - 실행 접수는 자동 재시도하지 않는다. 완료 조회는 최대 약 60초 동안 수행하며 테스트 전체 제한은 90초다. 실행 기록이 실제 서버에 남고 리소스를 사용한다.
-- 이 테스트는 원시 코드의 접수·결과 조회를 검증한다. [Java 함수 실행 코드](../guides/judge-execution.md)의 모든 시나리오를 실제 Judge0에서 검증했다는 뜻은 아니다.
+- 이 테스트는 원시 코드의 접수·결과 조회를 검증한다. [함수 실행 코드](../guides/judge-execution.md)의 모든 시나리오를 실제 Judge0에서 검증했다는 뜻은 아니다.
 
 ### 5.3 Judge0만 종료·정리
 
