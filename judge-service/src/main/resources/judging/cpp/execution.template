@@ -1,0 +1,311 @@
+#ifndef RE_SOLVE_EXECUTION_TYPES
+#define RE_SOLVE_EXECUTION_TYPES
+#include <cstdint>
+#include <map>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
+
+// 혼합 배열과 객체는 값의 선언 타입을 variant 안에 그대로 보관한다.
+struct Value {
+    using Array = std::vector<Value>;
+    using Object = std::map<std::string, Value>;
+    using Storage = std::variant<std::int32_t, std::int64_t, float, double, std::string, bool, Array, Object>;
+    Storage data;
+    Value() : data(std::int32_t{0}) {}
+    Value(const char* value) : data(std::string(value)) {}
+    Value(Array value) : data(std::move(value)) {}
+    Value(Object value) : data(std::move(value)) {}
+    template<class T> Value(T value) : data(std::move(value)) {}
+    template<class T> Value(const std::vector<T>& values) : data(Array{}) {
+        auto& result = std::get<Array>(data);
+        for (T value : values) result.emplace_back(std::move(value));
+    }
+};
+#endif
+
+// EXECUTION_RUNTIME
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <iomanip>
+#include <iostream>
+#include <iterator>
+#include <limits>
+#include <locale>
+#include <sstream>
+#include <type_traits>
+#include <tuple>
+#include <unistd.h>
+
+namespace judge_runner {
+// Judge0 Linux와 로컬 POSIX 환경에서 cout·printf·전역 초기화 출력도 함께 분리한다.
+class OutputCapture {
+    FILE* result;
+public:
+    OutputCapture() : result(nullptr) {
+        std::cout.flush();
+        std::fflush(stdout);
+        int original = ::dup(STDOUT_FILENO);
+        if (original < 0 || ::dup2(STDERR_FILENO, STDOUT_FILENO) < 0) {
+            throw std::runtime_error("Cannot separate execution output");
+        }
+        result = ::fdopen(original, "wb");
+        if (!result) throw std::runtime_error("Cannot open result output");
+    }
+    ~OutputCapture() { if (result) std::fclose(result); }
+    void write(const std::string& json) {
+        std::cout.flush();
+        std::fflush(stdout);
+        if (std::fwrite(json.data(), 1, json.size(), result) != json.size() || std::fflush(result) != 0) {
+            throw std::runtime_error("Cannot write result output");
+        }
+    }
+};
+static OutputCapture output;
+
+std::string decodeBase64(const std::string& text) {
+    const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    if (text.size() % 4 != 0) throw std::runtime_error("Invalid execution input");
+    std::string bytes;
+    for (std::size_t i = 0; i < text.size(); i += 4) {
+        std::uint32_t bits = 0;
+        int padding = 0;
+        for (int j = 0; j < 4; j++) {
+            char c = text[i + j];
+            if (c == '=') {
+                if (j < 2 || i + 4 != text.size()) throw std::runtime_error("Invalid input padding");
+                padding++;
+                bits <<= 6;
+            } else {
+                auto index = alphabet.find(c);
+                if (padding || index == std::string::npos) throw std::runtime_error("Invalid input encoding");
+                bits = (bits << 6) | static_cast<std::uint32_t>(index);
+            }
+        }
+        bytes.push_back(static_cast<char>(bits >> 16));
+        if (padding < 2) bytes.push_back(static_cast<char>(bits >> 8));
+        if (!padding) bytes.push_back(static_cast<char>(bits));
+    }
+    return bytes;
+}
+
+// Java의 UTF-16 입력을 UTF-8 문자열로 복원하며 단독 서로게이트도 유실하지 않는다.
+void appendUtf8(std::string& result, std::uint32_t code) {
+    if (code < 0x80) result.push_back(static_cast<char>(code));
+    else if (code < 0x800) {
+        result.push_back(static_cast<char>(0xc0 | (code >> 6)));
+        result.push_back(static_cast<char>(0x80 | (code & 0x3f)));
+    } else if (code < 0x10000) {
+        result.push_back(static_cast<char>(0xe0 | (code >> 12)));
+        result.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3f)));
+        result.push_back(static_cast<char>(0x80 | (code & 0x3f)));
+    } else {
+        result.push_back(static_cast<char>(0xf0 | (code >> 18)));
+        result.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3f)));
+        result.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3f)));
+        result.push_back(static_cast<char>(0x80 | (code & 0x3f)));
+    }
+}
+
+class Reader {
+    std::string bytes;
+    std::size_t offset = 0;
+    std::uint8_t byte() {
+        if (offset >= bytes.size()) throw std::runtime_error("Truncated execution input");
+        return static_cast<std::uint8_t>(bytes[offset++]);
+    }
+    std::uint32_t word() {
+        std::uint32_t value = 0;
+        for (int i = 0; i < 4; i++) value = (value << 8) | byte();
+        return value;
+    }
+    std::uint64_t wideWord() {
+        std::uint64_t value = 0;
+        for (int i = 0; i < 8; i++) value = (value << 8) | byte();
+        return value;
+    }
+    std::string text() {
+        auto length = word();
+        std::vector<std::uint16_t> chars;
+        for (std::uint32_t i = 0; i < length; i++) {
+            auto high = byte();
+            chars.push_back(static_cast<std::uint16_t>((high << 8) | byte()));
+        }
+        std::string value;
+        for (std::size_t i = 0; i < chars.size(); i++) {
+            std::uint32_t code = chars[i];
+            if (code >= 0xd800 && code <= 0xdbff && i + 1 < chars.size()
+                    && chars[i + 1] >= 0xdc00 && chars[i + 1] <= 0xdfff) {
+                code = 0x10000 + ((code - 0xd800) << 10) + (chars[++i] - 0xdc00);
+            }
+            appendUtf8(value, code);
+        }
+        return value;
+    }
+public:
+    explicit Reader(std::string input) : bytes(std::move(input)) {}
+    bool finished() const { return offset == bytes.size(); }
+    Value readValue() {
+        switch (byte()) {
+            case 1: {
+                auto bits = word();
+                std::int32_t value;
+                std::memcpy(&value, &bits, sizeof(value));
+                return value;
+            }
+            case 2: {
+                auto bits = wideWord();
+                std::int64_t value;
+                std::memcpy(&value, &bits, sizeof(value));
+                return value;
+            }
+            case 3: {
+                auto bits = wideWord();
+                double value;
+                static_assert(sizeof(value) == sizeof(bits) && std::numeric_limits<double>::is_iec559);
+                std::memcpy(&value, &bits, sizeof(value));
+                return value;
+            }
+            case 4: return text();
+            case 5: return byte() != 0;
+            case 6: {
+                auto size = word();
+                Value::Array array;
+                for (std::uint32_t i = 0; i < size; i++) array.push_back(readValue());
+                return array;
+            }
+            case 7: {
+                auto size = word();
+                Value::Object object;
+                for (std::uint32_t i = 0; i < size; i++) {
+                    auto key = text();
+                    object.emplace(std::move(key), readValue());
+                }
+                return object;
+            }
+            case 8: {
+                auto bits = word();
+                float value;
+                static_assert(sizeof(value) == sizeof(bits) && std::numeric_limits<float>::is_iec559);
+                std::memcpy(&value, &bits, sizeof(value));
+                return value;
+            }
+            default: throw std::runtime_error("Invalid execution input tag");
+        }
+    }
+};
+
+// 참조 전달은 허용하되 선언과 다른 인자·반환 타입의 암묵적 수치 변환은 막는다.
+template<class Signature> struct SignatureMatches;
+template<class R, class... Args> struct SignatureMatches<R(Args...)> {
+    template<class ActualR, class... ActualArgs>
+    static constexpr bool check(ActualR (*)(ActualArgs...)) {
+        return std::is_same_v<R, ActualR>
+            && std::is_same_v<std::tuple<Args...>, std::tuple<std::remove_cv_t<std::remove_reference_t<ActualArgs>>...>>;
+    }
+};
+
+template<class T> struct Converter {
+    static T read(const Value& value) { return std::get<T>(value.data); }
+};
+template<> struct Converter<Value> {
+    static Value read(const Value& value) { return value; }
+};
+template<class T> struct Converter<std::vector<T>> {
+    static std::vector<T> read(const Value& value) {
+        std::vector<T> result;
+        for (const auto& item : std::get<Value::Array>(value.data)) result.push_back(Converter<T>::read(item));
+        return result;
+    }
+};
+
+void writeJson(std::ostream& out, const Value& value);
+void writeJson(std::ostream& out, const std::string& value) {
+    out << '"';
+    const char* hex = "0123456789abcdef";
+    for (std::size_t i = 0; i < value.size();) {
+        auto first = static_cast<unsigned char>(value[i]);
+        if (first < 0x80) {
+            i++;
+            if (first == '"' || first == '\\') out << '\\' << static_cast<char>(first);
+            else if (first < 0x20) out << "\\u00" << hex[first >> 4] << hex[first & 15];
+            else out << static_cast<char>(first);
+            continue;
+        }
+        int count = first >= 0xf0 && first <= 0xf4 ? 4 : first >= 0xe0 && first <= 0xef ? 3 : first >= 0xc2 && first <= 0xdf ? 2 : 0;
+        if (!count || i + count > value.size()) throw std::runtime_error("Invalid string encoding");
+        std::uint32_t code = first & ((1u << (7 - count)) - 1);
+        for (int j = 1; j < count; j++) {
+            auto next = static_cast<unsigned char>(value[i + j]);
+            if ((next & 0xc0) != 0x80) throw std::runtime_error("Invalid string encoding");
+            code = (code << 6) | (next & 0x3f);
+        }
+        if (code > 0x10ffff || (count == 2 && code < 0x80) || (count == 3 && code < 0x800)
+                || (count == 4 && code < 0x10000)) throw std::runtime_error("Invalid string encoding");
+        if (code >= 0xd800 && code <= 0xdfff) {
+            out << "\\u" << hex[(code >> 12) & 15] << hex[(code >> 8) & 15] << hex[(code >> 4) & 15] << hex[code & 15];
+        } else out.write(value.data() + i, count);
+        i += count;
+    }
+    out << '"';
+}
+void writeJson(std::ostream& out, bool value) { out << (value ? "true" : "false"); }
+template<class T, std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, int> = 0>
+void writeJson(std::ostream& out, T value) { out << value; }
+template<class T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+void writeJson(std::ostream& out, T value) {
+    if (!std::isfinite(value)) throw std::runtime_error("Non-finite return value");
+    if (value == 0) out << (std::signbit(value) ? "-0.0" : "0.0");
+    else out << std::setprecision(std::numeric_limits<T>::max_digits10) << value;
+}
+void writeJson(std::ostream& out, const std::map<std::string, Value>& values);
+template<class T> void writeJson(std::ostream& out, const std::vector<T>& values) {
+    out << '[';
+    bool first = true;
+    for (const auto& value : values) {
+        if (!first) out << ',';
+        first = false;
+        writeJson(out, static_cast<T>(value));
+    }
+    out << ']';
+}
+void writeJson(std::ostream& out, const std::map<std::string, Value>& values) {
+    out << '{';
+    bool first = true;
+    for (const auto& item : values) {
+        if (!first) out << ',';
+        first = false;
+        writeJson(out, item.first);
+        out << ':';
+        writeJson(out, item.second);
+    }
+    out << '}';
+}
+void writeJson(std::ostream& out, const Value& value) {
+    std::visit([&out](const auto& member) { writeJson(out, member); }, value.data);
+}
+}
+
+${USER_SOURCE}
+
+int main() {
+    try {
+        std::string encoded((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
+        judge_runner::Reader input(judge_runner::decodeBase64(encoded));
+        ${DECLARATIONS}
+        if (!input.finished()) throw std::runtime_error("Unexpected execution input");
+        static_assert(judge_runner::SignatureMatches<${SIGNATURE}>::check(&solution), "Incorrect solution signature");
+        auto result = solution(${ARGUMENTS});
+        std::ostringstream json;
+        json.imbue(std::locale::classic());
+        judge_runner::writeJson(json, result);
+        judge_runner::output.write(json.str());
+        return 0;
+    } catch (const std::exception& exception) {
+        std::cerr << "Execution failed\n";
+        return 1;
+    }
+}
