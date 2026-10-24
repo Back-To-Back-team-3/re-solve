@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.execution.cpp;
+package com.backtoback.judge.judging.service.execution.cpp;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -21,7 +21,8 @@ import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
-import com.backtoback.judge.judging.service.CppExecutionSource;
+import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
+import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -30,12 +31,12 @@ import tools.jackson.databind.json.JsonMapper;
 class CppExecutionProcessTest {
     @TempDir
     Path directory;
-    private final CppExecutionCodeGenerator generator = new CppExecutionCodeGenerator();
+    private final ExecutionCodeGenerator generator = new CppExecutionCodeGenerator();
     private final CppTypeMapper types = new CppTypeMapper();
     private final JsonMapper mapper = JsonMapper.builder().build();
 
     /**
-     * 고정 폭 정수와 실수·불리언을 실제 C++에서 왕복시킨다.
+     * 선언 폭을 검사한 기본형 정수·실수·불리언을 실제 C++에서 왕복시킨다.
      *
      * @param kind 선언 타입
      * @param input JSON 입력
@@ -136,6 +137,28 @@ class CppExecutionProcessTest {
         echo(new TypeSpec(Kind.OBJECT, null, null, null, Map.of()), "{}");
     }
 
+    /**
+     * 혼합 배열의 기본 숫자 타입을 그대로 읽고 다시 저장한다.
+     *
+     * @throws Exception 컴파일 또는 실행이 실패한 경우
+     */
+    @Test
+    @DisplayName("C++ Value가 int·long long·float·double을 구분하여 복원하고 직렬화한다")
+    void preservesBasicNumericAlternatives() throws Exception {
+        var members = List.of(scalar(Kind.INT32), scalar(Kind.INT64), scalar(Kind.FLOAT32), scalar(Kind.FLOAT64));
+        var type = new TypeSpec(Kind.ARRAY, null, members, null, null);
+        String source = """
+            std::vector<Value> solution(const std::vector<Value>& value) {
+                return {std::get<int>(value[0].data), std::get<long long>(value[1].data),
+                        std::get<float>(value[2].data), std::get<double>(value[3].data)};
+            }
+            """;
+        String input = "[-2147483648,9223372036854775807,1.25,2.5]";
+        var result = execute(generator.generate(spec(type), source, Map.of("value", input)));
+        assertThat(result.exitCode()).as(result.stderr()).isZero();
+        assertThat(mapper.readTree(result.stdout())).isEqualTo(mapper.readTree(input));
+    }
+
     /** vector<bool>의 프록시와 객체 배열의 직렬화를 검증한다. */
     @Test
     @DisplayName("C++ 불리언 벡터와 고정 필드 객체 벡터를 실행한다")
@@ -169,9 +192,9 @@ class CppExecutionProcessTest {
         var function = new FunctionSpec("solution", List.of(new Parameter("value", positions)), output);
         String source = """
             std::map<std::string, Value> solution(const std::vector<Value>& value) {
-                return {{"n", std::get<std::int64_t>(value[0].data)},
+                return {{"n", std::get<long long>(value[0].data)},
                         {"s", std::get<std::string>(value[1].data)},
-                        {"items", std::vector<std::int32_t>{1,2}}};
+                        {"items", std::vector<int>{1,2}}};
             }
             """;
         var result = execute(generator.generate(function, source, Map.of("value", "[9007199254740993,\"x\"]")));
@@ -187,7 +210,7 @@ class CppExecutionProcessTest {
         String source = """
             int initialize() { std::printf("global-debug\\n"); return 0; }
             int initialized = initialize();
-            std::int32_t solution() {
+            int solution() {
                 std::cout << "cout-debug";
                 std::printf("printf-debug");
                 std::cerr << "cerr-debug";
@@ -219,7 +242,7 @@ class CppExecutionProcessTest {
                 generator
                     .generate(
                         function,
-                        "std::int32_t solution(std::int32_t left, std::int32_t right) { return left - right; }",
+                        "int solution(int left, int right) { return left - right; }",
                         Map.of("right", "3", "left", "10")
                     )
             );
@@ -246,9 +269,9 @@ class CppExecutionProcessTest {
     @ParameterizedTest
     @ValueSource(
         strings = {
-            "std::int32_t solution(std::int32_t value) { return ; }",
-            "double solution(std::int32_t value) { return value; }",
-            "std::int32_t solution(double value) { return value; }",
+            "int solution(int value) { return ; }",
+            "double solution(int value) { return value; }",
+            "int solution(double value) { return value; }",
             "int main() { return 0; }"
         }
     )
@@ -257,6 +280,34 @@ class CppExecutionProcessTest {
         var result = compile(generator.generate(spec(scalar(Kind.INT32)), source, Map.of("value", "1")));
         assertThat(result.exitCode()).isNotZero();
         assertThat(result.stderr()).isNotBlank();
+    }
+
+    /**
+     * 크기가 같은 정수 타입과 실수 타입도 선언한 기본형과 다르면 거절한다.
+     *
+     * @param kind 함수 명세의 입력·반환 타입
+     * @param source 다른 기본형을 선언한 사용자 함수
+     * @throws Exception 컴파일이 실패한 경우
+     */
+    @ParameterizedTest
+    @CsvSource(
+        delimiter = '|',
+        value = {
+            "INT32|int solution(long long value) { return value; }",
+            "INT32|long long solution(int value) { return value; }",
+            "INT64|long long solution(long value) { return value; }",
+            "INT64|long solution(long long value) { return value; }",
+            "FLOAT32|float solution(double value) { return value; }",
+            "FLOAT32|double solution(float value) { return value; }",
+            "FLOAT64|double solution(float value) { return value; }",
+            "FLOAT64|float solution(double value) { return value; }"
+        }
+    )
+    @DisplayName("C++ 함수의 인자·반환 기본형이 다르면 암묵적 수치 변환 대신 컴파일을 거절한다")
+    void rejectsDifferentNumericSignature(Kind kind, String source) throws Exception {
+        var result = compile(generator.generate(spec(scalar(kind)), source, Map.of("value", "1")));
+        assertThat(result.exitCode()).isNotZero();
+        assertThat(result.stderr()).contains("Incorrect solution signature");
     }
 
     /**
@@ -313,7 +364,7 @@ class CppExecutionProcessTest {
      * @return 컴파일 종료 코드와 메시지
      * @throws Exception 파일 생성 또는 컴파일이 실패한 경우
      */
-    private ProcessResult compile(CppExecutionSource source) throws Exception {
+    private ProcessResult compile(ExecutionSource source) throws Exception {
         Path file = directory.resolve("main.cpp");
         Path log = directory.resolve("compile.log");
         Files.writeString(file, source.sourceCode());
@@ -341,7 +392,7 @@ class CppExecutionProcessTest {
      * @return 프로세스 실행 결과
      * @throws Exception 컴파일 또는 실행이 실패한 경우
      */
-    private ProcessResult execute(CppExecutionSource source) throws Exception {
+    private ProcessResult execute(ExecutionSource source) throws Exception {
         var compilation = compile(source);
         assertThat(compilation.exitCode()).as(compilation.stderr()).isZero();
         Path stdin = directory.resolve("stdin");

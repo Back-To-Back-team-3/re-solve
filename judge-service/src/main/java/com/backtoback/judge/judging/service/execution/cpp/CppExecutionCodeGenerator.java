@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.execution.cpp;
+package com.backtoback.judge.judging.service.execution.cpp;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -10,14 +10,16 @@ import java.util.stream.IntStream;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
+import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.FunctionSpec;
-import com.backtoback.judge.judging.execution.FunctionSpecValidator;
-import com.backtoback.judge.judging.execution.TypedExecutionInputEncoder;
-import com.backtoback.judge.judging.service.CppExecutionSource;
+import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
+import com.backtoback.judge.judging.service.execution.FunctionSpecValidator;
+import com.backtoback.judge.judging.service.execution.TypedExecutionInputEncoder;
+import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 
-/** 전역 solution 함수를 호출할 C++17 소스와 실행 입력을 생성한다. */
+/** 전역 {@code solution} 함수를 호출할 C++17 소스와 실행 입력을 생성한다. */
 @Service
-public class CppExecutionCodeGenerator {
+public class CppExecutionCodeGenerator implements ExecutionCodeGenerator {
     private static final Set<String> RESERVED_NAMES
         = Set
             .of(
@@ -125,6 +127,12 @@ public class CppExecutionCodeGenerator {
         }
     }
 
+    /** {@inheritDoc} */
+    @Override
+    public JudgeLanguage language() {
+        return JudgeLanguage.CPP;
+    }
+
     /**
      * 표준 타입과 혼합 값 지원 선언을 포함한 전역 함수의 기본 코드를 생성한다.
      *
@@ -132,6 +140,7 @@ public class CppExecutionCodeGenerator {
      * @return 사용자가 함수 본문을 작성할 코드
      * @throws IllegalArgumentException 명세 또는 C++ 매개변수 이름이 잘못된 경우
      */
+    @Override
     public String starterCode(FunctionSpec spec) {
         validate(spec);
         String parameters
@@ -149,12 +158,13 @@ public class CppExecutionCodeGenerator {
      * 전역 함수를 호출하고 반환값을 JSON으로 직렬화할 실행 코드를 생성한다.
      *
      * @param spec 고정 회차의 함수 명세
-     * @param sourceCode 전역 solution 함수를 포함한 사용자 코드
+     * @param sourceCode 전역 {@code solution} 함수를 포함한 사용자 코드
      * @param argumentTexts 매개변수 이름별 입력 JSON 텍스트
      * @return 실행 코드와 입력
      * @throws IllegalArgumentException 명세·입력 또는 사용자 코드가 잘못된 경우
      */
-    public CppExecutionSource generate(FunctionSpec spec, String sourceCode, Map<String, String> argumentTexts) {
+    @Override
+    public ExecutionSource generate(FunctionSpec spec, String sourceCode, Map<String, String> argumentTexts) {
         validate(spec);
         if (sourceCode == null || sourceCode.isBlank()) {
             throw new IllegalArgumentException("실행할 C++ 코드가 필요합니다.");
@@ -186,7 +196,11 @@ public class CppExecutionCodeGenerator {
                 .replace("${ARGUMENTS}", arguments)
                 .replace("${SIGNATURE}", signature);
         // 기본 코드가 포함한 공통 선언은 헤더 가드로 보호한다. 사용자 소스는 마지막에 삽입한다.
-        return new CppExecutionSource(runner.replace("${USER_SOURCE}", sourceCode), inputs.encode(spec, argumentTexts));
+        return new ExecutionSource(
+            language(),
+            runner.replace("${USER_SOURCE}", sourceCode),
+            inputs.encode(spec, argumentTexts)
+        );
     }
 
     /**
