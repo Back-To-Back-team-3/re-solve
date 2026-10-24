@@ -15,6 +15,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+/** 관리자별 멱등 요청 원본과 최초 생성 응답을 보관하며, 태그 변경·삭제 이후에도 최초 응답을 유지한다. */
 @Entity
 @Table(
     name = "tag_creation_records",

@@ -1182,9 +1182,10 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `expires_at` | DATETIME(6) | Y | 접수 후 24시간의 만료 시각. 만료된 키로 새 요청을 접수하면 갱신 |
 | `result_tag_id` | BIGINT | N | 최초 생성 응답의 태그 ID. 처리 완료 전 NULL. 태그 삭제 후에도 보존하므로 FK 없음 |
 | `result_name` | VARCHAR(200) | N | 최초 생성 응답의 태그 이름. 처리 완료 전 NULL. 이후 이름 변경과 무관하게 보존 |
+| `result_display_order` | INT | N | 최초 생성 응답의 보정된 순번. 처리 완료 전 NULL. 이후 순번 변경과 무관하게 보존 |
 | `created_at` | DATETIME(6) | Y | 기록 생성 시각 |
 | `updated_at` | DATETIME(6) | Y | 기록 최종 수정 시각 |
-| `version` | BIGINT | Y | 낙관적 락 버전. 기본값 0 |
+| `version` | BIGINT | Y | 낙관적 락 버전. 애플리케이션 INSERT에서 0으로 초기화하며 DB DEFAULT는 사용하지 않음 |
 
 **제약 및 인덱스**
 
