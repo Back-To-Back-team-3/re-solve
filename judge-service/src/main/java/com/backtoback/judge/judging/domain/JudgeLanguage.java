@@ -1,11 +1,15 @@
-package com.backtoback.judge.judging.entity;
+package com.backtoback.judge.judging.domain;
 
 import java.util.regex.Pattern;
 
-import com.backtoback.judge.global.exception.custom.UnsupportedLanguageException;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.error.JudgeException;
 
 import lombok.Getter;
 
+/**
+ * 서비스 언어 코드와 실행 환경 선택 범위를 정의한다. (API 명세서 3.1.1)
+ */
 @Getter
 public enum JudgeLanguage {
     JAVA("java", "Java 17", "Java \\((?:OpenJDK|JDK) (17(?:\\.[0-9]+)*)\\)"),
@@ -36,7 +40,7 @@ public enum JudgeLanguage {
      *
      * @param code java, python3 또는 cpp
      * @return 일치하는 지원 언어
-     * @throws UnsupportedLanguageException 코드가 null이거나 지원하지 않는 경우
+     * @throws JudgeException {@code UNSUPPORTED_LANGUAGE}: 코드가 null이거나 지원하지 않는 경우
      */
     public static JudgeLanguage fromCode(String code) {
         for (JudgeLanguage language : values()) {
@@ -44,6 +48,6 @@ public enum JudgeLanguage {
                 return language;
             }
         }
-        throw new UnsupportedLanguageException();
+        throw new JudgeException(JudgeErrorCode.UNSUPPORTED_LANGUAGE);
     }
 }

@@ -1,4 +1,4 @@
-package com.backtoback.judge.judge0.dto.response;
+package com.backtoback.judge.judging.dto.response;
 
 /**
  * Judge0 언어 목록 응답의 실행 환경 ID와 이름을 담는다.

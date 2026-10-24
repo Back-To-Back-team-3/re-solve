@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.dto;
+package com.backtoback.judge.judging.service;
 
 /**
  * 실제 제출에 사용하는 실행 환경을 보관한다.

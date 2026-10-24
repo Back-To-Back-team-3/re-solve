@@ -6,70 +6,42 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import com.backtoback.judge.global.exception.custom.Judge0ConnectionFailedException;
-import com.backtoback.judge.global.exception.custom.Judge0ResponseFailedException;
-import com.backtoback.judge.global.exception.custom.SubmissionRuntimeUnavailableException;
-import com.backtoback.judge.global.exception.custom.UnsupportedLanguageException;
-import com.backtoback.judge.judge0.client.Judge0LanguageClient;
-import com.backtoback.judge.judge0.dto.response.Judge0LanguageResponse;
-import com.backtoback.judge.judging.dto.JudgeRuntime;
-import com.backtoback.judge.judging.dto.response.JudgeLanguagesResponse;
-import com.backtoback.judge.judging.entity.JudgeLanguage;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.error.JudgeException;
+import com.backtoback.judge.judging.client.Judge0LanguageClient;
+import com.backtoback.judge.judging.config.Judge0Properties;
+import com.backtoback.judge.judging.domain.JudgeLanguage;
+import com.backtoback.judge.judging.dto.response.Judge0LanguageResponse;
 
+import lombok.RequiredArgsConstructor;
+
+/**
+ * 실행 환경 목록과 언어별 선택 결과를 캐시하고 고정 실행 환경의 재사용 가능 여부를 판단한다.
+ */
 @Service
+@RequiredArgsConstructor
 public class JudgeLanguageService {
-    private final boolean javaEnabled;
-    private final boolean python3Enabled;
-    private final boolean cppEnabled;
+    private final Judge0Properties properties;
     private final Judge0LanguageClient languageClient;
     private List<Judge0LanguageResponse> cachedLanguages;
     private Map<JudgeLanguage, JudgeRuntime> cachedLatestRuntimes = Map.of();
-
-    /**
-     * 언어 활성화 정책과 Judge0 실행 환경 목록 조회 클라이언트를 연결한다.
-     *
-     * @param javaEnabled Java 사용 허용 여부
-     * @param python3Enabled Python 사용 허용 여부
-     * @param cppEnabled C++ 사용 허용 여부
-     * @param languageClient 전체 실행 환경 조회와 응답 검증을 담당하는 클라이언트
-     */
-    public JudgeLanguageService(
-        @Value("${judge0.languages.java.enabled}") boolean javaEnabled,
-        @Value("${judge0.languages.python3.enabled}") boolean python3Enabled,
-        @Value("${judge0.languages.cpp.enabled}") boolean cppEnabled,
-        Judge0LanguageClient languageClient
-    ) {
-        this.javaEnabled = javaEnabled;
-        this.python3Enabled = python3Enabled;
-        this.cppEnabled = cppEnabled;
-        this.languageClient = languageClient;
-    }
 
     /**
      * Judge0에서 조회한 런타임과 서비스의 활성화 정책을 함께 반환한다.
      * 주소가 없거나 지원 후보가 없으면 해당 언어를 비활성으로 표시한다.
      *
      * @return 내부 Judge0 ID를 노출하지 않는 언어 목록
-     * @throws Judge0ConnectionFailedException 연결 실패 또는 통신 시간 초과가 발생한 경우
-     * @throws Judge0ResponseFailedException HTTP 오류 또는 올바르지 않은 응답을 받은 경우
+     * @throws JudgeException {@code JUDGE0_CONNECTION_FAILED}: 연결 실패 또는 통신 시간 초과가 발생한 경우
+     *     또는 {@code JUDGE0_RESPONSE_FAILED}: HTTP 오류 또는 올바르지 않은 응답을 받은 경우
      */
-    public JudgeLanguagesResponse findAll() {
+    public List<JudgeLanguageAvailability> findAll() {
         availableLanguages();
-        return new JudgeLanguagesResponse(Arrays.stream(JudgeLanguage.values()).map(language -> {
+        return Arrays.stream(JudgeLanguage.values()).map(language -> {
             JudgeRuntime runtime = cachedLatestRuntimes.get(language);
-            return new JudgeLanguagesResponse.Language(
-                language.getCode(),
-                language.getDisplayName(),
-                runtime == null ? "배포 환경 확인 전"
-                    : runtime
-                        .runtimeName()
-                        .substring(runtime.runtimeName().indexOf('(') + 1, runtime.runtimeName().length() - 1),
-                enabled(language) && runtime != null
-            );
-        }).toList());
+            return new JudgeLanguageAvailability(language, runtime, enabled(language) && runtime != null);
+        }).toList();
     }
 
     /**
@@ -79,10 +51,10 @@ public class JudgeLanguageService {
      * @param language java, python3 또는 cpp
      * @param fixedRuntime 사용할 고정 실행 환경; null이면 지원 범위의 최신 환경을 선택한다
      * @return 캐시된 최신 환경 또는 검증을 통과한 고정 환경
-     * @throws UnsupportedLanguageException 미지원 언어이거나 최신 환경 선택 시 비활성·후보 없음인 경우
-     * @throws SubmissionRuntimeUnavailableException 고정 환경의 언어·ID·이름·버전이 다르거나 비활성인 경우
-     * @throws Judge0ConnectionFailedException 연결 실패 또는 통신 시간 초과가 발생한 경우
-     * @throws Judge0ResponseFailedException HTTP 오류 또는 올바르지 않은 응답을 받은 경우
+     * @throws JudgeException {@code UNSUPPORTED_LANGUAGE}: 미지원 언어이거나 최신 환경 선택 시 비활성·후보 없음인 경우
+     *     또는 {@code SUBMISSION_RUNTIME_UNAVAILABLE}: 고정 환경의 언어·ID·이름·버전이 다르거나 비활성인 경우
+     *     또는 {@code JUDGE0_CONNECTION_FAILED}: 연결 실패 또는 통신 시간 초과가 발생한 경우
+     *     또는 {@code JUDGE0_RESPONSE_FAILED}: HTTP 오류 또는 올바르지 않은 응답을 받은 경우
      */
     public JudgeRuntime requireRuntime(String language, JudgeRuntime fixedRuntime) {
         JudgeLanguage supportedLanguage = JudgeLanguage.fromCode(language);
@@ -90,7 +62,7 @@ public class JudgeLanguageService {
             // 고정 환경은 최신 버전이나 같은 버전의 다른 ID로 대체하지 않는다.
             if (!language.equals(fixedRuntime.language()) || fixedRuntime.judge0LanguageId() <= 0
                 || !enabled(supportedLanguage)) {
-                throw new SubmissionRuntimeUnavailableException();
+                throw new JudgeException(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE);
             }
             // 최초 조회한 목록에서 고정된 ID·이름·버전을 확인한다.
             for (Judge0LanguageResponse runtime : availableLanguages()) {
@@ -100,21 +72,21 @@ public class JudgeLanguageService {
                 var matcher = supportedLanguage.getRuntimePattern().matcher(runtime.name());
                 if (!runtime.name().equals(fixedRuntime.runtimeName()) || !matcher.matches()
                     || !matcher.group(1).equals(fixedRuntime.runtimeVersion())) {
-                    throw new SubmissionRuntimeUnavailableException();
+                    throw new JudgeException(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE);
                 }
                 return fixedRuntime;
             }
-            throw new SubmissionRuntimeUnavailableException();
+            throw new JudgeException(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE);
         }
 
         // 고정 환경이 없으면 최초 조회 때 선택해 둔 최신 실행 환경을 반환한다.
         if (!enabled(supportedLanguage)) {
-            throw new UnsupportedLanguageException();
+            throw new JudgeException(JudgeErrorCode.UNSUPPORTED_LANGUAGE);
         }
         availableLanguages();
         JudgeRuntime runtime = cachedLatestRuntimes.get(supportedLanguage);
         if (runtime == null) {
-            throw new UnsupportedLanguageException();
+            throw new JudgeException(JudgeErrorCode.UNSUPPORTED_LANGUAGE);
         }
         return runtime;
     }
@@ -127,9 +99,9 @@ public class JudgeLanguageService {
      */
     private boolean enabled(JudgeLanguage language) {
         return switch (language) {
-            case JAVA -> javaEnabled;
-            case PYTHON3 -> python3Enabled;
-            case CPP -> cppEnabled;
+            case JAVA -> properties.languages().java().enabled();
+            case PYTHON3 -> properties.languages().python3().enabled();
+            case CPP -> properties.languages().cpp().enabled();
         };
     }
 
@@ -201,8 +173,8 @@ public class JudgeLanguageService {
      * 일반 조회와 재채점이 같은 캐시를 사용한다. Judge0 언어 구성을 변경하면 judge-service도 재시작한다.
      *
      * @return 검증한 활성 언어 목록; 서버 주소 미설정이면 빈 목록
-     * @throws Judge0ConnectionFailedException 연결 실패 또는 통신 시간 초과가 발생한 경우
-     * @throws Judge0ResponseFailedException HTTP 오류 또는 올바르지 않은 응답을 받은 경우
+     * @throws JudgeException {@code JUDGE0_CONNECTION_FAILED}: 연결 실패 또는 통신 시간 초과가 발생한 경우
+     *     또는 {@code JUDGE0_RESPONSE_FAILED}: HTTP 오류 또는 올바르지 않은 응답을 받은 경우
      */
     private synchronized List<Judge0LanguageResponse> availableLanguages() {
         // synchronized로 동시 최초 요청을 기다리게 하여 목록 조회와 캐시 초기화를 한 번만 수행한다.

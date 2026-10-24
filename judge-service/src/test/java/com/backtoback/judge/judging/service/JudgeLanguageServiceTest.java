@@ -1,12 +1,13 @@
-package com.backtoback.judge.judging;
+package com.backtoback.judge.judging.service;
 
+import static com.backtoback.judge.judging.config.Judge0TestProperties.properties;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.concurrent.Executors;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -28,17 +30,16 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
-import com.backtoback.judge.global.exception.JudgeErrorCode;
-import com.backtoback.judge.global.exception.custom.Judge0ConnectionFailedException;
-import com.backtoback.judge.global.exception.custom.Judge0ResponseFailedException;
-import com.backtoback.judge.global.exception.custom.SubmissionRuntimeUnavailableException;
-import com.backtoback.judge.global.exception.custom.UnsupportedLanguageException;
-import com.backtoback.judge.judge0.client.Judge0LanguageClient;
-import com.backtoback.judge.judge0.dto.response.Judge0LanguageResponse;
-import com.backtoback.judge.judging.dto.JudgeRuntime;
-import com.backtoback.judge.judging.service.JudgeLanguageService;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.error.JudgeException;
+import com.backtoback.judge.judging.client.Judge0LanguageClient;
+import com.backtoback.judge.judging.dto.response.Judge0LanguageResponse;
 
-class JudgeLanguageServiceTests {
+/**
+ * 실행 환경 선택·고정 환경 검증과 캐시의 실패·동시성 계약을 검증한다.
+ */
+@org.junit.jupiter.api.extension.ExtendWith(org.mockito.junit.jupiter.MockitoExtension.class)
+class JudgeLanguageServiceTest {
     private static final String CATALOG = """
         [{"id":900,"name":"Java (JDK 17.0.6)"},
          {"id":901,"name":"Python (3.11.2)"},
@@ -65,6 +66,7 @@ class JudgeLanguageServiceTests {
      * 조회한 ID·버전을 사용하고 API 조회와 제출에서 같은 목록을 재사용하는지 검증한다.
      */
     @Test
+    @DisplayName("조회한 ID·버전을 사용하고 API 조회와 제출에서 같은 목록을 재사용하는지 검증한다")
     void discoversRuntimeAndCachesSuccessfulResponse() {
         server
             .expect(requestTo("http://judge0.test/languages/"))
@@ -72,13 +74,13 @@ class JudgeLanguageServiceTests {
         assertThat(service.requireRuntime("java", null).judge0LanguageId()).isEqualTo(900);
         assertThat(service.requireRuntime("python3", null).judge0LanguageId()).isEqualTo(901);
         assertThat(service.requireRuntime("cpp", null).judge0LanguageId()).isEqualTo(902);
-        assertThat(service.findAll().content())
-            .extracting(language -> language.runtimeVersion())
-            .containsExactly("JDK 17.0.6", "3.11.2", "GCC 12.2.0");
-        assertThat(service.findAll().content())
+        assertThat(service.findAll())
+            .extracting(language -> language.runtime().runtimeVersion())
+            .containsExactly("17.0.6", "3.11.2", "12.2.0");
+        assertThat(service.findAll())
             .extracting(
-                language -> language.language(),
-                language -> language.displayName(),
+                language -> language.language().getCode(),
+                language -> language.language().getDisplayName(),
                 language -> language.enabled()
             )
             .containsExactly(
@@ -98,6 +100,7 @@ class JudgeLanguageServiceTests {
      * @param name 기록된 실행 환경 이름
      */
     @ParameterizedTest
+    @DisplayName("고정 환경이 있으면 이전 ID를 검증하고 없으면 최신 환경을 선택하는지 검증한다")
     @CsvSource(
         {
             "java,17.0.6,900,Java (JDK 17.0.6)",
@@ -120,9 +123,9 @@ class JudgeLanguageServiceTests {
         assertThat(service.requireRuntime("java", null).judge0LanguageId()).isEqualTo(910);
         assertThat(service.requireRuntime("python3", null).judge0LanguageId()).isEqualTo(911);
         assertThat(service.requireRuntime("cpp", null).judge0LanguageId()).isEqualTo(912);
-        assertThat(service.findAll().content())
-            .extracting(language -> language.runtimeVersion())
-            .containsExactly("JDK 17.0.10", "3.14.0", "GCC 14.1.0");
+        assertThat(service.findAll())
+            .extracting(language -> language.runtime().runtimeVersion())
+            .containsExactly("17.0.10", "3.14.0", "14.1.0");
         server.verify();
     }
 
@@ -135,6 +138,7 @@ class JudgeLanguageServiceTests {
      * @param version 기록된 숫자 버전
      */
     @ParameterizedTest
+    @DisplayName("같은 버전의 더 작은 ID가 있어도 기록된 ID를 검증하고 컴파일 옵션을 유지하는지 검증한다")
     @CsvSource(
         {
             "java,900,Java (JDK 17.0.6),17.0.6",
@@ -158,6 +162,7 @@ class JudgeLanguageServiceTests {
      * @param catalog 기록된 환경과 일치하지 않는 최초 조회 목록
      */
     @ParameterizedTest
+    @DisplayName("고정 환경의 ID·이름·버전이 캐시된 목록과 다르면 재조회 없이 거부하는지 검증한다")
     @ValueSource(
         strings = {
             "[]",
@@ -174,7 +179,7 @@ class JudgeLanguageServiceTests {
         var previous = new JudgeRuntime("java", 900, "Java (JDK 17.0.6)", "17.0.6", null);
         assertThatThrownBy(() -> service.requireRuntime("java", previous))
             .isInstanceOfSatisfying(
-                SubmissionRuntimeUnavailableException.class,
+                JudgeException.class,
                 exception -> assertThat(exception.getErrorCode())
                     .isEqualTo(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE)
             );
@@ -187,6 +192,7 @@ class JudgeLanguageServiceTests {
      * @param version 이름에서 추출한 실제 버전과 다른 기록
      */
     @ParameterizedTest
+    @DisplayName("ID와 이름이 같아도 기록된 숫자 버전이 다르면 재채점을 거부하는지 검증한다")
     @NullAndEmptySource
     @ValueSource(
         strings = {
@@ -200,7 +206,11 @@ class JudgeLanguageServiceTests {
             .expect(requestTo("http://judge0.test/languages/"))
             .andRespond(withSuccess(CATALOG, MediaType.APPLICATION_JSON));
         assertThatThrownBy(() -> service.requireRuntime("java", previous))
-            .isInstanceOf(SubmissionRuntimeUnavailableException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode())
+                    .isEqualTo(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE)
+            );
         server.verify();
     }
 
@@ -208,6 +218,7 @@ class JudgeLanguageServiceTests {
      * 최초 조회한 목록과 언어별 최신 실행 환경을 일반 조회와 반복 재채점에서 재사용하는지 검증한다.
      */
     @Test
+    @DisplayName("최초 조회한 목록과 언어별 최신 실행 환경을 일반 조회와 반복 재채점에서 재사용하는지 검증한다")
     void sharesFirstSuccessfulCatalogAndLatestRuntimesAcrossRequests() {
         server
             .expect(requestTo("http://judge0.test/languages/"))
@@ -226,7 +237,7 @@ class JudgeLanguageServiceTests {
                 assertThat(service.requireRuntime(runtime.language(), runtime)).isSameAs(runtime);
                 assertThat(service.requireRuntime(runtime.language(), null)).isSameAs(runtime);
             }
-            assertThat(service.findAll().content()).hasSize(3);
+            assertThat(service.findAll()).hasSize(3);
         }
         assertThat(runtimes.get(2).compilerOptions()).isEqualTo("-std=c++17");
         server.verify();
@@ -236,16 +247,29 @@ class JudgeLanguageServiceTests {
      * 언어 불일치·잘못된 ID·비활성 언어를 외부 호출 전에 거부하는지 검증한다.
      */
     @Test
+    @DisplayName("언어 불일치·잘못된 ID·비활성 언어를 외부 호출 전에 거부하는지 검증한다")
     void rejectsInvalidStoredRuntimeBeforeLookup() {
         var previous = new JudgeRuntime("java", 900, "Java (JDK 17.0.6)", "17.0.6", null);
         assertThatThrownBy(() -> service.requireRuntime("python3", previous))
-            .isInstanceOf(SubmissionRuntimeUnavailableException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode())
+                    .isEqualTo(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE)
+            );
         var invalidId = new JudgeRuntime("java", 0, "Java (JDK 17.0.6)", "17.0.6", null);
         assertThatThrownBy(() -> service.requireRuntime("java", invalidId))
-            .isInstanceOf(SubmissionRuntimeUnavailableException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode())
+                    .isEqualTo(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE)
+            );
         service = service("http://judge0.test", false);
         assertThatThrownBy(() -> service.requireRuntime("java", previous))
-            .isInstanceOf(SubmissionRuntimeUnavailableException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode())
+                    .isEqualTo(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE)
+            );
         server.verify();
     }
 
@@ -253,15 +277,19 @@ class JudgeLanguageServiceTests {
      * Judge0에 실행 환경이 있어도 서비스의 활성화 설정이 없으면 실행을 거부하는지 검증한다.
      */
     @Test
+    @DisplayName("Judge0에 실행 환경이 있어도 서비스의 활성화 설정이 없으면 실행을 거부하는지 검증한다")
     void preservesExplicitActivationPolicy() {
         service = service("http://judge0.test", false);
         assertThatThrownBy(() -> service.requireRuntime("java", null).judge0LanguageId())
-            .isInstanceOf(UnsupportedLanguageException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.UNSUPPORTED_LANGUAGE)
+            );
         server
             .expect(requestTo("http://judge0.test/languages/"))
             .andRespond(withSuccess(CATALOG, MediaType.APPLICATION_JSON));
-        assertThat(service.findAll().content()).allSatisfy(language -> assertThat(language.enabled()).isFalse());
-        assertThat(service.findAll().content().getFirst().runtimeVersion()).isEqualTo("JDK 17.0.6");
+        assertThat(service.findAll()).allSatisfy(language -> assertThat(language.enabled()).isFalse());
+        assertThat(service.findAll().getFirst().runtime().runtimeVersion()).isEqualTo("17.0.6");
         server.verify();
     }
 
@@ -271,6 +299,7 @@ class JudgeLanguageServiceTests {
      * @param catalog 지원 후보가 없는 목록
      */
     @ParameterizedTest
+    @DisplayName("지원 후보가 없으면 실행하지 않는지 검증한다")
     @ValueSource(
         strings = {
             "[]",
@@ -282,8 +311,11 @@ class JudgeLanguageServiceTests {
             .expect(requestTo("http://judge0.test/languages/"))
             .andRespond(withSuccess(catalog, MediaType.APPLICATION_JSON));
         assertThatThrownBy(() -> service.requireRuntime("java", null).judge0LanguageId())
-            .isInstanceOf(UnsupportedLanguageException.class);
-        assertThat(service.findAll().content().getFirst().enabled()).isFalse();
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.UNSUPPORTED_LANGUAGE)
+            );
+        assertThat(service.findAll().getFirst().enabled()).isFalse();
         server.verify();
     }
 
@@ -293,6 +325,7 @@ class JudgeLanguageServiceTests {
      * @param reversed 응답 목록을 역순으로 배치할지 여부
      */
     @ParameterizedTest
+    @DisplayName("ID·목록 순서와 무관하게 지원 범위에서 가장 높은 숫자 버전을 선택하는지 검증한다")
     @ValueSource(
         booleans = {
             false,
@@ -328,9 +361,9 @@ class JudgeLanguageServiceTests {
         assertThat(service.requireRuntime("java", null).judge0LanguageId()).isEqualTo(21);
         assertThat(service.requireRuntime("python3", null).judge0LanguageId()).isEqualTo(22);
         assertThat(service.requireRuntime("cpp", null).judge0LanguageId()).isEqualTo(23);
-        assertThat(service.findAll().content())
-            .extracting(language -> language.runtimeVersion())
-            .containsExactly("JDK 17.0.10", "3.14.0", "GCC 14.1.0");
+        assertThat(service.findAll())
+            .extracting(language -> language.runtime().runtimeVersion())
+            .containsExactly("17.0.10", "3.14.0", "14.1.0");
         server.verify();
     }
 
@@ -340,6 +373,7 @@ class JudgeLanguageServiceTests {
      * @param reversed 목록을 역순으로 배치할지 여부
      */
     @ParameterizedTest
+    @DisplayName("목록 순서와 무관하게 최신 버전 중 가장 작은 ID를 선택하고 낮은 버전의 작은 ID는 무시하는지 검증한다")
     @ValueSource(
         booleans = {
             false,
@@ -363,8 +397,8 @@ class JudgeLanguageServiceTests {
             .expect(requestTo("http://judge0.test/languages/"))
             .andRespond(withSuccess("[" + String.join(",", entries) + "]", MediaType.APPLICATION_JSON));
         assertThat(service.requireRuntime("java", null).judge0LanguageId()).isEqualTo(10);
-        assertThat(service.findAll().content().getFirst().runtimeVersion()).isEqualTo("OpenJDK 17.0.10");
-        assertThat(service.findAll().content().getFirst().enabled()).isTrue();
+        assertThat(service.findAll().getFirst().runtime().runtimeVersion()).isEqualTo("17.0.10");
+        assertThat(service.findAll().getFirst().enabled()).isTrue();
         server.verify();
     }
 
@@ -374,6 +408,7 @@ class JudgeLanguageServiceTests {
      * @param highestFirst 최고 버전을 목록 앞에 배치할지 여부
      */
     @ParameterizedTest
+    @DisplayName("낮은 버전의 중복은 무시하고 더 높은 유일한 버전을 선택하는지 검증한다")
     @ValueSource(
         booleans = {
             false,
@@ -399,6 +434,7 @@ class JudgeLanguageServiceTests {
      * @param second 같은 버전의 두 번째 실행 환경 이름
      */
     @ParameterizedTest
+    @DisplayName("끝의 0 생략 여부가 다른 같은 버전도 가장 작은 ID를 선택하는지 검증한다")
     @CsvSource(
         {
             "java,Java (JDK 17),Java (OpenJDK 17.0.0)",
@@ -412,8 +448,8 @@ class JudgeLanguageServiceTests {
             .expect(requestTo("http://judge0.test/languages/"))
             .andRespond(withSuccess(catalog, MediaType.APPLICATION_JSON));
         assertThat(service.requireRuntime(code, null).judge0LanguageId()).isEqualTo(1);
-        assertThat(service.findAll().content())
-            .filteredOn(language -> language.language().equals(code))
+        assertThat(service.findAll())
+            .filteredOn(language -> language.language().getCode().equals(code))
             .singleElement()
             .satisfies(language -> assertThat(language.enabled()).isTrue());
         server.verify();
@@ -426,6 +462,7 @@ class JudgeLanguageServiceTests {
      * @param name 지원하지 않는 실행 환경 이름
      */
     @ParameterizedTest
+    @DisplayName("시험판 또는 해석할 수 없는 이름만 있으면 실행을 허용하지 않는지 검증한다")
     @CsvSource(
         {
             "java,Java (JDK 17.0.11-ea)",
@@ -441,7 +478,10 @@ class JudgeLanguageServiceTests {
             .expect(requestTo("http://judge0.test/languages/"))
             .andRespond(withSuccess("[{\"id\":1,\"name\":\"%s\"}]".formatted(name), MediaType.APPLICATION_JSON));
         assertThatThrownBy(() -> service.requireRuntime(code, null).judge0LanguageId())
-            .isInstanceOf(UnsupportedLanguageException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.UNSUPPORTED_LANGUAGE)
+            );
         server.verify();
     }
 
@@ -449,6 +489,7 @@ class JudgeLanguageServiceTests {
      * 실패한 조회는 저장하지 않아 다음 호출에서 정상 목록을 다시 조회하는지 검증한다.
      */
     @Test
+    @DisplayName("실패한 조회는 저장하지 않아 다음 호출에서 정상 목록을 다시 조회하는지 검증한다")
     void retriesOnNextRequestAfterHttpFailure() {
         server
             .expect(requestTo("http://judge0.test/languages/"))
@@ -456,11 +497,10 @@ class JudgeLanguageServiceTests {
         server
             .expect(requestTo("http://judge0.test/languages/"))
             .andRespond(withSuccess(CATALOG, MediaType.APPLICATION_JSON));
-        assertThatThrownBy(() -> service.findAll())
-            .isInstanceOfSatisfying(Judge0ResponseFailedException.class, exception -> {
-                assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.JUDGE0_RESPONSE_FAILED);
-                assertThat(exception.getUpstreamStatus()).isEqualTo(503);
-            });
+        assertThatThrownBy(() -> service.findAll()).isInstanceOfSatisfying(JudgeException.class, exception -> {
+            assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.JUDGE0_RESPONSE_FAILED);
+            assertThat(exception.getUpstreamStatus()).isEqualTo(503);
+        });
         var runtime = service.requireRuntime("java", null);
         assertThat(runtime.judge0LanguageId()).isEqualTo(900);
         assertThat(service.requireRuntime("java", null)).isSameAs(runtime);
@@ -471,13 +511,14 @@ class JudgeLanguageServiceTests {
      * 연결 오류는 실행 언어 미지원 오류와 구분하는지 검증한다.
      */
     @Test
+    @DisplayName("연결 오류는 실행 언어 미지원 오류와 구분하는지 검증한다")
     void reportsConnectionFailure() {
         server.expect(requestTo("http://judge0.test/languages/")).andRespond(request -> {
             throw new IOException("connection failed");
         });
         assertThatThrownBy(() -> service.findAll())
             .isInstanceOfSatisfying(
-                Judge0ConnectionFailedException.class,
+                JudgeException.class,
                 exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.JUDGE0_CONNECTION_FAILED)
             );
         server.verify();
@@ -489,6 +530,7 @@ class JudgeLanguageServiceTests {
      * @param catalog 잘못된 목록 응답
      */
     @ParameterizedTest
+    @DisplayName("빈 본문·잘못된 JSON·불완전하거나 중복된 ID는 캐시에 보관하지 않는지 검증한다")
     @ValueSource(
         strings = {
             "",
@@ -509,7 +551,11 @@ class JudgeLanguageServiceTests {
         server
             .expect(requestTo("http://judge0.test/languages/"))
             .andRespond(withSuccess(CATALOG, MediaType.APPLICATION_JSON));
-        assertThatThrownBy(() -> service.findAll()).isInstanceOf(Judge0ResponseFailedException.class);
+        assertThatThrownBy(() -> service.findAll())
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.JUDGE0_RESPONSE_FAILED)
+            );
         var runtime = service.requireRuntime("java", null);
         assertThat(runtime.judge0LanguageId()).isEqualTo(900);
         assertThat(service.requireRuntime("java", null)).isSameAs(runtime);
@@ -522,6 +568,7 @@ class JudgeLanguageServiceTests {
      * @throws Exception 비동기 실행 또는 결과 조회에 실패한 경우
      */
     @Test
+    @DisplayName("동시에 처음 조회해도 한 번 받은 목록을 공유하는지 검증한다")
     void sharesCatalogAcrossConcurrentRequests() throws Exception {
         server
             .expect(requestTo("http://judge0.test/languages/"))
@@ -544,6 +591,7 @@ class JudgeLanguageServiceTests {
      * @param code 지원하지 않는 언어 코드
      */
     @ParameterizedTest
+    @DisplayName("Enum으로 변환할 수 없는 API 코드는 외부 요청 없이 거부하는지 검증한다")
     @NullAndEmptySource
     @ValueSource(
         strings = {
@@ -558,7 +606,10 @@ class JudgeLanguageServiceTests {
     )
     void rejectsUnsupportedLanguageCodes(String code) {
         assertThatThrownBy(() -> service.requireRuntime(code, null).judge0LanguageId())
-            .isInstanceOf(UnsupportedLanguageException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.UNSUPPORTED_LANGUAGE)
+            );
         server.verify();
     }
 
@@ -566,11 +617,15 @@ class JudgeLanguageServiceTests {
      * 서버 주소 미설정 시 외부 요청 없이 모든 언어를 비활성으로 응답하는지 검증한다.
      */
     @Test
+    @DisplayName("서버 주소 미설정 시 외부 요청 없이 모든 언어를 비활성으로 응답하는지 검증한다")
     void avoidsRequestForMissingServer() {
         service = service("", true);
-        assertThat(service.findAll().content()).allSatisfy(language -> assertThat(language.enabled()).isFalse());
+        assertThat(service.findAll()).allSatisfy(language -> assertThat(language.enabled()).isFalse());
         assertThatThrownBy(() -> service.requireRuntime("java", null).judge0LanguageId())
-            .isInstanceOf(UnsupportedLanguageException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.UNSUPPORTED_LANGUAGE)
+            );
         server.verify();
     }
 
@@ -578,19 +633,24 @@ class JudgeLanguageServiceTests {
      * HTTP 구현 없이도 조회 실패 후 재시도와 최신·고정 환경의 캐시 공유를 서비스에서 처리하는지 검증한다.
      */
     @Test
+    @DisplayName("HTTP 구현 없이도 조회 실패 후 재시도와 최신·고정 환경의 캐시 공유를 서비스에서 처리하는지 검증한다")
     void ownsCacheAndSelectionAfterClientFailure() {
         var languageClient = mock(Judge0LanguageClient.class);
-        service = new JudgeLanguageService(true, false, false, languageClient);
-        when(languageClient.findAll())
-            .thenThrow(new Judge0ResponseFailedException(503))
-            .thenReturn(
+        service = new JudgeLanguageService(properties("http://judge0.test", true, false, false), languageClient);
+        given(languageClient.findAll())
+            .willThrow(new JudgeException(JudgeErrorCode.JUDGE0_RESPONSE_FAILED, 503))
+            .willReturn(
                 List
                     .of(
                         new Judge0LanguageResponse(900, "Java (JDK 17.0.6)"),
                         new Judge0LanguageResponse(910, "Java (JDK 17.0.10)")
                     )
             );
-        assertThatThrownBy(() -> service.findAll()).isInstanceOf(Judge0ResponseFailedException.class);
+        assertThatThrownBy(() -> service.findAll())
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.JUDGE0_RESPONSE_FAILED)
+            );
         var latest = service.requireRuntime("java", null);
         assertThat(latest.judge0LanguageId()).isEqualTo(910);
         var fixed = new JudgeRuntime("java", 900, "Java (JDK 17.0.6)", "17.0.6", null);
@@ -608,6 +668,9 @@ class JudgeLanguageServiceTests {
      * @return 테스트용 언어 서비스
      */
     private JudgeLanguageService service(String url, boolean enabled) {
-        return new JudgeLanguageService(enabled, enabled, enabled, new Judge0LanguageClient(url, client));
+        return new JudgeLanguageService(
+            properties(url, enabled, enabled, enabled),
+            new Judge0LanguageClient(properties(url), client)
+        );
     }
 }
