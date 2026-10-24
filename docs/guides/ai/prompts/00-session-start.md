@@ -19,9 +19,10 @@ Confirm the user, owner group, Issue, and branch, and choose the decision record
     - For Codex or Gemini CLI setup, see `docs/guides/ai/README.md` > `4.4`
 
 ### Every session
-1. Working directory is the repository root
-2. If `.personal/` exists, read relevant files (development journal, reference docs)
-3. If the work involves GitHub Issues or PRs: run `/mcp` and confirm `github` connected
+1. Docker Desktop is running: GitHub MCP server runs on Docker.
+2. Working directory is the repository root
+3. If `.personal/` exists, read relevant files (development journal, reference docs)
+4. If the work involves GitHub Issues or PRs: run `/mcp` and confirm `github` connected
     - If CONNECTION_CLOSED: check `($env:GITHUB_PAT).Length` in PowerShell
     - If 0: re-run `setx GITHUB_PAT "token"` and restart IntelliJ + Claude Code
 
