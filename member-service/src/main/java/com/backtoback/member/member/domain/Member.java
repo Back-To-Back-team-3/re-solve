@@ -2,7 +2,7 @@ package com.backtoback.member.member.domain;
 
 import java.time.LocalDateTime;
 
-import com.backtoback.member.global.entity.BaseTimeEntity;
+import com.backtoback.common.jpa.entity.BaseTimeEntity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

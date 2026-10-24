@@ -32,6 +32,8 @@ repositories {
 dependencies {
     // 공통 응답·예외 (common-core 포함)
     implementation project(':common-web')
+    // 생성·수정 시각 감사, Clock
+    implementation project(':common-jpa')
 
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
