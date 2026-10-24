@@ -2,12 +2,13 @@
 
 ## Purpose
 
-Group the owner group's features into categories (Step A), then split one approved category into Issues and separate what people must decide (Step B).
+Group the owner group's features into categories (Step B), check the cycle table first (Step A), then split one approved category into Issues and separate what people must decide (Step C).
 
 ## When to use
 
-- Step A: at the start of a milestone, or when scope or priority changes
-- Step B: once for each category approved in Step A
+- Step A: before every issue, to check the cycle table
+- Step B: at the start of a milestone, or when scope or priority changes
+- Step C: once for each category approved in Step B
 
 ## Inputs
 
@@ -54,7 +55,7 @@ Human gate: user approves the cycle table state before issue planning begins.
 
 ## Output format
 
-Step A:
+Step B:
 
 | 사이클 | 카테고리 | 포함 기능 | 우선순위 | 선행 조건 | 다른 도메인 영향 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -65,7 +66,7 @@ Step A:
 ### 결정 필요
 -
 
-Step B:
+Step C:
 
 ### 문서 선행 이슈
 | # | 제목 | 바꿀 문서 > 섹션 | 이유 | 영향 받는 담당 |
@@ -92,8 +93,9 @@ Step B:
 
 ## Human gate
 
-- Step A: approve the categories, adjust priority, and agree on dependency order with the other owner groups.
-- Step B: settle the Issue scope; decide API signatures, state transitions, and error codes; register and merge the document Issues first.
+- Step A: user approves the cycle table state before category planning begins.
+- Step B: approve the categories, adjust priority, and agree on dependency order with the other owner groups.
+- Step C: settle the Issue scope; decide API signatures, state transitions, and error codes; register and merge the document Issues first.
 
 ## Tool differences
 

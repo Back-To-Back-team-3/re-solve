@@ -6,7 +6,7 @@ Write an Issue body from a settled scope, and register it after the user approve
 
 ## When to use
 
-- After Step B of stage 10 settles the scope and decisions, once per Issue
+- After Step C of stage 10 settles the scope and decisions, once per Issue
 
 ## Inputs
 
