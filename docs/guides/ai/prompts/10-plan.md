@@ -17,7 +17,17 @@ Group the owner group's features into categories (Step A), then split one approv
 - The owner group's sections of `api-spec.md`, `erd.md`, `error-codes.md`, `event-contract.md`, and `policy-and-state.md`
 - Related decision records
 
-## Steps — A. Category plan
+## Step A — Cycle table review (run before every issue)
+
+1. Read `docs/records/progress/{owner}.md` cycle table.
+2. Verify the next issue matches the table order and dependency.
+    - If a new issue was manually created, confirm its title and scope match the table.
+    - If the table needs update (add / insert / change), propose changes and wait for Human gate.
+3. Confirm dependency order before proceeding to Step B.
+
+Human gate: user approves the cycle table state before issue planning begins.
+
+## Steps — B. Category plan
 
 1. List the owner group's features and priorities from `planning.md` > `3.2 요구사항 명세`.
 2. Group them into categories. Each category should split into a few Issues.
@@ -26,7 +36,7 @@ Group the owner group's features into categories (Step A), then split one approv
 5. Give the grounds for each row as `document > section`.
 6. Output the result and wait for approval.
 
-## Steps — B. Issue breakdown
+## Steps — C. Issue breakdown
 
 1. Split the approved category by `docs/guides/git-github.md` > `1.3 Issue 관리`. Split again any Issue over the size guideline.
 2. For each Issue, give a title (`git-github.md` > `1.2 커밋·Issue·PR 제목`), a one-line scope, endpoints, the expected number of changed files, and dependencies.

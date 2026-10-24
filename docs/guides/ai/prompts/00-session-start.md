@@ -9,6 +9,15 @@ Confirm the user, owner group, Issue, and branch, and choose the decision record
 - At the start of a new AI session
 - When switching to another Issue in the same session
 
+## Environment checklist (before reading any document)
+
+1. Docker Desktop is running: `docker ps` returns no error
+2. GitHub MCP is connected: `/mcp` shows `github` connected
+    - If CONNECTION_CLOSED: check `($env:GITHUB_PAT).Length` in PowerShell
+    - If 0: re-run `setx GITHUB_PAT "token"` and restart IntelliJ + Claude Code
+3. Working directory is the repository root
+4. If `.personal/` exists, read relevant files (development journal, reference docs)
+
 ## Inputs
 
 - `AGENTS.md` (loaded automatically)
