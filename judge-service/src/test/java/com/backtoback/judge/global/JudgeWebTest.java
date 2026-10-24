@@ -38,7 +38,7 @@ import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.judge.global.config.CommonConfiguration;
 import com.backtoback.judge.global.error.JudgeErrorCode;
-import com.backtoback.judge.global.exception.JudgeException;
+import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.global.security.SecurityConfiguration;
 
 import jakarta.validation.Valid;

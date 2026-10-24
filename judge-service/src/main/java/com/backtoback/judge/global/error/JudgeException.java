@@ -1,7 +1,6 @@
-package com.backtoback.judge.global.exception;
+package com.backtoback.judge.global.error;
 
 import com.backtoback.common.exception.BusinessException;
-import com.backtoback.judge.global.error.JudgeErrorCode;
 
 import lombok.Getter;
 
