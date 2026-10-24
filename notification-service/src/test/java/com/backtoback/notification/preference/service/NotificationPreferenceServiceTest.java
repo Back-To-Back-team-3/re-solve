@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.util.Optional;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import com.backtoback.notification.preference.domain.NotificationPreference;
 import com.backtoback.notification.preference.dto.request.NotificationPreferenceUpdateRequest;
@@ -47,7 +49,7 @@ class NotificationPreferenceServiceTest {
         assertThat(response.isLevelChangedEnabled()).isTrue();
         assertThat(response.isHintReadyEnabled()).isTrue();
         assertThat(response.isGithubSyncEnabled()).isTrue();
-        verify(preferenceRepository, never()).save(any());
+        verify(preferenceRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -76,7 +78,7 @@ class NotificationPreferenceServiceTest {
         // given
         Long memberId = 2L;
         given(preferenceRepository.findByMemberId(memberId)).willReturn(Optional.empty());
-        given(preferenceRepository.save(any(NotificationPreference.class)))
+        given(preferenceRepository.saveAndFlush(any(NotificationPreference.class)))
             .willAnswer(invocation -> invocation.getArgument(0));
 
         NotificationPreferenceUpdateRequest request
@@ -94,7 +96,7 @@ class NotificationPreferenceServiceTest {
         assertThat(response.isGithubSyncEnabled()).isTrue();
 
         ArgumentCaptor<NotificationPreference> captor = ArgumentCaptor.forClass(NotificationPreference.class);
-        verify(preferenceRepository).save(captor.capture());
+        verify(preferenceRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getMemberId()).isEqualTo(memberId);
         assertThat(captor.getValue().isAssignmentEnabled()).isFalse();
         assertThat(captor.getValue().isExamContestEnabled()).isTrue();
@@ -107,7 +109,7 @@ class NotificationPreferenceServiceTest {
         Long memberId = 3L;
         NotificationPreference existing = new NotificationPreference(memberId, false, true, true, true, false, true);
         given(preferenceRepository.findByMemberId(memberId)).willReturn(Optional.of(existing));
-        given(preferenceRepository.save(existing)).willReturn(existing);
+        given(preferenceRepository.saveAndFlush(existing)).willReturn(existing);
 
         NotificationPreferenceUpdateRequest request
             = new NotificationPreferenceUpdateRequest(true, null, false, null, null, false);
@@ -122,5 +124,35 @@ class NotificationPreferenceServiceTest {
         assertThat(response.isLevelChangedEnabled()).isTrue();
         assertThat(response.isHintReadyEnabled()).isFalse();
         assertThat(response.isGithubSyncEnabled()).isFalse();
+    }
+
+    @Test
+    @DisplayName("7.1.6 최초 PATCH 동시 요청으로 고유 제약 충돌이 발생하면 기존 행을 재조회하여 요청 필드를 반영한다")
+    void updatePreferencesWhenConcurrentCreateCollidesRefetchesAndUpdates() {
+        // given
+        Long memberId = 4L;
+        NotificationPreference concurrentRow
+            = new NotificationPreference(memberId, false, true, true, true, true, true);
+
+        given(preferenceRepository.findByMemberId(memberId))
+            .willReturn(Optional.empty())
+            .willReturn(Optional.of(concurrentRow));
+
+        given(preferenceRepository.saveAndFlush(any(NotificationPreference.class)))
+            .willThrow(new DataIntegrityViolationException("uk_notification_preferences_member_id"))
+            .willAnswer(invocation -> invocation.getArgument(0));
+
+        NotificationPreferenceUpdateRequest request
+            = new NotificationPreferenceUpdateRequest(null, null, false, null, null, null);
+
+        // when
+        NotificationPreferenceResponse response = preferenceService.updatePreferences(memberId, request);
+
+        // then
+        assertThat(response.isExamContestEnabled()).isFalse();
+        assertThat(response.isAssignmentEnabled()).isFalse();
+        assertThat(response.isStudyApplicationEnabled()).isTrue();
+        verify(preferenceRepository, times(2)).findByMemberId(memberId);
+        verify(preferenceRepository, times(2)).saveAndFlush(any(NotificationPreference.class));
     }
 }
