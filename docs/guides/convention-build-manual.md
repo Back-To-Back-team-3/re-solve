@@ -271,8 +271,12 @@ com.backtoback.{서비스}
 - 테스트는 대상과 같은 패키지에 `{대상}Test`로 둔다.
 - 단위 테스트는 `MockitoExtension`, BDDMockito `given`, AssertJ로 작성한다.
 - Controller 테스트는 `@WebMvcTest`와 `@MockitoBean`으로 작성한다.
-- DB·Redis가 필요한 테스트는 Testcontainers를 쓰고, Docker가 없으면 `Assumptions`로 건너뛴다.
+- DB·Redis가 필요한 테스트는 Testcontainers를 쓰고, Docker가 없으면 `@Testcontainers(disabledWithoutDocker = true)`로 건너뛴다.
 - 테스트 메서드 주석은 5.5 테스트를 따른다.
+- Spring Boot 컨텍스트 로드 테스트는 `@SpringBootTest` + Testcontainers MySQL로 작성한다.
+- Controller 테스트는 `@WebMvcTest`와 `@MockitoBean`으로 작성한다. 단, Application 클래스에 `@Import(JpaAuditingConfiguration)`이 있으면 `@WebMvcTest`가 JPA metamodel 오류로 실패한다. 이 경우 `@SpringBootTest`를 쓰고 PR 리뷰어에게 이유를 명시한다.
+- 프로필별로 다른 컨텍스트가 필요하면 클래스를 나눈다. 예: `SecurityConfigurationTest`(기본), `SecurityConfigurationLocalProfileTest`(local)
+- 기존 클래스명이 `…Tests`인 경우 그대로 유지한다.
 
 ---
 
