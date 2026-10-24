@@ -13,6 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
 import com.backtoback.judge.judging.dto.JudgeRuntime;
@@ -108,6 +109,7 @@ class JavaExecutionCodeGeneratorTests {
     void reusesExecutionRequest() {
         var code = generator.generate(spec(scalar(Kind.INT32)), "class Solution {}", Map.of("value", "7"));
         var runtime = new JudgeRuntime("java", 91, "Java (JDK 17)", "17", null);
+        assertThat(code.language()).isEqualTo(JudgeLanguage.JAVA);
         var request = code.toRequest(runtime, 2000, 7000, 262144);
         assertThat(request.language()).isEqualTo("java");
         assertThat(request.fixedRuntime()).isSameAs(runtime);
