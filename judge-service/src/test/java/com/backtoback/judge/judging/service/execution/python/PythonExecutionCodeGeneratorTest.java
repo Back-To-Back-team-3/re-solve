@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.execution.python;
+package com.backtoback.judge.judging.service.execution.python;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -13,11 +13,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
-import com.backtoback.judge.judging.service.JudgeRuntime;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 
 /** Python 기본 코드·공통 입력 계약·기존 실행 요청 연결을 검증한다. */
 class PythonExecutionCodeGeneratorTest {
@@ -84,6 +85,7 @@ class PythonExecutionCodeGeneratorTest {
         var source
             = generator.generate(spec(scalar(Kind.INT64)), "def solution(value): return value", Map.of("value", "1"));
         var runtime = new JudgeRuntime("python3", 71, "Python (3.8.1)", "3.8.1", null);
+        assertThat(source.language()).isEqualTo(JudgeLanguage.PYTHON3);
         var request = source.toRequest(runtime, 2000, 7000, 262144);
         assertThat(request.language()).isEqualTo("python3");
         assertThat(request.fixedRuntime()).isSameAs(runtime);
