@@ -10,7 +10,9 @@ import java.util.stream.Collectors;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
+import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.dto.FunctionSpec;
+import com.backtoback.judge.judging.service.ExecutionSource;
 
 /**
  * {@code Solution}의 {@code public} 인스턴스 메서드를 실행하는 Java 17 소스를 생성한다. (정책 및 상태 §3.1·§3.2)
@@ -124,7 +126,7 @@ public class JavaExecutionCodeGenerator {
      * @return 기존 실행 요청 모델에 연결할 코드와 입력
      * @throws IllegalArgumentException 명세·입력이 잘못되거나 코드가 비어 있는 경우
      */
-    public JavaExecutionSource generate(FunctionSpec spec, String sourceCode, Map<String, String> argumentTexts) {
+    public ExecutionSource generate(FunctionSpec spec, String sourceCode, Map<String, String> argumentTexts) {
         validate(spec);
         if (sourceCode == null || sourceCode.isBlank()) {
             throw new IllegalArgumentException("실행할 Java 코드가 필요합니다.");
@@ -140,7 +142,7 @@ public class JavaExecutionCodeGenerator {
             = template
                 .replace("${RETURN_TYPE}", types.sourceType(spec.returnType()))
                 .replace("${ARGUMENTS}", arguments);
-        return new JavaExecutionSource(sourceCode + "\n" + runner, inputs.encode(spec, argumentTexts));
+        return new ExecutionSource(JudgeLanguage.JAVA, sourceCode + "\n" + runner, inputs.encode(spec, argumentTexts));
     }
 
     /**

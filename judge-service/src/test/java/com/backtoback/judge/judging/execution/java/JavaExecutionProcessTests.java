@@ -26,6 +26,7 @@ import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
+import com.backtoback.judge.judging.service.ExecutionSource;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -425,7 +426,7 @@ class JavaExecutionProcessTests {
      * @return 컴파일 상태와 메시지
      * @throws Exception 파일 생성 또는 컴파일 준비가 실패한 경우
      */
-    private ProcessResult compile(JavaExecutionSource code) throws Exception {
+    private ProcessResult compile(ExecutionSource code) throws Exception {
         Path file = directory.resolve("Main.java");
         Files.writeString(file, code.sourceCode());
         var output = new ByteArrayOutputStream();
@@ -454,7 +455,7 @@ class JavaExecutionProcessTests {
      * @return 종료 코드와 분리한 출력
      * @throws Exception 컴파일·프로세스 실행·입출력이 실패한 경우
      */
-    private ProcessResult execute(JavaExecutionSource code) throws Exception {
+    private ProcessResult execute(ExecutionSource code) throws Exception {
         var compilation = compile(code);
         assertThat(compilation.exitCode()).as(compilation.stderr()).isZero();
         Path stdin = directory.resolve("stdin");
