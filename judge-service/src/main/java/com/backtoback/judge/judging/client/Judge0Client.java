@@ -22,10 +22,10 @@ import com.backtoback.judge.judging.dto.request.JudgeExecutionCreateRequest;
 import com.backtoback.judge.judging.dto.response.Judge0ExecutionCreateResponse;
 import com.backtoback.judge.judging.dto.response.Judge0ExecutionResultResponse;
 import com.backtoback.judge.judging.service.JudgeClient;
-import com.backtoback.judge.judging.service.JudgeExecutionCreateResponse;
-import com.backtoback.judge.judging.service.JudgeExecutionResultResponse;
-import com.backtoback.judge.judging.service.JudgeExecutionResultResponse.State;
 import com.backtoback.judge.judging.service.JudgeLanguageService;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionCreateResponse;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
 
 import lombok.RequiredArgsConstructor;
 

@@ -19,9 +19,9 @@ import com.backtoback.judge.judging.config.Judge0Properties;
 import com.backtoback.judge.judging.config.Judge0Properties.Language;
 import com.backtoback.judge.judging.config.Judge0Properties.Languages;
 import com.backtoback.judge.judging.dto.request.JudgeExecutionCreateRequest;
-import com.backtoback.judge.judging.service.JudgeExecutionResultResponse;
-import com.backtoback.judge.judging.service.JudgeExecutionResultResponse.State;
 import com.backtoback.judge.judging.service.JudgeLanguageService;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
 
 /**
  * judge0LiveTest 작업에서만 실행하는 실제 서버 연동 테스트다.

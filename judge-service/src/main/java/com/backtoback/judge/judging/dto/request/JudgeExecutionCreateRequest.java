@@ -1,6 +1,6 @@
 package com.backtoback.judge.judging.dto.request;
 
-import com.backtoback.judge.judging.service.JudgeRuntime;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 
 /**
  * 실행 엔진에 전달할 코드·입력과 실행 환경 및 자원 제한을 보관한다.
