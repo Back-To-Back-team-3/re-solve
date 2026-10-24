@@ -1,6 +1,8 @@
 #ifndef RE_SOLVE_EXECUTION_TYPES
 #define RE_SOLVE_EXECUTION_TYPES
+#include <climits>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -8,13 +10,29 @@
 #include <variant>
 #include <vector>
 
+// 기본형의 표현 범위를 검사해 공통 입력의 비트 표현을 그대로 복원한다.
+static_assert(CHAR_BIT == 8, "Execution input requires 8-bit bytes");
+static_assert(sizeof(int) == 4 && std::numeric_limits<int>::digits == 31
+    && std::numeric_limits<int>::min() == (-2147483647 - 1), "INT32 requires a signed 32-bit int");
+static_assert(sizeof(long long) == 8 && std::numeric_limits<long long>::digits == 63
+    && std::numeric_limits<long long>::min() == (-9223372036854775807LL - 1),
+    "INT64 requires a signed 64-bit long long");
+static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559
+    && std::numeric_limits<float>::radix == 2 && std::numeric_limits<float>::digits == 24
+    && std::numeric_limits<float>::min_exponent == -125 && std::numeric_limits<float>::max_exponent == 128,
+    "FLOAT32 requires an IEEE 754 binary32 float");
+static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559
+    && std::numeric_limits<double>::radix == 2 && std::numeric_limits<double>::digits == 53
+    && std::numeric_limits<double>::min_exponent == -1021 && std::numeric_limits<double>::max_exponent == 1024,
+    "FLOAT64 requires an IEEE 754 binary64 double");
+
 // 혼합 배열과 객체는 값의 선언 타입을 variant 안에 그대로 보관한다.
 struct Value {
     using Array = std::vector<Value>;
     using Object = std::map<std::string, Value>;
-    using Storage = std::variant<std::int32_t, std::int64_t, float, double, std::string, bool, Array, Object>;
+    using Storage = std::variant<int, long long, float, double, std::string, bool, Array, Object>;
     Storage data;
-    Value() : data(std::int32_t{0}) {}
+    Value() : data(int{0}) {}
     Value(const char* value) : data(std::string(value)) {}
     Value(Array value) : data(std::move(value)) {}
     Value(Object value) : data(std::move(value)) {}
@@ -33,7 +51,6 @@ struct Value {
 #include <iomanip>
 #include <iostream>
 #include <iterator>
-#include <limits>
 #include <locale>
 #include <sstream>
 #include <type_traits>
@@ -152,20 +169,19 @@ public:
         switch (byte()) {
             case 1: {
                 auto bits = word();
-                std::int32_t value;
+                int value;
                 std::memcpy(&value, &bits, sizeof(value));
                 return value;
             }
             case 2: {
                 auto bits = wideWord();
-                std::int64_t value;
+                long long value;
                 std::memcpy(&value, &bits, sizeof(value));
                 return value;
             }
             case 3: {
                 auto bits = wideWord();
                 double value;
-                static_assert(sizeof(value) == sizeof(bits) && std::numeric_limits<double>::is_iec559);
                 std::memcpy(&value, &bits, sizeof(value));
                 return value;
             }
@@ -189,7 +205,6 @@ public:
             case 8: {
                 auto bits = word();
                 float value;
-                static_assert(sizeof(value) == sizeof(bits) && std::numeric_limits<float>::is_iec559);
                 std::memcpy(&value, &bits, sizeof(value));
                 return value;
             }
@@ -199,6 +214,7 @@ public:
 };
 
 // 참조 전달은 허용하되 선언과 다른 인자·반환 타입의 암묵적 수치 변환은 막는다.
+// long과 long long의 크기가 같더라도 INT64 함수에는 long long만 허용한다.
 template<class Signature> struct SignatureMatches;
 template<class R, class... Args> struct SignatureMatches<R(Args...)> {
     template<class ActualR, class... ActualArgs>
