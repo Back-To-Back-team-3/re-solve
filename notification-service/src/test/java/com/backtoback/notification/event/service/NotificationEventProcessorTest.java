@@ -323,6 +323,40 @@ class NotificationEventProcessorTest {
     }
 
     @Test
+    @DisplayName("ExamCanceled 이벤트 수신 시 시험 예약 일괄 취소와 EXAM_CANCELED 알림 생성을 함께 수행한다")
+    void processExamCanceledCancelsRemindersAndCreatesNotification() {
+        // given
+        String eventId = "evt-exam-cancel-1";
+        JsonNode payload = objectMapper.readTree("""
+            {
+              "eventId": "evt-exam-cancel-1",
+              "eventType": "ExamCanceled",
+              "examId": "55",
+              "studyId": "12",
+              "examRevision": "4",
+              "canceledAt": "2026-10-20T20:15:00.000000+09:00",
+              "reason": "LEADER_CANCELED",
+              "targetMemberIds": ["7"]
+            }
+            """);
+
+        given(processedEventRepository.existsByEventId(eventId)).willReturn(false);
+        given(preferenceRepository.findByMemberId(7L)).willReturn(Optional.empty());
+        given(
+            notificationRepository.existsBySourceEventIdAndMemberIdAndType(eventId, 7L, NotificationType.EXAM_CANCELED)
+        ).willReturn(false);
+        given(notificationRepository.saveAndFlush(any(Notification.class)))
+            .willAnswer(invocation -> invocation.getArgument(0));
+
+        // when
+        eventProcessor.process(eventId, "ExamCanceled", payload);
+
+        // then
+        verify(examReminderService).cancelByExamCanceled(55L);
+        verify(notificationRepository).saveAndFlush(any(Notification.class));
+    }
+
+    @Test
     @DisplayName("수신 설정이 비활성화된 카테고리의 이벤트는 processed_events만 기록하고 알림은 생성하지 않는다")
     void processSkipsNotificationWhenPreferenceDisabled() {
         // given

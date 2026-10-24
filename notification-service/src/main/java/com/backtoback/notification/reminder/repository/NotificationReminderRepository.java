@@ -20,14 +20,54 @@ public interface NotificationReminderRepository extends JpaRepository<Notificati
 
     Optional<NotificationReminder> findByParticipantId(Long participantId);
 
-    List<NotificationReminder> findByExamIdAndStatus(Long examId, ReminderStatus status);
-
     List<NotificationReminder> findByStatusAndFireAtLessThanEqualAndStartsAtGreaterThanOrderByFireAtAsc(
         ReminderStatus status,
         LocalDateTime fireAtThreshold,
         LocalDateTime startsAtThreshold,
         Pageable pageable
     );
+
+    @Modifying(clearAutomatically = true)
+    @Query(
+        "UPDATE NotificationReminder r " + "SET r.startsAt = :newStartsAt, r.fireAt = :newFireAt, "
+            + "r.contextRevision = :examRevision, r.sourceEventId = :sourceEventId, r.updatedAt = :now "
+            + "WHERE r.examId = :examId "
+            + "AND r.status = com.backtoback.notification.reminder.domain.ReminderStatus.SCHEDULED "
+            + "AND r.contextRevision < :examRevision"
+    )
+    int rescheduleScheduledByExamId(
+        @Param("examId") Long examId,
+        @Param("examRevision") int examRevision,
+        @Param("newStartsAt") LocalDateTime newStartsAt,
+        @Param("newFireAt") LocalDateTime newFireAt,
+        @Param("sourceEventId") String sourceEventId,
+        @Param("now") LocalDateTime now
+    );
+
+    @Modifying(clearAutomatically = true)
+    @Query(
+        "UPDATE NotificationReminder r "
+            + "SET r.status = com.backtoback.notification.reminder.domain.ReminderStatus.CANCELED, "
+            + "r.contextRevision = :examRevision, r.sourceEventId = :sourceEventId, r.updatedAt = :now "
+            + "WHERE r.examId = :examId "
+            + "AND r.status = com.backtoback.notification.reminder.domain.ReminderStatus.SCHEDULED "
+            + "AND r.contextRevision < :examRevision"
+    )
+    int cancelScheduledByExamIdAndNewerRevision(
+        @Param("examId") Long examId,
+        @Param("examRevision") int examRevision,
+        @Param("sourceEventId") String sourceEventId,
+        @Param("now") LocalDateTime now
+    );
+
+    @Modifying(clearAutomatically = true)
+    @Query(
+        "UPDATE NotificationReminder r "
+            + "SET r.status = com.backtoback.notification.reminder.domain.ReminderStatus.CANCELED, r.updatedAt = :now "
+            + "WHERE r.participantId = :participantId "
+            + "AND r.status = com.backtoback.notification.reminder.domain.ReminderStatus.SCHEDULED"
+    )
+    int cancelScheduledByParticipantId(@Param("participantId") Long participantId, @Param("now") LocalDateTime now);
 
     @Modifying(clearAutomatically = true)
     @Query(
