@@ -35,8 +35,12 @@ Check changes against `docs/guides/ai/review-checklist.md`. Mode A is the author
     - 근거: the checklist number and `document > section > phrase`, or the related code. For related code, give a permalink with the PR head commit SHA. If you do not know the SHA, give the path and lines and mark the link for the reviewer to add.
     - 대안: the code or method to change. Use a `suggestion` block for a change of a few lines. If there is more than one valid option, list the options.
 6. Give each finding a severity (필수, 권장, 질문) and the submission type from `4.1 리뷰어가 확인할 내용`.
+   - 필수 (Request changes): build or test failure, security vulnerability, API contract violation, team decision record violation
+   - 권장 (Comment): convention or consistency, readability, performance improvement
+   - 질문 (Comment): unclear intent, needs confirmation
 7. If there is no 필수 finding, draft an approval comment following `4.1 리뷰어가 확인할 내용`: the PR's subject in one line, the result for each request in `💬 리뷰어에게`, and if prior change requests were made, confirmation that each was addressed.
 8. Output the analysis only. Do not post anything on GitHub.
+9. If needed, fetch the PR head branch locally to verify build and test results. Return to the original branch when done.
 
 ## Output format
 
@@ -67,33 +71,64 @@ Mode B:
 | --- | --- | --- |
 
 ### 지적
-| 위치 | 심각도 | 제출 | 지적 | 근거 | 대안 |
-| --- | --- | --- | --- | --- | --- |
+지적마다 아래 형식으로 작성한다.
+
+**지적**: `파일경로` L시작-L끝 — 무엇이 문제인지 한 줄
+**근거**: [체크리스트 번호] `문서 > 섹션 > 찾을 문구` 또는 permalink
+**대안**: 바꿀 코드나 방법
+- 몇 줄 수정이면 suggestion 블록으로 작성
+- 선택지가 여럿이면 모두 열거
+  **심각도**: Request changes / Comment
+
+### 참고 (선택)
+Observations that do not fit the 지적·근거·대안 format.
+Examples: scope over the size limit on already-merged work, observations outside the owner group's scope.
 
 ### PR 본문·주석과 코드의 차이
 -
 
 ### 승인 코멘트 초안 (필수 지적이 없을 때)
-- 주제:
-- 리뷰어에게 확인 결과:
-- 이전 변경 요청 반영 확인: (변경 요청이 있었던 경우)
+
+Before drafting, check whether prior change requests exist on this PR.
+
+**처음 리뷰하는 경우:**
+    ```
+    {PR 주제} 확인했습니다.
+    - {💬 리뷰어에게 항목 1} 확인했습니다.
+    - {💬 리뷰어에게 항목 2} 확인했습니다.
+    승인합니다.
+    {추가 코멘트 (있을 경우만)}
+    ```
+
+**이전 변경 요청이 있었던 경우:**
+    ```
+    {PR 주제} 확인했습니다.
+    - {💬 리뷰어에게 항목 1} 확인했습니다.
+    - {💬 리뷰어에게 항목 2} 확인했습니다.
+    - {이전 변경 요청 항목 1} 반영 확인했습니다.
+    - {이전 변경 요청 항목 2} 반영 확인했습니다.
+    승인합니다.
+    {추가 코멘트 (있을 경우만)}
+    ```
 ```
 
 ## Do not
 
 - Mark a command you did not run as 통과.
 - Mode A: fix 미통과 items without approval.
-- Mode B: post comments, approvals, or change requests on GitHub.
+- Mode B: post comments, approvals, or change requests on GitHub directly, without exception. Always present the result to the user and instruct them to post it manually.
 - Mode B: mark a matter of taste without grounds as 필수.
 - Mode B: write a finding without all of 지적, 근거, and 대안.
 
 ## Human gate
 
-- Mode A: the author decides how to fix each item and fixes it through stage 30 Step B. The author does not create the PR until there are no 미통과 items.
-- Mode B: the reviewer decides which comments to post, and writes and posts them directly, including approvals and change requests, following `git-github.md` > `4.1 리뷰어가 확인할 내용`.
+- Mode A: the author decides how to fix each item and fixes it through stage 30 Step-B. The author does not create the PR until there are no 미통과 items.
+- Mode B: the reviewer decides which findings to post, and writes and posts them manually on GitHub, including approvals and change requests, following `git-github.md` > `4.1 리뷰어가 확인할 내용`.
 
 ## Tool differences
 
 | Claude Code | Codex, Gemini CLI |
 | --- | --- |
 | Mode B reads the PR diff through MCP (read only) | The reviewer pastes the code |
+| If get_files exceeds the token limit, run `git fetch origin {PR-branch}` then `git cat-file -p {sha}:{path}` to find line numbers | Same |
+| Mode B may fetch the PR head locally and run compileJava, test, spotlessCheck if needed. Return to the original branch when done | Same |

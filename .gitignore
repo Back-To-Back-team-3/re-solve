@@ -26,6 +26,9 @@ replay_pid*
 *.jks
 *.keystore
 
+# Personal development docs (local only, not committed)
+.personal/
+
 # IntelliJ IDEA
 .idea/
 *.iml
