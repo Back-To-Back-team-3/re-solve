@@ -22,6 +22,64 @@ import com.backtoback.judge.judging.dto.TypeSpec.Kind;
 class JavaExecutionCodeGeneratorTests {
     private final JavaExecutionCodeGenerator generator = new JavaExecutionCodeGenerator();
 
+    /**
+     * Java 예약어·리터럴·단일 밑줄을 두 생성 경로에서 함께 거절한다.
+     *
+     * @param name 매개변수로 사용할 수 없는 이름
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "class",
+            "int",
+            "public",
+            "return",
+            "switch",
+            "volatile",
+            "const",
+            "goto",
+            "true",
+            "false",
+            "null",
+            "_"
+        }
+    )
+    @DisplayName("Java 예약어와 리터럴은 기본 코드와 실행 코드 생성 전에 거절한다")
+    void rejectsReservedParameterNames(String name) {
+        var type = scalar(Kind.INT32);
+        var function = new FunctionSpec("solution", List.of(new Parameter(name, type)), type);
+        assertThatThrownBy(() -> generator.starterCode(function)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> generator.generate(function, "class Solution {}", Map.of(name, "1")))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /**
+     * 예약어와 비슷한 이름과 매개변수 위치에서 유효한 문맥 키워드는 허용한다.
+     *
+     * @param name 매개변수로 사용할 수 있는 이름
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "className",
+            "class_",
+            "Class",
+            "_value",
+            "var",
+            "record",
+            "yield",
+            "sealed",
+            "permits"
+        }
+    )
+    @DisplayName("예약어의 접두·접미 이름과 유효한 문맥 키워드는 허용한다")
+    void acceptsLegalParameterNames(String name) {
+        var type = scalar(Kind.INT32);
+        var function = new FunctionSpec("solution", List.of(new Parameter(name, type)), type);
+        assertThat(generator.starterCode(function)).contains("int " + name);
+        assertThat(generator.generate(function, "class Solution {}", Map.of(name, "1")).stdin()).isNotBlank();
+    }
+
     /** 기본 타입과 배열의 Java 선언을 확인한다. */
     @ParameterizedTest
     @CsvSource(

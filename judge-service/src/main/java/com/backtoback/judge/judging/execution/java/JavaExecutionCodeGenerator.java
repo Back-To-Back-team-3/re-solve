@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.core.io.ClassPathResource;
@@ -17,6 +18,65 @@ import com.backtoback.judge.judging.dto.FunctionSpec;
  */
 @Service
 public class JavaExecutionCodeGenerator {
+    // Java 17 예약어와 식별자로 쓸 수 없는 리터럴을 거절하고 문맥 키워드는 허용한다.
+    private static final Set<String> JAVA_RESERVED_NAMES
+        = Set
+            .of(
+                "abstract",
+                "assert",
+                "boolean",
+                "break",
+                "byte",
+                "case",
+                "catch",
+                "char",
+                "class",
+                "const",
+                "continue",
+                "default",
+                "do",
+                "double",
+                "else",
+                "enum",
+                "extends",
+                "final",
+                "finally",
+                "float",
+                "for",
+                "goto",
+                "if",
+                "implements",
+                "import",
+                "instanceof",
+                "int",
+                "interface",
+                "long",
+                "native",
+                "new",
+                "package",
+                "private",
+                "protected",
+                "public",
+                "return",
+                "short",
+                "static",
+                "strictfp",
+                "super",
+                "switch",
+                "synchronized",
+                "this",
+                "throw",
+                "throws",
+                "transient",
+                "try",
+                "void",
+                "volatile",
+                "while",
+                "true",
+                "false",
+                "null",
+                "_"
+            );
     private final JavaTypeMapper types = new JavaTypeMapper();
     private final JavaInputEncoder inputs = new JavaInputEncoder();
     private final String template;
@@ -84,7 +144,7 @@ public class JavaExecutionCodeGenerator {
     }
 
     /**
-     * 코드 생성 전에 함수 구조와 중첩 타입의 지원 여부를 확인한다. 예약어 검사는 컴파일러에 맡긴다.
+     * 코드 생성 전에 함수 구조·Java 매개변수 이름과 중첩 타입의 지원 여부를 확인한다.
      *
      * @param spec 함수 명세
      * @throws IllegalArgumentException 함수명·매개변수 구조가 잘못된 경우
@@ -96,7 +156,7 @@ public class JavaExecutionCodeGenerator {
         var names = new HashSet<String>();
         for (var parameter : spec.parameters()) {
             if (parameter == null || parameter.name() == null || !parameter.name().matches("[A-Za-z_][A-Za-z0-9_]*")
-                || !names.add(parameter.name())) {
+                || JAVA_RESERVED_NAMES.contains(parameter.name()) || !names.add(parameter.name())) {
                 throw new IllegalArgumentException("매개변수 이름이 올바르지 않습니다.");
             }
             types.sourceType(parameter.type());
