@@ -6,17 +6,31 @@ import java.sql.SQLException;
 
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 
-/** 알 수 없는 DB 제약 위반의 서버 오류 응답과 상세 오류를 노출하지 않는 로그 정책을 확인한다. */
+/** DB 제약 위반·잠금 경합 응답과 상세 오류를 노출하지 않는 로그 정책을 확인한다. */
 @ExtendWith(OutputCaptureExtension.class)
 class ProblemExceptionHandlerTest {
+    @Test
+    @DisplayName("DB 잠금 대기 실패는 버전 충돌 오류로 응답하고 상세 오류를 로그에 남기지 않는다")
+    void lockAcquisitionFailureIsVersionConflict(CapturedOutput output) {
+        var exception = new CannotAcquireLockException("internal-lock-detail");
+
+        var response = new ProblemExceptionHandler().handlePessimisticLock(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody().error().code()).isEqualTo("PROBLEM_VERSION_CONFLICT");
+        assertThat(output.getAll()).contains("CannotAcquireLockException").doesNotContain("internal-lock-detail");
+    }
+
     @ParameterizedTest
     @DisplayName("태그 중복·사용 중 오류에 해당하지 않는 제약 위반은 서버 오류로 응답하고 로그에 오류 코드와 예외 타입만 남긴다")
     @CsvSource(
