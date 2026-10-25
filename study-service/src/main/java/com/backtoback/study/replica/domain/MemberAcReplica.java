@@ -102,7 +102,6 @@ public class MemberAcReplica extends BaseTimeEntity {
         LocalDateTime submittedAt,
         int judgeAttempt,
         JudgeVerdict verdict,
-        boolean accepted,
         LocalDateTime syncedAt
     ) {
         this.submissionId = submissionId;
@@ -111,7 +110,7 @@ public class MemberAcReplica extends BaseTimeEntity {
         this.submittedAt = submittedAt;
         this.judgeAttempt = judgeAttempt;
         this.verdict = verdict;
-        this.accepted = accepted;
+        this.accepted = verdict == JudgeVerdict.AC;
         this.syncedAt = syncedAt;
     }
 
@@ -125,18 +124,8 @@ public class MemberAcReplica extends BaseTimeEntity {
         LocalDateTime submittedAt,
         int judgeAttempt,
         JudgeVerdict verdict,
-        boolean accepted,
         LocalDateTime syncedAt
     ) {
-        return new MemberAcReplica(
-            submissionId,
-            memberId,
-            problemId,
-            submittedAt,
-            judgeAttempt,
-            verdict,
-            accepted,
-            syncedAt
-        );
+        return new MemberAcReplica(submissionId, memberId, problemId, submittedAt, judgeAttempt, verdict, syncedAt);
     }
 }
