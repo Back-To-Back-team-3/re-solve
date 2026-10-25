@@ -127,9 +127,17 @@ docs(contest): 시험 API 명세 반영
 | --- | --- | --- |
 | 일반 작업·Stack·`hotfix/* → main` | 2명 이상 | Mergify Queue, squash |
 | `develop → main`·`main → develop` | 3명 이상 | Mergify Queue, merge commit |
-- Draft 해제, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음, CI(`quality-check`) 성공이 필요하다. 수정 push 후에는 승인 상태를 다시 확인한다.
+- Draft 해제, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음, CI(`quality-check`) 성공이 필요하다. 갱신 후에는 승인 상태와 병합 조건을 다시 확인한다.
 - `quality-check`는 `spotlessCheck`, `checkstyleMain`, `checkstyleTest`, `compileTestJava`를 실행한다. (현재 테스트 실행은 포함하지 않는다.)
 - GitHub Ruleset은 사람의 직접 병합을 제한하고 Mergify에 예외를 부여한다. 병합 후 작업 브랜치 자동 삭제가 설정돼 있다.
+
+**승인 무효화 정책**
+
+- PR 브랜치에 새 커밋이 push되면 해당 push 이전의 승인 리뷰를 해제하고 재승인을 받는다. 단, Mergify 자체 `update`·`rebase`로 발생한 push는 제외한다. 위 표의 필요 승인 수와 병합 조건은 유지한다.
+- GitHub Ruleset의 stale 승인 무효화는 해제하고, 승인 해제는 Mergify의 `dismiss_reviews`가 담당한다. `approved: true`, `changes_requested: false`, `when: synchronize`로 설정해 변경 요청 리뷰는 유지하고 새 push 이전에 제출된 승인 리뷰를 해제한다.
+- Mergify 자체 갱신의 승인 유지 예외를 다른 봇의 push나 모든 diff 동일 갱신으로 확대하지 않는다.
+- GitHub-native Stack의 rebase는 Mergify 자체 `update`·`rebase`와 구분한다. GitHub-native Stack은 diff가 바뀌지 않는 rebase에서 GitHub의 stale 승인 무효화 설정과 관계없이 승인을 유지한다.
+- 동작 범위는 [Mergify Dismiss Reviews](https://docs.mergify.com/workflow/actions/dismiss_reviews/)와 [GitHub Stack rebase](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests#rebasing)를 따른다.
 
 ### 1.6 AI로 Issue·PR을 작성할 때
 
