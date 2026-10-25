@@ -2,6 +2,37 @@
 merge_protections_settings:
   auto_merge_conditions: true
 
+pull_request_rules:
+  - name: dismiss-approvals-on-new-commits
+    conditions:
+      - or:
+          - and:
+              - base = develop
+              - head = main
+          - and:
+              - base = main
+              - head = develop
+          - and:
+              - base = develop
+              - head != main
+              - head != develop
+          - and:
+              - base = main
+              - head != main
+              - head != develop
+          - and:
+              - label = 🧱 stack
+              - base != develop
+              - base != main
+              - head != develop
+              - head != main
+              - -from-fork
+    actions:
+      dismiss_reviews:
+        approved: true
+        changes_requested: false
+        when: synchronize
+
 queue_rules:
   - name: promote-between-main-and-develop
     merge_method: merge
