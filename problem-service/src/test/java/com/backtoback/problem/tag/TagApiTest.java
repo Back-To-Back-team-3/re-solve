@@ -3,6 +3,7 @@ package com.backtoback.problem.tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -11,13 +12,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -49,11 +57,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -62,6 +72,7 @@ import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.global.exception.ProblemExceptionHandler;
@@ -69,6 +80,8 @@ import com.backtoback.problem.global.lock.RedisTransactionLock;
 import com.backtoback.problem.tag.dto.request.TagCreateRequest;
 import com.backtoback.problem.tag.dto.request.TagUpdateRequest;
 import com.backtoback.problem.tag.repository.TagRepository;
+import com.backtoback.problem.tag.scheduler.TagCreationRecordCleanupScheduler;
+import com.backtoback.problem.tag.service.TagCreationRecordService;
 import com.backtoback.problem.tag.service.TagOrderService;
 import com.backtoback.problem.tag.service.TagService;
 
@@ -89,7 +102,9 @@ class TagApiTest {
     private static final String ADMIN_PATH = "/api/v1/admin/problems/tags";
     private static final String LIST_PATH = "/api/v1/problems/tags";
 
-    static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db");
+    // 잠금 대기 관측과 테스트 DDL에서만 컨테이너 root 계정을 사용한다. 서비스 연결은 기존 테스트 계정을 유지한다.
+    static final MySQLContainer MYSQL
+        = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db").withEnv("MYSQL_ROOT_HOST", "%");
 
     static final GenericContainer<?> REDIS
         = new GenericContainer<>("redis:7.4-alpine")
@@ -111,6 +126,12 @@ class TagApiTest {
     @Autowired
     private TagRepository tags;
 
+    @MockitoBean
+    private Clock clock;
+    @Autowired
+    private TagCreationRecordService creationRecords;
+    @Autowired
+    private TagCreationRecordCleanupScheduler cleanupScheduler;
     @Autowired
     private PlatformTransactionManager transactionManager;
 
@@ -175,10 +196,12 @@ class TagApiTest {
     }
 
     /**
-     * 이전 테스트의 태그와 참조 데이터를 정리한다.
+     * 테스트 시계를 초기화하고 이전 테스트의 태그와 요청 기록을 정리한다.
      */
     @BeforeEach
     void clearData() {
+        when(clock.getZone()).thenReturn(ZoneId.of("Asia/Seoul"));
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-13T00:00:00Z"));
         // 테스트 전용 참조 테이블로 FK 삭제 제약을 검증한다.
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS tag_usage_probe (
@@ -190,6 +213,7 @@ class TagApiTest {
         jdbc.update("DELETE FROM tag_usage_probe");
         jdbc.update("DELETE FROM tags");
         jdbc.update("DELETE FROM lock_transaction_probe");
+        jdbc.update("DELETE FROM tag_creation_records");
     }
 
     @Test
@@ -197,6 +221,27 @@ class TagApiTest {
     void createPatchAndDeleteFollowApiContractAndAuditFields() throws Exception {
         // given
         String id = create("hash", "해시", 5);
+        LocalDateTime createdAt = LocalDateTime.of(2026, 10, 13, 9, 0);
+        // JPA 감사 시각과 직접 SQL로 등록한 멱등 기록이 같은 공통 Clock을 사용한다.
+        assertThat(jdbc.queryForObject("SELECT created_at FROM tags WHERE id = ?", LocalDateTime.class, id))
+            .isEqualTo(createdAt);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT updated_at FROM tag_creation_records WHERE idempotency_key = ?",
+                    LocalDateTime.class,
+                    "hash"
+                )
+        ).isEqualTo(createdAt);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT expires_at FROM tag_creation_records WHERE idempotency_key = ?",
+                    LocalDateTime.class,
+                    "hash"
+                )
+        ).isEqualTo(createdAt.plusHours(24));
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-13T00:01:00Z"));
 
         // when
         mvc
@@ -220,6 +265,11 @@ class TagApiTest {
         // then
         assertThat(jdbc.queryForObject("SELECT display_order FROM tags WHERE id = ?", Integer.class, id)).isZero();
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, id)).isEqualTo(1L);
+        // 수정해도 생성 시각은 유지하고, 수정 시각만 변경된 Clock을 따른다.
+        assertThat(jdbc.queryForObject("SELECT created_at FROM tags WHERE id = ?", LocalDateTime.class, id))
+            .isEqualTo(createdAt);
+        assertThat(jdbc.queryForObject("SELECT updated_at FROM tags WHERE id = ?", LocalDateTime.class, id))
+            .isEqualTo(createdAt.plusMinutes(1));
         assertThat(
             jdbc
                 .queryForObject(
@@ -299,9 +349,24 @@ class TagApiTest {
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, existing)).isZero();
     }
 
+    /**
+     * 동일 생성 요청을 재전송해도 순번 이동이 반복되지 않는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void replayDoesNotShiftOrdersAgain() throws Exception {
+        String existing = create("existing", "기존 태그", 0);
+        String inserted = create("inserted", "새 태그", 0);
+        assertThat(create("inserted", "새 태그", 0)).isEqualTo(inserted);
+        assertThat(displayOrder(existing)).isEqualTo(1);
+        assertThat(displayOrder(inserted)).isZero();
+        assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, existing)).isEqualTo(2L);
+    }
+
     @Test
     @DisplayName("이름 중복으로 등록이 실패하면 순번 이동을 롤백한다")
-    void duplicateNameRollsBackShift() throws Exception {
+    void duplicateNameRollsBackShiftAndRequestRecord() throws Exception {
         String existing = create("existing", "기존 태그", 0);
         mvc
             .perform(
@@ -312,6 +377,7 @@ class TagApiTest {
             .andExpect(status().isConflict());
         assertThat(displayOrder(existing)).isZero();
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, existing)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(1);
     }
 
     @Test
@@ -367,8 +433,8 @@ class TagApiTest {
         // when
         List<String> ids
             = race(
-                () -> tagService.create(new TagCreateRequest("새 태그 A", 0)).tagId(),
-                () -> tagService.create(new TagCreateRequest("새 태그 B", 0)).tagId()
+                () -> tagService.create("admin", "first", new TagCreateRequest("새 태그 A", 0)).tagId(),
+                () -> tagService.create("admin", "second", new TagCreateRequest("새 태그 B", 0)).tagId()
             );
         // then
         assertThat(ids.get(0)).isNotEqualTo(ids.get(1));
@@ -384,12 +450,19 @@ class TagApiTest {
         RedissonClient otherClient = Redisson.create(new Config(redisson.getConfig()));
         try {
             TagService otherService
-                = new TagService(tags, new TagOrderService(tags, new RedisTransactionLock(otherClient)));
+                = new TagService(
+                    tags,
+                    creationRecords,
+                    new TagOrderService(tags, new RedisTransactionLock(otherClient))
+                );
             var transaction = new TransactionTemplate(transactionManager);
             // when
             race(
-                () -> tagService.create(new TagCreateRequest("첫 태그", 2)).tagId(),
-                () -> transaction.execute(status -> otherService.create(new TagCreateRequest("두 번째 태그", 2)).tagId())
+                () -> tagService.create("admin", "first", new TagCreateRequest("첫 태그", 2)).tagId(),
+                () -> transaction
+                    .execute(
+                        status -> otherService.create("admin", "second", new TagCreateRequest("두 번째 태그", 2)).tagId()
+                    )
             );
             // then
             assertThat(jdbc.queryForList("SELECT display_order FROM tags ORDER BY display_order", Integer.class))
@@ -416,7 +489,7 @@ class TagApiTest {
         try {
             // when
             new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
-                tagService.create(new TagCreateRequest("태그", 1));
+                tagService.create("admin", "transaction", new TagCreateRequest("태그", 1));
                 assertThat(displayOrder(first)).isZero();
                 assertThat(displayOrder(following)).isEqualTo(2);
                 assertThat(otherLock.tryLock()).isFalse();
@@ -427,6 +500,8 @@ class TagApiTest {
             // then
             assertThat(otherLock.tryLock()).isTrue();
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(rollback ? 2 : 3);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class))
+                .isEqualTo(rollback ? 2 : 3);
             assertThat(displayOrder(following)).isEqualTo(rollback ? 1 : 2);
             assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, following))
                 .isEqualTo(rollback ? 0L : 2L);
@@ -442,7 +517,7 @@ class TagApiTest {
 
     @Test
     @DisplayName("잠금 대기가 초과되면 등록을 거부하고 태그를 저장하지 않는다")
-    void busyRedisLockRejectsCreationWithoutPersistingTag() throws Exception {
+    void busyRedisLockRejectsCreationWithoutPersistingRequestOrTag() throws Exception {
         RedissonClient otherClient = Redisson.create(new Config(redisson.getConfig()));
         var otherLock = otherClient.getLock("problem:tags:order:lock");
         try {
@@ -456,6 +531,7 @@ class TagApiTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("PROBLEM_VERSION_CONFLICT"));
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isZero();
         } finally {
             otherLock.unlock();
             otherClient.shutdown();
@@ -475,6 +551,7 @@ class TagApiTest {
             .andExpect(status().isCreated());
         assertThat(displayOrder(existing)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(2);
     }
 
     @ParameterizedTest
@@ -675,7 +752,8 @@ class TagApiTest {
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var first = executor.submit(() -> inTransaction(isolation, () -> {
                 switch (operation) {
-                    case "CREATE", "EMPTY_CREATE" -> tagService.create(new TagCreateRequest("첫 요청 태그", 0));
+                    case "CREATE", "EMPTY_CREATE" ->
+                        tagService.create("admin", "commit-gap-first", new TagCreateRequest("첫 요청 태그", 0));
                     case "MOVE" -> tagService.update(Long.parseLong(lastId), new TagUpdateRequest(null, 0));
                     case "DELETE" -> tagService.delete(Long.parseLong(lastId));
                     default -> throw new IllegalArgumentException(operation);
@@ -690,7 +768,7 @@ class TagApiTest {
                 assertThat(redisson.getLock("problem:tags:order:lock").forceUnlock()).isTrue();
                 var competing = executor.submit(() -> captureFailure(() -> inTransaction(isolation, () -> {
                     jdbc.update("INSERT INTO lock_transaction_probe (id, payload) VALUES (1, 'competing-write')");
-                    tagService.create(new TagCreateRequest("경쟁 요청 태그", 0));
+                    tagService.create("admin", "commit-gap-competing", new TagCreateRequest("경쟁 요청 태그", 0));
                     return null;
                 })));
 
@@ -1071,6 +1149,26 @@ class TagApiTest {
             .containsExactly(first, last);
     }
 
+    /**
+     * 보정 결과가 같아도 원본 요청 순번이 다르면 멱등키 충돌로 응답하는지 검증한다.
+     *
+     * @throws Exception API 요청 또는 검증 중 오류가 발생한 경우
+     */
+    @Test
+    void idempotencyComparesRequestedOrderBeforeClamping() throws Exception {
+        create("original", "기존 태그", Integer.MAX_VALUE);
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH))
+                    .header("Idempotency-Key", "original")
+                    .content(mapper.writeValueAsString(new TagCreateRequest("기존 태그", Integer.MAX_VALUE - 1)))
+            )
+            .andExpect(status().is(422))
+            .andExpect(jsonPath("$.error.code").value("IDEMPOTENCY_KEY_CONFLICT"));
+        assertThat(jdbc.queryForObject("SELECT request_display_order FROM tag_creation_records", Integer.class))
+            .isEqualTo(Integer.MAX_VALUE);
+    }
+
     @Test
     @DisplayName("검색어의 SQL 와일드카드 문자를 일반 문자로 검색한다")
     void keywordTreatsSqlWildcardsAsLiteralText() throws Exception {
@@ -1140,11 +1238,84 @@ class TagApiTest {
         }
     )
     @DisplayName("잘못된 생성 요청은 입력 오류로 거부하고 태그를 저장하지 않는다")
-    void invalidCreateDoesNotPersistTag(String body) throws Exception {
+    void invalidCreateDoesNotPersistRequestOrTag(String body) throws Exception {
         mvc
             .perform(admin(post(ADMIN_PATH)).header("Idempotency-Key", "invalid").content(body))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isZero();
+    }
+
+    /**
+     * 누락·공백·길이 제한을 위반한 멱등키와 이름을 거부하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    @DisplayName("멱등키 누락·공백·길이 초과와 이름 길이 초과를 입력 오류로 거부한다")
+    void missingBlankAndOversizedKeysAndNamesAreRejected() throws Exception {
+        String body = "{\"name\":\"태그\",\"displayOrder\":0}";
+        mvc.perform(admin(post(ADMIN_PATH)).content(body)).andExpect(status().isBadRequest());
+        for (String key : List.of(" ", "k".repeat(101))) {
+            String reason = key.isBlank() ? "멱등키를 입력해 주세요." : "멱등키는 100자 이하로 입력해 주세요.";
+            mvc
+                .perform(admin(post(ADMIN_PATH)).header("Idempotency-Key", key).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
+                .andExpect(jsonPath("$.error.details[0].field").value("Idempotency-Key"))
+                .andExpect(jsonPath("$.error.details[0].reason").value(reason));
+        }
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH))
+                    .header("Idempotency-Key", "long-name")
+                    .content(mapper.writeValueAsString(new TagCreateRequest("a".repeat(201), 0)))
+            )
+            .andExpect(status().isBadRequest());
+    }
+
+    /**
+     * 비 ASCII 문자가 포함된 멱등키를 거부하고 태그와 요청 기록을 남기지 않는지 검증한다.
+     *
+     * @param key 비 ASCII 문자가 포함된 멱등키
+     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "key-¡",
+            "key-é",
+            "key-한글",
+            "key-😀"
+        }
+    )
+    @DisplayName("비 ASCII 멱등키를 한국어 사유로 거부하고 태그와 요청 기록을 저장하지 않는다")
+    void nonAsciiIdempotencyKeysAreRejected(String key) throws Exception {
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH)).header("Idempotency-Key", key).content("{\"name\":\"태그\",\"displayOrder\":0}")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
+            .andExpect(jsonPath("$.error.details[0].field").value("Idempotency-Key"))
+            .andExpect(jsonPath("$.error.details[0].reason").value("멱등키는 ASCII 문자로 입력해 주세요."));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isZero();
+    }
+
+    /**
+     * ASCII 멱등키의 길이 경계와 기호를 허용하고 동일 요청에 최초 결과를 반환하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void asciiIdempotencyKeysAcceptLengthBoundariesAndSymbols() throws Exception {
+        for (String key : List.of("a", "k".repeat(100), "ABC-123_./:~")) {
+            String id = create(key, key, 0);
+            assertThat(create(key, key, 0)).isEqualTo(id);
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(3);
     }
 
     @ParameterizedTest
@@ -1223,6 +1394,7 @@ class TagApiTest {
             )
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.error.code").value("PROBLEM_TAG_DUPLICATED"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(1);
         String id = create("failed", "스택", 2);
         mvc
             .perform(admin(patch(ADMIN_PATH + "/" + id)).content("{\"name\":\"해시\",\"displayOrder\":9}"))
@@ -1230,6 +1402,138 @@ class TagApiTest {
             .andExpect(jsonPath("$.error.code").value("PROBLEM_TAG_DUPLICATED"));
         assertThat(jdbc.queryForObject("SELECT name FROM tags WHERE id = ?", String.class, id)).isEqualTo("스택");
         assertThat(jdbc.queryForObject("SELECT display_order FROM tags WHERE id = ?", Integer.class, id)).isEqualTo(1);
+    }
+
+    /**
+     * 요청 순번 보정과 태그 이름·순번 변경 및 삭제 이후에도 최초 생성 응답을 반환하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    @DisplayName("태그 순번이 변경되거나 삭제되어도 최초 보정된 순번을 재응답한다")
+    void replayPreservesOriginalResponseAfterTagUpdateAndDelete() throws Exception {
+        String original
+            = mvc
+                .perform(
+                    admin(post(ADMIN_PATH))
+                        .header("Idempotency-Key", "original")
+                        .content("{\"name\":\"해시\",\"displayOrder\":99}")
+                )
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.displayOrder").value(0))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String id = mapper.readTree(original).path("data").path("tagId").asText();
+        create("another", "다른 태그", 0);
+        assertThat(displayOrder(id)).isEqualTo(1);
+        mvc
+            .perform(admin(patch(ADMIN_PATH + "/" + id)).content("{\"name\":\"새 이름\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.displayOrder").value(1));
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT result_display_order FROM tag_creation_records WHERE idempotency_key = ?",
+                    Integer.class,
+                    "original"
+                )
+        ).isZero();
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH))
+                    .header("Idempotency-Key", "original")
+                    .content("{\"displayOrder\":99,\"name\":\"해시\"}")
+            )
+            .andExpect(status().isCreated())
+            .andExpect(content().json(original));
+        mvc.perform(admin(delete(ADMIN_PATH + "/" + id))).andExpect(status().isNoContent());
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH))
+                    .header("Idempotency-Key", "original")
+                    .content("{\"name\":\"해시\",\"displayOrder\":99}")
+            )
+            .andExpect(status().isCreated())
+            .andExpect(content().json(original));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags WHERE id = ?", Integer.class, id)).isZero();
+    }
+
+    /**
+     * 원본 요청 이름과 순번을 보관하고 이름의 공백·대소문자 차이를 구분하는지 검증한다.
+     *
+     * @param name 최초 요청에 사용할 원본 태그 이름
+     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            " 그리디 ",
+            "Hash"
+        }
+    )
+    void idempotencyPreservesOriginalNameAndComparesItExactly(String name) throws Exception {
+        String id = create("original-values", name, 37);
+        assertThat(jdbc.queryForObject("SELECT request_name FROM tag_creation_records", String.class)).isEqualTo(name);
+        assertThat(jdbc.queryForObject("SELECT request_display_order FROM tag_creation_records", Integer.class))
+            .isEqualTo(37);
+        assertThat(jdbc.queryForObject("SELECT name FROM tags WHERE id = ?", String.class, id)).isEqualTo(name.strip());
+        assertThat(create("original-values", name, 37)).isEqualTo(id);
+
+        String changedName = name.startsWith(" ") ? name.strip() : "hash";
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH))
+                    .header("Idempotency-Key", "original-values")
+                    .content(mapper.writeValueAsString(new TagCreateRequest(changedName, 37)))
+            )
+            .andExpect(status().is(422))
+            .andExpect(jsonPath("$.error.code").value("IDEMPOTENCY_KEY_CONFLICT"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(1);
+        assertThat(displayOrder(id)).isZero();
+    }
+
+    /**
+     * 최대 길이의 한글 이름과 정수 최대 순번도 원본 요청으로 보관하고 재사용하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void idempotencyStoresMaximumLengthNameAndOrder() throws Exception {
+        String name = "가".repeat(200);
+        String id = create("maximum-values", name, Integer.MAX_VALUE);
+        assertThat(create("maximum-values", name, Integer.MAX_VALUE)).isEqualTo(id);
+        assertThat(jdbc.queryForObject("SELECT request_name FROM tag_creation_records", String.class)).isEqualTo(name);
+        assertThat(jdbc.queryForObject("SELECT request_display_order FROM tag_creation_records", Integer.class))
+            .isEqualTo(Integer.MAX_VALUE);
+    }
+
+    /**
+     * 멱등키의 본문 충돌과 관리자별 범위 및 대소문자 구분을 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void sameKeyWithDifferentBodyConflictsAndKeysAreScopedByAdminAndCase() throws Exception {
+        create("key", "해시", 0);
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH)).header("Idempotency-Key", "key").content("{\"name\":\"해시\",\"displayOrder\":1}")
+            )
+            .andExpect(status().is(422))
+            .andExpect(jsonPath("$.error.code").value("IDEMPOTENCY_KEY_CONFLICT"));
+        mvc
+            .perform(
+                post(ADMIN_PATH)
+                    .header("X-User-Id", "other-admin")
+                    .header("X-User-Role", "ADMIN")
+                    .header("Idempotency-Key", "key")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"name\":\"스택\",\"displayOrder\":0}")
+            )
+            .andExpect(status().isCreated());
+        create("KEY", "큐", 0);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(3);
     }
 
     @Test
@@ -1251,12 +1555,560 @@ class TagApiTest {
         assertThat(displayOrder(following)).isZero();
     }
 
+    /**
+     * 동일 키의 동시 요청이 태그 하나를 생성하고 같은 ID를 반환하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void concurrentSameKeyCreatesOneTagAndReturnsSameId() throws Exception {
+        List<String> ids
+            = race(
+                () -> tagService.create("admin", "same", new TagCreateRequest("해시", 0)).tagId(),
+                () -> tagService.create("admin", "same", new TagCreateRequest("해시", 0)).tagId()
+            );
+        assertThat(ids.get(0)).isEqualTo(ids.get(1));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(1);
+    }
+
     @Test
     @DisplayName("같은 이름의 동시 등록은 하나만 성공하고 나머지는 중복 오류를 반환한다")
     void concurrentDuplicateNamesCreateOneTagAndRejectTheOtherRequest() throws Exception {
         List<String> outcomes = race(() -> createOutcome("first"), () -> createOutcome("second"));
         assertThat(outcomes).containsExactlyInAnyOrder("CREATED", "PROBLEM_TAG_DUPLICATED");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+        value = Isolation.class,
+        names = {
+            "REPEATABLE_READ",
+            "READ_COMMITTED"
+        }
+    )
+    @Timeout(30)
+    @DisplayName("같은 관리자·키의 다른 본문 동시 요청은 하나만 생성하고 나머지는 422로 거부한다")
+    void concurrentDifferentBodiesKeepOnlyWinningRecord(Isolation isolation) throws Exception {
+        // given
+        Callable<String> first = () -> createWithConflictingBody(isolation, "첫 요청");
+        Callable<String> other = () -> createWithConflictingBody(isolation, "다른 요청");
+
+        // when
+        List<String> outcomes = race(first, other);
+
+        // then
+        assertThat(outcomes).containsExactlyInAnyOrder("CREATED", "IDEMPOTENCY_KEY_CONFLICT");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(1);
+        var tag = jdbc.queryForMap("SELECT id, name, display_order FROM tags");
+        var record = jdbc.queryForMap("SELECT * FROM tag_creation_records");
+        assertThat(record.get("request_name")).isIn("첫 요청", "다른 요청");
+        assertThat(record.get("request_name")).isEqualTo(tag.get("name"));
+        assertThat(record.get("result_name")).isEqualTo(tag.get("name"));
+        assertThat(record.get("result_tag_id")).isEqualTo(tag.get("id"));
+        assertThat(record.get("result_display_order")).isEqualTo(0);
+        assertTagSequence((String)tag.get("name"));
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+        value = Isolation.class,
+        names = {
+            "REPEATABLE_READ",
+            "READ_COMMITTED"
+        }
+    )
+    @Timeout(30)
+    @DisplayName("기록 잠금 대기 중 만료되면 잠금 획득 후 시각으로 새 요청을 처리한다")
+    void expiryIsRecheckedAfterWaitingForRecordLock(Isolation isolation) throws Exception {
+        // given
+        String originalId = create("expiry-wait", "기존 태그", 0);
+        Instant beforeExpiry = Instant.parse("2026-10-13T23:59:59Z");
+        Instant afterExpiry = Instant.parse("2026-10-14T00:00:01Z");
+        var currentTime = new AtomicReference<>(beforeExpiry);
+        when(clock.instant()).thenAnswer(invocation -> currentTime.get());
+        var connectionId = new AtomicLong();
+        var started = new CountDownLatch(1);
+        var waitingTransaction = new TransactionTemplate(transactionManager);
+        waitingTransaction.setIsolationLevel(isolation.value());
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            // when
+            var pending = new TransactionTemplate(transactionManager).execute(status -> {
+                jdbc.queryForObject("""
+                    SELECT id FROM tag_creation_records
+                    WHERE admin_id = 'admin' AND idempotency_key = 'expiry-wait' FOR UPDATE
+                    """, Long.class);
+                var future = executor.submit(() -> waitingTransaction.execute(waiting -> {
+                    assertThat(jdbc.queryForObject("SELECT @@session.transaction_isolation", String.class))
+                        .isEqualTo(isolation.name().replace('_', '-'));
+                    connectionId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                    started.countDown();
+                    return tagService.create("admin", "expiry-wait", new TagCreateRequest("새 태그", 1));
+                }));
+                awaitSignal(started);
+                // upsert가 실제 DB 잠금을 기다리는 동안 만료 경계를 넘긴다.
+                awaitDatabaseLockWait(connectionId.get());
+                currentTime.set(afterExpiry);
+                return future;
+            });
+            var response = pending.get(10, TimeUnit.SECONDS);
+
+            // then
+            assertThat(response.tagId()).isNotEqualTo(originalId);
+            var record = jdbc.queryForMap("SELECT * FROM tag_creation_records");
+            assertThat(record.get("request_name")).isEqualTo("새 태그");
+            assertThat(record.get("result_tag_id").toString()).isEqualTo(response.tagId());
+            assertThat(jdbc.queryForObject("SELECT expires_at FROM tag_creation_records", LocalDateTime.class))
+                .isEqualTo(LocalDateTime.ofInstant(afterExpiry, clock.getZone()).plusHours(24));
+            assertTagSequence("기존 태그", "새 태그");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        booleans = {
+            false,
+            true
+        }
+    )
+    @Timeout(30)
+    @DisplayName("응답 기록까지 flush한 뒤 Redis 검사가 실패하면 태그·순번·멱등 기록을 모두 복원한다")
+    void lostRedisOwnershipRollsBackCompletedRecord(boolean renewExpiredRecord) throws Exception {
+        // given
+        create("existing", "기존 태그", 0);
+        create("last", "끝 태그", 1);
+        String key = renewExpiredRecord ? "existing" : "new-record";
+        if (renewExpiredRecord) {
+            when(clock.instant()).thenReturn(Instant.parse("2026-10-14T00:00:00Z"));
+        }
+        var originalTags = jdbc.queryForList("SELECT * FROM tags ORDER BY id");
+        var originalRecords = jdbc.queryForList("SELECT * FROM tag_creation_records ORDER BY id");
+
+        // when & then
+        RuntimeException failure
+            = captureFailure(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                var response = tagService.create("admin", key, new TagCreateRequest("새 태그", 0));
+                tags.flush();
+                var record = jdbc.queryForMap("SELECT * FROM tag_creation_records WHERE idempotency_key = ?", key);
+                assertThat(record.get("result_tag_id").toString()).isEqualTo(response.tagId());
+                assertThat(record.get("result_name")).isEqualTo(response.name());
+                assertThat(record.get("result_display_order")).isEqualTo(response.displayOrder());
+                assertTagSequence("새 태그", "기존 태그", "끝 태그");
+                assertThat(redisson.getLock("problem:tags:order:lock").forceUnlock()).isTrue();
+            }));
+
+        // then
+        assertThat(failure).isInstanceOf(ProblemException.class);
+        assertVersionConflict(failure);
+        assertThat(jdbc.queryForList("SELECT * FROM tags ORDER BY id")).isEqualTo(originalTags);
+        assertThat(jdbc.queryForList("SELECT * FROM tag_creation_records ORDER BY id")).isEqualTo(originalRecords);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+        value = Isolation.class,
+        names = {
+            "REPEATABLE_READ",
+            "READ_COMMITTED"
+        }
+    )
+    @Timeout(30)
+    @DisplayName("Redis 검사 후 소유권을 잃어도 같은 멱등키 요청은 DB 기록 잠금으로 보호한다")
+    void recordLockProtectsReplayAfterSuccessfulRedisCheck(Isolation isolation) throws Exception {
+        // given
+        create("seed", "기존 태그", 0);
+        var request = new TagCreateRequest("새 태그", 0);
+        var checked = new CountDownLatch(1);
+        var resumeCommit = new CountDownLatch(1);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            // when & then
+            var first = executor.submit(() -> inTransaction(isolation, () -> {
+                var response = tagService.create("admin", "shared-record", request);
+                tags.flush();
+                assertThat(jdbc.queryForObject("""
+                    SELECT result_tag_id FROM tag_creation_records WHERE idempotency_key = 'shared-record'
+                    """, String.class)).isEqualTo(response.tagId());
+                pauseAfterRedisCheck(checked, resumeCommit);
+                return response;
+            }));
+            try {
+                awaitSignal(checked);
+                assertThat(redisson.getLock("problem:tags:order:lock").forceUnlock()).isTrue();
+                var competing = executor.submit(() -> captureFailure(() -> inTransaction(isolation, () -> {
+                    jdbc.update("INSERT INTO lock_transaction_probe (id, payload) VALUES (1, 'same-key')");
+                    return tagService.create("admin", "shared-record", request);
+                })));
+
+                // then
+                RuntimeException failure = competing.get(10, TimeUnit.SECONDS);
+                assertThat(failure).isInstanceOf(PessimisticLockingFailureException.class);
+                assertThat(hasMysqlError(failure, 1205)).isTrue();
+                assertVersionConflict(failure);
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM lock_transaction_probe", Integer.class)).isZero();
+            } finally {
+                resumeCommit.countDown();
+            }
+            var committed = first.get(10, TimeUnit.SECONDS);
+
+            // when & then
+            assertThat(tagService.create("admin", "shared-record", request)).isEqualTo(committed);
+            var record = jdbc.queryForMap("""
+                SELECT * FROM tag_creation_records WHERE idempotency_key = 'shared-record'
+                """);
+            assertThat(record.get("result_tag_id").toString()).isEqualTo(committed.tagId());
+            assertThat(record.get("result_name")).isEqualTo(committed.name());
+            assertThat(record.get("result_display_order")).isEqualTo(committed.displayOrder());
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(2);
+            assertTagSequence("새 태그", "기존 태그");
+        }
+    }
+
+    /** 같은 키의 다른 본문을 실제 서비스에 전달하고 충돌의 오류 코드·HTTP 상태 정의를 확인한다. */
+    private String createWithConflictingBody(Isolation isolation, String name) {
+        try {
+            inTransaction(
+                isolation,
+                () -> tagService.create("admin", "different-bodies", new TagCreateRequest(name, 0))
+            );
+            return "CREATED";
+        } catch (ProblemException conflict) {
+            assertThat(conflict.getErrorCode()).isEqualTo(CommonErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+            assertThat(conflict.getErrorCode().getStatus()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            return conflict.getErrorCode().getCode();
+        }
+    }
+
+    /** 서비스 SQL의 실제 DB 잠금 대기를 테스트 전용 관리 연결에서 관측해 순서를 고정한다. */
+    private void awaitDatabaseLockWait(long connectionId) {
+        try (
+            var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), "root", MYSQL.getPassword());
+            var statement = connection.prepareStatement("""
+                SELECT COUNT(*) FROM performance_schema.data_lock_waits w
+                JOIN performance_schema.threads t ON t.THREAD_ID = w.REQUESTING_THREAD_ID
+                WHERE t.PROCESSLIST_ID = ?
+                """)
+        ) {
+            statement.setLong(1, connectionId);
+            statement.setQueryTimeout(2);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            do {
+                try (var result = statement.executeQuery()) {
+                    if (result.next() && result.getInt(1) > 0) {
+                        return;
+                    }
+                }
+                Thread.yield();
+            } while (System.nanoTime() < deadline);
+            throw new AssertionError("멱등 기록의 DB 잠금 대기를 확인하지 못했다");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("테스트 DB 잠금 대기를 조회하지 못했다", exception);
+        }
+    }
+
+    /**
+     * 만료 전 재요청이 최초 24시간의 유효 기간을 연장하지 않는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void replayBeforeExpiryDoesNotExtendTheOriginal24Hours() throws Exception {
+        String originalId = create("ttl", "해시", 0);
+        LocalDateTime expiresAt
+            = jdbc.queryForObject("SELECT expires_at FROM tag_creation_records", LocalDateTime.class);
+        assertThat(expiresAt).isEqualTo(LocalDateTime.of(2026, 10, 14, 9, 0));
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-13T23:59:59.999999Z"));
+        assertThat(create("ttl", "해시", 0)).isEqualTo(originalId);
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH))
+                    .header("Idempotency-Key", "ttl")
+                    .content("{\"name\":\"다른 태그\",\"displayOrder\":0}")
+            )
+            .andExpect(status().is(422));
+        assertThat(jdbc.queryForObject("SELECT expires_at FROM tag_creation_records", LocalDateTime.class))
+            .isEqualTo(expiresAt);
+    }
+
+    /**
+     * 삭제 스케줄러 실행 전에도 만료된 키를 새 요청으로 검증하는지 확인한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void expiredRequestIsRevalidatedWithoutWaitingForCleanup() throws Exception {
+        String originalId = create("ttl", "해시", 0);
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-14T00:00:00Z"));
+        // 같은 태그가 남아 있으므로 최초 응답 재사용이 아니라 이름 중복 검증을 거친다.
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH)).header("Idempotency-Key", "ttl").content("{\"name\":\"해시\",\"displayOrder\":0}")
+            )
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error.code").value("PROBLEM_TAG_DUPLICATED"));
+        String newId = create("ttl", "스택", 1);
+        assertThat(newId).isNotEqualTo(originalId);
+        assertThat(jdbc.queryForObject("SELECT request_name FROM tag_creation_records", String.class)).isEqualTo("스택");
+        assertThat(jdbc.queryForObject("SELECT request_display_order FROM tag_creation_records", Integer.class))
+            .isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT expires_at FROM tag_creation_records", LocalDateTime.class))
+            .isEqualTo(LocalDateTime.of(2026, 10, 15, 9, 0));
+        assertThat(jdbc.queryForObject("SELECT result_display_order FROM tag_creation_records", Integer.class))
+            .isEqualTo(1);
+        mvc
+            .perform(
+                admin(post(ADMIN_PATH)).header("Idempotency-Key", "ttl").content("{\"name\":\"스택\",\"displayOrder\":1}")
+            )
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.tagId").value(newId))
+            .andExpect(jsonPath("$.data.displayOrder").value(1));
+    }
+
+    /**
+     * 원래 태그가 삭제된 후 만료된 키로 새 태그를 생성할 수 있는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void expiredKeyWithSameBodyCreatesNewTagAfterOriginalTagWasDeleted() throws Exception {
+        String originalId = create("ttl", "해시", 0);
+        mvc.perform(admin(delete(ADMIN_PATH + "/" + originalId))).andExpect(status().isNoContent());
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-14T00:00:00Z"));
+        assertThat(create("ttl", "해시", 0)).isNotEqualTo(originalId);
+    }
+
+    /**
+     * 스케줄러가 만료 요청만 삭제하고 태그와 유효한 요청은 유지하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void schedulerDeletesOnlyExpiredRequestsAndKeepsTags() throws Exception {
+        // given
+        create("old", "해시", 0);
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-13T01:00:00Z"));
+        create("fresh", "스택", 1);
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-14T00:00:00Z"));
+        // when
+        cleanupScheduler.deleteExpiredRecords();
+        // then
+        assertThat(jdbc.queryForList("SELECT idempotency_key FROM tag_creation_records", String.class))
+            .containsExactly("fresh");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(2);
+        cleanupScheduler.deleteExpiredRecords();
+        assertThat(jdbc.queryForList("SELECT idempotency_key FROM tag_creation_records", String.class))
+            .containsExactly("fresh");
+    }
+
+    /**
+     * 후보 조회 뒤 유효 기간이 연장된 기록을 삭제하지 않는지 검증한다.
+     */
+    @Test
+    @DisplayName("후보 조회 후 만료 시각이 연장된 기록은 삭제하지 않는다")
+    void cleanupRechecksExpiryAfterCandidateSelection() throws Exception {
+        // given
+        create("extended", "해시", 0);
+        Instant cleanupTime = Instant.parse("2026-10-14T00:00:00Z");
+        AtomicBoolean candidateTransactionObserved = new AtomicBoolean();
+        AtomicBoolean renewed = new AtomicBoolean();
+        when(clock.instant()).thenAnswer(invocation -> {
+            if (TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+                candidateTransactionObserved.set(true);
+            } else if (candidateTransactionObserved.get() && renewed.compareAndSet(false, true)) {
+                // 실제 후보 조회가 끝난 뒤, 첫 건별 삭제를 시작하기 전 다른 쓰기 트랜잭션으로 연장한다.
+                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                var renewalTransaction = new TransactionTemplate(transactionManager);
+                renewalTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                renewalTransaction
+                    .executeWithoutResult(
+                        status -> jdbc
+                            .update(
+                                "UPDATE tag_creation_records SET expires_at = ? WHERE idempotency_key = 'extended'",
+                                LocalDateTime.ofInstant(cleanupTime, ZoneId.of("Asia/Seoul")).plusHours(1)
+                            )
+                    );
+            }
+            return cleanupTime;
+        });
+
+        // when
+        cleanupScheduler.deleteExpiredRecords();
+
+        // then
+        assertThat(candidateTransactionObserved).isTrue();
+        assertThat(renewed).isTrue();
+        assertThat(jdbc.queryForList("SELECT idempotency_key FROM tag_creation_records", String.class))
+            .containsExactly("extended");
+    }
+
+    /**
+     * 만료 정리가 실행마다 최대 500개만 삭제하는지 검증한다.
+     */
+    @Test
+    void cleanupDeletesAtMost500RequestsPerRun() {
+        // given
+        LocalDateTime expired = LocalDateTime.now(clock).minusHours(1);
+        List<Object[]> rows
+            = IntStream
+                .range(0, 501)
+                .mapToObj(
+                    index -> new Object[] {
+                        "batch-" + index,
+                        expired,
+                        expired.minusHours(24),
+                        expired.minusHours(24)
+                    }
+                )
+                .toList();
+        jdbc.batchUpdate("""
+            INSERT INTO tag_creation_records
+                (admin_id, idempotency_key, request_name, request_display_order, expires_at,
+                    created_at, updated_at, version, result_tag_id, result_name, result_display_order)
+            VALUES ('admin', ?, '태그', 1, ?, ?, ?, 1, 1, '태그', 1)
+            """, rows);
+        // when
+        cleanupScheduler.deleteExpiredRecords();
+        // then
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(1);
+        cleanupScheduler.deleteExpiredRecords();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isZero();
+    }
+
+    /**
+     * 한 건의 실제 DB 삭제 실패가 앞선 삭제를 되돌리지 않고 다음 후보 처리를 허용하는지 검증한다.
+     *
+     * @throws SQLException 테스트 전용 트리거 생성·정리에 실패한 경우
+     */
+    @Test
+    @DisplayName("한 기록의 삭제 실패가 앞선 삭제를 되돌리지 않고 다음 기록 처리를 허용한다")
+    void cleanupFailureRollsBackOnlyItsOwnTransaction() throws SQLException {
+        // given
+        LocalDateTime expired = LocalDateTime.now(clock).minusHours(1);
+        List<Object[]> rows
+            = Stream
+                .of("delete-before", "fail-delete", "delete-after")
+                .map(
+                    key -> new Object[] {
+                        key,
+                        expired,
+                        expired.minusHours(24),
+                        expired.minusHours(24)
+                    }
+                )
+                .toList();
+        jdbc.batchUpdate("""
+            INSERT INTO tag_creation_records
+                (admin_id, idempotency_key, request_name, request_display_order, expires_at,
+                    created_at, updated_at, version, result_tag_id, result_name, result_display_order)
+            VALUES ('admin', ?, '태그', 1, ?, ?, ?, 1, 1, '태그', 1)
+            """, rows);
+        String trigger = "tr_test_fail_tag_creation_record_delete";
+        // DDL만 컨테이너 관리자 연결로 실행하고, 실제 삭제는 서비스 계정과 트랜잭션을 그대로 사용한다.
+        try (
+            var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), "root", MYSQL.getPassword());
+            var statement = connection.createStatement()
+        ) {
+            Throwable testFailure = null;
+            try {
+                statement.execute("DROP TRIGGER IF EXISTS " + trigger);
+                statement.execute("""
+                    CREATE TRIGGER tr_test_fail_tag_creation_record_delete
+                    BEFORE DELETE ON tag_creation_records
+                    FOR EACH ROW
+                    BEGIN
+                        IF OLD.idempotency_key = 'fail-delete' THEN
+                            SIGNAL SQLSTATE '23000' SET MESSAGE_TEXT = 'intentional cleanup test failure';
+                        END IF;
+                    END
+                    """);
+
+                // when
+                cleanupScheduler.deleteExpiredRecords();
+
+                // then
+                assertThat(jdbc.queryForList("SELECT idempotency_key FROM tag_creation_records", String.class))
+                    .containsExactly("fail-delete");
+            } catch (SQLException | RuntimeException | Error failure) {
+                testFailure = failure;
+                throw failure;
+            } finally {
+                try {
+                    statement.execute("DROP TRIGGER IF EXISTS " + trigger);
+                } catch (SQLException cleanupFailure) {
+                    if (testFailure == null) {
+                        throw cleanupFailure;
+                    }
+                    testFailure.addSuppressed(cleanupFailure);
+                }
+            }
+        }
+    }
+
+    /**
+     * 정리가 처리 중인 요청을 건너뛰고 갱신된 기록을 보존하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void cleanupSkipsLockedRequestAndDoesNotDeleteItsRenewedRecord() throws Exception {
+        // given
+        create("locked", "해시", 0);
+        create("unlocked", "스택", 1);
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-14T00:00:00Z"));
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch renew = new CountDownLatch(1);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var pending = executor.submit(() -> new TransactionTemplate(transactionManager).execute(transaction -> {
+                jdbc.queryForObject("""
+                    SELECT id FROM tag_creation_records
+                    WHERE admin_id = 'admin' AND idempotency_key = 'locked' FOR UPDATE
+                    """, Long.class);
+                locked.countDown();
+                try {
+                    if (!renew.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Cleanup did not finish");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+                return tagService.create("admin", "locked", new TagCreateRequest("갱신된 태그", 2)).tagId();
+            }));
+            try {
+                assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+                // when
+                cleanupScheduler.deleteExpiredRecords();
+            } finally {
+                renew.countDown();
+            }
+            String renewedId = pending.get(10, TimeUnit.SECONDS);
+            // then
+            cleanupScheduler.deleteExpiredRecords();
+            assertThat(jdbc.queryForObject("SELECT result_tag_id FROM tag_creation_records", String.class))
+                .isEqualTo(renewedId);
+        }
+    }
+
+    /**
+     * 만료된 동일 키의 동시 요청도 새 태그 하나만 생성하는지 검증한다.
+     *
+     * @throws Exception 테스트 요청·동시 작업 또는 검증 준비 중 오류가 발생한 경우
+     */
+    @Test
+    void concurrentExpiredKeyRequestsStillCreateOnlyOneNewTag() throws Exception {
+        create("same", "해시", 0);
+        when(clock.instant()).thenReturn(Instant.parse("2026-10-14T00:00:00Z"));
+        List<String> ids
+            = race(
+                () -> tagService.create("admin", "same", new TagCreateRequest("스택", 1)).tagId(),
+                () -> tagService.create("admin", "same", new TagCreateRequest("스택", 1)).tagId()
+            );
+        assertThat(ids.get(0)).isEqualTo(ids.get(1));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_creation_records", Integer.class)).isEqualTo(1);
     }
 
     /**
