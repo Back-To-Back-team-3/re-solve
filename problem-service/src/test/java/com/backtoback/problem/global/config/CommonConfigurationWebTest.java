@@ -1,7 +1,11 @@
 package com.backtoback.problem.global.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -10,14 +14,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -32,6 +40,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,20 +50,33 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.backtoback.common.api.ApiResponse;
+import com.backtoback.common.api.PageResponse;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.exception.ErrorCode;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.security.user.GatewayUser;
+import com.backtoback.problem.admin.controller.AdminTagController;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
+import com.backtoback.problem.tag.controller.TagController;
+import com.backtoback.problem.tag.dto.request.TagCreateRequest;
+import com.backtoback.problem.tag.dto.request.TagUpdateRequest;
+import com.backtoback.problem.tag.dto.response.TagResponse;
+import com.backtoback.problem.tag.service.TagService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
 /**
- * 공통 웹 설정과 문제 전용 예외 처리기가 함께 적용된 HTTP 응답을 확인한다.
+ * 공통 웹 설정·문제 전용 예외 응답과 태그 Controller의 연결을 확인한다.
  */
-@WebMvcTest
+@WebMvcTest(
+    controllers = {
+        CommonConfigurationWebTest.TestController.class,
+        TagController.class,
+        AdminTagController.class
+    }
+)
 @Import(
     {
         CommonConfigurationWebTest.TestController.class,
@@ -67,6 +89,110 @@ import jakarta.validation.constraints.NotBlank;
 class CommonConfigurationWebTest {
     @Autowired
     private MockMvc mvc;
+
+    @MockitoBean
+    private TagService tagService;
+
+    @Test
+    @DisplayName("분리한 태그 Controller가 네 API의 응답과 서비스 호출을 유지한다")
+    void tagControllersKeepResponseContractAfterSeparation() throws Exception {
+        // given
+        var tag = new TagResponse("1", "해시", 0);
+        var changedTag = new TagResponse("1", "정렬", 0);
+        var creation = new TagCreateRequest("해시", 0);
+        var update = new TagUpdateRequest("정렬", null);
+        given(tagService.find("", 0, 100, "displayOrder,asc"))
+            .willReturn(new PageResponse<>(List.of(tag), 0, 100, 1L, 1, false));
+        given(tagService.create(creation)).willReturn(tag);
+        given(tagService.update(1L, update)).willReturn(changedTag);
+
+        // when & then
+        mvc
+            .perform(
+                get("/api/v1/problems/tags")
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "USER")
+                    .header("X-Correlation-Id", "tag-request")
+            )
+            .andExpect(status().isOk())
+            .andExpect(header().string("X-Correlation-Id", "tag-request"))
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.message").isEmpty())
+            .andExpect(jsonPath("$.data.content[0].tagId").value("1"))
+            .andExpect(jsonPath("$.data.content[0].name").value("해시"))
+            .andExpect(jsonPath("$.data.content[0].displayOrder").value(0))
+            .andExpect(jsonPath("$.data.size").value(100));
+        mvc
+            .perform(
+                post("/api/v1/admin/problems/tags")
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "ADMIN")
+                    .header("Idempotency-Key", "tag-create")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"name\":\"해시\",\"displayOrder\":0}")
+            )
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.message").value("태그가 생성되었습니다."))
+            .andExpect(jsonPath("$.data.tagId").value("1"))
+            .andExpect(jsonPath("$.data.name").value("해시"))
+            .andExpect(jsonPath("$.data.displayOrder").value(0));
+        mvc
+            .perform(
+                patch("/api/v1/admin/problems/tags/1")
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "ADMIN")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"name\":\"정렬\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.message").value("태그가 수정되었습니다."))
+            .andExpect(jsonPath("$.data.tagId").value("1"))
+            .andExpect(jsonPath("$.data.name").value("정렬"))
+            .andExpect(jsonPath("$.data.displayOrder").value(0));
+        mvc
+            .perform(delete("/api/v1/admin/problems/tags/1").header("X-User-Id", "12").header("X-User-Role", "ADMIN"))
+            .andExpect(status().isNoContent())
+            .andExpect(content().string(""));
+        then(tagService).should().find("", 0, 100, "displayOrder,asc");
+        then(tagService).should().create(creation);
+        then(tagService).should().update(1L, update);
+        then(tagService).should().delete(1L);
+    }
+
+    @Test
+    @DisplayName("익명의 태그 조회와 일반 사용자의 관리자 태그 변경을 거부한다")
+    void tagControllersKeepAccessRestrictionsAfterSeparation() throws Exception {
+        // when & then
+        mvc
+            .perform(get("/api/v1/problems/tags"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+        mvc
+            .perform(
+                post("/api/v1/admin/problems/tags")
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"name\":\"해시\",\"displayOrder\":0}")
+            )
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
+        mvc
+            .perform(
+                patch("/api/v1/admin/problems/tags/1")
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"name\":\"정렬\"}")
+            )
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
+        mvc
+            .perform(delete("/api/v1/admin/problems/tags/1").header("X-User-Id", "12").header("X-User-Role", "USER"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
+        then(tagService).shouldHaveNoInteractions();
+    }
 
     @Test
     @DisplayName("익명 요청이면 공통 인증 오류와 요청 추적 ID를 반환한다")
@@ -153,6 +279,36 @@ class CommonConfigurationWebTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
             .andExpect(jsonPath("$.error.details[0].field").value("name"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidTagListParameters")
+    @DisplayName("태그 목록 조건 검증은 필드별 한국어 사유를 반환한다")
+    void invalidTagListParametersReturnKoreanReasons(String parameter, String value, String field, String reason)
+        throws Exception {
+        mvc
+            .perform(
+                get("/api/v1/problems/tags")
+                    .param(parameter, value)
+                    .header("X-User-Id", "12")
+                    .header("X-User-Role", "USER")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
+            .andExpect(jsonPath("$.error.details[0].field").value(field))
+            .andExpect(jsonPath("$.error.details[0].reason").value(reason));
+    }
+
+    static Stream<Arguments> invalidTagListParameters() {
+        return Stream
+            .of(
+                Arguments.of("keyword", "x".repeat(201), "keyword", "검색어는 200자 이하로 입력해 주세요."),
+                Arguments.of("page", "-1", "page", "페이지는 0 이상이어야 합니다."),
+                Arguments.of("page", "21474837", "page", "페이지는 21,474,836 이하이어야 합니다."),
+                Arguments.of("size", "0", "size", "페이지 크기는 1 이상이어야 합니다."),
+                Arguments.of("size", "101", "size", "페이지 크기는 100 이하여야 합니다."),
+                Arguments.of("sort", "id,asc", "sort", "정렬 형식은 displayOrder 또는 name과 asc 또는 desc 조합이어야 합니다.")
+            );
     }
 
     @Test

@@ -1994,34 +1994,43 @@
 - **요청 파라미터:**
     
     
-    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
-    | --- | --- | --- | --- | --- |
-    | `keyword` | string | N | — | 태그명 검색 |
-    | `page` | int | N | 0 |  |
-    | `size` | int | N | 100 |  |
-    
-    허용 정렬 필드: `displayOrder`, `name` (기본 `displayOrder,asc`)
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `keyword` | Query | string | N | 빈 문자열 | 최대 200자. 앞뒤 공백을 제거하여 태그명 부분 검색. 빈 값이면 전체 조회 |
+    | `page` | Query | int | N | 0 | 0~21,474,836 |
+    | `size` | Query | int | N | 100 | 1~100 |
+    | `sort` | Query | string | N | `displayOrder,asc` | `displayOrder` 또는 `name`과 `asc` 또는 `desc` 조합. 같은 값은 태그 ID 오름차순 정렬 |
     
 - **응답 (200):**
     
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "content": [ 
-    	      { "tagId": "1", "name": "해시" }, 
-    	      { "tagId": "2", "name": "스택/큐" } 
-          ],
-          "page": 0, 
-          "size": 100, 
-          "totalElements": 10, 
-          "totalPages": 1, 
-          "hasNext": false
-        }
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "tagId": "1",
+            "name": "해시",
+            "displayOrder": 0
+          },
+          {
+            "tagId": "2",
+            "name": "스택/큐",
+            "displayOrder": 1
+          }
+        ],
+        "page": 0,
+        "size": 100,
+        "totalElements": 10,
+        "totalPages": 1,
+        "hasNext": false
       }
+    }
     ```
     
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 검색어 길이·페이지·크기·정렬 조건이 유효하지 않음
 
 #### 2.5.2 태그 생성
 
@@ -2029,65 +2038,103 @@
 - **인증:** `ADMIN`
 - **Idempotency:** 있음
 - **대응 테이블:** `tags`
+- **설명:** 기존 태그가 n개이면 요청 순번을 0~n으로 보정하여 삽입한다. 삽입 위치부터 기존 태그를 한 칸씩 뒤로 밀며, 태그 저장과 순번 변경은 같은 트랜잭션으로 처리한다.
 - **요청 바디:**
-    
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `name` | string | Y | 1~200자. 공백만 입력할 수 없으며 앞뒤 공백을 제거하여 저장 |
+    | `displayOrder` | int | Y | 삽입할 순번. 0 미만은 0, 기존 태그 개수보다 크면 마지막 위치로 보정 |
+
     ```json
-      { "name": "해시", "displayOrder": 1 }
+    {
+      "name": "해시",
+      "displayOrder": 1
+    }
     ```
     
 - **응답 (201):**
     
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "태그가 생성되었습니다.", 
-    	  "data": { 
-    		  "tagId": "1", 
-    		  "name": "해시" 
-    	  } 
+    {
+      "success": true,
+      "message": "태그가 생성되었습니다.",
+      "data": {
+        "tagId": "1",
+        "name": "해시",
+        "displayOrder": 0
       }
+    }
     ```
     
 - **에러:**
-    - `PROBLEM_TAG_DUPLICATED`(409)
+    - `COMMON_INVALID_REQUEST`(400) / 필수값 누락 또는 이름·순번 형식이 유효하지 않음
+    - `PROBLEM_TAG_DUPLICATED`(409) / 같은 이름의 태그가 존재함
+    - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
 
 #### 2.5.3 태그 수정
 
 - **Method / URI:** `PATCH /api/v1/admin/problems/tags/{tagId}`
 - **인증:** `ADMIN`
 - **대응 테이블:** `tags`
-- **설명:** 이름·표시 순서를 바꾼다. 새 회차를 만들지 않으며 연결된 현재·과거 회차에 바뀐 이름이 표시된다.
+- **설명:** 이름·표시 순서를 바꾼다. 새 회차를 만들지 않으며 연결된 현재·과거 회차에 바뀐 이름이 표시된다. 태그가 n개이면 요청 순번을 0~(n-1)로 보정하고, 이동 구간의 다른 태그 순번도 조정한다.
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `tagId` | Path | string | Y | — | 수정할 태그 ID |
+
 - **요청 바디:**
-    
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `name` | string | N | 1~200자. 공백만 입력할 수 없으며 앞뒤 공백을 제거하여 저장. 생략 또는 null이면 유지 |
+    | `displayOrder` | int | N | 이동할 순번. 범위를 벗어나면 첫 번째 또는 마지막 위치로 보정. 생략 또는 null이면 유지 |
+
+    두 필드 중 하나 이상은 null이 아닌 값으로 전달한다.
+
     ```json
-      { "name": "그리디" }
+    {
+      "name": "그리디",
+      "displayOrder": 0
+    }
     ```
     
 - **응답 (200):**
     
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "태그가 수정되었습니다.", 
-    	  "data": { 
-    		  "tagId": "2", 
-    		  "name": "그리디" 
-    	  } 
+    {
+      "success": true,
+      "message": "태그가 수정되었습니다.",
+      "data": {
+        "tagId": "2",
+        "name": "그리디",
+        "displayOrder": 0
       }
+    }
     ```
     
 - **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 변경값이 없거나 이름·순번 형식이 유효하지 않음
     - `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_TAG_DUPLICATED`(409)
+    - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
 
 #### 2.5.4 태그 삭제
 
 - **Method / URI:** `DELETE /api/v1/admin/problems/tags/{tagId}`
 - **인증:** `ADMIN`
 - **대응 테이블:** `tags`, `problem_revision_tags`
-- **설명:** 어떤 회차에서도 쓰지 않는 태그만 삭제한다. 연결을 자동 해제하지 않는다.
+- **설명:** 어떤 회차에서도 쓰지 않는 태그만 삭제한다. 연결을 자동 해제하지 않는다. 삭제 후 뒤에 있는 태그의 순번을 한 칸씩 당기며, 삭제와 순번 변경은 같은 트랜잭션으로 처리한다.
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `tagId` | Path | string | Y | — | 삭제할 태그 ID |
+
 - **응답 (204)**
 - **에러:**
     - `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_TAG_IN_USE`(409)
+    - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
 
 ### 2.6 내부 API
 
