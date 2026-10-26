@@ -48,8 +48,8 @@ public class JudgeLanguageService {
      * 고정 환경이 없으면 캐시된 최신 실행 환경을 반환하고, 있으면 최초 조회한 Judge0 목록과 일치하는지 검증한다.
      * 고정 환경의 ID·이름·버전이 달라지면 대체하지 않고 거부하며 컴파일 옵션도 그대로 유지한다.
      *
-     * @param language java, python3 또는 cpp
-     * @param fixedRuntime 사용할 고정 실행 환경; null이면 지원 범위의 최신 환경을 선택한다
+     * @param language {@code java}, {@code python3} 또는 {@code cpp}
+     * @param fixedRuntime 사용할 고정 실행 환경; {@code null}이면 지원 범위의 최신 환경을 선택한다
      * @return 캐시된 최신 환경 또는 검증을 통과한 고정 환경
      * @throws JudgeException {@code UNSUPPORTED_LANGUAGE}: 미지원 언어이거나 최신 환경 선택 시 비활성·후보 없음인 경우
      *     또는 {@code SUBMISSION_RUNTIME_UNAVAILABLE}: 고정 환경의 언어·ID·이름·버전이 다르거나 비활성인 경우
@@ -112,28 +112,20 @@ public class JudgeLanguageService {
      *
      * @param language 지원 언어
      * @param runtimes Judge0 활성 언어 목록
-     * @return 선택한 버전에서 ID가 가장 작은 후보; 후보가 없으면 null
+     * @return 선택한 버전에서 ID가 가장 작은 후보; 후보가 없으면 {@code null}
      */
     private Judge0LanguageResponse select(JudgeLanguage language, List<Judge0LanguageResponse> runtimes) {
-        // selected는 ID·이름을 가진 선택 결과, highestVersion은 그 결과의 비교용 버전이다.
         Judge0LanguageResponse selected = null;
         String[] highestVersion = null;
         for (Judge0LanguageResponse runtime : runtimes) {
-            // Enum의 패턴으로 요청 언어와 지원 범위를 확인한다.
-            // Java 요청이면 Java 17만 후보가 되며, Python이나 Java 21은 건너뛴다.
             var matcher = language.getRuntimePattern().matcher(runtime.name());
             // 숫자와 점으로만 구성된 정식 버전만 선택하여 시험판·알 수 없는 형식을 제외한다.
             if (!matcher.matches()) {
                 continue;
             }
-            // 첫 번째 캡처 그룹에는 숫자 버전만 들어 있다.
-            // "Java (JDK 17.0.6)"에서 "17.0.6"을 추출한 뒤 점으로 나눈다.
             String[] version = matcher.group(1).split("\\.");
-            // 첫 후보는 비교 대상이 없으므로 양수로 처리해 바로 선택한다.
-            // 이후에는 현재 선택보다 높은지 숫자로 비교한다. 예를 들어 17.0.10은 17.0.9보다 높다.
             int comparison = highestVersion == null ? 1 : compareVersions(version, highestVersion);
             if (comparison > 0) {
-                // 최초 후보 또는 더 높은 버전으로 선택 결과를 교체한다.
                 selected = runtime;
                 highestVersion = version;
             } else if (comparison == 0 && runtime.id() < selected.id()) {
@@ -142,7 +134,6 @@ public class JudgeLanguageService {
                 selected = runtime;
             }
         }
-        // 후보가 없으면 null이다. 선택했다면 ID·이름을 그대로 반환해 해당 ID로 실행하도록 한다.
         return selected;
     }
 
@@ -184,21 +175,16 @@ public class JudgeLanguageService {
         }
         // HTTP 호출·응답 형식 검증은 전용 클라이언트에 맡긴다. 실패하면 캐시 없이 예외를 전달한다.
         List<Judge0LanguageResponse> languages = languageClient.findAll();
-        // EnumMap은 JudgeLanguage를 키로 사용하며, 언어마다 최신 실행 환경 하나를 보관한다.
         var latestRuntimes = new EnumMap<JudgeLanguage, JudgeRuntime>(JudgeLanguage.class);
         for (JudgeLanguage language : JudgeLanguage.values()) {
             // 활성화 여부와 별개로 언어별 최신 후보를 한 번만 선택한다.
             // 실제 사용 허용 여부는 findAll과 requireRuntime에서 확인한다.
             Judge0LanguageResponse runtime = select(language, languages);
-            // 지원 범위에 맞는 후보가 없으면 해당 언어는 Map에 넣지 않는다.
             if (runtime == null) {
                 continue;
             }
-            // select에서 검증한 패턴으로 숫자 버전을 추출해 실행에 필요한 정보까지 보관한다.
             var matcher = language.getRuntimePattern().matcher(runtime.name());
-            // 새 Matcher이므로 matches를 실행해야 group(1)에 숫자 버전이 기록된다.
             matcher.matches();
-            // 버전 추출과 객체 생성을 반복하지 않도록 ID·이름·버전·컴파일 옵션을 함께 저장한다.
             // C++은 C++17 옵션을 지정하고, 다른 언어는 별도 컴파일 옵션을 지정하지 않는다.
             latestRuntimes
                 .put(

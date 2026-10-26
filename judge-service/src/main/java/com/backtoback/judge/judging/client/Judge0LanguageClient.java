@@ -77,7 +77,7 @@ public class Judge0LanguageClient {
     /**
      * 원본 코드나 외부 응답 본문 없이 응답 오류를 기록하고 예외를 생성한다.
      *
-     * @param status 외부 HTTP 상태; 확인할 수 없으면 null
+     * @param status 외부 HTTP 상태; 확인할 수 없으면 {@code null}
      * @return 상위 실행기에 전달할 응답 오류 예외
      */
     private JudgeException responseFailure(Integer status) {

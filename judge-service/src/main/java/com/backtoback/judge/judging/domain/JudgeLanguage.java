@@ -38,9 +38,9 @@ public enum JudgeLanguage {
      * 외부 언어 코드를 지원 언어로 변환한다.
      * 기존 API 계약에 따라 대소문자나 앞뒤 공백을 보정하지 않는다.
      *
-     * @param code java, python3 또는 cpp
+     * @param code {@code java}, {@code python3} 또는 {@code cpp}
      * @return 일치하는 지원 언어
-     * @throws JudgeException {@code UNSUPPORTED_LANGUAGE}: 코드가 null이거나 지원하지 않는 경우
+     * @throws JudgeException {@code UNSUPPORTED_LANGUAGE}: 코드가 {@code null}이거나 지원하지 않는 경우
      */
     public static JudgeLanguage fromCode(String code) {
         for (JudgeLanguage language : values()) {
