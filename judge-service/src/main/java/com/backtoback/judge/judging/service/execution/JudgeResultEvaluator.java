@@ -83,7 +83,7 @@ public final class JudgeResultEvaluator {
         int outputLimitKiB
     ) {
         requireLimits(memoryLimitKiB, outputLimitKiB);
-        if (execution == null || execution.state() != stateFor(execution.statusId())) {
+        if (execution == null || execution.state() != State.fromStatusId(execution.statusId())) {
             return systemFailure();
         }
         if (execution.state() == State.SYSTEM_ERROR) {
@@ -159,21 +159,6 @@ public final class JudgeResultEvaluator {
             return JudgeVerdict.WA;
         }
         return comparator.matches(type, expectedText, execution.stdout()) ? JudgeVerdict.AC : JudgeVerdict.WA;
-    }
-
-    /**
-     * Judge0 상태 코드에서 기대하는 진행 상태를 조회한다.
-     *
-     * @param statusId Judge0 상태 코드
-     * @return 대응 상태; 알려지지 않은 상태 코드는 시스템 실패
-     */
-    private State stateFor(int statusId) {
-        return switch (statusId) {
-            case 1 -> State.QUEUED;
-            case 2 -> State.RUNNING;
-            case 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 -> State.COMPLETED;
-            default -> State.SYSTEM_ERROR;
-        };
     }
 
     /**
