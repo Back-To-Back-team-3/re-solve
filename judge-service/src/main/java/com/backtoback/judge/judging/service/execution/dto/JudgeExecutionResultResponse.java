@@ -1,4 +1,4 @@
-package com.backtoback.judge.judging.service;
+package com.backtoback.judge.judging.service.execution.dto;
 
 import java.math.BigDecimal;
 

@@ -1559,7 +1559,8 @@
 | `expectedReturnText` | string | Y | 기대 반환값 JSON 텍스트 |
 - 숫자는 정밀도 보존을 위해 JSON 텍스트로 보낸다. 예: `"a": "9007199254740993"`. 문자열 `abc`는 `"\"abc\""`.
 - 같은 입력·기대값의 중복 테스트는 공개 여부와 무관하게 거절한다.
-- TypeSpec 필드·지원 타입·검증 규칙은 하위 문서 「TypeSpec 공통 타입 명세」를 따른다.
+- TypeSpec 필드·지원 타입·검증 규칙은 [TypeSpec 공통 타입 명세](type-spec.md)를 따른다.
+- Java 클래스·함수 선언 조건과 반환값·디버그 출력 구분은 [정책 및 상태 3.1·3.2](../planning/policy-and-state.md#3-제출채점-정책)를 따른다. Java 타입 매핑은 [TypeSpec 명세](type-spec.md#4-java-타입-매핑)에 둔다.
 
 **executionLimits**
 
