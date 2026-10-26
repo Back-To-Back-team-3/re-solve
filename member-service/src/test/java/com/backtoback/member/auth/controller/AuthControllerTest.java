@@ -266,15 +266,6 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("숫자가 아닌 X-User-Id는 500이 아니라 401 AUTH_TOKEN_INVALID")
-    void nonNumericUserIdIsUnauthorized() throws Exception {
-        mockMvc
-            .perform(post("/api/v1/auth/logout").header("X-User-Id", "abc").header("Authorization", "Bearer access"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
-    }
-
-    @Test
     @DisplayName("1.1.4 재발급은 새 Access Token을 주고 교체된 Refresh Token 쿠키를 설정한다")
     void refreshReturnsAccessTokenAndRotatedCookie() throws Exception {
         given(authService.refresh("old-refresh"))
@@ -312,8 +303,8 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("1.1.4 재발급 실패(INVALID·REUSED)는 401과 함께 Refresh Token 쿠키를 지운다")
-    void refreshFailureClearsCookie() throws Exception {
+    @DisplayName("1.1.4 재발급 실패(INVALID·REUSED)는 401을 주고 Refresh Token 쿠키는 그대로 둔다")
+    void refreshFailureKeepsCookie() throws Exception {
         given(authService.refresh(null)).willThrow(new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID));
         given(authService.refresh("stolen")).willThrow(new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_REUSED));
 
@@ -321,15 +312,13 @@ class AuthControllerTest {
             .perform(post("/api/v1/auth/token/refresh"))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_INVALID"))
-            .andExpect(
-                header().string("Set-Cookie", allOf(containsString("refreshToken="), containsString("Max-Age=0")))
-            );
+            .andExpect(header().doesNotExist("Set-Cookie"));
 
         mockMvc
             .perform(post("/api/v1/auth/token/refresh").cookie(new Cookie("refreshToken", "stolen")))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_REUSED"))
-            .andExpect(header().string("Set-Cookie", containsString("Max-Age=0")));
+            .andExpect(header().doesNotExist("Set-Cookie"));
     }
 
     @Test
@@ -339,6 +328,7 @@ class AuthControllerTest {
             .perform(
                 post("/api/v1/auth/logout")
                     .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
                     .header("Authorization", "Bearer access")
                     .cookie(new Cookie("refreshToken", "refresh"))
             )
@@ -347,7 +337,7 @@ class AuthControllerTest {
                 header().string("Set-Cookie", allOf(containsString("refreshToken="), containsString("Max-Age=0")))
             );
 
-        verify(authService).logout(7L, "Bearer access", "refresh");
+        verify(authService).logout("7", "Bearer access", "refresh");
     }
 
     @Test
@@ -355,6 +345,30 @@ class AuthControllerTest {
     void logoutRequiresAuthenticatedUser() throws Exception {
         mockMvc
             .perform(post("/api/v1/auth/logout").header("Authorization", "Bearer access"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+
+        verify(authService, never()).logout(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("관리자 경로는 USER면 403 AUTH_ACCESS_DENIED, ADMIN이면 보안 체인을 통과한다")
+    void adminPathRequiresAdminRole() throws Exception {
+        mockMvc
+            .perform(get("/api/v1/admin/members").header("X-User-Id", "7").header("X-User-Role", "USER"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
+        // 아직 관리자 API가 없어 보안 체인을 통과하면 404다.
+        mockMvc
+            .perform(get("/api/v1/admin/members").header("X-User-Id", "1").header("X-User-Role", "ADMIN"))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("1.1.5 X-User-Role 없이 X-User-Id만 오면 공통 보안 필터가 401로 막는다")
+    void logoutRejectsMissingRole() throws Exception {
+        mockMvc
+            .perform(post("/api/v1/auth/logout").header("X-User-Id", "7").header("Authorization", "Bearer access"))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
 

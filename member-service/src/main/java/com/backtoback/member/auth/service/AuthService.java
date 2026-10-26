@@ -188,17 +188,18 @@ public class AuthService {
      * <li>요청에 쓴 Access Token은 남은 수명 동안, 같은 세션의 다른 Access Token은 Access Token 수명 동안 차단한다.</li>
      * </ul>
      *
-     * @param memberId Gateway가 전달한 요청자 ID ({@code X-User-Id})
+     * @param userId Gateway가 전달한 요청자 ID ({@code X-User-Id}). Access Token의 subject와 같아야 한다.
      * @param authorization {@code Authorization} 헤더 값
      * @param refreshToken Refresh Token 쿠키 값. 없으면 Access Token만 차단한다.
      */
-    public void logout(Long memberId, String authorization, String refreshToken) {
+    public void logout(String userId, String authorization, String refreshToken) {
         String accessToken = extractBearerToken(authorization);
         Jwt jwt
             = accessTokenProvider
                 .decode(accessToken)
-                .filter(decoded -> String.valueOf(memberId).equals(decoded.getSubject()))
+                .filter(decoded -> userId.equals(decoded.getSubject()))
                 .orElseThrow(() -> new MemberException(CommonErrorCode.AUTH_TOKEN_INVALID));
+        Long memberId = Long.valueOf(jwt.getSubject());
 
         String sessionId = jwt.getClaimAsString(AccessTokenProvider.SESSION_CLAIM);
         accessTokenBlocklist.block(jwt.getId(), Duration.between(clock.instant(), jwt.getExpiresAt()));
