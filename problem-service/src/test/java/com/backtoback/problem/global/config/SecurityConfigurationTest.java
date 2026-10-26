@@ -1,4 +1,4 @@
-package com.backtoback.problem.global.security;
+package com.backtoback.problem.global.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -23,19 +24,16 @@ import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-class InternalAuthenticationTests {
+/** 보안 설정이 프로필별 내부 경로 허용과 외부 API 권한 검사를 유지하는지 확인한다. */
+class SecurityConfigurationTest {
     private final WebApplicationContextRunner runner
         = new WebApplicationContextRunner()
             .withInitializer(new ConfigDataApplicationContextInitializer())
             .withUserConfiguration(SecurityTestConfiguration.class)
             .withBean(ObjectMapper.class, () -> JsonMapper.builder().build());
 
-    /**
-     * 각 프로필에서 내부 API 허용과 외부 API 권한 검사를 함께 검증한다.
-     *
-     * @param profile 검증할 활성 프로필 또는 프로필 조합
-     */
     @ParameterizedTest
+    @DisplayName("모든 프로필에서 내부 요청을 허용하고 외부 API 권한을 검사한다")
     @ValueSource(
         strings = {
             "local",
@@ -68,6 +66,7 @@ class InternalAuthenticationTests {
         });
     }
 
+    /** 보안 필터 체인과 프로브 컨트롤러를 테스트에 등록한다. */
     @TestConfiguration(proxyBeanMethods = false)
     @EnableWebSecurity
     @EnableWebMvc
@@ -78,17 +77,13 @@ class InternalAuthenticationTests {
         }
     )
     static class SecurityTestConfiguration {
-        // 테스트 컨텍스트에서만 내부 인증 경계를 구성한다.
+
     }
 
+    /** 내부·외부 경로의 보안 동작을 확인할 응답을 제공한다. */
     @TestComponent
     @RestController
     static class ProbeController {
-        /**
-         * 보안 경계 검증용 요청에 정상 응답을 반환한다.
-         *
-         * @return 테스트용 정상 응답 문자열
-         */
         @GetMapping(
             {
                 "/internal/v1/probe",
@@ -100,11 +95,6 @@ class InternalAuthenticationTests {
             return "ok";
         }
 
-        /**
-         * 보안 경계 검증용 요청에 정상 응답을 반환한다.
-         *
-         * @return 테스트용 정상 응답 문자열
-         */
         @PostMapping("/internal/v1/probe")
         String write() {
             return "ok";

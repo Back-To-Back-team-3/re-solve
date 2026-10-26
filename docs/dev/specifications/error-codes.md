@@ -44,7 +44,7 @@
 | `PROBLEM_NOT_FOUND` | 404 | 문제를 찾을 수 없음 |
 | `PROBLEM_NOT_AVAILABLE` | 404 | `PRIVATE`·`ARCHIVED`·`EXAM_ONLY` 문제에 일반 접근 |
 | `PROBLEM_REVISION_NOT_FOUND` | 404 | 문제에 속하지 않는 회차 |
-| `PROBLEM_VERSION_CONFLICT` | 409 | `rowVersion` 불일치 (동시 수정) |
+| `PROBLEM_VERSION_CONFLICT` | 409 | `rowVersion` 불일치 또는 태그 변경의 DB·분산 잠금 경합 (동시 변경) |
 | `PROBLEM_INVALID_STATE_TRANSITION` | 409 | 허용되지 않는 공개 상태 전이 |
 | `PROBLEM_IN_ACTIVE_EXAM` | 409 | 예정·진행 중 시험·대회에 포함된 문제의 비공개·보관 |
 | `PROBLEM_TEST_CASE_INVALID` | 400 | 테스트가 함수 명세와 불일치·중복 |
