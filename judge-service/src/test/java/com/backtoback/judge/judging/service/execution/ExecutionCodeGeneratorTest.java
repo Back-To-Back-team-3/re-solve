@@ -17,6 +17,7 @@ import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
 import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 import com.backtoback.judge.judging.service.execution.java.JavaExecutionCodeGenerator;
+import com.backtoback.judge.judging.service.execution.python.PythonExecutionCodeGenerator;
 
 /** 언어별 생성기를 같은 인터페이스로 호출하고 공통 결과·요청으로 연결한다. */
 class ExecutionCodeGeneratorTest {
@@ -63,6 +64,6 @@ class ExecutionCodeGeneratorTest {
      * @return 공통 계약을 검증할 언어별 생성기
      */
     private static Stream<ExecutionCodeGenerator> generators() {
-        return Stream.of(new JavaExecutionCodeGenerator());
+        return Stream.of(new JavaExecutionCodeGenerator(), new PythonExecutionCodeGenerator());
     }
 }

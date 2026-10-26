@@ -1,0 +1,96 @@
+import base64 as _base64
+import inspect as _inspect
+import io as _io
+import json as _json
+import math as _math
+import struct as _struct
+import sys as _sys
+
+
+def _read_exact(stream, length):
+    """입력 길이를 확인하여 잘린 내부 실행 스트림을 거절한다."""
+    value = stream.read(length)
+    if len(value) != length:
+        raise ValueError("Invalid execution input")
+    return value
+
+
+def _unpack(stream, format_code):
+    """공통 입력 인코더의 big-endian 값을 복원한다."""
+    return _struct.unpack(format_code, _read_exact(stream, _struct.calcsize(format_code)))[0]
+
+
+def _read_text(stream):
+    """문자열의 UTF-16 코드 단위를 보존한다."""
+    return _read_exact(stream, _unpack(stream, ">I") * 2).decode("utf-16-be", errors="surrogatepass")
+
+
+def _read_value(stream):
+    """선언 타입으로 이미 검증·정규화한 숫자와 중첩 값을 복원한다."""
+    tag = _unpack(stream, ">B")
+    if tag == 1:
+        return _unpack(stream, ">i")
+    if tag == 2:
+        return _unpack(stream, ">q")
+    if tag == 3:
+        return _unpack(stream, ">d")
+    if tag == 4:
+        return _read_text(stream)
+    if tag == 5:
+        return _unpack(stream, ">?")
+    if tag == 6:
+        return [_read_value(stream) for _ in range(_unpack(stream, ">I"))]
+    if tag == 7:
+        result = {}
+        for _ in range(_unpack(stream, ">I")):
+            key = _read_text(stream)
+            result[key] = _read_value(stream)
+        return result
+    if tag == 8:
+        return _unpack(stream, ">f")
+    raise ValueError("Invalid execution input tag")
+
+
+def _validate_output(value):
+    """숫자·문자열·불리언·배열·문자열 키 객체만 암묵적 변환 없이 직렬화한다."""
+    if value is None or type(value) in (str, bool, int):
+        return
+    if type(value) is float:
+        if not _math.isfinite(value):
+            raise ValueError("Non-finite return value")
+        return
+    if type(value) is list:
+        for member in value:
+            _validate_output(member)
+        return
+    if type(value) is dict:
+        for key, member in value.items():
+            if type(key) is not str:
+                raise TypeError("Object keys must be strings")
+            _validate_output(member)
+        return
+    raise TypeError("Unsupported return value")
+
+
+def _run():
+    """모듈 초기화 출력까지 stderr로 분리하고 solution 반환값만 stdout에 쓴다."""
+    result_output = _sys.stdout
+    _sys.stdout = _sys.stderr
+    stream = _io.BytesIO(_base64.b64decode(_sys.stdin.buffer.read(), validate=True))
+    arguments = [_read_value(stream) for _ in range(${PARAMETER_COUNT})]
+    if stream.read(1):
+        raise ValueError("Unexpected execution input")
+    namespace = {"__name__": "__submission__"}
+    source = _base64.b64decode("${USER_SOURCE}").decode("utf-8")
+    exec(compile(source, "solution.py", "exec"), namespace)
+    function = namespace.get("solution")
+    if (not _inspect.isfunction(function) or _inspect.iscoroutinefunction(function)
+            or _inspect.isasyncgenfunction(function)):
+        raise TypeError("A synchronous solution function is required")
+    result = function(*arguments)
+    _validate_output(result)
+    result_output.write(_json.dumps(result, ensure_ascii=True, allow_nan=False, separators=(",", ":")))
+    result_output.flush()
+
+
+_run()

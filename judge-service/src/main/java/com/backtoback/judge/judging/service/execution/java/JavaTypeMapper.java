@@ -1,10 +1,12 @@
 package com.backtoback.judge.judging.service.execution.java;
 
 import com.backtoback.judge.judging.dto.TypeSpec;
-import com.backtoback.judge.judging.dto.TypeSpec.Kind;
+import com.backtoback.judge.judging.service.execution.FunctionSpecValidator;
 
 /** Java 함수 선언과 입력 배열 복원에 사용할 타입을 결정한다. */
 final class JavaTypeMapper {
+    private final FunctionSpecValidator validator = new FunctionSpecValidator();
+
     /**
      * 명세를 Java 소스의 타입으로 변환한다. 동일 타입 배열은 원시 타입 배열을 유지한다.
      *
@@ -13,7 +15,7 @@ final class JavaTypeMapper {
      * @throws IllegalArgumentException 명세 구조가 잘못된 경우
      */
     String sourceType(TypeSpec type) {
-        validate(type);
+        validator.validateType(type);
         return switch (type.kind()) {
             case INT32 -> "int";
             case INT64 -> "long";
@@ -54,40 +56,4 @@ final class JavaTypeMapper {
         };
     }
 
-    /**
-     * 생성기가 사용할 타입 구조를 중첩된 원소와 필드까지 확인한다.
-     *
-     * @param type 확인할 타입
-     * @throws IllegalArgumentException 구조가 잘못된 경우
-     */
-    private void validate(TypeSpec type) {
-        if (type == null || type.kind() == null) {
-            throw new IllegalArgumentException("함수 타입이 필요합니다.");
-        }
-        int arrays
-            = (type.elementType() == null ? 0 : 1) + (type.positionTypes() == null ? 0 : 1)
-                + (type.repeatTypes() == null ? 0 : 1);
-        if (type.kind() == Kind.ARRAY) {
-            if (arrays != 1 || type.properties() != null) {
-                throw new IllegalArgumentException("배열 타입은 한 가지 방식으로 지정해야 합니다.");
-            }
-            if (type.elementType() != null) {
-                validate(type.elementType());
-            } else {
-                var members = type.positionTypes() != null ? type.positionTypes() : type.repeatTypes();
-                if (type.repeatTypes() != null && members.isEmpty()) {
-                    throw new IllegalArgumentException("반복 타입 패턴은 비어 있을 수 없습니다.");
-                }
-                members.forEach(this::validate);
-            }
-        } else if (type.kind() == Kind.OBJECT) {
-            if (arrays != 0 || type.properties() == null
-                || type.properties().keySet().stream().anyMatch(key -> key == null)) {
-                throw new IllegalArgumentException("객체 필드 명세가 필요합니다.");
-            }
-            type.properties().values().forEach(this::validate);
-        } else if (arrays != 0 || type.properties() != null) {
-            throw new IllegalArgumentException("기본 타입에 중첩 명세를 지정할 수 없습니다.");
-        }
-    }
 }
