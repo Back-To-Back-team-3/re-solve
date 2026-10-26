@@ -1,4 +1,4 @@
-package com.backtoback.problem.problem;
+package com.backtoback.problem.problem.service;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -8,17 +8,19 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import com.backtoback.problem.global.exception.custom.CommonInvalidRequestException;
+import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.dto.FunctionSpec;
 import com.backtoback.problem.problem.dto.TypeSpec;
-import com.backtoback.problem.problem.service.FunctionSpecValidator;
 
+/** 함수 구조와 재귀 타입의 공통 검증 계약을 확인한다. */
 class FunctionSpecValidatorTests {
     private final FunctionSpecValidator validator = new FunctionSpecValidator();
 
@@ -27,6 +29,7 @@ class FunctionSpecValidatorTests {
      *
      * @param kind 검증할 기본 타입
      */
+    @DisplayName("지원하는 기본 타입을 입력과 반환에 사용할 수 있다")
     @ParameterizedTest
     @EnumSource(
         value = TypeSpec.Kind.class,
@@ -45,6 +48,7 @@ class FunctionSpecValidatorTests {
     /**
      * 세 배열 형태와 중첩 객체 및 빈 배열·객체 명세를 허용하는지 검증한다.
      */
+    @DisplayName("배열 세 방식과 중첩·빈 컨테이너 명세를 허용한다")
     @Test
     void nestedAndEmptyContainerSpecsAreSupported() {
         TypeSpec integer = scalar(TypeSpec.Kind.INT32);
@@ -66,8 +70,10 @@ class FunctionSpecValidatorTests {
     /**
      * 누락·중복 선택·빈 반복 패턴·타입에 맞지 않는 하위 필드를 거부하는지 검증한다.
      */
+    @DisplayName("잘못 조합한 재귀 타입 명세는 요청 오류로 거절한다")
     @Test
     void malformedTypeSpecsAreRejected() {
+        // given
         TypeSpec integer = scalar(TypeSpec.Kind.INT32);
         Map<String, TypeSpec> nullFieldType = new HashMap<>();
         nullFieldType.put("value", null);
@@ -91,15 +97,18 @@ class FunctionSpecValidatorTests {
                     new TypeSpec(TypeSpec.Kind.INT32, integer, null, null, null),
                     new TypeSpec(TypeSpec.Kind.STRING, null, null, null, Map.of())
                 );
+        // when & then
         for (var type : invalid) {
             assertThatThrownBy(() -> validator.validate(new FunctionSpec("solution", List.of(), type)))
-                .isInstanceOf(CommonInvalidRequestException.class);
+                .isInstanceOf(ProblemException.class)
+                .hasFieldOrPropertyWithValue("errorCode", CommonErrorCode.COMMON_INVALID_REQUEST);
         }
     }
 
     /**
      * 함수명·목록·중복 또는 null 매개변수가 유효하지 않으면 거부하는지 검증한다.
      */
+    @DisplayName("잘못된 함수 구조와 중복 매개변수는 요청 오류로 거절한다")
     @Test
     void malformedFunctionsAreRejected() {
         TypeSpec integer = scalar(TypeSpec.Kind.INT32);
@@ -114,7 +123,9 @@ class FunctionSpecValidatorTests {
                 new FunctionSpec("solution", Arrays.asList(parameter, null), integer),
                 new FunctionSpec("solution", List.of(new FunctionSpec.Parameter("value", null)), integer)
             )) {
-            assertThatThrownBy(() -> validator.validate(spec)).isInstanceOf(CommonInvalidRequestException.class);
+            assertThatThrownBy(() -> validator.validate(spec))
+                .isInstanceOf(ProblemException.class)
+                .hasFieldOrPropertyWithValue("errorCode", CommonErrorCode.COMMON_INVALID_REQUEST);
         }
     }
 
@@ -123,6 +134,7 @@ class FunctionSpecValidatorTests {
      *
      * @param name 유효하지 않은 매개변수 이름
      */
+    @DisplayName("매개변수 이름이 없거나 형식이 잘못되면 거절한다")
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(
@@ -137,7 +149,9 @@ class FunctionSpecValidatorTests {
     void invalidParameterNamesAreRejected(String name) {
         TypeSpec integer = scalar(TypeSpec.Kind.INT32);
         var spec = new FunctionSpec("solution", List.of(new FunctionSpec.Parameter(name, integer)), integer);
-        assertThatThrownBy(() -> validator.validate(spec)).isInstanceOf(CommonInvalidRequestException.class);
+        assertThatThrownBy(() -> validator.validate(spec))
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", CommonErrorCode.COMMON_INVALID_REQUEST);
     }
 
     /**
@@ -145,6 +159,7 @@ class FunctionSpecValidatorTests {
      *
      * @param name 형식이 유효한 매개변수 이름
      */
+    @DisplayName("공통 이름 형식을 만족하면 언어 예약어도 허용한다")
     @ParameterizedTest
     @ValueSource(
         strings = {

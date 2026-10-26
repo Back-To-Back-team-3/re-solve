@@ -1,4 +1,4 @@
-package com.backtoback.problem.problem;
+package com.backtoback.problem.problem.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -10,20 +10,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import com.backtoback.common.exception.CommonErrorCode;
-import com.backtoback.problem.global.exception.ProblemErrorCode;
-import com.backtoback.problem.global.exception.custom.CommonInvalidRequestException;
-import com.backtoback.problem.global.exception.custom.ProblemTestCaseInvalidException;
+import com.backtoback.problem.global.error.ProblemErrorCode;
+import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.dto.FunctionSpec;
-import com.backtoback.problem.problem.dto.ParsedTestCase;
 import com.backtoback.problem.problem.dto.TypeSpec;
 import com.backtoback.problem.problem.dto.request.TestCaseRequest;
-import com.backtoback.problem.problem.service.FunctionSpecValidator;
-import com.backtoback.problem.problem.service.TestCaseValidator;
-import com.backtoback.problem.problem.service.TestValueParser;
 
+/** 전체 테스트의 구성·인자 순서·중복과 업무 오류 코드를 확인한다. */
 class TestCaseValidatorTests {
     private final TestCaseValidator validator
         = new TestCaseValidator(new FunctionSpecValidator(), new TestValueParser());
@@ -31,8 +28,10 @@ class TestCaseValidatorTests {
     /**
      * 입력 객체의 키 순서와 관계없이 선언 순서로 인자를 구성하고 공개 예제도 포함하는지 검증한다.
      */
+    @DisplayName("모든 테스트의 인자를 선언 순서로 정리하고 원문을 보존한다")
     @Test
     void parametersFollowDeclarationOrderAndSamplesAreIncluded() {
+        // given
         TypeSpec integer = scalar(TypeSpec.Kind.INT64);
         var spec
             = new FunctionSpec(
@@ -46,8 +45,10 @@ class TestCaseValidatorTests {
         var sample = new TestCaseRequest(true, arguments, "9007199254740995");
         var hidden = new TestCaseRequest(false, Map.of("a", "0", "b", "1"), "1");
 
+        // when
         var parsed = validator.validate(spec, List.of(sample, hidden));
 
+        // then
         assertThat(parsed)
             .containsExactly(
                 new ParsedTestCase(
@@ -64,6 +65,7 @@ class TestCaseValidatorTests {
     /**
      * 매개변수가 없는 함수와 배열 반환값을 지원하는지 검증한다.
      */
+    @DisplayName("매개변수 없는 함수와 배열 반환값을 허용한다")
     @Test
     void parameterlessFunctionsAndArrayReturnsAreSupported() {
         TypeSpec array = new TypeSpec(TypeSpec.Kind.ARRAY, scalar(TypeSpec.Kind.INT32), null, null, null);
@@ -82,6 +84,7 @@ class TestCaseValidatorTests {
     /**
      * 공개 또는 숨김 테스트가 없거나 공개 여부가 누락되면 거부하는지 검증한다.
      */
+    @DisplayName("공개 예제와 숨김 테스트가 모두 있어야 한다")
     @Test
     void bothSampleAndHiddenCasesAreRequired() {
         var spec = singleParameter(scalar(TypeSpec.Kind.INT32));
@@ -98,19 +101,23 @@ class TestCaseValidatorTests {
                 Arrays.asList(sample, null)
             )) {
             assertThatThrownBy(() -> validator.validate(spec, cases))
-                .isInstanceOf(ProblemTestCaseInvalidException.class);
+                .isInstanceOf(ProblemException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
         }
     }
 
     /**
      * 입력 이름 누락·추가·null 입력·기대값 오류를 거부하는지 검증한다.
      */
+    @DisplayName("입력 이름과 필수 값이 명세와 다르면 거절한다")
     @Test
     void missingExtraAndInvalidValuesAreRejected() {
+        // given
         var spec = singleParameter(scalar(TypeSpec.Kind.INT32));
         var sample = new TestCaseRequest(true, Map.of("value", "1"), "1");
         Map<String, String> nullValue = new LinkedHashMap<>();
         nullValue.put("value", null);
+        // when & then
         for (var invalid : List
             .of(
                 new TestCaseRequest(false, Map.of(), "2"),
@@ -123,15 +130,18 @@ class TestCaseValidatorTests {
                 new TestCaseRequest(false, Map.of("value", "2"), "\"2\"")
             )) {
             assertThatThrownBy(() -> validator.validate(spec, List.of(sample, invalid)))
-                .isInstanceOf(ProblemTestCaseInvalidException.class);
+                .isInstanceOf(ProblemException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
         }
     }
 
     /**
      * 공개 여부·JSON 공백·객체 키 순서·소수 표기만 다른 테스트도 중복으로 거부하는지 검증한다.
      */
+    @DisplayName("공개 여부와 JSON 표기만 다른 같은 테스트는 중복으로 거절한다")
     @Test
     void duplicateCasesUseValuesRatherThanRawJsonOrVisibility() {
+        // given
         TypeSpec object
             = new TypeSpec(
                 TypeSpec.Kind.OBJECT,
@@ -148,17 +158,21 @@ class TestCaseValidatorTests {
             );
         var sample = new TestCaseRequest(true, Map.of("value", "{\"a\":1,\"b\":\"x\"}"), "0.30");
         var hidden = new TestCaseRequest(false, Map.of("value", " { \"b\":\"x\", \"a\":1 } "), "0.3");
+        // when & then
         assertThatThrownBy(() -> validator.validate(spec, List.of(sample, hidden)))
-            .isInstanceOf(ProblemTestCaseInvalidException.class);
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
         var integralReturn = new TestCaseRequest(true, sample.argumentTexts(), "1");
         var decimalReturn = new TestCaseRequest(false, hidden.argumentTexts(), "1.0");
         assertThatThrownBy(() -> validator.validate(spec, List.of(integralReturn, decimalReturn)))
-            .isInstanceOf(ProblemTestCaseInvalidException.class);
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
     }
 
     /**
      * 배열 순서나 문자열 공백이 다르면 서로 다른 테스트 값으로 유지하는지 검증한다.
      */
+    @DisplayName("배열 순서와 문자열 공백이 다르면 다른 테스트로 유지한다")
     @Test
     void arrayOrderAndStringWhitespaceAreSignificant() {
         TypeSpec array = new TypeSpec(TypeSpec.Kind.ARRAY, scalar(TypeSpec.Kind.STRING), null, null, null);
@@ -174,18 +188,19 @@ class TestCaseValidatorTests {
     }
 
     /**
-     * 함수 명세 오류와 테스트 오류를 서로 다른 공통 오류 코드로 구분하는지 검증한다.
+     * 같은 업무 예외를 사용해도 함수 명세 오류와 테스트 오류 코드가 구분되는지 검증한다.
      */
+    @DisplayName("함수 명세 오류와 테스트 오류는 같은 예외의 다른 코드로 구분한다")
     @Test
     void schemaAndTestErrorsHaveTheirOwnCodes() {
         assertThatThrownBy(() -> validator.validate(null, List.of()))
             .isInstanceOfSatisfying(
-                CommonInvalidRequestException.class,
+                ProblemException.class,
                 error -> assertThat(error.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_INVALID_REQUEST)
             );
         assertThatThrownBy(() -> validator.validate(singleParameter(scalar(TypeSpec.Kind.INT32)), List.of()))
             .isInstanceOfSatisfying(
-                ProblemTestCaseInvalidException.class,
+                ProblemException.class,
                 error -> assertThat(error.getErrorCode()).isEqualTo(ProblemErrorCode.PROBLEM_TEST_CASE_INVALID)
             );
     }
@@ -193,6 +208,7 @@ class TestCaseValidatorTests {
     /**
      * 미확정된 테스트 개수·1 MiB 크기·5단계 깊이 상한을 임의로 적용하지 않는지 검증한다.
      */
+    @DisplayName("테스트 개수·크기·깊이에 미정인 업무 제한을 추가하지 않는다")
     @Test
     void unconfirmedBusinessLimitsAreNotIntroduced() {
         var integers

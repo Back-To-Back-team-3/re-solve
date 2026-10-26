@@ -1,4 +1,4 @@
-package com.backtoback.problem.problem;
+package com.backtoback.problem.problem.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -8,16 +8,19 @@ import java.math.BigInteger;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import com.backtoback.problem.global.exception.custom.ProblemTestCaseInvalidException;
+import com.backtoback.problem.global.error.ProblemErrorCode;
+import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.dto.TypeSpec;
-import com.backtoback.problem.problem.service.TestValueParser;
 
+/** JSON 값의 정밀도·구조 보존과 잘못된 테스트 값의 오류 코드를 확인한다. */
 class TestValueParserTests {
     private final TestValueParser parser = new TestValueParser();
 
@@ -27,6 +30,7 @@ class TestValueParserTests {
      * @param kind 선언한 정수 타입
      * @param text 파싱할 정수 JSON 텍스트
      */
+    @DisplayName("정수 경계와 큰 INT64 값을 정확히 보존한다")
     @ParameterizedTest
     @CsvSource(
         {
@@ -47,6 +51,7 @@ class TestValueParserTests {
      * @param kind 선언한 정수 타입
      * @param text 유효하지 않은 정수 JSON 텍스트
      */
+    @DisplayName("정수 범위 초과와 다른 JSON 타입은 테스트 오류로 거절한다")
     @ParameterizedTest
     @CsvSource(
         {
@@ -61,7 +66,9 @@ class TestValueParserTests {
         }
     )
     void invalidIntegersAreRejected(TypeSpec.Kind kind, String text) {
-        assertThatThrownBy(() -> parser.parse(text, scalar(kind))).isInstanceOf(ProblemTestCaseInvalidException.class);
+        assertThatThrownBy(() -> parser.parse(text, scalar(kind)))
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
     }
 
     /**
@@ -70,6 +77,7 @@ class TestValueParserTests {
      * @param kind 선언한 실수 타입
      * @param text 파싱할 숫자 JSON 텍스트
      */
+    @DisplayName("유효한 실수 값은 원래 십진 정밀도로 보존한다")
     @ParameterizedTest
     @CsvSource(
         {
@@ -93,6 +101,7 @@ class TestValueParserTests {
      * @param kind 선언한 실수 타입
      * @param text 범위를 벗어나거나 타입이 다른 JSON 텍스트
      */
+    @DisplayName("실수 범위 초과·언더플로와 다른 타입을 거절한다")
     @ParameterizedTest
     @CsvSource(
         {
@@ -106,7 +115,61 @@ class TestValueParserTests {
         }
     )
     void invalidDecimalsAreRejected(TypeSpec.Kind kind, String text) {
-        assertThatThrownBy(() -> parser.parse(text, scalar(kind))).isInstanceOf(ProblemTestCaseInvalidException.class);
+        assertThatThrownBy(() -> parser.parse(text, scalar(kind)))
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
+    }
+
+    /**
+     * 숫자 토큰이 기본 길이 제한보다 길어도 지수로 조정한 유효 값과 중첩 구조를 보존한다.
+     *
+     * @param kind 검증할 실수 타입
+     */
+    @DisplayName("긴 숫자 표기의 유효한 값은 단일 값과 중첩 객체에서 허용한다")
+    @ParameterizedTest
+    @EnumSource(
+        value = TypeSpec.Kind.class,
+        names = {
+            "FLOAT32",
+            "FLOAT64"
+        }
+    )
+    void longFloatingTextsKeepValidValuesInNestedStructures(TypeSpec.Kind kind) {
+        // given
+        String text = "1" + "0".repeat(1_500) + "e-1500";
+        TypeSpec floating = scalar(kind);
+        TypeSpec array = new TypeSpec(TypeSpec.Kind.ARRAY, floating, null, null, null);
+        TypeSpec object = new TypeSpec(TypeSpec.Kind.OBJECT, null, null, null, Map.of("values", array));
+
+        // when & then
+        assertThat((BigDecimal)parser.parse(text, floating)).isEqualByComparingTo(BigDecimal.ONE);
+        assertThat(parser.parse("{\"values\":[" + text + "]}", object))
+            .isEqualTo(Map.of("values", List.of(BigDecimal.ONE)));
+    }
+
+    /**
+     * 숫자 표기의 길이 제한을 조정해도 범위 초과·언더플로·후속 JSON 토큰은 거절한다.
+     *
+     * @param kind 검증할 실수 타입
+     */
+    @DisplayName("긴 숫자도 실수 범위와 단일 JSON 값 조건을 지켜야 한다")
+    @ParameterizedTest
+    @EnumSource(
+        value = TypeSpec.Kind.class,
+        names = {
+            "FLOAT32",
+            "FLOAT64"
+        }
+    )
+    void longFloatingTextsStillRejectInvalidValues(TypeSpec.Kind kind) {
+        // given
+        String digits = "1" + "0".repeat(1_500);
+        // when & then
+        for (String text : List.of(digits, digits + "e-2000", digits + "e-1500 2")) {
+            assertThatThrownBy(() -> parser.parse(text, scalar(kind)))
+                .isInstanceOf(ProblemException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
+        }
     }
 
     /**
@@ -114,6 +177,7 @@ class TestValueParserTests {
      *
      * @param text 유효하지 않은 JSON 텍스트
      */
+    @DisplayName("빈 값·null·특수 숫자·잘못된 JSON을 거절한다")
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(
@@ -132,12 +196,14 @@ class TestValueParserTests {
     )
     void malformedJsonValuesAreRejected(String text) {
         assertThatThrownBy(() -> parser.parse(text, scalar(TypeSpec.Kind.INT32)))
-            .isInstanceOf(ProblemTestCaseInvalidException.class);
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
     }
 
     /**
      * 문자열의 공백·줄바꿈·대소문자와 불리언 타입을 보존하며 묵시적 변환을 거부하는지 검증한다.
      */
+    @DisplayName("문자열과 불리언을 자동 변환하지 않고 원래 값으로 보존한다")
     @Test
     void stringsAndBooleansKeepTheirOwnTypes() {
         TypeSpec string = scalar(TypeSpec.Kind.STRING);
@@ -146,14 +212,21 @@ class TestValueParserTests {
         assertThat(parser.parse("\"\"", string)).isEqualTo("");
         assertThat(parser.parse("true", bool)).isEqualTo(true);
         assertThat(parser.parse("false", bool)).isEqualTo(false);
-        assertThatThrownBy(() -> parser.parse("123", string)).isInstanceOf(ProblemTestCaseInvalidException.class);
-        assertThatThrownBy(() -> parser.parse("\"true\"", bool)).isInstanceOf(ProblemTestCaseInvalidException.class);
-        assertThatThrownBy(() -> parser.parse("1", bool)).isInstanceOf(ProblemTestCaseInvalidException.class);
+        assertThatThrownBy(() -> parser.parse("123", string))
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
+        assertThatThrownBy(() -> parser.parse("\"true\"", bool))
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
+        assertThatThrownBy(() -> parser.parse("1", bool))
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
     }
 
     /**
      * 동일 타입·위치별·반복 패턴 배열의 길이와 순서 및 원소 타입을 검증한다.
      */
+    @DisplayName("배열 길이와 원소 타입을 검사하고 순서를 보존한다")
     @Test
     void arraysValidatePositionAndPatternWithoutReordering() {
         TypeSpec integer = scalar(TypeSpec.Kind.INT32);
@@ -172,16 +245,21 @@ class TestValueParserTests {
             .isEqualTo(List.of());
         for (String invalid : List.of("[\"x\",1,2]", "[1,\"x\"]", "[1,\"x\",null]", "{}")) {
             assertThatThrownBy(() -> parser.parse(invalid, repeated))
-                .isInstanceOf(ProblemTestCaseInvalidException.class);
+                .isInstanceOf(ProblemException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
         }
         assertThatThrownBy(() -> parser.parse("[2,\"x\"]", positional))
-            .isInstanceOf(ProblemTestCaseInvalidException.class);
-        assertThatThrownBy(() -> parser.parse("[]", positional)).isInstanceOf(ProblemTestCaseInvalidException.class);
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
+        assertThatThrownBy(() -> parser.parse("[]", positional))
+            .isInstanceOf(ProblemException.class)
+            .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
     }
 
     /**
      * 중첩 객체의 키 순서와 배열을 보존하고 필드 누락·추가·중복·null을 거부하는지 검증한다.
      */
+    @DisplayName("객체는 선언한 필드만 허용하고 중복 키와 null을 거절한다")
     @Test
     void objectsRequireExactlyTheDeclaredFields() {
         TypeSpec list = new TypeSpec(TypeSpec.Kind.ARRAY, scalar(TypeSpec.Kind.INT64), null, null, null);
@@ -207,15 +285,19 @@ class TestValueParserTests {
                 "{\"values\":[],\"name\":\"x\",\"name\":\"y\"}",
                 "{\"values\":[null],\"name\":\"x\"}"
             )) {
-            assertThatThrownBy(() -> parser.parse(invalid, object)).isInstanceOf(ProblemTestCaseInvalidException.class);
+            assertThatThrownBy(() -> parser.parse(invalid, object))
+                .isInstanceOf(ProblemException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
         }
     }
 
     /**
      * 고정 위치 배열 내부의 객체와 반복 패턴 배열을 재귀적으로 검증하는지 검증한다.
      */
+    @DisplayName("혼합 배열과 객체의 중첩 타입을 재귀적으로 검사한다")
     @Test
     void mixedNestedContainersKeepDeclaredTypes() {
+        // given
         TypeSpec repeated
             = new TypeSpec(
                 TypeSpec.Kind.ARRAY,
@@ -227,7 +309,9 @@ class TestValueParserTests {
         TypeSpec object = new TypeSpec(TypeSpec.Kind.OBJECT, null, null, null, Map.of("values", repeated));
         TypeSpec positional
             = new TypeSpec(TypeSpec.Kind.ARRAY, null, List.of(scalar(TypeSpec.Kind.STRING), object), null, null);
+        // when
         Object result = parser.parse("[\"x\",{\"values\":[9007199254740993,true]}]", positional);
+        // then
         assertThat(result).isEqualTo(List.of("x", Map.of("values", List.of(new BigInteger("9007199254740993"), true))));
         for (String invalid : List
             .of(
@@ -236,7 +320,8 @@ class TestValueParserTests {
                 "[\"x\",{\"values\":[9007199254740993,1]}]"
             )) {
             assertThatThrownBy(() -> parser.parse(invalid, positional))
-                .isInstanceOf(ProblemTestCaseInvalidException.class);
+                .isInstanceOf(ProblemException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ProblemErrorCode.PROBLEM_TEST_CASE_INVALID);
         }
     }
 
