@@ -22,6 +22,7 @@ The reference documents are written in Korean. Locations below keep the original
 3. Follow `docs/guides/git-github.md` > `1.1 브랜치 전략` for branches. Only propose branch create or switch commands, and run them after the user approves.
 4. Read the decision records in `docs/records/decisions/` related to the task.
 5. Read the reference documents for the task from the table in §4. Do not write code based on a document you have not read.
+6. If `docs/records/progress/{owner}.md` exists, read it to confirm the current cycle and recent completed work.
 
 ## 2. Document rules
 
@@ -57,6 +58,7 @@ The source of the document list is `docs/README.md`. The table below shows which
 | Environment variables | `docs/operations/env-example.md` |
 | Branches, commits, Issues, PRs | `docs/guides/git-github.md` |
 | Writing code, before a commit | `docs/guides/convention-build-manual.md` |
+| AI collaboration guides | `docs/guides/ai/README.md`, prompts in `docs/guides/ai/prompts/` |
 
 ## 5. Owners
 
