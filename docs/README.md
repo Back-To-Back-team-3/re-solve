@@ -9,12 +9,14 @@
 | 개발·협업 가이드 | [Git/GitHub 매뉴얼](guides/git-github.md) | 브랜치·Issue·PR·리뷰·병합 규칙과 작업 흐름 |
 | 개발·협업 가이드 | [컨벤션·빌드 매뉴얼](guides/convention-build-manual.md) | Spotless·Checkstyle·빌드·주석·코드 구조 규칙 |
 | 개발·협업 가이드 | [공통 모듈 적용 가이드](guides/common-module.md) | 모듈 선택·설정 등록·보안 체인 연결·기존 서비스 적용 주의점 |
+| 개발·협업 가이드 | [채점 실행 코드 가이드](guides/judge-execution.md) | 생성기 연결·내부 입출력 변환·결과 매핑·검증 방법 |
 | 개발·협업 가이드 | [AI 협업 안내](guides/ai/README.md) | AI 도구별 설정 파일·세션 시작·세 도구의 GitHub MCP 연결 |
 | 기획 | [기획서](dev/planning/planning.md) | 서비스 개요, 기능 목록, 마일스톤 |
 | 기획 | [정책 및 상태](dev/planning/policy-and-state.md) | 도메인 정책, 상태 전이, 불변식 |
 | 아키텍처 | [시스템 구성도](dev/architecture/system-architecture.md) | 전체 아키텍처 구조 |
 | 아키텍처 | [다이어그램](dev/architecture/diagrams.md) | 서비스 간 시퀀스, 상태 전이 흐름 |
 | 명세 | [API 명세서](dev/specifications/api-spec.md) | 서비스 외부 인터페이스 |
+| 명세 | [TypeSpec 공통 타입 명세](dev/specifications/type-spec.md) | 함수 입력·반환 타입, 배열·객체 검증과 Java 타입 매핑 |
 | 명세 | [ERD](dev/specifications/erd.md) | 도메인·DB 구조 |
 | 명세 | [이벤트 계약서](dev/specifications/event-contract.md) | 서비스 간 내부 인터페이스 |
 | 명세 | [스케줄러](dev/specifications/scheduler.md) | 예약 작업 정의 |

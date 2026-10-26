@@ -1,6 +1,7 @@
 package com.backtoback.judge.judging.service;
 
 import com.backtoback.judge.judging.domain.JudgeLanguage;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 
 /**
  * 서비스에서 선택한 언어 실행 환경과 사용 허용 여부.
