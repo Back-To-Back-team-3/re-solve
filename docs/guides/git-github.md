@@ -6,8 +6,8 @@
 
 1. 일반 작업 브랜치는 최신 `develop`에서 만든다. 배포 버전의 긴급 수정인 `hotfix/*`만 `main`에서 만든다.
 2. `main`·`develop`에는 직접 push하지 않는다. 변경은 PR로 반영한다.
-3. 일반 PR은 팀원 2명, `main ↔ develop` PR은 팀원 3명의 승인이 필요하다.
-    - CI 성공, 충돌 없음, 미해결 리뷰 대화 없음도 병합 조건이다.
+3. 모든 PR은 필수 승인 수를 두지 않는다. push 전 AI 리뷰·보완과 Draft PR 검토는 아래 작업 흐름을 따른다.
+    - Draft 해제, CI 성공, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음이 병합 조건이다.
 4. 직접 실행하지 않은 테스트·빌드는 PR에서 완료로 표시하지 않는다.(현재 CI는 테스트를 실행하지 않는다.)
 
 ### 작업 사이클
@@ -16,10 +16,10 @@
 | --- | --- | --- |
 | 1 | Issue 생성 | 작업 목적과 범위를 정한다. |
 | 2 | `develop` 최신화·브랜치 생성 | Issue 번호와 담당 도메인을 브랜치명에 넣는다. |
-| 3 | 작업·커밋 | 변경 파일과 staging 내용을 확인한다. |
+| 3 | 작업·AI 리뷰·보완·커밋 | push 전에 AI로 변경을 검토·보완하고 변경 파일과 staging 내용을 확인한다. |
 | 4 | 브랜치 push·Draft PR 생성 | base가 `develop`인지 확인한다. |
-| 5 | CodeRabbit·CI 확인과 수정 | 실제로 수행한 검증만 PR에 적는다. |
-| 6 | Ready for review·팀원 리뷰 | 승인, 변경 요청, 미해결 대화를 확인한다. |
+| 5 | Draft PR 검토·보완과 CI 확인 | CodeRabbit 리뷰는 1.5 병합 정책을 따르고, 실제로 수행한 검증만 PR에 적는다. |
+| 6 | 작성자의 Ready for review 전환 | 변경 요청과 미해결 대화를 확인한다. |
 | 7 | Mergify Queue 병합 | 병합 결과와 작업 브랜치 삭제를 확인한다. |
 | 8 | `develop` 최신화 | 다음 Issue를 시작하기 전에 pull한다. |
 
@@ -123,21 +123,17 @@ docs(contest): 시험 API 명세 반영
 
 ### 1.5 병합 정책
 
-| PR | 필요 승인 | 병합 방식 |
-| --- | --- | --- |
-| 일반 작업·Stack·`hotfix/* → main` | 2명 이상 | Mergify Queue, squash |
-| `develop → main`·`main → develop` | 3명 이상 | Mergify Queue, merge commit |
-- Draft 해제, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음, CI(`quality-check`) 성공이 필요하다. 갱신 후에는 승인 상태와 병합 조건을 다시 확인한다.
-- `quality-check`는 `spotlessCheck`, `checkstyleMain`, `checkstyleTest`, `compileTestJava`를 실행한다. (현재 테스트 실행은 포함하지 않는다.)
+| PR | 병합 방식 |
+| --- | --- |
+| 일반 작업·Stack·`hotfix/* → main` | Mergify Queue, squash |
+| `develop → main`·`main → develop` | Mergify Queue, merge commit |
+- 모든 PR에 필수 승인 수를 두지 않으며, 새 push에 따른 승인 무효화·재승인을 요구하지 않는다. GitHub Ruleset의 필수 승인 수와 stale 승인 무효화를 해제하고 Mergify의 `dismiss_reviews`는 사용하지 않는다.
+- 로컬에서 코드 작성 후 push 전에 AI 리뷰를 수행하고 발견한 문제를 보완한다.
+- Draft PR에서는 CodeRabbit 리뷰를 받을 수 있으면 확인하고, 발견한 문제를 검토·처리한다. CodeRabbit은 한도·장애가 있을 수 있으므로 필수 병합 체크로 두지 않는다. 리뷰를 받지 못한 사유를 PR마다 의무 작성하거나 예외 승인을 받을 필요는 없다.
+- 검토·보완 후 PR 작성자가 `Ready for review`로 전환한다. 팀원 리뷰에서 발견한 문제도 검토·처리한다.
+- Draft 해제, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음이 필요하다. `quality-check`는 Queue 진입과 병합 전 모두 성공해야 한다. 갱신 후에는 이 병합 조건을 다시 확인한다.
+- `quality-check`는 `checkstyleMain`, `checkstyleTest`, `compileTestJava`를 실행한다. 현재 `spotlessCheck`와 테스트 실행은 포함하지 않는다.
 - GitHub Ruleset은 사람의 직접 병합을 제한하고 Mergify에 예외를 부여한다. 병합 후 작업 브랜치 자동 삭제가 설정돼 있다.
-
-**승인 무효화 정책**
-
-- PR 브랜치에 새 커밋이 push되면 해당 push 이전의 승인 리뷰를 해제하고 재승인을 받는다. 단, Mergify 자체 `update`·`rebase`로 발생한 push는 제외한다. 위 표의 필요 승인 수와 병합 조건은 유지한다.
-- GitHub Ruleset의 stale 승인 무효화는 해제하고, 승인 해제는 Mergify의 `dismiss_reviews`가 담당한다. `approved: true`, `changes_requested: false`, `when: synchronize`로 설정해 변경 요청 리뷰는 유지하고 새 push 이전에 제출된 승인 리뷰를 해제한다.
-- Mergify 자체 갱신의 승인 유지 예외를 다른 봇의 push나 모든 diff 동일 갱신으로 확대하지 않는다.
-- GitHub-native Stack의 rebase는 Mergify 자체 `update`·`rebase`와 구분한다. GitHub-native Stack은 diff가 바뀌지 않는 rebase에서 GitHub의 stale 승인 무효화 설정과 관계없이 승인을 유지한다.
-- 동작 범위는 [Mergify Dismiss Reviews](https://docs.mergify.com/workflow/actions/dismiss_reviews/)와 [GitHub Stack rebase](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests#rebasing)를 따른다.
 
 ### 1.6 AI로 Issue·PR을 작성할 때
 
@@ -288,6 +284,8 @@ git switch -c feat/이슈번호-domain-summary
 
 ### 3.2 변경 확인·커밋·push
 
+- push 전 AI 리뷰·보완은 1.5 병합 정책을 따른다.
+
 ```bash
 # 변경한 파일과 내용을 확인한 뒤 staging
 git status
@@ -311,8 +309,8 @@ git push -u origin feat/이슈번호-domain-summary
 1. GitHub 저장소에서 `Compare & pull request` 또는 `Pull requests → New pull request`를 연다.
 2. base `develop`, compare 본인 작업 브랜치를 확인하고 `Create draft pull request`로 만든다.
 3. PR 템플릿에 완료한 변경과 실제 수행한 검증을 작성한다.
-    - CodeRabbit 리뷰와 CI 결과를 확인하고 필요한 수정을 같은 브랜치에 push한다.
-4. 수정이 끝나면 `Ready for review`로 바꾸고 팀원 리뷰를 요청한다.
+    - 1.5 병합 정책에 따라 Draft PR을 검토·보완하고 CI 결과를 확인한다. 수정은 같은 브랜치에 push한다.
+4. 검토·보완이 끝나면 PR 작성자가 `Ready for review`로 바꾼다. 팀원 리뷰가 있으면 발견한 문제를 검토·처리한다.
 
 ---
 
@@ -331,7 +329,7 @@ git push -u origin feat/이슈번호-domain-summary
     - 파일 화면에서 줄을 선택하고 `y`를 누르면 permalink로 바뀐다.
 - 대안이 몇 줄의 코드 수정이면 GitHub `suggestion` 블록으로 적는다.
 - 병합 전에 반드시 고쳐야 하는 지적은 `Review changes → Request changes`로, 권장·질문은 `Comment`로 제출한다.
-- 승인은 `Review changes → Approve`에 아래 내용을 코멘트로 적어 제출한다.
+- 승인 리뷰를 남기는 경우에는 `Review changes → Approve`에 아래 내용을 코멘트로 적어 제출한다.
     - PR의 주제 (무엇을 바꾼 PR인지 한 줄)
     - `💬 리뷰어에게`의 확인 요청마다 확인한 결과
     - 확인 요청이 "특이사항 없음"이면 직접 확인한 범위
@@ -340,8 +338,8 @@ git push -u origin feat/이슈번호-domain-summary
 ### 4.2 병합 전 확인
 
 1. Draft가 해제됐는지 확인한다.
-2. 해당 PR의 승인 수, 변경 요청, 미해결 대화, 충돌 여부를 확인한다.
-3. CI(`quality-check`) 성공을 확인한다.
+2. 해당 PR의 변경 요청, 미해결 대화, 충돌 여부를 확인한다.
+3. Queue 진입과 병합 전 CI(`quality-check`) 성공을 확인한다.
 4. 조건이 충족되면 Mergify Queue의 병합 결과를 확인한다.
 
 ### 4.3 병합 후
