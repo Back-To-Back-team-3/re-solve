@@ -23,6 +23,7 @@ The reference documents are written in Korean. Locations below keep the original
 4. Read the decision records in `docs/records/decisions/` related to the task.
 5. Read the reference documents for the task from the table in §4. Do not write code based on a document you have not read.
 6. If `docs/records/progress/{owner}.md` exists, read it to confirm the current cycle and recent completed work.
+7. If `.personal/` directory exists, read files relevant to the current issue (development journal, personal reference docs) before reporting.
 
 ## 2. Document rules
 
@@ -40,6 +41,8 @@ The reference documents are written in Korean. Locations below keep the original
 - Write Issues and PRs by `docs/guides/git-github.md` > `1.6 AI로 Issue·PR을 작성할 때`.
 - Before each commit, follow `docs/guides/convention-build-manual.md` > `4. 평소 개발 시 — 매 커밋 전 루틴`. Report only the commands you actually ran, with their results.
 - Never write secrets (tokens, passwords, keys) to files, commits, Issues, or PRs. Leave example values empty.
+- Do not reference `.personal/` directory paths or file names anywhere in the repository: commit messages, code comments, Issue bodies, PR bodies, or any other tracked file.
+- After creating a branch, push it immediately and confirm the branch appears in the repository. Open a Draft PR before starting implementation.
 
 ## 4. Reference documents
 
