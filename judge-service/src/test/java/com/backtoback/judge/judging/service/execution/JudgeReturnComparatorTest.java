@@ -10,13 +10,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
 
-/** TypeSpec의 구조·숫자 정규화와 기대값 오류·사용자 오답의 구분을 검증한다. */
+/** {@code TypeSpec}의 구조·숫자 정규화와 기대값 오류·사용자 오답의 구분을 검증한다. */
 class JudgeReturnComparatorTest {
     private final JudgeReturnComparator comparator = new JudgeReturnComparator();
 
@@ -91,6 +92,31 @@ class JudgeReturnComparatorTest {
         String decimal = "1.00000005960464477539062500000000000000000000000000000000000000000000000000001";
         assertThat(comparator.matches(type(Kind.FLOAT32), "1.00000011920928955078125", decimal)).isTrue();
         assertThat(comparator.matches(type(Kind.FLOAT32), "1", decimal)).isFalse();
+    }
+
+    /**
+     * 긴 숫자 표기도 선언 정밀도로 비교하며 기대값과 객체 필드에 동일한 규칙을 적용한다.
+     *
+     * @param kind 선언 부동소수 타입
+     */
+    @ParameterizedTest
+    @EnumSource(
+        value = Kind.class,
+        names = {
+            "FLOAT32",
+            "FLOAT64"
+        }
+    )
+    @DisplayName("기본 숫자 토큰 길이를 넘는 소수도 기대값과 실제값 모두 정확히 비교한다")
+    void comparesLongDecimals(Kind kind) {
+        String decimal = "1." + "0".repeat(1200);
+        assertThat(comparator.matches(type(kind), "1", decimal)).isTrue();
+        assertThat(comparator.matches(type(kind), decimal, "1")).isTrue();
+        assertThat(comparator.matches(type(kind), "2", decimal)).isFalse();
+        var object = new TypeSpec(Kind.OBJECT, null, null, null, Map.of("value", type(kind)));
+        String longObject = "{\"value\":" + decimal + "}";
+        assertThat(comparator.matches(object, "{\"value\":1}", longObject)).isTrue();
+        assertThat(comparator.matches(object, longObject, "{\"value\":1}")).isTrue();
     }
 
     /**

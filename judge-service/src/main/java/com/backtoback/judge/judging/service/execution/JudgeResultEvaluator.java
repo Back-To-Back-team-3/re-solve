@@ -139,6 +139,11 @@ public final class JudgeResultEvaluator {
         boolean returnExceeded,
         boolean debugExceeded
     ) {
+        // TLE·CE는 메모리 보정 대상이 아니며, 나머지 종료 상태는 출력 초과보다 실측 메모리를 우선한다.
+        if (execution.statusId() != 5 && execution.statusId() != 6 && execution.memoryKiB() != null
+            && execution.memoryKiB().compareTo(BigDecimal.valueOf(memoryLimitKiB)) >= 0) {
+            return JudgeVerdict.MLE;
+        }
         if (returnExceeded || debugExceeded) {
             return JudgeVerdict.RE;
         }
@@ -147,9 +152,6 @@ public final class JudgeResultEvaluator {
         }
         if (execution.statusId() == 6) {
             return JudgeVerdict.CE;
-        }
-        if (execution.memoryKiB() != null && execution.memoryKiB().compareTo(BigDecimal.valueOf(memoryLimitKiB)) >= 0) {
-            return JudgeVerdict.MLE;
         }
         if (execution.statusId() >= 7 || execution.exitCode() != null && execution.exitCode() != 0
             || execution.exitSignal() != null && execution.exitSignal() != 0) {
@@ -164,7 +166,7 @@ public final class JudgeResultEvaluator {
     /**
      * UTF-8 출력의 크기가 한도를 초과하는지 확인한다. 같은 크기는 허용한다.
      *
-     * @param text 검사할 원시 출력; null은 출력 없음
+     * @param text 검사할 원시 출력; {@code null}은 출력 없음
      * @param limitBytes 허용 바이트 수
      * @return 출력 크기가 한도를 초과하는지 여부
      */

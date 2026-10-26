@@ -192,6 +192,49 @@ class JudgeResultEvaluatorTest {
     }
 
     /**
+     * 메모리 보정 대상에서는 출력 제한도 초과한 경우 실측 메모리를 우선한다.
+     *
+     * @param status 엔진 종료 상태
+     * @param verdict 동시 초과의 기대 판정
+     */
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "3,MLE",
+            "4,MLE",
+            "5,RE",
+            "6,RE",
+            "7,MLE",
+            "8,MLE",
+            "9,MLE",
+            "10,MLE",
+            "11,MLE",
+            "12,MLE"
+        }
+    )
+    @DisplayName("출력과 메모리를 동시에 초과하면 메모리 보정 대상만 MLE로 처리한다")
+    void prioritizesMemoryOverOutput(int status, JudgeVerdict verdict) {
+        var debugExceeded = evaluate(execution(status, "1", "x".repeat(65537), "1", "262144"));
+        assertThat(debugExceeded.verdict()).isEqualTo(verdict);
+        assertThat(debugExceeded.debugOutput()).isNull();
+        var returnExceeded = evaluate(execution(status, "1".repeat(1048577), "", "1", "300000"));
+        assertThat(returnExceeded.verdict()).isEqualTo(verdict);
+        assertThat(returnExceeded.actualReturnText()).isNull();
+    }
+
+    /**
+     * 출력 예산 안의 긴 숫자는 파서 기본 길이 제한 때문에 오답으로 처리하지 않는다.
+     */
+    @Test
+    @DisplayName("반환값 제한 안의 긴 소수는 선언 타입으로 비교해 AC를 반환한다")
+    void acceptsLongDecimalWithinOutputBudget() {
+        var floating = new TypeSpec(Kind.FLOAT64, null, null, null, null);
+        var raw = execution(3, "1." + "0".repeat(1200), "", "1", "100");
+        assertThat(evaluator.evaluate(raw, floating, "1", 262144, 1024).verdict()).isEqualTo(JudgeVerdict.AC);
+        assertThat(evaluator.evaluate(raw, floating, "1", 262144, 1).verdict()).isEqualTo(JudgeVerdict.RE);
+    }
+
+    /**
      * 초 단위 측정을 저장·응답용 정수 밀리초로 올림한다.
      *
      * @param seconds 원시 시간

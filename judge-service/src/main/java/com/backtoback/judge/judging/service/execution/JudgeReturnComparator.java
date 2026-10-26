@@ -13,16 +13,17 @@ import com.backtoback.judge.judging.dto.TypeSpec;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
+import tools.jackson.core.ObjectReadContext;
+import tools.jackson.core.StreamReadConstraints;
 import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.core.json.JsonFactory;
 
 /**
- * 선언 타입으로 JSON 반환값을 정규화해 허용 오차 없이 비교한다. (TypeSpec 공통 타입 명세 §2·§3·§7)
+ * 선언 타입으로 JSON 반환값을 정규화해 허용 오차 없이 비교한다. ({@code TypeSpec} 공통 타입 명세 §2·§3·§7)
  */
 @Service
 public final class JudgeReturnComparator {
     private final FunctionSpecValidator validator = new FunctionSpecValidator();
-    private final JsonMapper mapper = JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
 
     /**
      * 기대값과 실제 반환값의 선언 타입·구조·값이 일치하는지 비교한다.
@@ -54,7 +55,16 @@ public final class JudgeReturnComparator {
      */
     private Object normalize(TypeSpec type, String text) {
         require(text != null);
-        try (JsonParser parser = mapper.createParser(text)) {
+        // 출력 크기 제한은 판정기가 검사하므로 숫자 토큰에 별도의 짧은 길이 제한을 두지 않는다.
+        var factory
+            = JsonFactory
+                .builder()
+                .streamReadConstraints(
+                    StreamReadConstraints.builder().maxNumberLength(Math.max(1, text.length())).build()
+                )
+                .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                .build();
+        try (JsonParser parser = factory.createParser(ObjectReadContext.empty(), text)) {
             parser.nextToken();
             Object value = readValue(type, parser);
             require(parser.nextToken() == null);
