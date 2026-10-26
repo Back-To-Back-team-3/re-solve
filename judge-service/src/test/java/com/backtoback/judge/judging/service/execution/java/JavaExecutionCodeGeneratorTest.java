@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.backtoback.judge.judging.domain.JudgeLanguage;
@@ -23,6 +24,55 @@ import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 /** 함수 명세·입력 검증과 Java 실행 코드 생성 결과를 검증한다. */
 class JavaExecutionCodeGeneratorTest {
     private final JavaExecutionCodeGenerator generator = new JavaExecutionCodeGenerator();
+
+    /**
+     * 긴 숫자 표기도 선언 정밀도로 변환하고 중첩 구조에서 같은 입력 스트림을 만든다.
+     *
+     * @param kind 선언 부동소수 타입
+     */
+    @ParameterizedTest
+    @EnumSource(
+        value = Kind.class,
+        names = {
+            "FLOAT32",
+            "FLOAT64"
+        }
+    )
+    @DisplayName("긴 소수와 짧은 소수는 기본 값과 중첩 객체에서 같은 실행 입력으로 변환한다")
+    void encodesLongDecimals(Kind kind) {
+        var type = scalar(kind);
+        String decimal = "1." + "0".repeat(1200);
+        String source = "class Solution {}";
+        assertThat(generator.generate(spec(type), source, Map.of("value", decimal)).stdin())
+            .isEqualTo(generator.generate(spec(type), source, Map.of("value", "1.0")).stdin());
+        var array = new TypeSpec(Kind.ARRAY, type, null, null, null);
+        var object = new TypeSpec(Kind.OBJECT, null, null, null, Map.of("items", array));
+        assertThat(generator.generate(spec(object), source, Map.of("value", "{\"items\":[" + decimal + "]}")).stdin())
+            .isEqualTo(generator.generate(spec(object), source, Map.of("value", "{\"items\":[1.0]}")).stdin());
+    }
+
+    /**
+     * 숫자 길이 제한을 조정해도 선언 타입의 범위 초과와 언더플로는 거절한다.
+     *
+     * @param kind 선언 부동소수 타입
+     */
+    @ParameterizedTest
+    @EnumSource(
+        value = Kind.class,
+        names = {
+            "FLOAT32",
+            "FLOAT64"
+        }
+    )
+    @DisplayName("긴 숫자라도 선언 타입의 범위 초과와 언더플로는 거절한다")
+    void rejectsOutOfRangeLongDecimals(Kind kind) {
+        String decimal = "1." + "0".repeat(1200);
+        for (String exponent : List.of("e400", "e-400")) {
+            assertThatThrownBy(
+                () -> generator.generate(spec(scalar(kind)), "class Solution {}", Map.of("value", decimal + exponent))
+            ).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
 
     /**
      * Java 예약어·리터럴·단일 밑줄을 두 생성 경로에서 함께 거절한다.

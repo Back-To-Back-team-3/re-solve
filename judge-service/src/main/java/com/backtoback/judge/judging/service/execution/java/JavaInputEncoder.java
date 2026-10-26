@@ -15,7 +15,10 @@ import com.backtoback.judge.judging.dto.TypeSpec;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
+import tools.jackson.core.ObjectReadContext;
+import tools.jackson.core.StreamReadConstraints;
 import tools.jackson.core.StreamReadFeature;
+import tools.jackson.core.json.JsonFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -25,7 +28,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 final class JavaInputEncoder {
     private final JavaTypeMapper types = new JavaTypeMapper();
-    private final JsonMapper mapper = JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
+    private final JsonMapper mapper = JsonMapper.builder().build();
 
     /**
      * 매개변수 선언 순서로 테스트 입력을 변환한다.
@@ -66,7 +69,14 @@ final class JavaInputEncoder {
      * @throws IllegalArgumentException 값이 없거나 여러 값이 이어지는 경우
      */
     private JsonNode readInput(String text) {
-        try (JsonParser parser = mapper.createParser(text)) {
+        // 숫자 표기의 길이로 유효한 입력을 거절하지 않도록 현재 JSON 길이를 토큰 한도로 사용한다.
+        var factory
+            = JsonFactory
+                .builder()
+                .streamReadConstraints(StreamReadConstraints.builder().maxNumberLength(text.length()).build())
+                .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                .build();
+        try (JsonParser parser = factory.createParser(ObjectReadContext.empty(), text)) {
             parser.nextToken();
             JsonNode value = readNode(parser);
             require(parser.nextToken() == null);
