@@ -32,11 +32,48 @@ class ProblemExceptionHandlerTest {
     }
 
     @ParameterizedTest
-    @DisplayName("태그 중복·사용 중 오류에 해당하지 않는 제약 위반은 서버 오류로 응답하고 로그에 오류 코드와 예외 타입만 남긴다")
+    @DisplayName("태그 제약 이름과 오류 번호가 일치하면 해당 충돌로 응답하고 상세 오류를 노출하지 않는다")
+    @CsvSource(
+        {
+            "1062, uk_tags_name, PROBLEM_TAG_DUPLICATED",
+            "1062, tags.uk_tags_name, PROBLEM_TAG_DUPLICATED",
+            "1062, uk_tags_display_order, PROBLEM_VERSION_CONFLICT",
+            "1062, tags.uk_tags_display_order, PROBLEM_VERSION_CONFLICT",
+            "1451, fk_problem_revision_tags_tag, PROBLEM_TAG_IN_USE",
+            "1451, problem_revision_tags.fk_problem_revision_tags_tag, PROBLEM_TAG_IN_USE"
+        }
+    )
+    void knownTagConstraintsReturnConflict(
+        int mysqlError,
+        String constraintName,
+        String expectedCode,
+        CapturedOutput output
+    ) {
+        // given
+        var sqlException = new SQLException("internal-db-detail", "23000", mysqlError);
+        var violation = new ConstraintViolationException("constraint failed", sqlException, "sql", constraintName);
+        var exception = new DataIntegrityViolationException("DB write failed", new IllegalStateException(violation));
+
+        // when
+        var response = new ProblemExceptionHandler().handleDataIntegrity(exception);
+
+        // then
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody().error().code()).isEqualTo(expectedCode);
+        assertThat(output.getAll())
+            .contains(expectedCode, "DataIntegrityViolationException")
+            .doesNotContain("internal-db-detail", "constraint failed", "DB write failed");
+    }
+
+    @ParameterizedTest
+    @DisplayName("태그 충돌에 해당하지 않는 제약 위반은 서버 오류로 응답하고 로그에 오류 코드와 예외 타입만 남긴다")
     @CsvSource(
         value = {
             "1062, uk_other_name",
-            "1062, uk_tags_display_order",
+            "1062, uk_tags_display_order_other",
+            "1062, tags.uk_tags_display_order_other",
+            "1451, uk_tags_display_order",
+            "1048, uk_tags_display_order",
             "1451, fk_other_parent",
             "1452, fk_problem_revision_tags_tag",
             "1048, uk_tags_name",

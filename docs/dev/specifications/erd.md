@@ -1033,13 +1033,17 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `name` | VARCHAR(200) | Y | 태그 이름 (프로그래머스 고득점 Kit 기준) |
-| `display_order` | INT | Y | 표시 순서 |
+| `display_order` | INT | Y | 표시 순서. 커밋 시 태그 n개의 순번은 0~(n-1)이며 중복 없이 연속됨 |
 | `created_at` | DATETIME(6) | Y |  |
 | `updated_at` | DATETIME(6) | Y |  |
+| `version` | BIGINT | Y | 낙관적 락 버전. JPA가 생성 시 0으로 초기화하며 DB DEFAULT는 사용하지 않음 |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
 | `uk_tags_name` | `name` | 태그 이름 중복 방지 |
+| `uk_tags_display_order` | `display_order` | 표시 순서 중복 방지 (UNIQUE) |
+
+**순번 변경:** Redis 공통 잠금과 DB 행 잠금을 사용한다. 같은 트랜잭션 안에서 변경 대상에 임시 음수 순번을 배정한 뒤 최종 순번을 저장하여 UNIQUE 충돌을 피한다. 커밋된 순번은 0 이상이며, 별도 잠금 테이블은 사용하지 않는다.
 
 #### 4.2.9 회차별 태그 (`problem_revision_tags`) `[IMMUTABLE]`
 
@@ -2418,6 +2422,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | --- | --- | --- |
 | 공개 회차 불변 | `problem_revisions`는 `[IMMUTABLE]`, UPDATE API 없음. 수정은 새 회차 INSERT | `[제출]` 회차 고정 |
 | 회차 번호 중복 | `uk_problem_revisions_problem_revision_number`, 다음 번호는 `problems` 행 잠금 후 계산 | — |
+| 태그 순번 연속성·경합 | DB 행 잠금으로 순번을 조정하고 저장·삭제를 같은 트랜잭션으로 처리. `uk_tags_display_order`와 낙관적 락 버전으로 중복 순번·오래된 변경을 거부 (상세: 4.2.8 태그) | — |
 | 테스트 구성 | 회차당 공개·숨김 테스트 각 1개 이상 (작성 단계 검증) | — |
 | 기준 시간 제한 | `time_limit_ms >= max(C++ 정답 최대 실행 시간 × 3, 1000)` (작성 단계 검증) | — |
 | 공개 조건 | `visibility = PUBLIC`은 회차 1개 이상일 때만 | — |
@@ -2614,6 +2619,19 @@ member-service/src/main/resources/db/migration/
 ```
 
 ### 7.2 Problem (`problem-service`)
+
+현재 태그 관리 구현에 적용된 마이그레이션:
+
+```text
+problem-service/src/main/resources/db/migration/
+  V1__problem_create_tags.sql
+  V2__problem_add_unique_tags.sql
+```
+
+- V1: 태그 테이블과 이름 UNIQUE 제약 생성
+- V2: 표시 순서 UNIQUE 제약 추가
+
+아래 목록은 전체 구축 계획이며, 개발 중 실제 적용 파일과 번호는 구분합니다.
 
 ```
 problem-service/src/main/resources/db/migration/
