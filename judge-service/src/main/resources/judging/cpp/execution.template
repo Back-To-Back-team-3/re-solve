@@ -275,7 +275,15 @@ template<class T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 void writeJson(std::ostream& out, T value) {
     if (!std::isfinite(value)) throw std::runtime_error("Non-finite return value");
     if (value == 0) out << (std::signbit(value) ? "-0.0" : "0.0");
-    else out << std::setprecision(std::numeric_limits<T>::max_digits10) << value;
+    else {
+        std::ostringstream number;
+        number.imbue(std::locale::classic());
+        number << std::setprecision(std::numeric_limits<T>::max_digits10) << value;
+        auto text = number.str();
+        // 정수처럼 보이는 실수도 JSON의 실수 토큰으로 남겨 반환 타입을 검증할 수 있게 한다.
+        if (text.find_first_of(".eE") == std::string::npos) text += ".0";
+        out << text;
+    }
 }
 void writeJson(std::ostream& out, const std::map<std::string, Value>& values);
 template<class T> void writeJson(std::ostream& out, const std::vector<T>& values) {

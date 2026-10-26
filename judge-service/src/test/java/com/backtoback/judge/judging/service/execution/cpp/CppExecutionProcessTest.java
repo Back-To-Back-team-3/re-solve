@@ -51,7 +51,9 @@ class CppExecutionProcessTest {
             "INT64,9223372036854775807",
             "INT64,-9223372036854775808",
             "FLOAT32,1.25",
+            "FLOAT32,1.0",
             "FLOAT64,1.25",
+            "FLOAT64,1.0",
             "BOOLEAN,true",
             "BOOLEAN,false"
         }
@@ -157,6 +159,28 @@ class CppExecutionProcessTest {
         var result = execute(generator.generate(spec(type), source, Map.of("value", input)));
         assertThat(result.exitCode()).as(result.stderr()).isZero();
         assertThat(mapper.readTree(result.stdout())).isEqualTo(mapper.readTree(input));
+    }
+
+    /**
+     * 정수 선언 위치에 반환한 실수도 실제 JSON 숫자 타입을 유지한다.
+     *
+     * @throws Exception 컴파일 또는 실행이 실패한 경우
+     */
+    @Test
+    @DisplayName("C++ 객체·혼합 배열의 정수처럼 보이는 실수를 정수로 직렬화하지 않는다")
+    void preservesFloatingReturnTokensInValues() throws Exception {
+        var integer = scalar(Kind.INT32);
+        var positions = new TypeSpec(Kind.ARRAY, null, List.of(integer, integer, integer), null, null);
+        var output = new TypeSpec(Kind.OBJECT, null, null, null, Map.of("items", positions, "value", integer));
+        var function = new FunctionSpec("solution", List.of(), output);
+        String source = """
+            std::map<std::string, Value> solution() {
+                return {{"items", std::vector<Value>{1.0f, -2.0, 3}}, {"value", 1.0}};
+            }
+            """;
+        var result = execute(generator.generate(function, source, Map.of()));
+        assertThat(result.exitCode()).as(result.stderr()).isZero();
+        assertThat(result.stdout()).isEqualTo("{\"items\":[1.0,-2.0,3],\"value\":1.0}");
     }
 
     /** vector<bool>의 프록시와 객체 배열의 직렬화를 검증한다. */
