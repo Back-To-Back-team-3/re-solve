@@ -180,7 +180,7 @@ class AuthServiceTest {
         given(accessTokenProvider.decode("access")).willReturn(Optional.of(accessJwt("7", NOW.plusSeconds(1200))));
         given(accessTokenProvider.accessTokenTtl()).willReturn(Duration.ofHours(1));
 
-        authService.logout(7L, "Bearer access", "refresh");
+        authService.logout("7", "Bearer access", "refresh");
 
         verify(accessTokenBlocklist).block("jti-1", Duration.ofSeconds(1200));
         verify(accessTokenBlocklist).blockSession("sid-1", Duration.ofHours(1));
@@ -193,22 +193,26 @@ class AuthServiceTest {
         given(accessTokenProvider.decode("access")).willReturn(Optional.of(accessJwt("7", NOW.plusSeconds(60))));
         given(accessTokenProvider.accessTokenTtl()).willReturn(Duration.ofHours(1));
 
-        authService.logout(7L, "Bearer access", null);
+        authService.logout("7", "Bearer access", null);
 
         verify(accessTokenBlocklist).block("jti-1", Duration.ofSeconds(60));
         verify(refreshTokenStore).revokeSession(7L, "sid-1", null);
     }
 
     @Test
-    @DisplayName("로그아웃: Bearer 토큰이 없거나 요청자와 토큰 주인이 다르면 AUTH_TOKEN_INVALID")
+    @DisplayName("로그아웃: Bearer 토큰이 없거나 요청자(숫자가 아닌 ID 포함)와 토큰 주인이 다르면 AUTH_TOKEN_INVALID")
     void logoutRejectsMissingOrForeignToken() {
-        assertThatThrownBy(() -> authService.logout(7L, null, "refresh"))
+        assertThatThrownBy(() -> authService.logout("7", null, "refresh"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
             .isEqualTo(CommonErrorCode.AUTH_TOKEN_INVALID);
 
         given(accessTokenProvider.decode("other")).willReturn(Optional.of(accessJwt("8", NOW.plusSeconds(60))));
-        assertThatThrownBy(() -> authService.logout(7L, "Bearer other", "refresh"))
+        assertThatThrownBy(() -> authService.logout("7", "Bearer other", "refresh"))
+            .isInstanceOf(BusinessException.class)
+            .extracting("errorCode")
+            .isEqualTo(CommonErrorCode.AUTH_TOKEN_INVALID);
+        assertThatThrownBy(() -> authService.logout("abc", "Bearer other", "refresh"))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
             .isEqualTo(CommonErrorCode.AUTH_TOKEN_INVALID);
