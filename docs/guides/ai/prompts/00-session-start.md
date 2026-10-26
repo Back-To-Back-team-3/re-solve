@@ -25,6 +25,7 @@ Report results only. Do not write code in this stage.
 5. Choose the reference documents and sections to read from `AGENTS.md` > `4. Reference documents`.
 6. If a decision record and a reference document say different things, list each difference as `document > section > phrase`.
 7. List the scope items that have no grounds in the documents as questions.
+8. If `docs/records/progress/{owner}.md` exists, read it and add the current cycle and recent PR status to the 작업 준비 보고 table. If a PR merged since the last update exists, ask the user whether to update the file now or after the session ends.
 
 ## Output format
 
