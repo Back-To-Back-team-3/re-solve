@@ -20,7 +20,8 @@ public record AuthProperties(
     @NotEmpty List<String> allowedRedirectPaths,
     @Valid @NotNull GitHub github,
     @Valid @NotNull Jwt jwt,
-    @Valid @NotNull RefreshToken refreshToken
+    @Valid @NotNull RefreshToken refreshToken,
+    boolean devLoginEnabled
 ) {
 
     public record GitHub(

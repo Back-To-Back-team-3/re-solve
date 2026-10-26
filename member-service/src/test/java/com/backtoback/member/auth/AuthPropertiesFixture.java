@@ -25,7 +25,8 @@ public final class AuthPropertiesFixture {
                 "https://api.github.com"
             ),
             new AuthProperties.Jwt(JWT_SECRET, Duration.ofHours(1)),
-            new AuthProperties.RefreshToken(Duration.ofDays(14), Duration.ofSeconds(10), true)
+            new AuthProperties.RefreshToken(Duration.ofDays(14), Duration.ofSeconds(10), true),
+            false
         );
     }
 }

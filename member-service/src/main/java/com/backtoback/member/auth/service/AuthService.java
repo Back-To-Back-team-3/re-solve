@@ -133,20 +133,15 @@ public class AuthService {
                 .consume(loginCode)
                 .filter(consumed -> matchesBrowserNonce(browserNonce, consumed.browserNonceHash()))
                 .orElseThrow(() -> new MemberException(MemberErrorCode.AUTH_LOGIN_CODE_INVALID));
-        Member member = memberService.getMember(claim.memberId());
-        if (member.isWithdrawn()) {
-            throw new MemberException(CommonErrorCode.AUTH_ACCESS_DENIED);
-        }
+        return issueTokens(memberService.getMember(claim.memberId()), claim.newMember());
+    }
 
-        IssuedRefreshToken issued = refreshTokenStore.issue(member.getId());
-        String accessToken = accessTokenProvider.issue(member, issued.sessionId());
-        return new LoginResult(
-            accessToken,
-            accessTokenProvider.expiresInSeconds(),
-            issued.refreshToken(),
-            member,
-            claim.newMember()
-        );
+    /**
+     * 개발용 로그인 (API 명세서 1.1.6). GitHub 로그인 없이 지정한 회원으로 토큰을 발급한다.
+     * 활성화 여부는 Controller가, 운영 환경에서 켜지지 않았는지는 {@code DevLoginGuard}가 확인한다.
+     */
+    public LoginResult devLogin(Long memberId) {
+        return issueTokens(memberService.getMember(memberId), false);
     }
 
     /**
@@ -205,6 +200,21 @@ public class AuthService {
         accessTokenBlocklist.block(jwt.getId(), Duration.between(clock.instant(), jwt.getExpiresAt()));
         accessTokenBlocklist.blockSession(sessionId, accessTokenProvider.accessTokenTtl());
         refreshTokenStore.revokeSession(memberId, sessionId, StringUtils.hasText(refreshToken) ? refreshToken : null);
+    }
+
+    private LoginResult issueTokens(Member member, boolean newMember) {
+        if (member.isWithdrawn()) {
+            throw new MemberException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        IssuedRefreshToken issued = refreshTokenStore.issue(member.getId());
+        String accessToken = accessTokenProvider.issue(member, issued.sessionId());
+        return new LoginResult(
+            accessToken,
+            accessTokenProvider.expiresInSeconds(),
+            issued.refreshToken(),
+            member,
+            newMember
+        );
     }
 
     private UriComponentsBuilder frontendCallback() {

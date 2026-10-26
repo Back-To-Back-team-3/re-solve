@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.exception.BusinessException;
@@ -24,6 +25,7 @@ import com.backtoback.common.exception.ErrorCode;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.member.auth.config.AuthProperties;
 import com.backtoback.member.auth.dto.AccessTokenResponse;
+import com.backtoback.member.auth.dto.DevLoginRequest;
 import com.backtoback.member.auth.dto.LoginCodeExchangeRequest;
 import com.backtoback.member.auth.dto.TokenResponse;
 import com.backtoback.member.auth.service.AuthService;
@@ -106,6 +108,22 @@ public class AuthController {
             .ok()
             .header(HttpHeaders.SET_COOKIE, refreshTokenCookie(result.refreshToken()).toString())
             .header(HttpHeaders.SET_COOKIE, expiredLoginNonceCookie().toString())
+            .body(ApiResponse.success(TokenResponse.from(result)));
+    }
+
+    /**
+     * 1.1.6 개발용 로그인 — 지정한 회원으로 토큰을 발급한다. 응답은 1.1.3 로그인 코드 교환과 같다.
+     * 꺼져 있으면 경로가 없는 것처럼 404로 응답한다.
+     */
+    @PostMapping("/dev-login")
+    public ResponseEntity<ApiResponse<TokenResponse>> devLogin(@Valid @RequestBody DevLoginRequest request) {
+        if (!authProperties.devLoginEnabled()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
+        LoginResult result = authService.devLogin(Long.valueOf(request.memberId()));
+        return ResponseEntity
+            .ok()
+            .header(HttpHeaders.SET_COOKIE, refreshTokenCookie(result.refreshToken()).toString())
             .body(ApiResponse.success(TokenResponse.from(result)));
     }
 
