@@ -42,6 +42,7 @@ The reference documents are written in Korean. Locations below keep the original
 - Before each commit, follow `docs/guides/convention-build-manual.md` > `4. 평소 개발 시 — 매 커밋 전 루틴`. Report only the commands you actually ran, with their results.
 - Never write secrets (tokens, passwords, keys) to files, commits, Issues, or PRs. Leave example values empty.
 - Do not reference `.personal/` directory paths or file names anywhere in the repository: commit messages, code comments, Issue bodies, PR bodies, or any other tracked file.
+- After creating a branch, push it immediately and confirm the branch appears in the repository. Open a Draft PR before starting implementation.
 
 ## 4. Reference documents
 
