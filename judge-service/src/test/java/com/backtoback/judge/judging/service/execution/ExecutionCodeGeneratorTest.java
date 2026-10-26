@@ -15,6 +15,7 @@ import com.backtoback.judge.judging.dto.FunctionSpec;
 import com.backtoback.judge.judging.dto.FunctionSpec.Parameter;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.dto.TypeSpec.Kind;
+import com.backtoback.judge.judging.service.execution.cpp.CppExecutionCodeGenerator;
 import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 import com.backtoback.judge.judging.service.execution.java.JavaExecutionCodeGenerator;
 import com.backtoback.judge.judging.service.execution.python.PythonExecutionCodeGenerator;
@@ -64,6 +65,7 @@ class ExecutionCodeGeneratorTest {
      * @return 공통 계약을 검증할 언어별 생성기
      */
     private static Stream<ExecutionCodeGenerator> generators() {
-        return Stream.of(new JavaExecutionCodeGenerator(), new PythonExecutionCodeGenerator());
+        return Stream
+            .of(new JavaExecutionCodeGenerator(), new PythonExecutionCodeGenerator(), new CppExecutionCodeGenerator());
     }
 }
