@@ -62,6 +62,7 @@ class StudyControllerTest {
                 "EMPLOYMENT",
                 "LV2",
                 "java",
+                "EVENING",
                 10,
                 5,
                 StudyStatus.RECRUITING,
@@ -78,7 +79,8 @@ class StudyControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.content[0].studyId").value(12))
-            .andExpect(jsonPath("$.data.content[0].name").value("코딩테스트 스터디"));
+            .andExpect(jsonPath("$.data.content[0].name").value("코딩테스트 스터디"))
+            .andExpect(jsonPath("$.data.content[0].activeTimeSlot").value("EVENING"));
     }
 
     @Test
