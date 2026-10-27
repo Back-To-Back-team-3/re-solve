@@ -921,7 +921,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `author_id` | BIGINT | Y | 회차 작성 관리자 (COMMENT: `members.id`) |
 | `created_at` | DATETIME(6) | Y |  |
 | `wall_time_limit_ms` | INT | Y | 해당 회차의 최종 wall time 제한(ms). 팀 논의 B-5의 CPU 제한 + 공통 여유값을 적용하여 저장한다. |
-| `output_limit_kb` | INT | Y | 해당 회차의 테스트별 반환 JSON 크기 제한(KiB, 1KiB = 1,024바이트). API의 executionLimits.outputLimitKb에 대응한다. 등록 시 생략·null이면 기본 1,024를 확정해 저장한다. 디버그 출력의 공통 64KiB 제한은 이 컬럼에 포함하지 않는다(정책 및 상태 §3.2). |
+| `output_limit_kb` | INT | Y | 해당 회차의 테스트별 반환 JSON 크기 제한(KiB, 1KiB = 1,024바이트). API의 executionLimits.outputLimitKb에 대응한다. 허용 범위는 1~256이며, 등록 시 생략·null이면 기본 64를 확정해 저장한다. 디버그 출력의 공통 64KiB 제한은 이 컬럼에 포함하지 않는다(정책 및 상태 §3.2). |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |

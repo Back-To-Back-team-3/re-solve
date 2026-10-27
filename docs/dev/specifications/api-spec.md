@@ -1259,7 +1259,7 @@
     	      "timeMs": 2000, 
     	      "memoryKb": 262144, 
     	      "wallTimeMs": 7000, 
-              "outputLimitKb": 1024
+              "outputLimitKb": 64
           },
           "starterCodes": [ 
     	      { 
@@ -1569,7 +1569,7 @@
 | `timeMs` | int 또는 null | ms | CPU 시간 제한. 기본 2,000. C++ 정답 최대 실행 시간 × 3 이상, 최소 1,000 (B-5) |
 | `memoryKb` | int 또는 null | KB | 메모리 제한. 기본 262,144 |
 | `wallTimeMs` | int 또는 null | ms | 생략 시 `timeMs + 5,000` |
-| `outputLimitKb` | int 또는 null | KiB | 테스트별 반환 JSON 크기 제한. 생략·null이면 기본 1,024(1MiB). 디버그 출력 제한과 별개이며 초과는 `RE`(출력 초과) |
+| `outputLimitKb` | int 또는 null | KiB | 테스트별 반환 JSON 크기 제한. 허용 범위 1~256, 생략·null이면 기본 64. 디버그 출력 제한과 별개이며 초과 판정은 정책 및 상태 §3.2·§3.3을 따른다 |
 - 언어별 보정은 두지 않는다. 최종 값은 회차에 저장하고 이후 공통 설정 변경은 기존 회차에 반영하지 않는다.
 - 반환값·디버그 출력의 크기 계산과 개별 제한은 [정책 및 상태 > 3.2 채점 실행](../planning/policy-and-state.md#32-채점-실행)을 따른다. 디버그 출력은 테스트별 공통 64KiB 제한으로, `executionLimits`의 요청·응답 필드나 회차별 설정에 포함하지 않는다.
 
@@ -1741,7 +1741,7 @@
     	      "timeMs": 2000, 
     	      "memoryKb": 262144, 
     	      "wallTimeMs": 7000, 
-              "outputLimitKb": 1024
+              "outputLimitKb": 64
           },
           "testCases": [ { 
     	      "testAssetId": "501", 
@@ -2201,7 +2201,7 @@
     	    "timeMs": 2000, 
     	    "memoryKb": 262144, 
     	    "wallTimeMs": 7000, 
-            "outputLimitKb": 1024
+            "outputLimitKb": 64
         },
         "cases": [ { 
     	    "testAssetId": "501", 
@@ -2264,7 +2264,7 @@
     	      "timeMs": 2000, 
     	      "memoryKb": 262144, 
     	      "wallTimeMs": 7000, 
-              "outputLimitKb": 1024
+              "outputLimitKb": 64
           },
           "starterCodes": [ 
     	      { 
