@@ -1,6 +1,8 @@
 package com.backtoback.study.discovery.dto;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import com.backtoback.study.membership.domain.JoinType;
 import com.backtoback.study.membership.domain.Study;
@@ -20,9 +22,13 @@ public record StudySummaryResponse(
     int memberCount,
     StudyStatus status,
     JoinType joinType,
-    LocalDateTime lastActivityAt,
-    LocalDateTime createdAt
+    OffsetDateTime lastActivityAt,
+    OffsetDateTime createdAt
 ) {
+
+    // 날짜·시각은 Asia/Seoul 기준 ISO 8601(+09:00)로 응답한다(API 명세서 0.1). DB의 LocalDateTime은
+    // 이미 Asia/Seoul 기준 벽시계 값이라 오프셋만 붙인다.
+    private static final ZoneOffset SEOUL_OFFSET = ZoneOffset.ofHours(9);
 
     public static StudySummaryResponse from(Study study) {
         return new StudySummaryResponse(
@@ -36,8 +42,12 @@ public record StudySummaryResponse(
             study.getMemberCount(),
             study.getStatus(),
             study.getJoinType(),
-            study.getLastActivityAt(),
-            study.getCreatedAt()
+            toSeoulOffset(study.getLastActivityAt()),
+            toSeoulOffset(study.getCreatedAt())
         );
+    }
+
+    private static OffsetDateTime toSeoulOffset(LocalDateTime value) {
+        return value == null ? null : value.atOffset(SEOUL_OFFSET);
     }
 }

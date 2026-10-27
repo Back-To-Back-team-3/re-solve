@@ -9,7 +9,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -67,8 +68,8 @@ class StudyControllerTest {
                 5,
                 StudyStatus.RECRUITING,
                 JoinType.APPROVAL,
-                LocalDateTime.of(2026, 9, 27, 21, 10),
-                LocalDateTime.of(2026, 9, 21, 10, 0)
+                OffsetDateTime.of(2026, 9, 27, 21, 10, 0, 0, ZoneOffset.ofHours(9)),
+                OffsetDateTime.of(2026, 9, 21, 10, 0, 0, 0, ZoneOffset.ofHours(9))
             );
         given(studyQueryService.searchStudies(any(), any(), any(), any(), any(), any()))
             .willReturn(new PageImpl<>(List.of(item)));
@@ -80,7 +81,8 @@ class StudyControllerTest {
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.content[0].studyId").value("12"))
             .andExpect(jsonPath("$.data.content[0].name").value("코딩테스트 스터디"))
-            .andExpect(jsonPath("$.data.content[0].activeTimeSlot").value("EVENING"));
+            .andExpect(jsonPath("$.data.content[0].activeTimeSlot").value("EVENING"))
+            .andExpect(jsonPath("$.data.content[0].createdAt").value("2026-09-21T10:00:00+09:00"));
     }
 
     @Test
