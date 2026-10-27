@@ -11,7 +11,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -153,7 +152,8 @@ class StudyControllerTest {
             .perform(get("/api/v1/studies/12"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.studyId").value("12"))
-            .andExpect(jsonPath("$.data.myMembership").isEmpty());
+            .andExpect(jsonPath("$.data.myMembership").isEmpty())
+            .andExpect(jsonPath("$.data.createdAt").value("2026-09-21T10:00:00+09:00"));
     }
 
     @Test
@@ -193,7 +193,7 @@ class StudyControllerTest {
             3L,
             null,
             myMembership,
-            LocalDateTime.of(2026, 9, 21, 10, 0)
+            OffsetDateTime.of(2026, 9, 21, 10, 0, 0, 0, ZoneOffset.ofHours(9))
         );
     }
 }
