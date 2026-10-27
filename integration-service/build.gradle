@@ -49,10 +49,6 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.flywaydb:flyway-mysql'
 
-    // ShedLock
-    implementation 'net.javacrumbs.shedlock:shedlock-spring:6.3.0'
-    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.3.0'
-
     // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'

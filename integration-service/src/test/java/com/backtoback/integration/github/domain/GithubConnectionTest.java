@@ -1,6 +1,7 @@
 package com.backtoback.integration.github.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -8,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class GithubConnectionTest {
 
     @Test
-    @DisplayName("연동 엔티티 생성 시 초기 상태는 CONNECTED이고 해제 사유는 null이다")
+    @DisplayName("연동 엔티티 생성 시 초기 상태는 CONNECTED이고 해제 사유는 null이며 기본적으로 autoCommitEnabled는 true이다")
     void createConnectionInitialState() {
         GithubConnection connection
             = GithubConnection
@@ -25,7 +26,6 @@ class GithubConnectionTest {
                 .githubLogin("test-user")
                 .repositoryOwner("test-user")
                 .repositoryName("algorithm-solutions")
-                .autoCommitEnabled(true)
                 .commitPathRule("{난이도}/{문제번호}-{문제명}/풀이.java")
                 .build();
 
@@ -65,6 +65,72 @@ class GithubConnectionTest {
         assertThat(connection.getDisconnectedReason()).isEqualTo(GithubDisconnectedReason.USER_REQUEST);
         assertThat(connection.getInstallationId()).isNull();
         assertThat(connection.getEncryptedToken()).isNull();
+    }
+
+    @Test
+    @DisplayName("이미 DISCONNECTED 상태에서 다시 disconnect를 호출하면 IllegalStateException이 발생한다")
+    void disconnectWhenAlreadyDisconnectedThrowsException() {
+        GithubConnection connection
+            = GithubConnection
+                .builder()
+                .memberId(1L)
+                .installationId(12345L)
+                .encryptedToken(
+                    new byte[] {
+                        1,
+                        2,
+                        3
+                    }
+                )
+                .githubLogin("test-user")
+                .repositoryOwner("test-user")
+                .repositoryName("algorithm-solutions")
+                .commitPathRule("{난이도}/{문제번호}-{문제명}/풀이.java")
+                .build();
+
+        connection.disconnect(GithubDisconnectedReason.USER_REQUEST);
+
+        assertThatThrownBy(() -> connection.disconnect(GithubDisconnectedReason.WITHDRAWN))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("CONNECTED 상태에서만 연동을 해제할 수 있습니다");
+    }
+
+    @Test
+    @DisplayName("CONNECTED 상태에서 reconnect를 호출하면 IllegalStateException이 발생한다")
+    void reconnectWhenConnectedThrowsException() {
+        GithubConnection connection
+            = GithubConnection
+                .builder()
+                .memberId(1L)
+                .installationId(12345L)
+                .encryptedToken(
+                    new byte[] {
+                        1,
+                        2,
+                        3
+                    }
+                )
+                .githubLogin("test-user")
+                .repositoryOwner("test-user")
+                .repositoryName("algorithm-solutions")
+                .commitPathRule("{난이도}/{문제번호}-{문제명}/풀이.java")
+                .build();
+
+        assertThatThrownBy(
+            () -> connection
+                .reconnect(
+                    99999L,
+                    new byte[] {
+                        9,
+                        8,
+                        7
+                    },
+                    "new-user",
+                    "new-user",
+                    "new-repo",
+                    "{태그}/{문제번호}/풀이.java"
+                )
+        ).isInstanceOf(IllegalStateException.class).hasMessageContaining("DISCONNECTED 상태에서만 재연동할 수 있습니다");
     }
 
     @Test

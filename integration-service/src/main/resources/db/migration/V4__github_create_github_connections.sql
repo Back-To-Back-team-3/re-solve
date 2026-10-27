@@ -7,7 +7,7 @@ CREATE TABLE github_connections
     github_login           VARCHAR(50)  NOT NULL COMMENT 'GitHub 사용자명',
     repository_owner       VARCHAR(50)  COLLATE utf8mb4_bin NOT NULL COMMENT '대상 저장소 소유자명',
     repository_name        VARCHAR(200) COLLATE utf8mb4_bin NOT NULL COMMENT '대상 저장소 이름 (대소문자 구분)',
-    is_auto_commit_enabled BOOLEAN      NOT NULL DEFAULT TRUE COMMENT '맞힌 문제 자동 커밋 활성화 여부',
+    is_auto_commit_enabled BOOLEAN      NOT NULL COMMENT '맞힌 문제 자동 커밋 활성화 여부',
     commit_path_rule       VARCHAR(255) NOT NULL COMMENT '커밋 경로 템플릿 ({난이도}/{문제번호}-{문제명}/…)',
     status                 VARCHAR(30)  NOT NULL COMMENT 'CONNECTED / DISCONNECTED',
     disconnected_reason    VARCHAR(30)  NULL COMMENT 'NULL 허용: 연결 중. USER_REQUEST / AUTH_EXPIRED / WITHDRAWN',

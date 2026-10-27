@@ -16,7 +16,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * GitHub 연동 엔티티 (erd.md > 4.8.1).
+ * GitHub 연동 엔티티 (erd.md > 4.8.1, policy-and-state.md > 9.3).
  * 회원당 1개의 GitHub 저장소 연동 정보와 암호화된 토큰을 보관한다.
  */
 @Entity
@@ -105,7 +105,7 @@ public class GithubConnection extends BaseTimeEntity {
         String githubLogin,
         String repositoryOwner,
         String repositoryName,
-        boolean autoCommitEnabled,
+        Boolean autoCommitEnabled,
         String commitPathRule
     ) {
         this.memberId = memberId;
@@ -114,18 +114,22 @@ public class GithubConnection extends BaseTimeEntity {
         this.githubLogin = githubLogin;
         this.repositoryOwner = repositoryOwner;
         this.repositoryName = repositoryName;
-        this.autoCommitEnabled = autoCommitEnabled;
+        this.autoCommitEnabled = (autoCommitEnabled != null) ? autoCommitEnabled : true;
         this.commitPathRule = commitPathRule;
         this.status = GithubConnectionStatus.CONNECTED;
         this.disconnectedReason = null;
     }
 
     /**
-     * GitHub 연동을 해제하고 인증 토큰과 설치 ID를 파기한다 (erd.md > 2.7, 4.8.1).
+     * GitHub 연동을 해제하고 인증 토큰과 설치 ID를 파기한다 (erd.md > 2.7, policy-and-state.md > 10).
      *
      * @param reason 연동 해제 사유
+     * @throws IllegalStateException 현재 상태가 CONNECTED가 아닌 경우
      */
     public void disconnect(GithubDisconnectedReason reason) {
+        if (this.status != GithubConnectionStatus.CONNECTED) {
+            throw new IllegalStateException("CONNECTED 상태에서만 연동을 해제할 수 있습니다. 현재 상태: " + this.status);
+        }
         this.status = GithubConnectionStatus.DISCONNECTED;
         this.installationId = null;
         this.encryptedToken = null;
@@ -133,7 +137,7 @@ public class GithubConnection extends BaseTimeEntity {
     }
 
     /**
-     * 연동 해제 상태에서 다시 GitHub 연동을 활성화한다.
+     * 연동 해제 상태에서 다시 GitHub 연동을 활성화한다 (policy-and-state.md > 10).
      *
      * @param installationId 새 GitHub App 설치 ID
      * @param encryptedToken 새로 암호화된 토큰
@@ -141,6 +145,7 @@ public class GithubConnection extends BaseTimeEntity {
      * @param repositoryOwner 저장소 소유자명
      * @param repositoryName 저장소명
      * @param commitPathRule 커밋 경로 규칙
+     * @throws IllegalStateException 현재 상태가 DISCONNECTED가 아닌 경우
      */
     public void reconnect(
         Long installationId,
@@ -150,6 +155,9 @@ public class GithubConnection extends BaseTimeEntity {
         String repositoryName,
         String commitPathRule
     ) {
+        if (this.status != GithubConnectionStatus.DISCONNECTED) {
+            throw new IllegalStateException("DISCONNECTED 상태에서만 재연동할 수 있습니다. 현재 상태: " + this.status);
+        }
         this.status = GithubConnectionStatus.CONNECTED;
         this.installationId = installationId;
         this.encryptedToken = encryptedToken;

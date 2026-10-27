@@ -18,6 +18,8 @@ import org.testcontainers.mysql.MySQLContainer;
 @Testcontainers(disabledWithoutDocker = true)
 class IntegrationServiceApplicationTests {
 
+    private static final String TEST_SECRET_KEY_BASE64 = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+
     @Container
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("integration_db");
 
@@ -26,6 +28,7 @@ class IntegrationServiceApplicationTests {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("integration.crypto.secret-key", () -> TEST_SECRET_KEY_BASE64);
     }
 
     @Autowired(required = false)
