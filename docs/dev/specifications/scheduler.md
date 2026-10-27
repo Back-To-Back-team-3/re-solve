@@ -381,6 +381,8 @@
 | Outbox | DB 변경과 같은 트랜잭션. 공통 Relay 발행. 발행 완료는 ACCEPTED만 REQUESTED로 전이하며 먼저 온 JUDGED/FAILED 보존 |
 | 지표·운영 알림 | 선정·성공·보류·실패·실행 시간·최장 미종결/원격 경과 기록. 미해결 FAILED 및 10분 이상 접수·작업·가드는 운영 알림. 사용자 확정 알림과 구분 |
 
+- CONTEST_CREATE가 SUCCEEDED이기 전에는 대회 생성이 미완료다. 대회 시작·참가·일반 목록 노출을 차단하며 §4.7에서 연결을 복구하거나 취소한다.
+
 ### 4.1 `ExamLifecycleScheduler` — 시험 시작·종료
 
 | 항목 | 값 |
@@ -616,7 +618,7 @@
 | 한 회차 처리량 | 페이지당 100건, 20초 뒤 새 선정 중단. 남은 대상은 다음 회차 |
 | 트랜잭션 경계 | 원격 확인 후 관리자 작업·접수 또는 가드·감사를 새 트랜잭션에 반영 |
 | 대상 조회 | 생성·갱신 후 1분 이상 미종결 원격 관리자 작업과 PREPARED 가드 |
-| 상태 전이 | 관리자 PENDING → 확인된 SUCCEEDED/FAILED. 원격 COMMITTED 확인 시 가드 PREPARED → BLOCKED, 원격 ABORTED 확인 시 PREPARED → OPEN |
+| 상태 전이 | 관리자 PENDING → 확인된 SUCCEEDED/FAILED. 원격 COMMITTED·ABORTED 확인 시 API §4.7.4 완료·취소 규칙 적용. 준비 전 상태·종결 결과·더 최신 원천 상태 보존 |
 | 발행 이벤트 | 원격 완료 결과의 기존 이벤트 복구만. 새로운 확정 알림 없음 |
 | 지표 | §4.0 공통 지표 및 대상 상태·회차·버전별 보류 원인 |
 
@@ -625,9 +627,10 @@
 1. EXAM_RETRY는 같은 operationId·expectedJudgeAttempt로 B 계약(3.3.6)을 재요청하고 접수 상태를 대사한다. 응답 유실로 새 operationId를 만들지 않는다.
 2. 성공 목표를 targetJudgeAttempt에 저장한다. 마지막 반영 judge_attempt보다 큰 목표일 때만 REQUESTED·is_zero_confirmed=false로 전이하고 judge_attempt는 유지한다. 이미 목표 이상 결과가 반영됐으면 상태·판정을 보존한다.
 3. 확인된 작업 SUCCEEDED·감사 로그를 함께 저장한다. B가 동일 작업 미실행 실패를 확정하면 FAILED·마지막 오류로 종결한다. 타임아웃·5xx·조회 실패는 미실행 증거가 아니다.
-4. 가드 소유 서비스 작업 상태를 조회한다. COMMITTED이면 complete 규칙, ABORTED이면 cancel 규칙을 적용한다. PENDING·404·통신 실패는 PREPARED를 유지한다.
-5. 가드 잠금 뒤 operationId·sourceVersion을 다시 비교한다. 새 작업·새 버전을 이전 응답으로 덮어쓰지 않는다. 동일 완료·취소는 멱등이다.
-6. STUDY 준비로 취소한 예정 시험은 ABORTED여도 자동 복원하지 않는다. 진행 시험은 원래 마감까지 종료 처리를 계속한다. 가드 자동 해제 TTL을 두지 않는다.
+4. CONTEST_CREATE는 같은 대회·고정 회차·선택 버전·설정 관리자로 미확인 B 연결을 재요청한다. 전체 확인은 SUCCEEDED, 확정 거절·미완료 상태의 시작 시각 경과는 대회 CANCELED·FAILED·감사·취소 Outbox로 함께 종결한다. 해당 작업 SUCCEEDED 전에는 대회를 노출·참가·시작시키지 않는다.
+5. 가드 소유 서비스 작업 상태를 조회한다. COMMITTED이면 complete 규칙, ABORTED이면 준비 전 상태와 결과를 보존하는 cancel 규칙을 적용한다. PENDING·404·통신 실패는 PREPARED를 유지한다.
+6. 가드 잠금 뒤 operationId·sourceVersion을 다시 비교한다. 새 작업·새 버전을 이전 응답으로 덮어쓰지 않는다. 동일 완료·취소는 멱등이다.
+7. STUDY 준비로 취소한 예정 시험은 ABORTED여도 자동 복원하지 않는다. 진행 시험은 원래 마감까지 종료 처리를 계속한다. 가드 자동 해제 TTL을 두지 않는다.
 
 **동시성 설계 포인트:**
 
@@ -643,7 +646,7 @@
 
 **재기동·지연 시:** DB의 미종결 작업을 다시 선정한다. 원격 상태가 불명확하면 차단을 유지하고 운영 알림을 남긴다. 접수 FAILED는 별도 관리자 종결 전까지 확정을 막는다.
 
-**명세서와의 관계:** API §4.7.3~§4.7.4·§4.8.9·§4.6.3~§4.6.7 / DB §4.4.16·§4.4.18. 자원 가드는 도입 결정 대기(API 부록 D) — 미도입 시 가드 관련 동작 4~6은 비활성
+**명세서와의 관계:** API §4.7.3~§4.7.4·§4.8.9·§4.6.3~§4.6.7 / DB §4.4.16·§4.4.18. Problem 상태 작업 저장은 DB §4.2.19·API §2.6.10, 대회 연결 복구는 API §2.6.9·§4.6.1을 따른다.
 
 ### 4.8 `ContestCacheRebuildScheduler` — 순위 캐시 복구
 

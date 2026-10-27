@@ -2392,11 +2392,29 @@
 
 - **Method / URI:** `POST /api/v1/admin/problems/{problemId}/publication`
 - **인증:** `ADMIN` (작성 관리자)
-- **Idempotency:** 있음
-- **대응 테이블:** `problems`, `problem_revisions`, `audit_logs`, `outbox_events`
+- **Idempotency:** `Idempotency-Key` 필수. §2.3.7 공통 처리의 동일 요청·최초 응답 규칙
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_state_operations`, `audit_logs`, `outbox_events`
 - **설명:** 검증을 통과한 사용 회차가 있는 `GENERAL` 문제를 `PUBLIC`으로 전환한다. `EXAM_ONLY` 문제는 대회 설정으로 공개된다.
     - 공개 전 관리자가 해당 회차의 C++ 실행 결과와 시간 제한 ×3·최소 1,000ms 기준을 확인한다(정책 §4). 측정 근거가 없으면 관리자 확인이 필요하며 검증 통과만으로 확인 완료로 간주하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증, ADMIN |
+    | `Idempotency-Key` | Y | 1~100자 ASCII. 동일 요청 재시도에 재사용 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 작성 관리자 소유 문제 ID |
+
 - **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `rowVersion` | integer | Y | 조회한 문제 행 버전, 1 이상 |
 
     ```json
     {
@@ -2404,7 +2422,14 @@
     }
     ```
 
-- **응답 (200):**
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success / message` | boolean / string | 공통 성공 응답 |
+    | `data.visibility / data.rowVersion` | string / integer | 변경된 공개 상태·증가한 행 버전 |
 
     ```json
     {
@@ -2418,18 +2443,50 @@
     ```
 
 - **에러:**
-    - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409) / 통과 사용 회차 없음·`EXAM_ONLY`·이미 `PUBLIC`·`ARCHIVED`(재공개 허용 여부 확정 필요)
+    - `AUTH_ACCESS_DENIED`(403), `PROBLEM_NOT_FOUND`(404), `COMMON_INVALID_REQUEST`(400), `IDEMPOTENCY_KEY_CONFLICT`(422)
+    - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409) / 통과 사용 회차 없음·`EXAM_ONLY`·이미 `PUBLIC`·`ARCHIVED`
 - **발행:**
     - `ProblemStateChanged` v2 — `visibility = PUBLIC`
+
+**공개·비공개·보관 공통 처리**
+
+- `Idempotency-Key`는 필수다. 작성 관리자·문제·작업 종류·키와 정규화 요청 해시를 함께 식별한다. 같은 키·같은 본문은 최초 성공 응답 또는 진행 중인 동일 작업에 연결하고, 다른 본문은 `IDEMPOTENCY_KEY_CONFLICT`(422)다. 원래 응답이 유실돼도 새 작업 ID로 재실행하지 않는다.
+- 처리 중 작업은 `PENDING`, Problem 상태 변경이 커밋되면 `COMMITTED`, 변경하지 않았음이 확정되면 `ABORTED`다. 작업 ID·원래 요청·요청 해시·기대 버전·집행자·변경 전후 상태·결과 버전·최초 응답을 영속 보존한다. 같은 키의 `ABORTED` 작업을 다시 준비하지 않고 새 시도는 새 키·작업 ID를 사용한다.
+- 신규 요청은 문제의 작성 관리자·상태·`rowVersion`을 확인한다. 공개는 `GENERAL`·`PRIVATE`와 통과 사용 회차를 요구한다. 비공개는 `PUBLIC`만, 보관은 `PRIVATE`·`PUBLIC`만 허용한다. `ARCHIVED`에서 나가는 전이는 없다. 기존 성공 재요청은 현재 버전으로 다시 실행하지 않고 최초 응답을 반환한다.
+- 비공개·보관은 작업을 먼저 기록한 뒤 DB 잠금 밖에서 §4.7.3에 `resourceType=PROBLEM`·`resourceId=problemId`·`operationType=PROBLEM_HIDE`·`expectedSourceVersion`(원래 `rowVersion`의 10진 문자열)을 보낸다. 같은 가드 행을 잠그는 신규 시험·대회 편입과 직렬화한다. 예정·진행 중 참조가 있으면 409로 거절하며, 조회 결과가 비어 있다는 이유로 준비를 생략하지 않는다.
+- 비공개·보관은 `PREPARED`·`ready=true` 확인 후 짧은 Problem 트랜잭션에서 문제를 잠그고 원래 버전·상태를 다시 검증한다. 공개 상태·`row_version + 1`·감사 로그·`ProblemStateChanged` v2 Outbox·`COMMITTED` 결과를 함께 저장한다. 새 문제 회차를 만들거나 기존 회차·제출·이미지·고정 참조를 삭제하지 않는다.
+- 커밋 후 같은 `operationId`와 새 `sourceVersion`(증가한 행 버전의 10진 문자열), 조치 사유로 §4.7.4 `complete`를 호출한다. 완료 전달 실패는 커밋을 취소하지 않는다. 이미 확정된 성공 응답을 반환하고 같은 완료 호출·상태 이벤트·Contest 작업 대사로 복구한다. 공개는 원격 준비 없이 문제 잠금 아래 같은 상태·버전·감사·Outbox·작업 결과 원자 저장을 적용한다.
+- 준비 거절이나 Problem 재검증 실패 등 변경하지 않았음이 확정되면 `ABORTED`를 보존하고, 준비된 같은 작업에만 `cancel`을 호출한다. 예상치 못한 5xx·타임아웃으로 준비 또는 DB 커밋 결과가 불명확하면 `PENDING`과 가드 차단을 유지하고 결과를 대사한다. 404·TTL 경과만으로 취소하거나 새 작업을 시작하지 않는다.
+- 통신 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503), Problem 버전 경합은 `PROBLEM_VERSION_CONFLICT`(409)다. C의 작업 점유·작업 ID·버전 충돌은 §4.7.3·§4.7.4대로 처리하며, 성공으로 바꾸지 않는다.
+- 일반 제출·태그의 24시간 만료를 이 기록에 적용하지 않는다. 미종결 작업·가드와 멱등 응답에 필요한 완료 기록은 자동 삭제하지 않는다. Problem 작업 상태 조회 경로는 §4.8.9의 `GET /internal/v1/problems/{problemId}/operations/{operationId}`를 사용하며 `operationId`·`state`·`sourceVersion`·`resourceStatus`를 직접 객체로 반환한다. `sourceVersion`은 10진 문자열이며 `PENDING`·`ABORTED`는 원래 기대 버전, `COMMITTED`는 결과 버전이다. `resourceStatus`는 해당 작업의 변경 전 상태 또는 COMMITTED의 결과 상태이며 현재 문제 상태로 덮어쓰지 않는다. 문제·작업 소속을 함께 확인하고 contest-service에만 제공한다. 미존재 작업의 HTTP 404는 자동 취소 근거가 아니다.
+- 작업 기록은 ERD §4.2.19 problem_state_operations에 저장한다. 문제 행 잠금 뒤 다른 PENDING 상태 작업을 확인하고, 있으면 PROBLEM_VERSION_CONFLICT(409)로 거절한다.
 
 #### 2.3.8 문제 비공개 전환
 
 - **Method / URI:** `POST /api/v1/admin/problems/{problemId}/unpublication`
 - **인증:** `ADMIN` (작성 관리자)
-- **Idempotency:** 있음
-- **대응 테이블:** `problems`, `audit_logs`, `outbox_events`
-- **설명:** `PUBLIC → PRIVATE`. 일반 목록 노출과 새 일반 풀이 접수를 중단한다. 회차·제출·이미 시험에 고정된 회차는 유지한다.
+- **Idempotency:** `Idempotency-Key` 필수. §2.3.7 공통 처리의 동일 요청·최초 응답 규칙
+- **대응 테이블:** `problems`, `problem_state_operations`, `audit_logs`, `outbox_events`
+- **설명:** `PUBLIC → PRIVATE`. 일반 목록 노출과 새 일반 풀이 접수를 중단한다. 회차·제출·이미 시험에 고정된 회차는 유지한다. 준비·상태 커밋·완료·실패 복구는 §2.3.7 공통 처리를 따른다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증, ADMIN |
+    | `Idempotency-Key` | Y | 1~100자 ASCII. 동일 요청 재시도에 재사용 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 작성 관리자 소유 문제 ID |
+
 - **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `rowVersion` | integer | Y | 조회한 문제 행 버전, 1 이상 |
 
     ```json
     {
@@ -2437,7 +2494,14 @@
     }
     ```
 
-- **응답 (200):**
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success / message` | boolean / string | 공통 성공 응답 |
+    | `data.visibility / data.rowVersion` | string / integer | 변경된 공개 상태·증가한 행 버전 |
 
     ```json
     {
@@ -2451,11 +2515,12 @@
     ```
 
 - **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `PROBLEM_NOT_FOUND`(404), `COMMON_INVALID_REQUEST`(400), `IDEMPOTENCY_KEY_CONFLICT`(422)
     - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409)
-    - `PROBLEM_IN_ACTIVE_EXAM`(409) / 진행 중 시험·대회에 포함 (예정 시험 처리는 미결정 B-9)
+    - `PROBLEM_IN_ACTIVE_EXAM`(409) / 예정·진행 중 시험·대회에 포함
     - `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **외부 의존:**
-    - `GET /internal/v1/exams/problem-usage?problemId=` (contest) — 진행 중 시험·대회 포함 여부. 실패 시 fail-closed
+    - contest 자원 가드 `prepare`·`complete`·`cancel`(§4.7.3·§4.7.4). 사용 조회(§4.7.6)는 안내용이며 준비를 대체하지 않는다. 실패·결과 불명은 §2.3.7 공통 처리를 따른다.
 - **발행:**
     - `ProblemStateChanged` v2 — `visibility = PRIVATE` (study 문제집 `EXCLUDED` 처리)
 
@@ -2463,10 +2528,29 @@
 
 - **Method / URI:** `POST /api/v1/admin/problems/{problemId}/archive`
 - **인증:** `ADMIN` (작성 관리자)
-- **Idempotency:** 있음
-- **대응 테이블:** `problems`, `audit_logs`, `outbox_events`
-- **설명:** `ARCHIVED`(소프트 딜리트)로 전환해 새 풀이·시험 선택을 막는다. 기존에 고정한 회차는 유지한다. 해제 여부는 정책 검토 대상이다.
+- **Idempotency:** `Idempotency-Key` 필수. §2.3.7 공통 처리의 동일 요청·최초 응답 규칙
+- **대응 테이블:** `problems`, `problem_state_operations`, `audit_logs`, `outbox_events`
+- **설명:** `ARCHIVED`(소프트 딜리트)로 전환해 새 풀이·시험 선택을 막는다. 기존에 고정한 회차는 유지한다. `PRIVATE`·`PUBLIC`에서만 전환하며 `ARCHIVED`는 종단 상태로 보관 해제·재공개를 허용하지 않는다. 가드와 상태 커밋은 §2.3.7 공통 처리를 따른다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증, ADMIN |
+    | `Idempotency-Key` | Y | 1~100자 ASCII. 동일 요청 재시도에 재사용 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 작성 관리자 소유 문제 ID |
+
 - **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `rowVersion` | integer | Y | 조회한 문제 행 버전, 1 이상 |
+    | `reason` | string | Y | 보관 사유, audit_logs.reason에 보존 |
 
     ```json
     {
@@ -2475,7 +2559,14 @@
     }
     ```
 
-- **응답 (200):**
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success / message` | boolean / string | 공통 성공 응답 |
+    | `data.visibility / data.rowVersion` | string / integer | 변경된 공개 상태·증가한 행 버전 |
 
     ```json
     {
@@ -2489,7 +2580,9 @@
     ```
 
 - **에러:**
-    - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409), `PROBLEM_IN_ACTIVE_EXAM`(409)
+    - `AUTH_ACCESS_DENIED`(403), `PROBLEM_NOT_FOUND`(404), `COMMON_INVALID_REQUEST`(400), `IDEMPOTENCY_KEY_CONFLICT`(422)
+    - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409), `PROBLEM_IN_ACTIVE_EXAM`(409), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** contest 자원 가드(§4.7.3·§4.7.4). 준비 조회 실패·완료 결과 불명은 §2.3.7 공통 처리를 따른다.
 - **발행:**
     - `ProblemStateChanged` v2 — `visibility = ARCHIVED`
 
@@ -3047,103 +3140,164 @@
 #### 2.6.3 고정 회차 본문 조회
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content`
-- **인증:** 내부 호출 (contest, member) + 호출 맥락 헤더 `X-Access-Context: EXAM:{examId}` / `CONTEST:{contestId}` / `DIAGNOSIS:{diagnosisId}`
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tests`, `problem_test_assets`
-- **설명:** 고정 회차의 본문·함수 명세·실행 제한·공개 예제를 반환한다. 숨김 테스트는 읽지 않는다. 참가·공개 권한은 호출 서비스가 확인한 뒤 호출한다.
-- **응답 (200):** 문제 상세 조회(2.1.2)와 같은 형식
+- **인증:** 내부 호출 (contest, member). 서비스 토큰을 요구하지 않으며 내부망 신뢰 경계는 결정 기록 > 서비스 간 인증 방식을 따른다.
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tags`, `tags`, `problem_revision_tests`, `problem_test_assets`, `problem_validations`
+- **설명:** 호출 서비스에 고정된 회차의 본문·함수 명세·실행 제한·통과 언어의 기본 코드·공개 예제를 반환한다. 현재 사용 회차로 치환하지 않는다. 숨김 테스트·정답 코드·회원별 풀이 상태를 반환하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `X-Access-Context` | Y | `EXAM:{examId}` / `CONTEST:{contestId}` / `DIAGNOSIS:{diagnosisId}`. 호출 서비스가 권한을 확인한 문맥 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `revisionId` | Path | string | Y | 해당 문맥에 고정된 문제 수정 회차 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 래퍼 없는 직접 객체. 아래 필드는 요청한 고정 회차 기준이며 `solvedStatus`는 포함하지 않는다.
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `problemId / problemRevisionId / revisionNumber` | string / string / integer | 문제·고정 회차·표시 회차 번호 |
+    | `title / difficulty / tags` | string / integer / object[] | 고정 회차 제목·난이도·태그 |
+    | `publishedAt` | string (date-time) | 기존 상세 조회와 같은 회차 등록 시각 |
+    | `description / constraints / examples` | string | 본문·제한·예시 Markdown |
+    | `functionSpec / executionLimits` | object | 고정 회차의 함수 명세·실행 제한 |
+    | `supportedLanguages / starterCodes` | string[] / object[] | 해당 고정 회차의 통과 언어와 그 언어의 기본 코드 |
+    | `samples` | object[] | 고정 회차의 공개 테스트 ID·입력·기대값 |
 
     ```json
     {
-      "success": true,
-      "message": null,
-      "data": {
-        "problemId": "301",
-        "problemRevisionId": "1001",
-        "revisionNumber": 1,
-        "title": "두 수의 합",
-        "difficulty": 1,
-        "tags": [
+      "problemId": "301",
+      "problemRevisionId": "1001",
+      "revisionNumber": 1,
+      "title": "두 수의 합",
+      "difficulty": 1,
+      "tags": [
+        {
+          "tagId": "1",
+          "name": "구현"
+        }
+      ],
+      "publishedAt": "2026-09-27T10:00:00+09:00",
+      "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
+      "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
+      "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
           {
-            "tagId": "1",
-            "name": "구현"
-          }
-        ],
-        "publishedAt": "2026-09-27T10:00:00+09:00",
-        "solvedStatus": "UNSOLVED",
-        "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
-        "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
-        "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
-        "functionSpec": {
-          "name": "solution",
-          "parameters": [
-            {
-              "name": "a",
-              "type": {
-                "kind": "INT32"
-              }
-            },
-            {
-              "name": "b",
-              "type": {
-                "kind": "INT32"
-              }
+            "name": "a",
+            "type": {
+              "kind": "INT32"
             }
-          ],
-          "returnType": {
-            "kind": "INT32"
-          }
-        },
-        "executionLimits": {
-          "timeMs": 2000,
-          "memoryKb": 262144,
-          "wallTimeMs": 7000,
-          "outputLimitKb": 64
-        },
-        "starterCodes": [
+          },
           {
-            "language": "python3",
-            "sourceCode": "def solution(a, b):\n    pass\n"
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
           }
         ],
-        "samples": [
-          {
-            "testAssetId": "501",
-            "argumentTexts": {
-              "a": "1",
-              "b": "2"
-            },
-            "expectedReturnText": "3"
-          }
-        ],
-        "supportedLanguages": [
-          "python3"
-        ]
-      }
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": 262144,
+        "wallTimeMs": 7000,
+        "outputLimitKb": 64
+      },
+      "starterCodes": [
+        {
+          "language": "python3",
+          "sourceCode": "def solution(a, b):\n    pass\n"
+        }
+      ],
+      "samples": [
+        {
+          "testAssetId": "501",
+          "argumentTexts": {
+            "a": "1",
+            "b": "2"
+          },
+          "expectedReturnText": "3"
+        }
+      ],
+      "supportedLanguages": [
+        "python3"
+      ]
     }
     ```
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 문맥 헤더·ID 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404) / 문제·회차 소속 불일치, `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 본문·공개 예제·기본 코드 조회 실패
+- **동시성/멱등 보장:** 지정 회차의 불변 본문·테스트 연결로 조회한다. 최신 회차가 생기거나 문제가 `PRIVATE`·`ARCHIVED`로 바뀌어도 적법한 기존 고정 참조는 유지한다.
+- **발행:** 없음
+- **외부 의존:** Judge 기본 코드 HTTP(§2.7). 요청한 고정 회차의 `functionSpec`·통과 언어로만 생성하며 다른 회차·미통과 언어로 대체하지 않는다.
+- **비고:** contest는 참가·시작 전 비공개·종료 후 복기·종료 공개 설정과 자기 DB의 고정 문제 연결을 먼저 확인한다. member는 자기 진단 응시·열람 권한과 고정 회차를 먼저 확인한다. Problem은 문제 존재·회차 소속·자료 연결을 확인하며 호출 서비스의 참가 권한을 대신 판정하거나 Contest에 같은 열람 검증을 다시 요청하지 않는다. 문맥 헤더만으로 외부 회원의 열람 권한이 생기지 않는다.
 
 #### 2.6.4 고정 회차 본문 이미지 조회
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}`
-- **인증:** 내부 호출 (contest, member) + `X-Access-Context`
-- **대응 테이블:** `problem_body_images`, `problem_images`
-- **설명:** 고정 회차 본문에 연결된 이미지 바이너리. 브라우저에는 contest·member의 권한 검사 경로로 전달한다.
+- **인증:** 내부 호출 (contest, member). 참가·열람 권한과 Problem 소속 검증의 책임은 §2.6.3과 같다.
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_body_images`, `problem_images`
+- **설명:** 요청한 고정 회차 본문에 연결된 이미지 바이너리를 반환한다. 브라우저에는 contest·member의 권한 검사 경로로 전달한다.
+- **요청 헤더:** §2.6.3의 `X-Access-Context` 필수, `X-Correlation-Id` 선택
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId / revisionId / imageId` | Path | string | Y | 문제·고정 회차·본문 연결 이미지 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 실제 이미지의 `Content-Type`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 이미지 바이너리. 공통 JSON 래퍼와 S3 주소를 반환하지 않는다.
+- **에러:** `COMMON_INVALID_REQUEST`(400), `PROBLEM_REVISION_NOT_FOUND`(404) / 문제·회차 소속 불일치, `PROBLEM_NOT_FOUND`(404) / 이미지 없음·소속 또는 본문 연결 불일치, `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 저장소 조회 장애
+- **동시성/멱등 보장:** `revision.body_asset_id`에 연결된 이미지와 소속 문제를 함께 확인한다. 같은 문제의 다른 회차나 다른 문제의 이미지로 대체하지 않는다. 보관 후에도 기존 고정 회차 연결을 보존한다.
+- **발행:** 없음
+- **외부 의존:** S3 이미지 읽기
+- **비고:** 호출 서비스는 §2.6.3과 같은 권한 확인 후 바이너리를 전달한다.
 
 #### 2.6.5 문제 선택용 요약 조회
 
 - **Method / URI:** `GET /internal/v1/problems/summaries`
 - **인증:** 내부 호출 (study, contest)
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`, `tags`
-- **설명:** 문제집·시험 생성 시 회차 고정·표시용 요약을 반환한다(B-2). 요청 ID 중 사용 불가 문제는 `isAvailable: false`로 표시한다. 회차는 PASSED가 있는 최대 회차이며 `sourceVersion`·`supportedLanguages`를 함께 반환해 상태 이벤트와 비교한다.
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`, `tags`, `problem_validations`
+- **설명:** 문제집·시험·대회 생성 시 고정할 사용 회차와 표시용 요약을 반환한다. 사용 회차는 PASSED가 있는 최대 회차이며 `sourceVersion`·`supportedLanguages`를 상태 이벤트와 같은 스냅샷으로 반환한다.
+- **요청 헤더:** `X-Correlation-Id` 선택
 - **요청 파라미터:**
 
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `ids` | string[] | Y | — | 문제 ID 최대 50개 |
-    | `purpose` | string | Y | — | `ASSIGNMENT` / `EXAM`(`GENERAL`·`PUBLIC`만 가용) / `CONTEST`(`EXAM_ONLY` 허용) |
+    | `ids` | string[] | Y | — | 문제 ID 최대 50개. §0.1의 반복 파라미터 형식 |
+    | `purpose` | string | Y | — | `ASSIGNMENT` / `EXAM` / `CONTEST` |
 
-- **응답 (200):**
-    - `items[].sourceVersion`: 문제 행 버전 정수. `items[].supportedLanguages`: 반환 사용 회차의 통과 언어 배열. 존재하는 문제는 비가용 상태여도 이 상태 메타를 반환한다. 재조회가 더 최신이면 그 버전·스냅샷을 함께 반영한다.
+- **요청 바디:** 없음
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 래퍼 없는 `{items:[...]}` 객체
+
+    | 필드 | 타입 | 반환 조건·설명 |
+    | --- | --- | --- |
+    | `items[].problemId / isAvailable` | string / boolean | 모든 요청 ID. 없는 문제도 해당 ID와 false로 식별 |
+    | `items[].scope / visibility / sourceVersion` | string / string / integer | 존재하는 문제는 비가용이어도 현재 상태·행 버전 반환. 없는 문제는 필드 생략 |
+    | `items[].problemRevisionId / revisionNumber` | string 또는 null / integer 또는 null | 존재하는 문제의 사용 회차. 통과 회차가 없으면 둘 다 null |
+    | `items[].supportedLanguages` | string[] | 존재하는 문제의 사용 회차 통과 언어. 회차가 없으면 [] |
+    | `items[].title / difficulty / tags` | string / integer / object[] | 존재하며 사용 회차가 있을 때 그 회차의 표시용 요약. 그 외 생략 |
 
     ```json
     {
@@ -3154,21 +3308,34 @@
           "revisionNumber": 3,
           "title": "최단 경로",
           "difficulty": 3,
-          "tags": [
-            {
-              "tagId": "7",
-              "name": "그래프"
-            }
-          ],
+          "tags": [{"tagId": "7", "name": "그래프"}],
           "scope": "GENERAL",
           "visibility": "PUBLIC",
           "isAvailable": true,
           "sourceVersion": 7,
           "supportedLanguages": ["java", "python3"]
-        }
+        },
+        {
+          "problemId": "102",
+          "isAvailable": false,
+          "scope": "GENERAL",
+          "visibility": "PRIVATE",
+          "sourceVersion": 1,
+          "problemRevisionId": null,
+          "revisionNumber": null,
+          "supportedLanguages": []
+        },
+        {"problemId": "999", "isAvailable": false}
       ]
     }
     ```
+
+- **가용 조건:** `ASSIGNMENT`·`EXAM`은 `GENERAL`·`PUBLIC`만, `CONTEST`는 `GENERAL`·`PUBLIC` 또는 `EXAM_ONLY`·`PRIVATE/PUBLIC`을 허용한다. 모든 용도에서 통과 사용 회차와 하나 이상의 통과 언어가 필요하며 `ARCHIVED`는 신규 편입할 수 없다. `EXAM_ONLY`의 대회 연결 검증은 종료 공개 계약과 별개로 수행한다.
+- **에러:** `COMMON_INVALID_REQUEST`(400) / ID 형식·최대 50개·purpose 위반. 개별 미존재·비가용은 404로 전체 실패시키지 않고 항목별 false로 반환한다.
+- **동시성/멱등 보장:** 문제별 행 버전·사용 회차·언어·요약을 일치시킨다. 호출 서비스는 고정할 회차를 저장하며, Contest는 §4.7.3과 같은 PROBLEM 가드 잠금 안에서 신규 편입을 확정한다. 요약 조회만으로 이후 편입 가능성을 예약하지 않는다. 이벤트와 재조회 결과는 더 큰 `sourceVersion`만 반영한다.
+- **발행:** 없음
+- **외부 의존:** 없음. 요약은 본문·기본 코드·숨김 테스트·정답 코드를 포함하지 않으며 기본 코드는 §2.6.3·§2.7에서 통과 언어에 한해 제공한다.
+- **비고:** 비가용 항목의 회차·표시용 필드를 가용으로 해석하지 않는다. 호출 서비스는 모든 선택 항목의 `isAvailable`을 확인한다.
 
 #### 2.6.6 힌트 문맥 조회
 
@@ -3327,6 +3494,88 @@
 - **외부 의존:** 비공개 S3 원문 저장소
 - **프론트 계약:** 없음
 - **비고:** Judge는 요청 ID·회차·언어·해시를 수신 메시지와 대조하고 코드를 실행 메모리에서 사용한다. 코드·테스트 원문을 메시지나 Judge 업무 DB에 복사하지 않는다.
+
+#### 2.6.9 대회 전용 문제 연결
+
+- **Method / URI:** `PUT /internal/v1/problems/{problemId}/contest`
+- **인증:** 내부 호출 (contest). C가 실제 생성 대회·고정 문제와 ADMIN 설정 관리자를 확인한 뒤 호출한다. 내부 서비스 토큰은 요구하지 않는다.
+- **Idempotency:** 문제·대회·고정 회차·설정 관리자별 동일 연결은 최초 연결 결과 반환
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_validations`, `audit_logs`
+- **설명:** 기존 EXAM_ONLY 문제의 contest_id와 고정 회차·연결 기준 버전·종료 공개 설정 관리자를 명시적으로 기록한다. GENERAL은 호출 대상이 아니다.
+- **요청 헤더:** `X-Correlation-Id` 선택
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 선택한 문제 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `contestId` | string | Y | C에 먼저 영속 저장한 대회 ID |
+    | `problemRevisionId` | string | Y | C가 선택·고정한 통과 회차 |
+    | `rowVersion` | integer | Y | 선택 요약의 sourceVersion, 1 이상 |
+    | `actorMemberId` | string | Y | C가 ADMIN 권한을 확인한 종료 공개 설정 관리자 |
+
+    ```json
+    {"contestId":"8","problemRevisionId":"2001","rowVersion":7,"actorMemberId":"7"}
+    ```
+
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 래퍼 없는 직접 객체
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `problemId / contestId / problemRevisionId` | string | 최초 연결 문제·대회·고정 회차 |
+    | `linkedSourceVersion` | integer | 최초 연결 커밋의 Problem 버전. 재요청도 같은 값 |
+    | `policyActorId` | string | 보존한 실제 설정 관리자 |
+
+    ```json
+    {"problemId":"601","contestId":"8","problemRevisionId":"2001","linkedSourceVersion":8,"policyActorId":"7"}
+    ```
+
+- **에러:** `COMMON_INVALID_REQUEST`(400), `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404), `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409) / GENERAL·ARCHIVED·다른 대회 또는 회차·설정 관리자로 덮어쓰기·통과 회차/언어 없음
+- **동시성/멱등 보장:** 문제 행을 잠그고 기존 연결부터 확인한다. 대회·고정 회차·관리자가 모두 같으면 현재 공개 상태·버전이 바뀌었어도 최초 연결을 반환한다. 새 연결은 rowVersion·EXAM_ONLY·비보관·해당 문제의 회차·통과 언어를 확인한다. 연결 필드·row_version + 1·`contest_link_source_version`·연결 감사는 같은 트랜잭션이다. 연결 후 회차·대회·관리자·기준 버전은 덮어쓰지 않는다.
+- **발행:** 없음. 연결 자체는 공개 상태·사용 회차·언어를 바꾸지 않는다.
+- **외부 의존:** 없음. C의 대회 생성·설정 관리자 검증을 B가 C에 재질의하지 않는다.
+- **비고:** 생성 실패·응답 유실 시 C는 §4.6.1의 같은 생성 작업·대회·고정 회차로 연결을 재시도한다. B의 연결을 자동 해제하거나 다른 대회로 재배정하지 않는다. 종료 공개 비교·감사는 이벤트 계약서 §4.4 C12~C14를 따른다.
+
+#### 2.6.10 문제 상태 작업 조회
+
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/operations/{operationId}`
+- **인증:** 내부 호출 (contest)
+- **Idempotency:** 조회, 상태 변경 없음
+- **대응 테이블:** `problem_state_operations`
+- **설명:** 자원 가드와 동일한 원래 작업의 확정 여부를 조회한다.
+- **요청 헤더:** `X-Correlation-Id` 선택
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId / operationId` | Path | string | Y | 문제와 그 문제의 원래 작업 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 원래 작업 ID |
+    | `state` | string | PENDING / COMMITTED / ABORTED |
+    | `sourceVersion` | string | COMMITTED는 결과 버전, 그 외 기대 버전의 10진 문자열 |
+    | `resourceStatus` | string | COMMITTED는 target_visibility, 그 외 before_visibility |
+
+    ```json
+    {"operationId":"problem-hide-301","state":"COMMITTED","sourceVersion":"10","resourceStatus":"PRIVATE"}
+    ```
+
+- **에러:** `COMMON_INVALID_REQUEST`(400), `PROBLEM_NOT_FOUND`(404) / 작업 없음·문제 소속 불일치
+- **동시성/멱등 보장:** 영속된 원래 작업의 스냅샷을 반환하며 현재 문제 상태로 치환하지 않는다. C는 조회 후 자기 가드 잠금 안에서 작업 ID·버전을 다시 확인한다. 404·PENDING·통신 실패는 자동 취소 근거가 아니다.
+- **발행:** 없음
+- **외부 의존:** 없음
 
 ### 2.7 사용하는 내부 API
 
@@ -6037,7 +6286,8 @@
 
 - **Method / URI:** `POST /api/v1/admin/contests`
 - **인증:** `ADMIN`
-- **대응 테이블:** `contests`, `contest_problems`, `contest_resource_guards`, `audit_logs`, `outbox_events`
+- **Idempotency:** 요청 operationId와 집행자·정규화 본문 해시를 기존 관리자 작업에 보존. 같은 요청은 같은 대회·고정 회차·최초 성공 응답 반환, 다른 본문은 IDEMPOTENCY_KEY_CONFLICT(422)
+- **대응 테이블:** `contests`, `contest_problems`, `contest_resource_guards`, `contest_admin_operations`, `audit_logs`, `outbox_events`
 - **설명:** 공개 대회를 만들고 문제(`EXAM_ONLY` 또는 `GENERAL`·`PUBLIC`)·라벨·표시 순서를 설정. B의 현재 회차를 고정. `title` 1~200자, 1~20문제, 기간 1~180분, `startsAt`은 미래, 중복 `problemId`·`label` 불가, `label`은 `A`~`T`, `displayOrder`는 1부터 연속.
 - **요청 헤더:**
     
@@ -6051,6 +6301,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
+    | `operationId` | string | Y | 생성 작업 ID, 1~100자. 응답 유실에도 재사용 |
     | `title` | string | Y | 제목 |
     | `startsAt` | string (date-time) | Y | 시작 시각 |
     | `endsAt` | string (date-time) | Y | 전체 종료 시각 |
@@ -6063,6 +6314,7 @@
     
     ```json
     {
+      "operationId": "contest-create-8",
       "title": "Re:Solve 10월 오픈 대회",
       "startsAt": "2026-10-31T20:00:00+09:00",
       "endsAt": "2026-10-31T22:00:00+09:00",
@@ -6121,8 +6373,12 @@
     }
     ```
     
-- **에러:** `AUTH_ACCESS_DENIED`(403), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `CONTEST_DEPENDENCY_UNAVAILABLE`(503), `COMMON_INVALID_REQUEST`(400)
-- **외부 의존:** `GET /internal/v1/problems/summaries?ids=` (problem)
+- **에러:** `AUTH_ACCESS_DENIED`(403), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `CONTEST_DEPENDENCY_UNAVAILABLE`(503), `COMMON_INVALID_REQUEST`(400), `IDEMPOTENCY_KEY_CONFLICT`(422)
+- **외부 의존:** Problem 선택 요약(§2.6.5, `purpose=CONTEST`)과 전용 문제의 명시적 대회 연결. `GENERAL`은 연결 대상에서 제외하며, `EXAM_ONLY`는 선택한 고정 회차와 `problems.contest_id`가 생성한 대회에 연결돼야 한다. 같은 연결 재요청은 같은 결과이고 다른 대회·다른 회차로 묵시적으로 덮어쓰지 않는다. 생성·연결 응답 유실 시 기존 대회·같은 연결을 대사하며 새 대회를 중복 생성하지 않는다. 연결은 §2.6.9 PUT API를 사용한다.
+
+- **생성·연결 복구:** 선택 요약을 조회한 뒤 C의 PROBLEM 가드·대회 잠금 안에서 대회·고정 문제·선택 버전과 CONTEST_CREATE PENDING 작업을 함께 저장한다. 원격 PUT은 커밋 후 수행한다. 모든 EXAM_ONLY 연결이 확인된 뒤 SUCCEEDED·생성 감사·최초 응답을 확정하고 201을 반환한다. GENERAL만 있으면 연결 호출 없이 같은 완료 절차를 따른다.
+- **미완료 차단:** CONTEST_CREATE가 SUCCEEDED이기 전에는 SCHEDULED 대회를 일반 목록에 노출하거나 참가·입장·시작시키지 않는다. 연결 요청의 5xx·타임아웃은 미실행 증거가 아니며 PENDING 유지·같은 대회/고정 회차/요청 재시도·§4.7 대사로 복구한다. 이때 호출자에는 CONTEST_DEPENDENCY_UNAVAILABLE(503)를 반환한다.
+- **확정 실패:** B의 연결 불일치 등 확정 거절 또는 연결 미완료 상태에서 시작 시각 경과가 확인되면 대회를 CANCELED로 종결하고 생성 작업 FAILED·감사·ContestCanceled Outbox를 함께 기록한다. 이미 완료된 B 연결은 취소 대회의 이력으로 보존하며 자동 해제·다른 대회 덮어쓰기를 하지 않는다. 같은 operationId는 새 대회를 만들지 않고 보존한 결과를 반환한다.
 
 #### 4.6.2 대회 취소
 
@@ -6649,7 +6905,7 @@
 - **Method / URI:** `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/prepare`
 - **인증:** MEMBER/WITHDRAWAL은 member-service, STUDY/STUDY_CLOSE는 study-service, PROBLEM/PROBLEM_HIDE는 problem-service만.
 - **대응 테이블:** `contest_resource_guards`, `exams`, `exam_participants`, `contests`, `contest_participants`, `exam_problems`, `contest_problems`, `outbox_events`
-- **설명:** 자원 작업 준비
+- **설명:** 소유 서비스의 상태 변경 전에 신규 편입을 차단하고 기존 차단 조건을 확인한다. PROBLEM은 비공개와 보관 모두 PROBLEM_HIDE를 사용한다.
 - **요청 헤더:** 없음
 - **요청 파라미터:**
     
@@ -6664,7 +6920,7 @@
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
     | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
-    | `operationType` | string | Y | 작업 종류. 해당 API의 허용 작업만 지정 |
+    | `operationType` | string | Y | WITHDRAWAL / STUDY_CLOSE / PROBLEM_HIDE. 자원·소유 서비스 조합은 비고 참조 |
     | `expectedSourceVersion` | string | Y | 원천 상태의 기대 순서 값 문자열 |
 - **응답 헤더:**
     
@@ -6678,9 +6934,10 @@
     | 필드 | 타입 | 설명 |
     | --- | --- | --- |
     | `operationId` | string | 호출자 생성 멱등 작업 ID. 1~100자 |
-    | `state` | string | 작업 또는 가드 상태. 해당 처리 규칙 적용 |
+    | `state` | string | OPEN / PREPARED / BLOCKED |
+    | `operationResult` | string | PENDING / COMMITTED / ABORTED, 현재 작업의 결과 |
     | `ready` | boolean | 소유 서비스가 원격 작업을 완료할 수 있는지 |
-    | `preparedAt` | string (date-time) | 자원 가드 준비 시각 |
+    | `preparedAt` | string (date-time) 또는 null | 자원 가드 준비 시각. 준비 전은 null |
     | `canceledExamIds` | string[] | 준비 과정에서 취소한 예정 시험 ID 목록 |
     | `blockingExamIds` | string[] | 종료를 기다리는 시험 ID 목록 |
 - **비고:**
@@ -6692,17 +6949,20 @@
     - **PROBLEM:** SCHEDULED 또는 시간상 진행 중인 시험·대회에 포함되면 PROBLEM_IN_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 문제 편입을 막는다.
     - EXAM_ONLY 종료공개와 고정 회차 채점은 가드와 분리한다.
     - **응답 조건:** 진행 중 스터디 시험만 202/ready=false. 회원·문제 거절은 준비 상태를 남기지 않는다.
-    - **응답 값:** `state=PREPARED`
+    - **응답 값:** 신규 준비 성공은 `state=PREPARED`. 동일 작업의 완료·취소 후 prepare 재요청은 보존한 `BLOCKED`·`OPEN`을 반환하며 다시 준비하지 않는다. `ready=true`는 해당 작업의 PREPARED 상태에서만 반환한다.
     - **멱등:** 같은 operationId·type·expectedSourceVersion이면 기존 상태 반환. prepare 요청 해시는 DB 가드에 저장하고 완료·취소 후에도 마지막 operationId와 함께 보존한다.
-    - 취소된 같은 작업은 OPEN을 반환하며 재준비하지 않는다.
-    - 다른 본문은 422 IDEMPOTENCY_KEY_CONFLICT. 다른 작업이 점유하면 409 CONTEST_OPERATION_BLOCKED. expectedSourceVersion < 저장 sourceVersion은 409 SOURCE_VERSION_CONFLICT.
+    - OPEN으로 취소된 같은 작업은 OPEN을 반환하며 재준비하지 않는다. BLOCKED에서 시작한 취소는 BLOCKED를 반환한다. operationResult=ABORTED를 보존하며 재준비하지 않는다.
+    - 다른 본문은 422 IDEMPOTENCY_KEY_CONFLICT. 다른 PREPARED 작업이 점유하면 409 CONTEST_OPERATION_BLOCKED. expectedSourceVersion < 저장 sourceVersion은 409 SOURCE_VERSION_CONFLICT.
+    - **PROBLEM 응답:** 신규 준비 성공은 200·`PREPARED`·`ready=true`이며 `canceledExamIds`·`blockingExamIds`는 빈 배열이다. 예정·진행 참조가 있으면 `PROBLEM_IN_ACTIVE_EXAM`(409)이며 PREPARED를 남기지 않는다. PROBLEM 준비로 시험·대회를 자동 취소하지 않는다.
+    - **직렬화:** PROBLEM prepare와 시험 생성·문제 교체·대회 생성의 해당 문제 편입은 같은 `(PROBLEM, problemId)` 가드 행을 잠근다. 신규 가드 행은 유일 제약으로 먼저 확보한 후 잠근다. 둘 중 먼저 커밋한 결과를 다른 쪽이 확인하므로 사용 조회 뒤 신규 편입을 끼워 넣을 수 없다. 원격 HTTP는 이 잠금 밖에서 끝낸다.
+    - **준비 전 상태:** PROBLEM_HIDE는 다른 미종결 작업이 없는 OPEN 또는 BLOCKED에서 준비한다. prepared_from_state와 operation_result=PENDING을 같은 가드 트랜잭션에 저장한다. 반복 prepare는 원래 준비·종결 결과를 반환하고 기존 결과를 초기화하지 않는다.
     - **작업 유형:** MEMBER/WITHDRAWAL은 member-service, STUDY/STUDY_CLOSE는 study-service, PROBLEM/PROBLEM_HIDE는 problem-service만 호출한다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
 #### 4.7.4 자원 작업 완료·취소
 
 - **Method / URI:** `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/complete`, `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/cancel`
-- **인증:** §4.5.3의 자원 소유 서비스.
+- **인증:** §4.7.3의 자원 소유 서비스.
 - **대응 테이블:** `contest_resource_guards`
 - **설명:** 자원 작업 완료·취소
 - **요청 헤더:** 없음
@@ -6733,18 +6993,20 @@
     | 필드 | 타입 | 설명 |
     | --- | --- | --- |
     | `operationId` | string | 호출자 생성 멱등 작업 ID. 1~100자 |
-    | `state` | string | 작업 또는 가드 상태. 해당 처리 규칙 적용 |
-    | `sourceVersion` | string | 원천 상태 순서 값 문자열 |
+    | `state` | string | OPEN / PREPARED / BLOCKED |
+    | `operationResult` | string | PENDING / COMMITTED / ABORTED, 현재 작업의 결과 |
+    | `sourceVersion` | string | 원천 상태 순서 값의 10진 문자열. Problem의 INT 행 버전은 값 손실 없이 변환 |
 - **비고:**
     - **complete:** 소유 서비스가 자기 DB 상태를 변경한 뒤 호출한다.
-    - 가드 operationId 일치와 sourceVersion 증가를 검증해 BLOCKED로 전이한다.
+    - 가드 operationId 일치와 expectedSourceVersion보다 큰 결과 버전을 확인해 operation_result=COMMITTED로 종결한다. source_version은 기존값과 결과 버전 중 큰 값으로 보존한다. PROBLEM은 최신 source_status가 결과보다 큰 버전의 PUBLIC이고 GENERAL 재공개인 경우에만 OPEN, 그 외 BLOCKED로 반영한다. PROBLEM complete의 버전은 Problem COMMITTED 결과와 같아야 하며, cancel은 원래 기대 버전을 사용하고 원천 상태를 증가시키지 않는다.
     - STUDY는 ready=true일 때만 완료한다.
     - MemberWithdrawn/StudyClosed/ProblemStateChanged도 같은 완료 처리를 복구한다.
-    - **cancel:** 소유 서비스가 작업을 실행하지 않았음을 확정한 뒤 OPEN으로 전이한다.
+    - **cancel:** 소유 서비스가 작업을 실행하지 않았음(`ABORTED`)을 확정한 뒤 취소한다. OPEN에서 준비한 작업은 OPEN으로 복귀한다. PROBLEM의 BLOCKED에서 후속 보관을 준비했으면 prepared_from_state=BLOCKED로 복원하고 operation_result=ABORTED를 보존한다.
+    - 반복 complete/cancel은 같은 operationResult와 상태를 반환한다. 취소는 현재 작업의 ABORTED 확인과 원래 기대 버전을 요구한다. 더 최신 원천 상태가 있으면 GENERAL·PUBLIC만 OPEN, PRIVATE·ARCHIVED는 BLOCKED이며, 그 외에는 준비 전 상태로 복원한다. 원천 버전은 감소시키지 않는다.
     - 이미 완료된 작업은 취소 불가(409 OPERATION_ALREADY_COMPLETED). 스터디 준비로 취소된 시험을 자동 복원하지 않는다.
     - **응답 조건:** 반복 완료·취소는 같은 결과 반환. 오래된 작업 ID는 409 OPERATION_NOT_CURRENT.
     - **복구:** C는 PREPARED 1분 초과 건을 5분 주기로 소유 서비스 operation 상태 API로 대사한다.
-    - COMMITTED는 complete, ABORTED는 cancel, PENDING/조회 실패는 유지·운영 알림. TTL 자동 해제 없음. PROBLEM 재공개는 sourceVersion이 더 큰 PUBLIC 이벤트에만 OPEN.
+    - COMMITTED는 complete, ABORTED는 cancel, PENDING/조회 실패는 유지·운영 알림. TTL 자동 해제 없음. PROBLEM의 GENERAL 재공개는 현재 작업을 덮어쓰지 않는 더 큰 PUBLIC 이벤트에만 OPEN이며 ARCHIVED는 해제하지 않는다. 미해결 PREPARED의 다른 작업을 PUBLIC 스냅샷만으로 취소하지 않는다. 해당 스냅샷의 sourceVersion·visibility·scope는 source_version·source_status·source_scope에 함께 보존하고 작업 종결 뒤 최신 상태로 차단을 결정한다. 오래된 스냅샷은 무시하고 ARCHIVED는 후속 해제하지 않는다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
 #### 4.7.5 스터디 시험 상태 조회
@@ -6822,7 +7084,7 @@
     | `hasBlockingUsage` | boolean | 예정·진행 중 문제 사용이 존재하는지 |
 - **비고:**
     - **기준:** 예정·진행 중 사용을 반환한다.
-    - 조회와 비공개 전환 사이 경합은 4.5.3으로 막는다.
+    - 조회와 비공개·보관 사이 신규 편입 경합은 §4.7.3의 PROBLEM prepare로 막는다. 이 조회는 안내·진단용이며 상태 변경 승인을 대신하지 않는다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
 #### 4.7.7 힌트 차단 복구 조회
@@ -6987,19 +7249,19 @@
 
 #### 4.8.1 문제 선택 (problem)
 
-- **Method / URI:** `GET /internal/v1/problems/summaries?ids={id1,id2,...}`
-- **응답 필드:** `problemId`, `scope`, `visibility`, `problemRevisionId`, `revisionNumber`, `title`
-- **비고:** 누락 ID는 `EXAM_PROBLEM_NOT_AVAILABLE`(409). 시험은 `GENERAL`/`PUBLIC`, 대회는 `EXAM_ONLY`/`PRIVATE` 또는 `GENERAL`/`PUBLIC`만 편입. `ARCHIVED`는 신규 편입 불가.
+- **Method / URI:** `GET /internal/v1/problems/summaries?ids={id1}&ids={id2}&purpose={purpose}`
+- **응답 필드:** §2.6.5의 직접 객체 `items`. `problemId`·`isAvailable`과 존재·사용 회차 조건별 필드
+- **비고:** §2.6.5의 `ids`(최대 50개)·`purpose=EXAM/CONTEST`를 지정한다. 누락·`isAvailable=false`는 `EXAM_PROBLEM_NOT_AVAILABLE`(409). 통과 사용 회차·언어·상태 버전을 고정하며 편입은 PROBLEM 가드 잠금 안에서 확정한다. 상태·용도 조건은 §2.6.5를 따른다.
 
 #### 4.8.2 고정 회차 본문 (problem)
 
-- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content?context=&contextId=&memberId=&action=READ_BODY`
-- **비고:** B가 `action=READ_BODY`로 §4.7.1 열람 권한을 검증. 조회 실패 시 503.
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content`
+- **비고:** C가 자기 문맥의 참가·열람 권한과 고정 참조를 확인하고 `X-Access-Context`로 호출한다. B는 문제·회차 소속과 자료 연결을 검증한다(§2.6.3). C가 확인한 권한을 B가 C에 다시 질의하지 않는다. 조회 장애 시 503.
 
 #### 4.8.3 고정 회차 이미지 (problem)
 
-- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}?context=&contextId=&memberId=&action=READ_IMAGE`
-- **비고:** `action=READ_IMAGE`로 고정 회차 연결 검증. 이미지 없음·열람 불가는 404.
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}`
+- **비고:** C가 열람 권한과 고정 참조를 확인하고 `X-Access-Context`로 호출한다. B는 문제·회차·본문·이미지 소속을 검증한다(§2.6.4). 이미지 없음·소속 불일치는 404.
 
 #### 4.8.4 채점 상태 대사 (judge)
 
