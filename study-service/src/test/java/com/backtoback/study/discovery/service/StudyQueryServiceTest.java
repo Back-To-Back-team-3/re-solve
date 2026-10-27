@@ -23,7 +23,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.backtoback.study.discovery.dto.StudySummaryResponse;
 import com.backtoback.study.membership.domain.JoinType;
 import com.backtoback.study.membership.domain.Study;
+import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
+import com.backtoback.study.replica.repository.MemberReplicaRepository;
 
 /**
  * 선택 필터가 모두 없거나 모두 있어도 예외 없이 조회되고, 조회 결과가 응답 DTO로 올바르게 바뀌는지 검증한다.
@@ -35,12 +37,18 @@ class StudyQueryServiceTest {
     @Mock
     private StudyRepository studyRepository;
 
+    @Mock
+    private StudyMembershipRepository studyMembershipRepository;
+
+    @Mock
+    private MemberReplicaRepository memberReplicaRepository;
+
     private StudyQueryService service;
     private Pageable pageable;
 
     @BeforeEach
     void setUp() {
-        service = new StudyQueryService(studyRepository);
+        service = new StudyQueryService(studyRepository, studyMembershipRepository, memberReplicaRepository);
         pageable = PageRequest.of(0, 20);
     }
 
