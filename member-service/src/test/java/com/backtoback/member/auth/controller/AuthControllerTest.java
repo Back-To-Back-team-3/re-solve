@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -21,6 +22,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
@@ -43,7 +45,8 @@ import jakarta.servlet.http.Cookie;
     properties = {
         "resolve.auth.github.client-id=client-id",
         "resolve.auth.github.client-secret=client-secret",
-        "resolve.auth.jwt.secret=test-jwt-secret-key-must-be-at-least-32-bytes"
+        "resolve.auth.jwt.secret=test-jwt-secret-key-must-be-at-least-32-bytes",
+        "resolve.auth.dev-login-enabled=true"
     }
 )
 @Import(
@@ -230,6 +233,72 @@ class AuthControllerTest {
     }
 
     @Test
+    @DisplayName("1.1.6 개발용 로그인은 1.1.3과 같은 본문과 Refresh Token 쿠키를 준다")
+    void devLoginReturnsTokens() throws Exception {
+        Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
+        ReflectionTestUtils.setField(member, "id", 7L);
+        given(authService.devLogin(7L))
+            .willReturn(new LoginResult("access-token", 3600L, "refresh-token", member, false));
+
+        mockMvc
+            .perform(
+                post("/api/v1/auth/dev-login").contentType(MediaType.APPLICATION_JSON).content("{\"memberId\":\"7\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.accessToken").value("access-token"))
+            .andExpect(jsonPath("$.data.member.memberId").value("7"))
+            .andExpect(jsonPath("$.data.member.isNewMember").value(false))
+            .andExpect(
+                header()
+                    .string(
+                        "Set-Cookie",
+                        allOf(containsString("refreshToken=refresh-token"), containsString("HttpOnly"))
+                    )
+            );
+    }
+
+    @Test
+    @DisplayName("1.1.6 회원 ID가 숫자가 아니면 400, 없는 회원이면 404 MEMBER_NOT_FOUND")
+    void devLoginValidatesMember() throws Exception {
+        mockMvc
+            .perform(
+                post("/api/v1/auth/dev-login").contentType(MediaType.APPLICATION_JSON).content("{\"memberId\":\"abc\"}")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.details[0].field").value("memberId"));
+
+        given(authService.devLogin(99L)).willThrow(new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
+        mockMvc
+            .perform(
+                post("/api/v1/auth/dev-login").contentType(MediaType.APPLICATION_JSON).content("{\"memberId\":\"99\"}")
+            )
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error.code").value("MEMBER_NOT_FOUND"));
+    }
+
+    @Nested
+    @TestPropertySource(properties = "resolve.auth.dev-login-enabled=false")
+    class DevLoginDisabled {
+
+        @Autowired
+        private MockMvc disabledMockMvc;
+
+        @Test
+        @DisplayName("1.1.6 개발용 로그인이 꺼져 있으면 없는 경로처럼 404이고 토큰을 발급하지 않는다")
+        void devLoginIsNotFound() throws Exception {
+            disabledMockMvc
+                .perform(
+                    post("/api/v1/auth/dev-login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"memberId\":\"7\"}")
+                )
+                .andExpect(status().isNotFound());
+
+            verify(authService, never()).devLogin(any());
+        }
+    }
+
+    @Test
     @DisplayName("1.1.3 로그인 코드가 비어 있으면 400 COMMON_INVALID_REQUEST")
     void exchangeLoginCodeValidatesBody() throws Exception {
         mockMvc
@@ -263,15 +332,6 @@ class AuthControllerTest {
             .perform(get("/api/v1/auth/token"))
             .andExpect(status().isMethodNotAllowed())
             .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
-    }
-
-    @Test
-    @DisplayName("숫자가 아닌 X-User-Id는 500이 아니라 401 AUTH_TOKEN_INVALID")
-    void nonNumericUserIdIsUnauthorized() throws Exception {
-        mockMvc
-            .perform(post("/api/v1/auth/logout").header("X-User-Id", "abc").header("Authorization", "Bearer access"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
 
     @Test
@@ -312,8 +372,8 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("1.1.4 재발급 실패(INVALID·REUSED)는 401과 함께 Refresh Token 쿠키를 지운다")
-    void refreshFailureClearsCookie() throws Exception {
+    @DisplayName("1.1.4 재발급 실패(INVALID·REUSED)는 401을 주고 Refresh Token 쿠키는 그대로 둔다")
+    void refreshFailureKeepsCookie() throws Exception {
         given(authService.refresh(null)).willThrow(new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID));
         given(authService.refresh("stolen")).willThrow(new MemberException(MemberErrorCode.AUTH_REFRESH_TOKEN_REUSED));
 
@@ -321,15 +381,13 @@ class AuthControllerTest {
             .perform(post("/api/v1/auth/token/refresh"))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_INVALID"))
-            .andExpect(
-                header().string("Set-Cookie", allOf(containsString("refreshToken="), containsString("Max-Age=0")))
-            );
+            .andExpect(header().doesNotExist("Set-Cookie"));
 
         mockMvc
             .perform(post("/api/v1/auth/token/refresh").cookie(new Cookie("refreshToken", "stolen")))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_REUSED"))
-            .andExpect(header().string("Set-Cookie", containsString("Max-Age=0")));
+            .andExpect(header().doesNotExist("Set-Cookie"));
     }
 
     @Test
@@ -339,6 +397,7 @@ class AuthControllerTest {
             .perform(
                 post("/api/v1/auth/logout")
                     .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
                     .header("Authorization", "Bearer access")
                     .cookie(new Cookie("refreshToken", "refresh"))
             )
@@ -347,7 +406,7 @@ class AuthControllerTest {
                 header().string("Set-Cookie", allOf(containsString("refreshToken="), containsString("Max-Age=0")))
             );
 
-        verify(authService).logout(7L, "Bearer access", "refresh");
+        verify(authService).logout("7", "Bearer access", "refresh");
     }
 
     @Test
@@ -355,6 +414,30 @@ class AuthControllerTest {
     void logoutRequiresAuthenticatedUser() throws Exception {
         mockMvc
             .perform(post("/api/v1/auth/logout").header("Authorization", "Bearer access"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+
+        verify(authService, never()).logout(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("관리자 경로는 USER면 403 AUTH_ACCESS_DENIED, ADMIN이면 보안 체인을 통과한다")
+    void adminPathRequiresAdminRole() throws Exception {
+        mockMvc
+            .perform(get("/api/v1/admin/members").header("X-User-Id", "7").header("X-User-Role", "USER"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
+        // 아직 관리자 API가 없어 보안 체인을 통과하면 404다.
+        mockMvc
+            .perform(get("/api/v1/admin/members").header("X-User-Id", "1").header("X-User-Role", "ADMIN"))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("1.1.5 X-User-Role 없이 X-User-Id만 오면 공통 보안 필터가 401로 막는다")
+    void logoutRejectsMissingRole() throws Exception {
+        mockMvc
+            .perform(post("/api/v1/auth/logout").header("X-User-Id", "7").header("Authorization", "Bearer access"))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
 

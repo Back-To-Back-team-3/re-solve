@@ -2,12 +2,12 @@ package com.backtoback.member.auth.controller;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.Set;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,14 +16,16 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
-import com.backtoback.common.api.ApiErrorResponse;
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.exception.BusinessException;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.exception.ErrorCode;
+import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.member.auth.config.AuthProperties;
 import com.backtoback.member.auth.dto.AccessTokenResponse;
+import com.backtoback.member.auth.dto.DevLoginRequest;
 import com.backtoback.member.auth.dto.LoginCodeExchangeRequest;
 import com.backtoback.member.auth.dto.TokenResponse;
 import com.backtoback.member.auth.service.AuthService;
@@ -31,7 +33,6 @@ import com.backtoback.member.auth.service.GitHubLoginStart;
 import com.backtoback.member.auth.service.LoginResult;
 import com.backtoback.member.auth.service.TokenRefreshResult;
 import com.backtoback.member.auth.store.OAuthStateStore;
-import com.backtoback.member.global.error.MemberErrorCode;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -46,13 +47,6 @@ public class AuthController {
     static final String REFRESH_TOKEN_COOKIE = "refreshToken";
     static final String LOGIN_NONCE_COOKIE = "loginNonce";
     static final String AUTH_COOKIE_PATH = "/api/v1/auth";
-    static final String USER_ID_HEADER = "X-User-Id";
-
-    /**
-     * 재발급이 이 오류로 실패하면 더 쓸 수 없는 Refresh Token 쿠키를 지운다.
-     */
-    private static final Set<ErrorCode> REFRESH_FAILURES
-        = Set.of(MemberErrorCode.AUTH_REFRESH_TOKEN_INVALID, MemberErrorCode.AUTH_REFRESH_TOKEN_REUSED);
 
     private final AuthService authService;
     private final AuthProperties authProperties;
@@ -118,30 +112,34 @@ public class AuthController {
     }
 
     /**
+     * 1.1.6 개발용 로그인 — 지정한 회원으로 토큰을 발급한다. 응답은 1.1.3 로그인 코드 교환과 같다.
+     * 꺼져 있으면 경로가 없는 것처럼 404로 응답한다.
+     */
+    @PostMapping("/dev-login")
+    public ResponseEntity<ApiResponse<TokenResponse>> devLogin(@Valid @RequestBody DevLoginRequest request) {
+        if (!authProperties.devLoginEnabled()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
+        LoginResult result = authService.devLogin(Long.valueOf(request.memberId()));
+        return ResponseEntity
+            .ok()
+            .header(HttpHeaders.SET_COOKIE, refreshTokenCookie(result.refreshToken()).toString())
+            .body(ApiResponse.success(TokenResponse.from(result)));
+    }
+
+    /**
      * 1.1.4 토큰 재발급 — Refresh Token을 교체하고 새 Access Token을 내려준다.
      * 유예 시간 안의 중복 재발급은 Access Token만 내려주고 쿠키는 그대로 둔다.
      */
     @PostMapping("/token/refresh")
-    public ResponseEntity<?> refresh(
+    public ResponseEntity<ApiResponse<AccessTokenResponse>> refresh(
         @CookieValue(
             name = REFRESH_TOKEN_COOKIE,
             required = false
         ) String refreshToken
     ) {
-        TokenRefreshResult result;
-        try {
-            result = authService.refresh(refreshToken);
-        } catch (BusinessException exception) {
-            if (!REFRESH_FAILURES.contains(exception.getErrorCode())) {
-                throw exception;
-            }
-            ErrorCode errorCode = exception.getErrorCode();
-            return ResponseEntity
-                .status(errorCode.getStatus())
-                .header(HttpHeaders.SET_COOKIE, expiredRefreshTokenCookie().toString())
-                .body(ApiErrorResponse.of(errorCode));
-        }
-
+        // 실패하면 쿠키를 지우지 않는다. 남은 토큰은 이미 폐기돼 재발급에 다시 실패하고, 재로그인 때 덮어쓴다.
+        TokenRefreshResult result = authService.refresh(refreshToken);
         ResponseEntity.BodyBuilder response = ResponseEntity.ok();
         if (result.refreshTokenRotated()) {
             response.header(HttpHeaders.SET_COOKIE, refreshTokenCookie(result.newRefreshToken()).toString());
@@ -154,7 +152,7 @@ public class AuthController {
      */
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
-        @RequestHeader(USER_ID_HEADER) Long memberId,
+        @AuthenticationPrincipal GatewayUser user,
         @RequestHeader(
             name = HttpHeaders.AUTHORIZATION,
             required = false
@@ -164,7 +162,7 @@ public class AuthController {
             required = false
         ) String refreshToken
     ) {
-        authService.logout(memberId, authorization, refreshToken);
+        authService.logout(user.userId(), authorization, refreshToken);
         return ResponseEntity
             .noContent()
             .header(HttpHeaders.SET_COOKIE, expiredRefreshTokenCookie().toString())

@@ -1,4 +1,8 @@
 spring:
+  data:
+    redis:
+      host: localhost
+      port: ${REDIS_HOST_PORT:6380}
   datasource:
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3308}/problem_db
   cloud:

@@ -1259,7 +1259,7 @@
     	      "timeMs": 2000, 
     	      "memoryKb": 262144, 
     	      "wallTimeMs": 7000, 
-    	      "outputLimitKb": 64 
+              "outputLimitKb": 64
           },
           "starterCodes": [ 
     	      { 
@@ -1559,7 +1559,8 @@
 | `expectedReturnText` | string | Y | 기대 반환값 JSON 텍스트 |
 - 숫자는 정밀도 보존을 위해 JSON 텍스트로 보낸다. 예: `"a": "9007199254740993"`. 문자열 `abc`는 `"\"abc\""`.
 - 같은 입력·기대값의 중복 테스트는 공개 여부와 무관하게 거절한다.
-- TypeSpec 필드·지원 타입·검증 규칙은 하위 문서 「TypeSpec 공통 타입 명세」를 따른다.
+- TypeSpec 필드·지원 타입·검증 규칙은 [TypeSpec 공통 타입 명세](type-spec.md)를 따른다.
+- Java 클래스·함수 선언 조건과 반환값·디버그 출력 구분은 [정책 및 상태 3.1·3.2](../planning/policy-and-state.md#3-제출채점-정책)를 따른다. Java 타입 매핑은 [TypeSpec 명세](type-spec.md#4-java-타입-매핑)에 둔다.
 
 **executionLimits**
 
@@ -1568,8 +1569,9 @@
 | `timeMs` | int 또는 null | ms | CPU 시간 제한. 기본 2,000. C++ 정답 최대 실행 시간 × 3 이상, 최소 1,000 (B-5) |
 | `memoryKb` | int 또는 null | KB | 메모리 제한. 기본 262,144 |
 | `wallTimeMs` | int 또는 null | ms | 생략 시 `timeMs + 5,000` |
-| `outputLimitKb` | int 또는 null | KB | 출력량 제한. 초과는 `RE`(출력 초과) |
+| `outputLimitKb` | int 또는 null | KiB | 테스트별 반환 JSON 크기 제한. 허용 범위 1~256, 생략·null이면 기본 64. 디버그 출력 제한과 별개이며 초과 판정은 정책 및 상태 §3.2·§3.3을 따른다 |
 - 언어별 보정은 두지 않는다. 최종 값은 회차에 저장하고 이후 공통 설정 변경은 기존 회차에 반영하지 않는다.
+- 반환값·디버그 출력의 크기 계산과 개별 제한은 [정책 및 상태 > 3.2 채점 실행](../planning/policy-and-state.md#32-채점-실행)을 따른다. 디버그 출력은 테스트별 공통 64KiB 제한으로, `executionLimits`의 요청·응답 필드나 회차별 설정에 포함하지 않는다.
 
 #### 2.3.1 문제 등록
 
@@ -1739,7 +1741,7 @@
     	      "timeMs": 2000, 
     	      "memoryKb": 262144, 
     	      "wallTimeMs": 7000, 
-    	      "outputLimitKb": 64 
+              "outputLimitKb": 64
           },
           "testCases": [ { 
     	      "testAssetId": "501", 
@@ -1994,100 +1996,158 @@
 - **요청 파라미터:**
     
     
-    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
-    | --- | --- | --- | --- | --- |
-    | `keyword` | string | N | — | 태그명 검색 |
-    | `page` | int | N | 0 |  |
-    | `size` | int | N | 100 |  |
-    
-    허용 정렬 필드: `displayOrder`, `name` (기본 `displayOrder,asc`)
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `keyword` | Query | string | N | 빈 문자열 | 최대 200자. 앞뒤 공백을 제거하여 태그명 부분 검색. 빈 값이면 전체 조회 |
+    | `page` | Query | int | N | 0 | 0~21,474,836 |
+    | `size` | Query | int | N | 100 | 1~100 |
+    | `sort` | Query | string | N | `displayOrder,asc` | `displayOrder` 또는 `name`과 `asc` 또는 `desc` 조합. 같은 값은 태그 ID 오름차순 정렬 |
     
 - **응답 (200):**
     
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "content": [ 
-    	      { "tagId": "1", "name": "해시" }, 
-    	      { "tagId": "2", "name": "스택/큐" } 
-          ],
-          "page": 0, 
-          "size": 100, 
-          "totalElements": 10, 
-          "totalPages": 1, 
-          "hasNext": false
-        }
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "tagId": "1",
+            "name": "해시",
+            "displayOrder": 0
+          },
+          {
+            "tagId": "2",
+            "name": "스택/큐",
+            "displayOrder": 1
+          }
+        ],
+        "page": 0,
+        "size": 100,
+        "totalElements": 10,
+        "totalPages": 1,
+        "hasNext": false
       }
+    }
     ```
     
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 검색어 길이·페이지·크기·정렬 조건이 유효하지 않음
 
 #### 2.5.2 태그 생성
 
 - **Method / URI:** `POST /api/v1/admin/problems/tags`
 - **인증:** `ADMIN`
-- **Idempotency:** 있음
-- **대응 테이블:** `tags`
+- **Idempotency:** `Idempotency-Key` 헤더 필수. 같은 관리자·같은 키로 접수 후 24시간 이내에 같은 요청값을 보내면 최초 생성 응답(201)을 반환한다. 유효 기간 내 다른 요청값은 `IDEMPOTENCY_KEY_CONFLICT`(422)로 처리한다.
+- **대응 테이블:** `tags`, `tag_creation_records`
+- **설명:** 기존 태그가 n개이면 요청 순번을 0~n으로 보정하여 삽입한다. 삽입 위치부터 기존 태그를 한 칸씩 뒤로 밀며, 태그 저장과 순번 변경은 같은 트랜잭션으로 처리한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Content-Type` | Y | `application/json` | 요청 본문 형식 |
+    | `Idempotency-Key` | Y | `tag-create-001` | 관리자별 요청 식별 키. 1~100자 ASCII, 공백만 입력 불가, 대소문자 구별 |
+
 - **요청 바디:**
-    
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `name` | string | Y | 1~200자. 공백만 입력할 수 없으며 앞뒤 공백을 제거하여 저장 |
+    | `displayOrder` | int | Y | 삽입할 순번. 0 미만은 0, 기존 태그 개수보다 크면 마지막 위치로 보정 |
+
     ```json
-      { "name": "해시", "displayOrder": 1 }
+    {
+      "name": "해시",
+      "displayOrder": 1
+    }
     ```
     
 - **응답 (201):**
     
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "태그가 생성되었습니다.", 
-    	  "data": { 
-    		  "tagId": "1", 
-    		  "name": "해시" 
-    	  } 
+    {
+      "success": true,
+      "message": "태그가 생성되었습니다.",
+      "data": {
+        "tagId": "1",
+        "name": "해시",
+        "displayOrder": 0
       }
+    }
     ```
     
 - **에러:**
-    - `PROBLEM_TAG_DUPLICATED`(409)
+    - `COMMON_INVALID_REQUEST`(400) / 필수값 누락 또는 이름·순번·멱등키 형식이 유효하지 않음
+    - `PROBLEM_TAG_DUPLICATED`(409) / 같은 이름의 태그가 존재함
+    - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
+    - `IDEMPOTENCY_KEY_CONFLICT`(422) / 유효 기간 내 같은 관리자·같은 키에 다른 요청값을 전달함
+- **동시성/멱등 보장:** `(admin_id, idempotency_key)` 유일 제약과 기록 행 잠금으로 중복 생성을 방지한다. 요청 기록·태그 생성·순번 변경·최초 응답 저장은 같은 DB 트랜잭션으로 처리한다.
+- **프론트 계약:** 응답 유실 등으로 재요청할 때는 같은 멱등키와 같은 `name`·`displayOrder`를 사용한다. 새로운 생성 요청에는 새 키를 사용한다.
 
 #### 2.5.3 태그 수정
 
 - **Method / URI:** `PATCH /api/v1/admin/problems/tags/{tagId}`
 - **인증:** `ADMIN`
 - **대응 테이블:** `tags`
-- **설명:** 이름·표시 순서를 바꾼다. 새 회차를 만들지 않으며 연결된 현재·과거 회차에 바뀐 이름이 표시된다.
+- **설명:** 이름·표시 순서를 바꾼다. 새 회차를 만들지 않으며 연결된 현재·과거 회차에 바뀐 이름이 표시된다. 태그가 n개이면 요청 순번을 0~(n-1)로 보정하고, 이동 구간의 다른 태그 순번도 조정한다.
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `tagId` | Path | string | Y | — | 수정할 태그 ID |
+
 - **요청 바디:**
-    
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `name` | string | N | 1~200자. 공백만 입력할 수 없으며 앞뒤 공백을 제거하여 저장. 생략 또는 null이면 유지 |
+    | `displayOrder` | int | N | 이동할 순번. 범위를 벗어나면 첫 번째 또는 마지막 위치로 보정. 생략 또는 null이면 유지 |
+
+    두 필드 중 하나 이상은 null이 아닌 값으로 전달한다.
+
     ```json
-      { "name": "그리디" }
+    {
+      "name": "그리디",
+      "displayOrder": 0
+    }
     ```
     
 - **응답 (200):**
     
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "태그가 수정되었습니다.", 
-    	  "data": { 
-    		  "tagId": "2", 
-    		  "name": "그리디" 
-    	  } 
+    {
+      "success": true,
+      "message": "태그가 수정되었습니다.",
+      "data": {
+        "tagId": "2",
+        "name": "그리디",
+        "displayOrder": 0
       }
+    }
     ```
     
 - **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 변경값이 없거나 이름·순번 형식이 유효하지 않음
     - `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_TAG_DUPLICATED`(409)
+    - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
 
 #### 2.5.4 태그 삭제
 
 - **Method / URI:** `DELETE /api/v1/admin/problems/tags/{tagId}`
 - **인증:** `ADMIN`
 - **대응 테이블:** `tags`, `problem_revision_tags`
-- **설명:** 어떤 회차에서도 쓰지 않는 태그만 삭제한다. 연결을 자동 해제하지 않는다.
+- **설명:** 어떤 회차에서도 쓰지 않는 태그만 삭제한다. 연결을 자동 해제하지 않는다. 삭제 후 뒤에 있는 태그의 순번을 한 칸씩 당기며, 삭제와 순번 변경은 같은 트랜잭션으로 처리한다.
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `tagId` | Path | string | Y | — | 삭제할 태그 ID |
+
 - **응답 (204)**
 - **에러:**
     - `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_TAG_IN_USE`(409)
+    - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
 
 ### 2.6 내부 API
 
@@ -2141,7 +2201,7 @@
     	    "timeMs": 2000, 
     	    "memoryKb": 262144, 
     	    "wallTimeMs": 7000, 
-    	    "outputLimitKb": 64 
+            "outputLimitKb": 64
         },
         "cases": [ { 
     	    "testAssetId": "501", 
@@ -2204,7 +2264,7 @@
     	      "timeMs": 2000, 
     	      "memoryKb": 262144, 
     	      "wallTimeMs": 7000, 
-    	      "outputLimitKb": 64 
+              "outputLimitKb": 64
           },
           "starterCodes": [ 
     	      { 
@@ -2345,7 +2405,7 @@
 | 내부 경로 | `/internal/v1/submissions/**` |
 | 소유 테이블 | 스키마 `judge` (`submissions`, `judge_jobs`, `judge_job_runs`, `judge_test_results`) |
 | 문맥 | `PRACTICE`(외부 API), `EXAM`·`CONTEST`(SQS `exam-submission-queue`), `DIAGNOSIS`(member 경유, 경로 확정 필요) |
-| 지원 언어 | `java`(Java 17), `python3`(Python 3), `cpp`(C++17). 런타임 버전·Judge0 `language_id`는 배포 환경에서 확정 |
+| 지원 언어 | `java`(Java 17), `python3`(Python 3), `cpp`(C++17). 런타임 버전과 Judge0 `language_id`는 Judge0 목록에서 조회하여 선택한다. 서비스의 언어 활성화 설정과 지원 실행 환경의 존재 여부를 함께 확인한다. |
 | 채점 | 202는 접수 완료이며 채점 완료가 아니다. 작업 원천은 `judge_jobs`, SKIP LOCKED 선점·임대, 실행 시도 상한 3회. |
 | 회차 용어 | 채점 회차 `judgeAttempt`(재채점마다 +1), 실행 시도 `tryCount`(회차 안 재시도). 기존 초안의 `attemptId`·`attemptNo`는 `judgeAttempt`로 통일 |
 | 재채점 | `PRACTICE`는 재채점하지 않는다. 채점 서버 장애로 실패한 `EXAM` 제출만 대상 (T2-11) |
@@ -2358,24 +2418,89 @@
 
 - **Method / URI:** `GET /api/v1/judge/languages`
 - **인증:** 로그인 필요
-- **대응 테이블:** 없음 (애플리케이션 설정)
-- **설명:** 지원 언어와 활성화 여부를 반환한다. 배포 환경에서 검증하기 전 런타임은 `enabled: false`로 둔다.
-- **응답 (200):**
-    
+- **Idempotency:** 없음
+- **Rate Limit:** 없음 (API별 별도 제한 없음)
+- **대응 테이블:** 없음 (애플리케이션 설정·메모리 캐시)
+- **설명:** 지원 언어 3종과 선택된 실행 환경, 활성화 여부를 반환한다. Judge0 목록에서 지원 범위에 맞는 최신 실행 환경을 선택하며, 서비스의 언어 활성화 설정이 켜져 있고 실행 환경이 존재할 때만 `enabled: true`를 반환한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:** 없음
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+    | `X-Correlation-Id` | 요청 추적 ID | 요청 처리에 사용한 추적 ID |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `content` | array | Java, Python, C++ 순서의 언어 목록. 비활성 언어도 포함하며 페이지네이션하지 않는다 |
+    | `content[].language` | string | `java` / `python3` / `cpp` |
+    | `content[].displayName` | string | `Java 17` / `Python 3` / `C++17` |
+    | `content[].runtimeVersion` | string | 선택된 Judge0 실행 환경의 표시 정보. 예: `JDK 17.0.6`, `3.11.2`, `GCC 12.2.0`. 지원 실행 환경이 없으면 `배포 환경 확인 전` |
+    | `content[].enabled` | boolean | 서비스의 해당 언어 활성화 설정이 켜져 있고, 지원 실행 환경이 존재하면 `true` |
+
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "content": [
-            { "language": "java", "displayName": "Java 17", "runtimeVersion": "배포 환경 확인 전", "enabled": false },
-            { "language": "python3", "displayName": "Python 3", "runtimeVersion": "배포 환경 확인 전", "enabled": false },
-            { "language": "cpp", "displayName": "C++17", "runtimeVersion": "배포 환경 확인 전", "enabled": false }
-          ]
-        }
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "language": "java",
+            "displayName": "Java 17",
+            "runtimeVersion": "JDK 17.0.6",
+            "enabled": true
+          },
+          {
+            "language": "python3",
+            "displayName": "Python 3",
+            "runtimeVersion": "3.11.2",
+            "enabled": false
+          },
+          {
+            "language": "cpp",
+            "displayName": "C++17",
+            "runtimeVersion": "배포 환경 확인 전",
+            "enabled": false
+          }
+        ]
       }
+    }
     ```
-    
+
+- **에러:**
+    - `JUDGE0_CONNECTION_FAILED`(503) / Judge0 목록 조회 중 연결 실패 또는 통신 시간 초과
+    - `JUDGE0_RESPONSE_FAILED`(503) / Judge0 HTTP 오류, 본문 누락, JSON 변환 실패, 잘못된 항목 또는 중복 ID 수신
+- **동시성/멱등 보장:**
+    - 서비스 인스턴스별로 최초 목록 조회와 캐시 초기화를 직렬화한다.
+    - 초기화에 성공하면 이후 요청은 캐시를 공유한다.
+    - 초기화에 실패하면 캐시를 저장하지 않고 다음 요청에서 다시 조회한다.
+- **발행:** 없음
+- **외부 의존:**
+    - `GET /languages/` (Judge0) — 실행 환경 목록 조회
+    - 연결 제한 기본값은 2초, 응답 대기 제한 기본값은 5초이며 환경 설정으로 변경할 수 있다.
+    - 요청 한 번 안에서 자동 재시도하지 않는다.
+    - 서버 주소가 설정되지 않았으면 외부 호출 없이 모든 언어를 비활성으로 반환한다.
+- **프론트 계약:**
+    - `enabled: false`인 언어는 선택할 수 없도록 표시한다.
+    - `runtimeVersion`에 값이 있어도 `enabled: false`일 수 있으므로, 활성 여부는 `enabled`로 판단한다.
+    - 이 응답은 서비스 전체의 언어 지원 상태이며, 개별 문제의 언어별 검증 상태를 의미하지 않는다.
+- **비고:**
+    - 실행 환경 선택 범위는 Java JDK·OpenJDK 17, Python 3, GCC 기반 C++이다.
+    - 숫자 버전으로 비교해 가장 높은 정식 버전을 선택하고, 같은 최고 버전의 후보가 여러 개이면 가장 작은 Judge0 ID를 선택한다.
+    - 전체 실행 환경 목록과 언어별 선택 결과는 서비스 인스턴스의 메모리에 보관하며 자동 갱신하지 않는다. 정상 응답인 빈 목록도 캐시한다.
+    - Judge0 실행 환경 목록이나 언어 활성화 설정을 변경한 경우 judge-service를 재시작해야 한다.
+    - 이 API는 실행 환경 목록을 조회하며, 코드를 실행하여 언어의 정상 동작을 검증하지 않는다. 캐시 생성 후 Judge0의 실시간 장애 여부도 확인하지 않는다.
+    - 응답 예시의 버전은 설명용이며 배포 환경의 실제 버전을 보장하지 않는다.
 
 #### 3.1.2 일반 풀이 제출
 
@@ -2677,7 +2802,8 @@
     ```
     
     - `CUSTOM`은 기대값이 없어 `verdict`가 `null`(실행 오류면 `RE`·`TLE` 등)
-    - `stdout`은 디버그 출력, 출력량 제한 적용
+    - `stdout`은 디버그 출력이며 테스트별 64KiB 제한을 적용한다. `actualReturnText`는 회차의 `outputLimitKb`로 별도 제한하며 두 출력은 합산하지 않는다. 어느 하나라도 초과하면 `RE`(출력 초과)로 처리한다. 크기 계산은 [정책 및 상태 > 3.2 채점 실행](../planning/policy-and-state.md#32-채점-실행)을 따른다.
+    - `timeMs`는 Judge0 실행 시간(초)을 밀리초로 변환한 뒤 올림한 정수다. 측정값이 없으면 null을 유지한다(정책 및 상태 §3.2).
 - **에러:**
     - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `RUN_RATE_LIMITED`(429), `PROBLEM_NOT_AVAILABLE`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge0 장애
 

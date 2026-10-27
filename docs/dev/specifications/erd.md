@@ -921,7 +921,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `author_id` | BIGINT | Y | 회차 작성 관리자 (COMMENT: `members.id`) |
 | `created_at` | DATETIME(6) | Y |  |
 | `wall_time_limit_ms` | INT | Y | 해당 회차의 최종 wall time 제한(ms). 팀 논의 B-5의 CPU 제한 + 공통 여유값을 적용하여 저장한다. |
-| `output_limit_kb` | INT | Y | 해당 회차의 최종 출력 크기 제한(KB). API의 executionLimits.outputLimitKb에 대응한다. |
+| `output_limit_kb` | INT | Y | 해당 회차의 테스트별 반환 JSON 크기 제한(KiB, 1KiB = 1,024바이트). API의 executionLimits.outputLimitKb에 대응한다. 허용 범위는 1~256이며, 등록 시 생략·null이면 기본 64를 확정해 저장한다. 디버그 출력의 공통 64KiB 제한은 이 컬럼에 포함하지 않는다(정책 및 상태 §3.2). |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
@@ -1033,13 +1033,17 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `name` | VARCHAR(200) | Y | 태그 이름 (프로그래머스 고득점 Kit 기준) |
-| `display_order` | INT | Y | 표시 순서 |
+| `display_order` | INT | Y | 표시 순서. 커밋 시 태그 n개의 순번은 0~(n-1)이며 중복 없이 연속됨 |
 | `created_at` | DATETIME(6) | Y |  |
 | `updated_at` | DATETIME(6) | Y |  |
+| `version` | BIGINT | Y | 낙관적 락 버전. JPA가 생성 시 0으로 초기화하며 DB DEFAULT는 사용하지 않음 |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
 | `uk_tags_name` | `name` | 태그 이름 중복 방지 |
+| `uk_tags_display_order` | `display_order` | 표시 순서 중복 방지 (UNIQUE) |
+
+**순번 변경:** Redis 공통 잠금과 DB 행 잠금을 사용한다. 같은 트랜잭션 안에서 변경 대상에 임시 음수 순번을 배정한 뒤 최종 순번을 저장하여 UNIQUE 충돌을 피한다. 커밋된 순번은 0 이상이며, 별도 잠금 테이블은 사용하지 않는다.
 
 #### 4.2.9 회차별 태그 (`problem_revision_tags`) `[IMMUTABLE]`
 
@@ -1165,6 +1169,37 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
 | `fk_problem_statistics_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
+
+#### 4.2.15 태그 생성 멱등 기록 (`tag_creation_records`)
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `admin_id` | VARCHAR(128) | Y | 요청한 관리자 ID (외부 참조). `utf8mb4_0900_bin`으로 대소문자 구별 |
+| `idempotency_key` | VARCHAR(100) | Y | 관리자별 멱등키. 1~100자 ASCII, 공백만 입력 불가. `utf8mb4_0900_bin`으로 대소문자 구별 |
+| `request_name` | VARCHAR(200) | Y | 최초 요청 이름. 앞뒤 공백을 제거하기 전 원본 값 |
+| `request_display_order` | INT | Y | 최초 요청 순번. 허용 범위로 보정하기 전 원본 값 |
+| `expires_at` | DATETIME(6) | Y | 접수 후 24시간의 만료 시각. 만료된 키로 새 요청을 접수하면 갱신 |
+| `result_tag_id` | BIGINT | N | 최초 생성 응답의 태그 ID. 처리 완료 전 NULL. 태그 삭제 후에도 보존하므로 FK 없음 |
+| `result_name` | VARCHAR(200) | N | 최초 생성 응답의 태그 이름. 처리 완료 전 NULL. 이후 이름 변경과 무관하게 보존 |
+| `result_display_order` | INT | N | 최초 생성 응답의 보정된 순번. 처리 완료 전 NULL. 이후 순번 변경과 무관하게 보존 |
+| `created_at` | DATETIME(6) | Y | 기록 생성 시각 |
+| `updated_at` | DATETIME(6) | Y | 기록 최종 수정 시각 |
+| `version` | BIGINT | Y | 낙관적 락 버전. 애플리케이션 INSERT에서 0으로 초기화하며 DB DEFAULT는 사용하지 않음 |
+
+**제약 및 인덱스**
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `uk_tag_creation_records_admin_key` | `(admin_id, idempotency_key)` | 관리자별 멱등키 중복 방지 (UNIQUE) |
+| `idx_tag_creation_records_expires_at` | `(expires_at, id)` | 만료 기록 정리 대상 조회 |
+
+**처리 및 보관 규칙**
+
+- 기록 행을 잠근 뒤 만료 여부와 원본 요청값을 확인한다. 유효한 동일 요청은 최초 응답을 반환하고 만료 시간을 연장하지 않는다.
+- 만료된 기록이 남아 있으면 새 요청값과 만료 시각으로 갱신하고 이전 결과를 비운다. 이미 삭제된 기록은 새로 생성한다.
+- 요청 기록·태그 생성·순번 변경·최초 응답 저장은 같은 트랜잭션에서 처리한다. 실패하면 함께 롤백한다.
+- 만료 기록 정리는 스케줄러 명세 §2.2를 따른다. 정리 전이라도 만료 시각이 지나면 새 요청으로 처리한다.
 
 ### 4.3 judge
 
@@ -1303,7 +1338,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `token_status` | VARCHAR(30) | Y | `NOT_CREATED` / `CREATED` / `UNKNOWN`(생성 응답 유실) / `DONE` |
 | `created_try_count` | INT | N | NULL 허용: 실행 생성 전. token을 만든 시도 번호 |
 | `verdict` | VARCHAR(30) | N | NULL 허용: 결과 전. 테스트별 판정 (`SYSTEM_ERROR` 포함) |
-| `time_ms` | INT | N | NULL 허용: 결과 전 |
+| `time_ms` | INT | N | NULL 허용: 결과 전 또는 실행 시간 측정값 없음. Judge0 실행 시간(초)을 밀리초로 변환한 뒤 올림한 값(정책 및 상태 §3.2) |
 | `memory_kb` | INT | N | NULL 허용: 결과 전 |
 | `actual_output` | MEDIUMTEXT | N | NULL 허용: 숨김 테스트는 저장하지 않음 |
 | `created_at` | DATETIME(6) | Y |  |
@@ -2418,6 +2453,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | --- | --- | --- |
 | 공개 회차 불변 | `problem_revisions`는 `[IMMUTABLE]`, UPDATE API 없음. 수정은 새 회차 INSERT | `[제출]` 회차 고정 |
 | 회차 번호 중복 | `uk_problem_revisions_problem_revision_number`, 다음 번호는 `problems` 행 잠금 후 계산 | — |
+| 태그 순번 연속성·경합 | DB 행 잠금으로 순번을 조정하고 저장·삭제를 같은 트랜잭션으로 처리. `uk_tags_display_order`와 낙관적 락 버전으로 중복 순번·오래된 변경을 거부 (상세: 4.2.8 태그) | — |
 | 테스트 구성 | 회차당 공개·숨김 테스트 각 1개 이상 (작성 단계 검증) | — |
 | 기준 시간 제한 | `time_limit_ms >= max(C++ 정답 최대 실행 시간 × 3, 1000)` (작성 단계 검증) | — |
 | 공개 조건 | `visibility = PUBLIC`은 회차 1개 이상일 때만 | — |
@@ -2614,6 +2650,23 @@ member-service/src/main/resources/db/migration/
 ```
 
 ### 7.2 Problem (`problem-service`)
+
+현재 태그 관리 구현에 적용된 마이그레이션:
+
+```text
+problem-service/src/main/resources/db/migration/
+  V1__problem_create_tags.sql
+  V2__problem_add_unique_tags.sql
+  V3__problem_create_tag_creation_records.sql
+  V4__common_create_shedlock.sql
+```
+
+- V1: 태그 테이블과 이름 UNIQUE 제약 생성
+- V2: 표시 순서 UNIQUE 제약 추가
+- V3: 태그 생성 멱등 기록 테이블 생성
+- V4: 공통 ShedLock 테이블 생성. 태그 멱등 기록 정리 스케줄러에서 사용
+
+아래 목록은 전체 구축 계획이며, 개발 중 실제 적용 파일과 번호는 구분합니다.
 
 ```
 problem-service/src/main/resources/db/migration/

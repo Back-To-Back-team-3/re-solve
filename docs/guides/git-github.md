@@ -6,8 +6,8 @@
 
 1. 일반 작업 브랜치는 최신 `develop`에서 만든다. 배포 버전의 긴급 수정인 `hotfix/*`만 `main`에서 만든다.
 2. `main`·`develop`에는 직접 push하지 않는다. 변경은 PR로 반영한다.
-3. 일반 PR은 팀원 2명, `main ↔ develop` PR은 팀원 3명의 승인이 필요하다.
-    - CI 성공, 충돌 없음, 미해결 리뷰 대화 없음도 병합 조건이다.
+3. 모든 PR은 필수 승인 수를 두지 않는다. push 전 AI 리뷰·보완과 Draft PR 검토는 아래 작업 흐름을 따른다.
+    - Draft 해제, CI 성공, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음이 병합 조건이다.
 4. 직접 실행하지 않은 테스트·빌드는 PR에서 완료로 표시하지 않는다.(현재 CI는 테스트를 실행하지 않는다.)
 
 ### 작업 사이클
@@ -16,10 +16,10 @@
 | --- | --- | --- |
 | 1 | Issue 생성 | 작업 목적과 범위를 정한다. |
 | 2 | `develop` 최신화·브랜치 생성 | Issue 번호와 담당 도메인을 브랜치명에 넣는다. |
-| 3 | 작업·커밋 | 변경 파일과 staging 내용을 확인한다. |
+| 3 | 작업·AI 리뷰·보완·커밋 | push 전에 AI로 변경을 검토·보완하고 변경 파일과 staging 내용을 확인한다. |
 | 4 | 브랜치 push·Draft PR 생성 | base가 `develop`인지 확인한다. |
-| 5 | CodeRabbit·CI 확인과 수정 | 실제로 수행한 검증만 PR에 적는다. |
-| 6 | Ready for review·팀원 리뷰 | 승인, 변경 요청, 미해결 대화를 확인한다. |
+| 5 | Draft PR 검토·보완과 CI 확인 | CodeRabbit 리뷰는 1.5 병합 정책을 따르고, 실제로 수행한 검증만 PR에 적는다. |
+| 6 | 작성자의 Ready for review 전환 | 변경 요청과 미해결 대화를 확인한다. |
 | 7 | Mergify Queue 병합 | 병합 결과와 작업 브랜치 삭제를 확인한다. |
 | 8 | `develop` 최신화 | 다음 Issue를 시작하기 전에 pull한다. |
 
@@ -100,8 +100,9 @@ docs(contest): 시험 API 명세 반영
 - 목적, 작업 내용, 중요도, 예상 규모, 완료 기한, 담당자를 확인하고 해당 Milestone에 넣는다.
 - 작업 범위를 추적할 수 있도록 기본적으로 하나의 Issue에 하나의 작업 브랜치를 사용한다. 범위가 커지면 Issue를 나눈다.
 - 완료 조건이나 범위가 바뀌면 Issue에도 반영한다.
-- Issue 하나의 크기는 구현 `300~800줄`(테스트 제외, 테스트 포함 최대 `1,500줄`), 엔드포인트 `1~2개`, 변경 파일 `10개` 이내를 기준으로 한다. 
-  - 넘을 것으로 예상되면 착수 전에 Issue를 나눈다.
+- Issue 하나의 크기는 구현 `300~800줄`(테스트 제외, 테스트 포함 최대 `1,500줄`), 엔드포인트 `1~2개`를 기준으로 한다. 파일 개수 제한은 없다.
+    - 넘을 것으로 예상되면 착수 전에 Issue를 나눈다.
+    - 테스트가 별도 Issue로 분리되는 경우 구현 줄 수만으로 판단한다.
 - Issue를 게시하기 전에 HTML 안내 주석과 예시·자리표시자를 삭제한다. 저장소의 템플릿 원본 주석은 유지한다.
 
 ### 1.4 PR 작성
@@ -114,21 +115,27 @@ docs(contest): 시험 API 명세 반영
 | 긴급 수정 역반영 | `develop` | `main` |
 | Stack 후속 PR | 바로 아래 작업 브랜치 | 후속 작업 브랜치 |
 - PR은 Draft로 열고 `.github/pull_request_template.md`의 개요·구현 내용·테스트·관련 이슈·리뷰어 안내·체크리스트를 작성한다.
+- 리뷰 피드백을 반영한 커밋이 있으면 구현·작업 내용 또는 테스트 상세에 `**피드백:** 반영한 내용` 형식으로 추가한다.
 - 테스트 항목은 실제 수행한 것만 체크한다. 실행하지 않았다면 `테스트 미진행`과 이유를 적는다.
 - Issue 자동 종료를 지정하려면 `Closes #번호`, 참조만 하려면 `Related to #번호`를 적는다. `Closes` 자동 종료는 저장소의 기본 브랜치(현재 `develop`)를 대상으로 병합할 때 적용된다.
 - GitHub Stack 후속 PR은 선행 PR 병합 후 base가 `develop`로 변경된 뒤 병합하면 자동 종료가 적용된다.
 - `main` 대상 PR은 병합만으로 Issue가 자동 종료되지 않는다. 완료된 Issue를 직접 닫거나 `develop` 역반영 PR에 `Closes #번호`를 적는다.
-- Stack의 2번째 이상 PR에만 `🧱 stack` 라벨을 붙인다. 선행 PR이 병합되면 후속 PR의 base와 diff를 다시 확인한다.
+- Stack의 2번째 이상 PR에만 `🧱 stack` 라벨을 붙인다. type 라벨은 그대로 유지하고 추가로 붙인다. 선행 PR이 병합되면 후속 PR의 base와 diff를 다시 확인한다.
 - PR 본문을 게시하기 전에 HTML 안내 주석과 예시·자리표시자를 삭제한다. 저장소의 템플릿 원본 주석은 유지한다.
+- 글머리 기호 한 항목이 한 문장을 넘길 것 같으면 하위 목록으로 내린다.
 
 ### 1.5 병합 정책
 
-| PR | 필요 승인 | 병합 방식 |
-| --- | --- | --- |
-| 일반 작업·Stack·`hotfix/* → main` | 2명 이상 | Mergify Queue, squash |
-| `develop → main`·`main → develop` | 3명 이상 | Mergify Queue, merge commit |
-- Draft 해제, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음, CI(`quality-check`) 성공이 필요하다. 수정 push 후에는 승인 상태를 다시 확인한다.
-- `quality-check`는 `spotlessCheck`, `checkstyleMain`, `checkstyleTest`, `compileTestJava`를 실행한다. (현재 테스트 실행은 포함하지 않는다.)
+| PR | 병합 방식 |
+| --- | --- |
+| 일반 작업·Stack·`hotfix/* → main` | Mergify Queue, squash |
+| `develop → main`·`main → develop` | Mergify Queue, merge commit |
+- 모든 PR에 필수 승인 수를 두지 않으며, 새 push에 따른 승인 무효화·재승인을 요구하지 않는다. GitHub Ruleset의 필수 승인 수와 stale 승인 무효화를 해제하고 Mergify의 `dismiss_reviews`는 사용하지 않는다.
+- 로컬에서 코드 작성 후 push 전에 AI 리뷰를 수행하고 발견한 문제를 보완한다.
+- Draft PR에서는 CodeRabbit 리뷰를 받을 수 있으면 확인하고, 발견한 문제를 검토·처리한다. CodeRabbit은 한도·장애가 있을 수 있으므로 필수 병합 체크로 두지 않는다. 리뷰를 받지 못한 사유를 PR마다 의무 작성하거나 예외 승인을 받을 필요는 없다.
+- 검토·보완 후 PR 작성자가 `Ready for review`로 전환한다. 팀원 리뷰에서 발견한 문제도 검토·처리한다.
+- Draft 해제, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음이 필요하다. `quality-check`는 Queue 진입과 병합 전 모두 성공해야 한다. 갱신 후에는 이 병합 조건을 다시 확인한다.
+- `quality-check`는 `checkstyleMain`, `checkstyleTest`, `compileTestJava`를 실행한다. 현재 `spotlessCheck`와 테스트 실행은 포함하지 않는다.
 - GitHub Ruleset은 사람의 직접 병합을 제한하고 Mergify에 예외를 부여한다. 병합 후 작업 브랜치 자동 삭제가 설정돼 있다.
 
 ### 1.6 AI로 Issue·PR을 작성할 때
@@ -137,11 +144,13 @@ docs(contest): 시험 API 명세 반영
 - Issue는 작업 성격에 맞는 `.github/ISSUE_TEMPLATE/` 파일을 사용하고, PR은 `.github/pull_request_template.md`를 사용한다.
 - Issue 작성 전에는 작업 목적·범위·작성자·완료 기한을 확인한다. 중요도·예상 규모는 확인한 범위를 기준으로 판단한다.
 - PR 작성 전에는 관련 Issue·현재 diff·실제로 수행한 검증과 결과를 확인한다. 계획만 있는 내용을 구현 완료로 작성하지 않는다.
-- Issue 작성자는 본인 이름에 체크한다. 다른 팀원의 체크는 해당 팀원이 확인한 경우에만 표시한다.
+- 이슈 확인 체크박스는 등록 후 작성자 본인만 체크한다. AI가 대신 체크하지 않는다.
+- PR 리뷰어는 작성자를 제외한 팀원 전원을 지정한다. 파트별 확인이 필요한 경우 PR 본문 "리뷰어에게" 섹션에 구체적으로 명시한다.
 - 필요한 정보나 자료에 접근할 수 없으면 누락된 부분을 확인한다. 날짜·담당자·링크·검증 결과를 추측하지 않는다.
 - 항목별 문장 형식은 템플릿을 따른다. 예시는 실제 작업의 사실로 복사하지 않는다.
 - 게시 전 제목 형식, 작업 범위, 링크·Issue 번호, 체크 여부를 확인한다. 본문에는 안내 주석·예시·자리표시자를 남기지 않는다.
 - 저장소의 템플릿 원본에는 안내 주석을 유지한다.
+- 글머리 기호 한 항목이 한 문장을 넘길 것 같으면 하위 목록으로 내린다.
 
 
 ### 1.7 문서 기준과 결정 기록
@@ -152,6 +161,7 @@ docs(contest): 시험 API 명세 반영
 - 결정 기록과 기준 문서가 충돌하면 최신 결정 기록을 따르고, 충돌한 기준 문서를 고치는 Issue를 만든다.
 - 같은 규칙을 여러 문서에 옮겨 적지 않는다. 규칙은 원본 문서 한 곳에 두고 다른 문서에서는 위치만 가리킨다.
 - 문서 위치는 행 번호가 아니라 `문서 > 섹션 > 찾을 문구`로 전달한다.
+- 구현 중 설계가 명세서와 달라지면 마지막 커밋으로 명세서도 함께 수정한다.
 
 ### 1.8 스택 브랜치 작업 규칙
 
@@ -280,6 +290,8 @@ git switch -c feat/이슈번호-domain-summary
 
 ### 3.2 변경 확인·커밋·push
 
+- push 전 AI 리뷰·보완은 1.5 병합 정책을 따른다.
+
 ```bash
 # 변경한 파일과 내용을 확인한 뒤 staging
 git status
@@ -303,8 +315,8 @@ git push -u origin feat/이슈번호-domain-summary
 1. GitHub 저장소에서 `Compare & pull request` 또는 `Pull requests → New pull request`를 연다.
 2. base `develop`, compare 본인 작업 브랜치를 확인하고 `Create draft pull request`로 만든다.
 3. PR 템플릿에 완료한 변경과 실제 수행한 검증을 작성한다.
-    - CodeRabbit 리뷰와 CI 결과를 확인하고 필요한 수정을 같은 브랜치에 push한다.
-4. 수정이 끝나면 `Ready for review`로 바꾸고 팀원 리뷰를 요청한다.
+    - 1.5 병합 정책에 따라 Draft PR을 검토·보완하고 CI 결과를 확인한다. 수정은 같은 브랜치에 push한다.
+4. 검토·보완이 끝나면 PR 작성자가 `Ready for review`로 바꾼다. 팀원 리뷰가 있으면 발견한 문제를 검토·처리한다.
 
 ---
 
@@ -321,9 +333,14 @@ git push -u origin feat/이슈번호-domain-summary
     - 대안: 바꿀 코드나 방법. 하나로 정할 수 없으면 선택지.
 - 다른 코드를 근거로 들 때는 커밋 해시가 들어간 permalink를 붙인다. 
     - 파일 화면에서 줄을 선택하고 `y`를 누르면 permalink로 바뀐다.
-- 대안이 몇 줄의 코드 수정이면 GitHub `suggestion` 블록으로 적는다.
+    - 파일 수가 많아 `get_files`가 토큰 한도를 초과하면 PR 브랜치를 로컬에 받아 줄 번호를 확인한다.
+  ```bash
+    git fetch origin <PR브랜치>
+    git cat-file -p <sha>:<파일경로>
+    ```
+- 대안이 몇 줄의 코드 수정이면 반드시 GitHub `suggestion` 블록으로 적는다. 서술형으로만 대안을 적지 않는다.
 - 병합 전에 반드시 고쳐야 하는 지적은 `Review changes → Request changes`로, 권장·질문은 `Comment`로 제출한다.
-- 승인은 `Review changes → Approve`에 아래 내용을 코멘트로 적어 제출한다.
+- 승인 리뷰를 남기는 경우에는 `Review changes → Approve`에 아래 내용을 코멘트로 적어 제출한다.
     - PR의 주제 (무엇을 바꾼 PR인지 한 줄)
     - `💬 리뷰어에게`의 확인 요청마다 확인한 결과
     - 확인 요청이 "특이사항 없음"이면 직접 확인한 범위
@@ -332,8 +349,8 @@ git push -u origin feat/이슈번호-domain-summary
 ### 4.2 병합 전 확인
 
 1. Draft가 해제됐는지 확인한다.
-2. 해당 PR의 승인 수, 변경 요청, 미해결 대화, 충돌 여부를 확인한다.
-3. CI(`quality-check`) 성공을 확인한다.
+2. 해당 PR의 변경 요청, 미해결 대화, 충돌 여부를 확인한다.
+3. Queue 진입과 병합 전 CI(`quality-check`) 성공을 확인한다.
 4. 조건이 충족되면 Mergify Queue의 병합 결과를 확인한다.
 
 ### 4.3 병합 후

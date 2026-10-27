@@ -9,18 +9,21 @@
 | 개발·협업 가이드 | [Git/GitHub 매뉴얼](guides/git-github.md) | 브랜치·Issue·PR·리뷰·병합 규칙과 작업 흐름 |
 | 개발·협업 가이드 | [컨벤션·빌드 매뉴얼](guides/convention-build-manual.md) | Spotless·Checkstyle·빌드·주석·코드 구조 규칙 |
 | 개발·협업 가이드 | [공통 모듈 적용 가이드](guides/common-module.md) | 모듈 선택·설정 등록·보안 체인 연결·기존 서비스 적용 주의점 |
+| 개발·협업 가이드 | [채점 실행 코드 가이드](guides/judge-execution.md) | 생성기 연결·내부 입출력 변환·결과 매핑·검증 방법 |
 | 개발·협업 가이드 | [AI 협업 안내](guides/ai/README.md) | AI 도구별 설정 파일·세션 시작·세 도구의 GitHub MCP 연결 |
 | 기획 | [기획서](dev/planning/planning.md) | 서비스 개요, 기능 목록, 마일스톤 |
 | 기획 | [정책 및 상태](dev/planning/policy-and-state.md) | 도메인 정책, 상태 전이, 불변식 |
 | 아키텍처 | [시스템 구성도](dev/architecture/system-architecture.md) | 전체 아키텍처 구조 |
 | 아키텍처 | [다이어그램](dev/architecture/diagrams.md) | 서비스 간 시퀀스, 상태 전이 흐름 |
 | 명세 | [API 명세서](dev/specifications/api-spec.md) | 서비스 외부 인터페이스 |
+| 명세 | [TypeSpec 공통 타입 명세](dev/specifications/type-spec.md) | 함수 입력·반환 타입, 배열·객체 검증과 언어별 타입 매핑 |
 | 명세 | [ERD](dev/specifications/erd.md) | 도메인·DB 구조 |
 | 명세 | [이벤트 계약서](dev/specifications/event-contract.md) | 서비스 간 내부 인터페이스 |
 | 명세 | [스케줄러](dev/specifications/scheduler.md) | 예약 작업 정의 |
 | 명세 | [에러 코드 표](dev/specifications/error-codes.md) | 공통 에러 코드 |
 | 운영 | [환경 변수 예시](operations/env-example.md) | 로컬·Docker 환경 변수 설정 예시 |
 | 기록 | [결정 기록](records/decisions/) | 서비스 간 계약·설계 결정과 근거 |
+| 기록 | [개발 계획서](records/progress/) | 담당별 사이클 표·이슈/PR 누적 |
 
 ## 디렉터리 구분
 
@@ -31,7 +34,7 @@
 | `dev/specifications/` | API 명세, 에러코드 표, 도메인·DB, 이벤트 계약, 스케줄러 정의 |
 | `guides/` | Git/GitHub, 코드 컨벤션, AI 협업, 로컬 개발·실행 방법 |
 | `operations/` | AWS 구성, 배포 절차, 모니터링, 장애 대응 절차 |
-| `records/` | 회의록, 결정 근거, 테스트·성능 측정·운영 결과 |
+| `records/` | 회의록, 결정 근거, 테스트·성능 측정·운영 결과, 담당별 개발 계획서 |
 | `assets/diagrams/` | 구성도·ERD·처리 흐름의 첨부 이미지 |
 | `assets/screenshots/` | 화면과 검증 결과의 스크린샷 |
 
