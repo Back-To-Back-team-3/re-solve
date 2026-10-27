@@ -2,7 +2,6 @@ package com.backtoback.study.global.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.DisplayName;
@@ -13,7 +12,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -23,8 +21,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
-
-import com.backtoback.common.web.security.user.GatewayUser;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -85,10 +81,11 @@ class SecurityConfigurationTest {
     @Test
     @DisplayName("로그인이 필요한 스터디 경로에 인증 헤더가 있으면 허용한다")
     void permitsUserOnLoginRequiredPaths() throws Exception {
+        // 테스트 DB에 가입 이력이 없어 content는 빈 목록이지만, 401이 아니라는 것이 authenticated() 적용을 증명한다.
+        // @AuthenticationPrincipal 분기는 StudyControllerTest(mock)에서 검증한다.
         mockMvc
             .perform(get("/api/v1/studies/me").header("X-User-Id", USER_ID).header("X-User-Role", "USER"))
-            .andExpect(status().isOk())
-            .andExpect(content().string(USER_ID));
+            .andExpect(status().isOk());
     }
 
     @Test
@@ -127,13 +124,8 @@ class SecurityConfigurationTest {
     @RestController
     static class ProbeController {
 
-        // GET /api/v1/studies, GET /api/v1/studies/{studyId}는 StudyController(discovery)가 실제로
-        // 구현해 더 이상 여기서 가짜 응답을 두지 않는다.
-
-        @GetMapping("/api/v1/studies/me")
-        String myStudies(@AuthenticationPrincipal GatewayUser user) {
-            return user.userId();
-        }
+        // GET /api/v1/studies, GET /api/v1/studies/{studyId}, GET /api/v1/studies/me는 StudyController(discovery)가
+        // 실제로 구현해 더 이상 여기서 가짜 응답을 두지 않는다.
 
         @GetMapping("/api/v1/studies/recommendations")
         String recommendations() {

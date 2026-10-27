@@ -34,6 +34,8 @@ import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.common.web.security.user.UserRole;
 import com.backtoback.study.discovery.dto.StudyDetailResponse;
+import com.backtoback.study.discovery.dto.StudyMyListResponse;
+import com.backtoback.study.discovery.dto.StudyMySummaryResponse;
 import com.backtoback.study.discovery.dto.StudySummaryResponse;
 import com.backtoback.study.discovery.service.StudyQueryService;
 import com.backtoback.study.membership.domain.JoinType;
@@ -174,6 +176,55 @@ class StudyControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.myMembership.membershipId").value("55"))
             .andExpect(jsonPath("$.data.myMembership.status").value("APPROVED"));
+    }
+
+    @Test
+    @DisplayName("5.1.3 로그인 시 토큰의 사용자 ID로 내 스터디 목록을 조회한다")
+    void getMyStudiesSuccess() throws Exception {
+        // given
+        SecurityContextHolder
+            .getContext()
+            .setAuthentication(new TestingAuthenticationToken(new GatewayUser("7", UserRole.USER), null));
+        StudyMySummaryResponse item
+            = new StudyMySummaryResponse(
+                "1",
+                "코딩테스트 스터디",
+                StudyStatus.ACTIVE,
+                "55",
+                MembershipStatus.APPROVED,
+                MembershipRole.MEMBER,
+                OffsetDateTime.of(2026, 9, 22, 9, 10, 0, 0, ZoneOffset.ofHours(9))
+            );
+        StudyMyListResponse response = new StudyMyListResponse(List.of(item), 0, 20, 1, 1, false, 2, 5);
+        given(studyQueryService.getMyStudies(eq(7L), any(), any())).willReturn(response);
+
+        // when & then
+        mockMvc
+            .perform(get("/api/v1/studies/me"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.content[0].membershipId").value("55"))
+            .andExpect(jsonPath("$.data.content[0].joinedAt").value("2026-09-22T09:10:00+09:00"))
+            .andExpect(jsonPath("$.data.activeJoinCount").value(2))
+            .andExpect(jsonPath("$.data.activeJoinLimit").value(5));
+    }
+
+    @Test
+    @DisplayName("5.1.3 size가 100을 넘으면 100으로 낮춰 서비스에 전달한다")
+    void getMyStudiesClampsPageSizeTo100() throws Exception {
+        // given
+        SecurityContextHolder
+            .getContext()
+            .setAuthentication(new TestingAuthenticationToken(new GatewayUser("7", UserRole.USER), null));
+        given(studyQueryService.getMyStudies(eq(7L), any(), any()))
+            .willReturn(new StudyMyListResponse(List.of(), 0, 100, 0, 0, false, 0, 5));
+
+        // when
+        mockMvc.perform(get("/api/v1/studies/me").param("size", "1000")).andExpect(status().isOk());
+
+        // then
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(studyQueryService).getMyStudies(eq(7L), any(), pageableCaptor.capture());
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(100);
     }
 
     private StudyDetailResponse detailResponse(StudyDetailResponse.MyMembership myMembership) {

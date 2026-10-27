@@ -1,10 +1,12 @@
 package com.backtoback.study.membership.repository;
 
+import java.util.Optional;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.backtoback.study.membership.domain.StudyMemberQuota;
 
 public interface StudyMemberQuotaRepository extends JpaRepository<StudyMemberQuota, Long> {
 
-    // 조회 메서드는 필요한 기능 Issue에서 추가한다.
+    Optional<StudyMemberQuota> findByMemberId(Long memberId);
 }
