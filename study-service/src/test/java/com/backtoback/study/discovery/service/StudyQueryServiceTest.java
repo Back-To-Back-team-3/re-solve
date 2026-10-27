@@ -58,7 +58,7 @@ class StudyQueryServiceTest {
         // then
         assertThat(result.getContent()).hasSize(1);
         StudySummaryResponse response = result.getContent().getFirst();
-        assertThat(response.studyId()).isEqualTo(1L);
+        assertThat(response.studyId()).isEqualTo("1");
         assertThat(response.name()).isEqualTo("코딩테스트 스터디");
         assertThat(response.goal()).isEqualTo("EMPLOYMENT");
     }

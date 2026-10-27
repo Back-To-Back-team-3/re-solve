@@ -10,7 +10,7 @@ import com.backtoback.study.membership.domain.StudyStatus;
  * 스터디 목록 조회 응답 (API 명세서 5.1.1).
  */
 public record StudySummaryResponse(
-    Long studyId,
+    String studyId,
     String name,
     String goal,
     String skillLevel,
@@ -26,7 +26,7 @@ public record StudySummaryResponse(
 
     public static StudySummaryResponse from(Study study) {
         return new StudySummaryResponse(
-            study.getId(),
+            String.valueOf(study.getId()),
             study.getName(),
             study.getGoal(),
             study.getSkillLevel(),

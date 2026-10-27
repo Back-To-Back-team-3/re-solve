@@ -57,7 +57,7 @@ class StudyControllerTest {
         // given
         StudySummaryResponse item
             = new StudySummaryResponse(
-                12L,
+                "12",
                 "코딩테스트 스터디",
                 "EMPLOYMENT",
                 "LV2",
@@ -78,7 +78,7 @@ class StudyControllerTest {
             .perform(get("/api/v1/studies"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.success").value(true))
-            .andExpect(jsonPath("$.data.content[0].studyId").value(12))
+            .andExpect(jsonPath("$.data.content[0].studyId").value("12"))
             .andExpect(jsonPath("$.data.content[0].name").value("코딩테스트 스터디"))
             .andExpect(jsonPath("$.data.content[0].activeTimeSlot").value("EVENING"));
     }
