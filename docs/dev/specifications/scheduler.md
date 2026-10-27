@@ -1007,7 +1007,7 @@
 | 소유 서비스·패키지 | `notification-service` / `reminder` |
 | 실행 방식 | `fixedDelay = 10초`, `initialDelay = 10초` |
 | 잠금 | ShedLock `ExamReminderDispatchScheduler`, `lockAtMostFor = 9초` |
-| 예약 저장소 | `notification_reminders`(ERD 추가 제안): `member_id`, `exam_id`, `participant_id`, `fire_at`, `starts_at`, `context_revision`, `source_event_id`, `status`(`SCHEDULED`/`SENT`/`CANCELED`) / 유일 `(participant_id)` |
+| 예약 저장소 | `notification_reminders`(ERD 4.7.3): `member_id`, `exam_id`, `participant_id`, `fire_at`, `starts_at`, `context_revision`, `source_event_id`, `status`(`SCHEDULED`/`SENT`/`CANCELED`) / 유일 `(participant_id)`. 시험 취소·일정 변경 이벤트가 참가 등록보다 먼저 도착하는 역전을 방어하기 위해 시험 단위 표식 행(`member_id = 0`, 음수 `participant_id`: `-(examId * 2 - 1)` 취소 표식, `-(examId * 2)` 일정 스냅샷)을 함께 기록하며, 탈퇴 회원 여부는 `notification_withdrawn_members`(ERD 4.7.4)로 판별한다 |
 | 예약 생성·갱신 | `ExamParticipantRegistered` → `fire_at = startsAt − 5분` INSERT. `ExamUpdated` → `context_revision` 큰 경우만 `fire_at` 갱신. `ExamParticipantCanceled`·`ExamCanceled` → `CANCELED` |
 | 대상 조회 | `status = 'SCHEDULED' AND fire_at <= now() AND starts_at > now()` |
 | 처리 | `UPDATE … SET status='SENT' WHERE id=:id AND status='SCHEDULED'` + `EXAM_STARTING_SOON` 알림 INSERT(유일 제약) 한 트랜잭션 → 커밋 후 SSE 전송 |
@@ -1031,10 +1031,10 @@
 | --- | --- |
 | 실행 방식 | `cron = 0 30 3 * * *`, `zone = "Asia/Seoul"` |
 | 잠금 | ShedLock `NotificationRetentionScheduler`, `lockAtMostFor = 30분` |
-| 처리 | `created_at < now() - INTERVAL 90 DAY` 1,000건 단위 삭제 (`idx_notifications_created_at`), `SENT`·`CANCELED` 예약 7일 경과분 삭제 |
+| 처리 | `notifications.created_at < now() - INTERVAL 90 DAY` (`idx_notifications_created_at`), 종결(`SENT`·`CANCELED`)된 참가자 예약(`participant_id > 0`, `updated_at < now() - INTERVAL 7 DAY`), SQS 최대 보관 기간(14일)이 경과한 시험 단위 음수 표식(`participant_id < 0`, `starts_at < now() - INTERVAL 14 DAY AND updated_at < now() - INTERVAL 14 DAY`)을 각 1,000건 배치 단위로 번갈아(라운드로빈) 삭제 |
 | 경합 | SSE 재전송 범위(24시간)와 겹치지 않음 |
 
-**명세서와의 관계:** 정책 §2.1 알림 보관 90일 / ERD 4.7.1
+**명세서와의 관계:** 정책 §2.1 알림 보관 90일 / ERD 4.7.1, 4.7.3
 
 ## 8. GitHub 연동 (integration)
 
