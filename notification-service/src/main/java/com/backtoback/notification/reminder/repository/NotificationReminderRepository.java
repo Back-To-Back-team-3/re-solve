@@ -31,8 +31,6 @@ public interface NotificationReminderRepository extends JpaRepository<Notificati
     @Query("SELECT r FROM NotificationReminder r WHERE r.participantId = :participantId")
     Optional<NotificationReminder> findByParticipantIdForShare(@Param("participantId") Long participantId);
 
-    boolean existsByParticipantId(Long participantId);
-
     List<NotificationReminder> findByStatusAndFireAtLessThanEqualAndStartsAtGreaterThanOrderByFireAtAsc(
         ReminderStatus status,
         LocalDateTime fireAtThreshold,
@@ -150,4 +148,48 @@ public interface NotificationReminderRepository extends JpaRepository<Notificati
             + "AND r.status = com.backtoback.notification.reminder.domain.ReminderStatus.SCHEDULED"
     )
     int cancelAllScheduledByExamId(@Param("examId") Long examId, @Param("now") LocalDateTime now);
+
+    /**
+     * 종결 상태({@code SENT}, {@code CANCELED})가 된 지 7일이 지난 실제 참가자 예약({@code participant_id > 0})을
+     * 지정된 건수만큼 물리 삭제한다 (스케줄러 명세서 7.2).
+     * 음수 {@code participant_id}를 사용하는 시험 단위 취소·스냅샷 표식 행은 지연 도착 이벤트 방어를 위해 삭제 대상에서 제외한다.
+     *
+     * @param cutoff 삭제 기준 시각 ({@code updated_at < cutoff})
+     * @param limit 1회 삭제 상한 건수
+     * @return 삭제된 행 수
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "DELETE FROM notification_reminders " + "WHERE status IN ('SENT', 'CANCELED') "
+            + "AND updated_at < :cutoff " + "AND participant_id > 0 " + "LIMIT :limit",
+        nativeQuery = true
+    )
+    int deleteExpiredCompletedReminders(@Param("cutoff") LocalDateTime cutoff, @Param("limit") int limit);
+
+    /**
+     * SQS 최대 보관 기간(14일)이 지나 더 이상 지연·역전 이벤트가 도착할 수 없는 음수 표식 행({@code participant_id < 0})을
+     * 지정된 건수만큼 물리 삭제하여 표식 행의 무한 적체를 방지한다 (스케줄러 명세서 0.2.3, 7.2).
+     *
+     * @param cutoff 삭제 기준 시각 ({@code starts_at < cutoff AND updated_at < cutoff})
+     * @param limit 1회 삭제 상한 건수
+     * @return 삭제된 행 수
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "DELETE FROM notification_reminders " + "WHERE status = 'CANCELED' " + "AND updated_at < :cutoff "
+            + "AND starts_at < :cutoff " + "AND participant_id < 0 " + "LIMIT :limit",
+        nativeQuery = true
+    )
+    int deleteExpiredSentinelReminders(@Param("cutoff") LocalDateTime cutoff, @Param("limit") int limit);
+
+    /**
+     * 탈퇴한 회원의 실제 시험 참가 예약({@code participant_id > 0})을 모두 물리 삭제한다.
+     * 음수 {@code participant_id}로 저장된 탈퇴 표식 행은 유지한다.
+     *
+     * @param memberId 탈퇴한 회원 ID
+     * @return 삭제된 행 수
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("DELETE FROM NotificationReminder r WHERE r.memberId = :memberId AND r.participantId > 0")
+    int deleteParticipantRemindersByMemberId(@Param("memberId") Long memberId);
 }
