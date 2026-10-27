@@ -176,7 +176,7 @@ flowchart LR
     - 문제는 삭제하지 않고 `visibility = ARCHIVED`로 표현한다. 제출이 있는 문제는 `ARCHIVED`로만 전환한다.
     - 저장된 수정 회차와 연결된 S3 파일은 불변이다. 수정은 새 회차·새 파일로만 한다.
     - 검증 코드 원본·요청·결과 요약은 Problem, 실행 작업·시도 이력·판정은 Judge가 소유한다. 참조 중인 검증 코드·요청은 삭제하지 않는다.
-    - 본문에 연결되지 않은 이미지(`status = PENDING`)는 대기 시간(미결정) 경과 후 S3 객체와 함께 물리 삭제한다.
+    - 미연결 본문·테스트·이미지·검증 코드만 정책 §4의 업로드 보호·24시간 유예와 §4.2.3의 참조 검사를 통과한 뒤 정리한다. 저장 회차와 검증 요청의 참조는 결과·공개 상태·경과 시간과 무관하게 보존한다.
     - 공유 풀이·댓글은 상태값(`CANCELED`·`DELETED`·`HIDDEN`)으로 표현한다. 회원 탈퇴 시 공유 풀이는 비공개 처리한다.
 
 ### 2.3 judge
@@ -956,45 +956,78 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 #### 4.2.3 본문 파일 (`problem_body_assets`)
 
+**파일 추적·연결 공통 규칙**
+
+본문·테스트·이미지·검증 코드는 각각 기존 `problem_body_assets`·`problem_test_assets`·`problem_images`·`problem_code_assets`에서 추적한다. Problem 백엔드가 파일 행과 객체 키를 업로드 전에 먼저 커밋하며, 클라이언트나 Judge가 추적 상태를 변경하지 않는다.
+
+| 상태 | 의미 | 허용 전이 |
+| --- | --- | --- |
+| `PENDING` | 업로드 진행·결과 확인 중 또는 저장 완료 후 미연결 | 저장·소속·참조 검사 후 `LINKED`, 쓰기 종료·미참조 확인 후 `DISCARDED`, 정리 조건 충족 시 `DELETING` |
+| `LINKED` | 저장 회차·본문 이미지 연결·검증 요청이 참조하는 파일 | 유지. 자동 정리로 다른 상태로 전이하지 않음 |
+| `DISCARDED` | 참조가 없고 업로드 쓰기 종료가 확인된 폐기 파일 | 유예 경과 후 `DELETING`. 재연결·업로드 재개 없음 |
+| `DELETING` | 삭제를 선점해 신규 연결·업로드를 금지한 파일 | S3 삭제 성공 또는 객체 없음 확인 후 DB 행 삭제. 실패·중단 시 상태 유지 |
+
+- 참조 원본은 본문의 `problem_revisions.body_asset_id`, 테스트의 `problem_revision_tests.test_asset_id`, 이미지의 `problem_body_images.image_id`, 코드의 `problem_validations.code_asset_id`다. 본문 삭제 전에는 `problem_body_images.body_asset_id`도 확인하고, 하나라도 있으면 삭제하지 않는다.
+- 최신·사용 회차만 검사하지 않는다. 이전 회차·검증 미통과 저장 회차·여러 회차가 공유하는 파일, 미반영·성공·실패 검증 요청의 코드 참조가 모두 보호 대상이다. 참조가 있는데 상태가 `PENDING`·`DISCARDED`·`DELETING`이면 삭제를 중단하고 정합성 오류로 기록한다.
+- 연결 트랜잭션과 정리 선점은 같은 파일 행 잠금으로 직렬화한다. 연결은 저장 완료한 `PENDING` 또는 같은 문제의 `LINKED`만 허용하고, 소속·작성 관리자·내용 메타 정보와 상태를 다시 확인한 뒤 참조 INSERT·소속 확정·`LINKED`를 함께 커밋한다. `DISCARDED`·`DELETING`·없는 파일은 참조하지 않는다.
+- 문제·회차 잠금이 필요한 API는 이를 먼저 획득하고, 파일은 본문 → 테스트 → 이미지 → 코드, 같은 종류는 ID 오름차순으로 잠근다. 정리 작업은 파일 한 행만 잠그고 문제·회차를 역순으로 잠그지 않는다. 모든 참조 생성 경로는 해당 파일 잠금·상태 검사를 거친다.
+- 최초 문제 저장 실패 시 파일의 `problem_id`는 null로 남을 수 있다. 문제를 만든 최종 트랜잭션이 소속과 참조를 함께 확정한다. 이미 연결된 파일은 다른 문제로 옮기지 않는다.
+- `created_at`은 첫 업로드 추적 시작이며 `upload_expires_at`·`uploaded_at`·`upload_finished_at`·`failure_code`를 파일별로 보관한다. 키·체크섬·크기와 이미지 MIME은 업로드할 바이트에서 먼저 정하고, `object_version`은 저장 결과가 확인되면 확정한다. 파일 행이 없으면 S3 업로드를 시작하지 않는다.
+- `uploaded_at`과 `upload_finished_at`은 최종 회차·요청 연결 전에 별도 짧은 트랜잭션으로 기록한다. 저장 성공은 두 시각이 있고, 확정 실패는 `uploaded_at = null`·종료 시각·실패 분류를 가진다. 업로드 성공 뒤 최종 DB 연결만 실패하면 저장·종료 시각은 유지하고 연결 실패 분류를 남긴다. 최종 DB 결과가 불명확하면 참조·멱등 응답을 확인하기 전 폐기하지 않는다.
+- 업로드 갱신·완료는 같은 파일 행 잠금 아래 `PENDING`·기존 만료값·종료 미확인 조건을 검사한다. 만료 후 기존 작업의 갱신·쓰기·연결 재개는 금지한다. 만료 전에 저장·종료를 확정한 미연결 파일은 `DELETING` 선점 전까지 연결할 수 있으며, 업로드 만료와 정리 유예를 혼동하지 않는다.
+- S3 호출 중에는 DB 행 잠금을 유지하지 않는다. 업로드 보호 시간은 정책 §4, 삭제 선점·외부 삭제·DB 정리·중단 복구는 스케줄러 §2.1을 따른다. 미연결 파일 정리는 검증 요청·Judge 실행 이력·태그 멱등 기록을 삭제하지 않는다.
+
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `problem_id` | BIGINT | N | NULL 허용: 최초 연결 전. FK → `problems.id` |
 | `owner_id` | BIGINT | Y | 파일 작성 관리자 (COMMENT: `members.id`) |
-| `status` | VARCHAR(30) | Y | `PENDING` / `LINKED` / `DISCARDED` |
+| `status` | VARCHAR(30) | Y | `PENDING` / `LINKED` / `DISCARDED` / `DELETING` |
 | `object_key` | VARCHAR(500) `_bin` | Y | S3 객체 키 (회차별 불변 경로) |
-| `object_version` | VARCHAR(200) | N | NULL 허용: 버전 관리 미사용 버킷 |
+| `object_version` | VARCHAR(200) | N | 저장 미확인·버전 관리 미사용은 null. 버전 관리 사용 시 연결 전에 고정 |
 | `sha256` | CHAR(64) `_bin` | Y | SHA-256 체크섬 |
 | `size_bytes` | BIGINT | Y | 파일 크기 |
-| `created_at` | DATETIME(6) | Y |  |
-| `updated_at` | DATETIME(6) | Y |  |
+| `upload_expires_at` | DATETIME(6) | Y | 업로드 보호 만료 시각. 시작·유효한 갱신 시각 + 24시간 |
+| `uploaded_at` | DATETIME(6) | N | S3 저장 결과·체크섬 확인 시각. 미확인·실패는 null |
+| `upload_finished_at` | DATETIME(6) | N | 기존 S3 쓰기와 재시도가 종료됐음이 확인된 시각. 결과 불명은 null |
+| `failure_code` | VARCHAR(100) | N | 업로드 검증·저장·최종 연결 실패 분류. 실패 없음은 null, 원문·인증 정보 저장 금지 |
+| `created_at` | DATETIME(6) | Y | 업로드 추적 시작 시각. 변경하지 않음 |
+| `updated_at` | DATETIME(6) | Y | 마지막 추적·상태 변경 시각. 정리 유예 기산점으로 사용하지 않음 |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
 | `fk_problem_body_assets_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
 | `uk_problem_body_assets_object_key` | `object_key` | 객체 키 중복 방지 |
+| `idx_problem_body_assets_cleanup` | `(status, upload_finished_at, id)` | 미연결 유예 경과·삭제 중 복구 조회 |
 
 #### 4.2.4 이미지 파일 (`problem_images`)
+
+업로드 추적 필드와 상태·참조 보호는 §4.2.3의 공통 규칙을 따른다.
 
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `problem_id` | BIGINT | N | NULL 허용: 최초 연결 전. FK → `problems.id` |
 | `owner_id` | BIGINT | Y | 파일 작성 관리자 (COMMENT: `members.id`) |
-| `status` | VARCHAR(30) | Y | `PENDING`(미연결) / `LINKED` / `DISCARDED` |
+| `status` | VARCHAR(30) | Y | `PENDING` / `LINKED` / `DISCARDED` / `DELETING` |
 | `object_key` | VARCHAR(500) `_bin` | Y | S3 객체 키 |
-| `object_version` | VARCHAR(200) | N | NULL 허용: 버전 관리 미사용 버킷 |
+| `object_version` | VARCHAR(200) | N | 저장 미확인·버전 관리 미사용은 null. 버전 관리 사용 시 연결 전에 고정 |
 | `sha256` | CHAR(64) `_bin` | Y | SHA-256 체크섬 |
 | `content_type` | VARCHAR(100) | Y | MIME 타입 |
 | `size_bytes` | BIGINT | Y | 파일 크기 |
-| `created_at` | DATETIME(6) | Y |  |
-| `updated_at` | DATETIME(6) | Y |  |
+| `upload_expires_at` | DATETIME(6) | Y | 업로드 보호 만료 시각. 시작·유효한 갱신 시각 + 24시간 |
+| `uploaded_at` | DATETIME(6) | N | S3 저장 결과·체크섬 확인 시각. 미확인·실패는 null |
+| `upload_finished_at` | DATETIME(6) | N | 기존 S3 쓰기와 재시도가 종료됐음이 확인된 시각. 결과 불명은 null |
+| `failure_code` | VARCHAR(100) | N | 업로드 검증·저장·최종 연결 실패 분류. 실패 없음은 null, 원문·인증 정보 저장 금지 |
+| `created_at` | DATETIME(6) | Y | 업로드 추적 시작 시각. 변경하지 않음 |
+| `updated_at` | DATETIME(6) | Y | 마지막 추적·상태 변경 시각. 정리 유예 기산점으로 사용하지 않음 |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
 | `fk_problem_images_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
 | `uk_problem_images_object_key` | `object_key` | 객체 키 중복 방지 |
-| `idx_problem_images_status_created_at` | `(status, created_at)` | 미연결 이미지 정리 스케줄러 |
+| `idx_problem_images_cleanup` | `(status, upload_finished_at, id)` | 미연결 유예 경과·삭제 중 복구 조회 |
+| `idx_problem_images_status_created_at` | `(status, created_at)` | 상태별 업로드 시작 이력 조회 |
 
 #### 4.2.5 본문 이미지 연결 (`problem_body_images`) `[IMMUTABLE]`
 
@@ -1013,23 +1046,30 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 #### 4.2.6 테스트 파일 (`problem_test_assets`)
 
+업로드 추적 필드와 상태·참조 보호는 §4.2.3의 공통 규칙을 따른다.
+
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `problem_id` | BIGINT | N | NULL 허용: 최초 연결 전. FK → `problems.id` |
 | `owner_id` | BIGINT | Y | 파일 작성 관리자 (COMMENT: `members.id`) |
-| `status` | VARCHAR(30) | Y | `PENDING` / `LINKED` / `DISCARDED` |
+| `status` | VARCHAR(30) | Y | `PENDING` / `LINKED` / `DISCARDED` / `DELETING` |
 | `object_key` | VARCHAR(500) `_bin` | Y | S3 객체 키 (비공개 버킷) |
-| `object_version` | VARCHAR(200) | N | NULL 허용: 버전 관리 미사용 버킷 |
+| `object_version` | VARCHAR(200) | N | 저장 미확인·버전 관리 미사용은 null. 버전 관리 사용 시 연결 전에 고정 |
 | `sha256` | CHAR(64) `_bin` | Y | SHA-256 체크섬 |
 | `size_bytes` | BIGINT | Y | 파일 크기 |
-| `created_at` | DATETIME(6) | Y |  |
-| `updated_at` | DATETIME(6) | Y |  |
+| `upload_expires_at` | DATETIME(6) | Y | 업로드 보호 만료 시각. 시작·유효한 갱신 시각 + 24시간 |
+| `uploaded_at` | DATETIME(6) | N | S3 저장 결과·체크섬 확인 시각. 미확인·실패는 null |
+| `upload_finished_at` | DATETIME(6) | N | 기존 S3 쓰기와 재시도가 종료됐음이 확인된 시각. 결과 불명은 null |
+| `failure_code` | VARCHAR(100) | N | 업로드 검증·저장·최종 연결 실패 분류. 실패 없음은 null, 원문·인증 정보 저장 금지 |
+| `created_at` | DATETIME(6) | Y | 업로드 추적 시작 시각. 변경하지 않음 |
+| `updated_at` | DATETIME(6) | Y | 마지막 추적·상태 변경 시각. 정리 유예 기산점으로 사용하지 않음 |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
 | `fk_problem_test_assets_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
 | `uk_problem_test_assets_object_key` | `object_key` | 객체 키 중복 방지 |
+| `idx_problem_test_assets_cleanup` | `(status, upload_finished_at, id)` | 미연결 유예 경과·삭제 중 복구 조회 |
 
 #### 4.2.7 회차별 테스트 구성 (`problem_revision_tests`) `[IMMUTABLE]`
 
@@ -1231,25 +1271,30 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 #### 4.2.16 검증 코드 파일 (`problem_code_assets`)
 
-검증 코드 원문은 비공개 S3의 불변 UTF-8 파일로 저장한다. DB에는 기존 본문·테스트 에셋과 같은 파일 메타 정보와 연결 상태를 보관한다.
+검증 코드 원문은 비공개 S3의 불변 UTF-8 파일로 저장한다. DB에는 기존 본문·테스트 에셋과 같은 파일 메타 정보와 연결 상태를 보관한다. 업로드 추적 필드와 상태·참조 보호는 §4.2.3의 공통 규칙을 따른다.
 
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `problem_id` | BIGINT | Y | FK → `problems.id`. 문제 저장 후 코드 접수 |
 | `owner_id` | BIGINT | Y | 작성 관리자 (`members.id`, 외부 참조) |
-| `status` | VARCHAR(30) | Y | `PENDING` / `LINKED` / `DISCARDED` |
+| `status` | VARCHAR(30) | Y | `PENDING` / `LINKED` / `DISCARDED` / `DELETING` |
 | `object_key` | VARCHAR(500) `_bin` | Y | 업로드마다 새로 만드는 불변 S3 객체 키 |
-| `object_version` | VARCHAR(200) | N | 버킷 버전 관리 사용 시 고정 버전, 미사용은 null |
+| `object_version` | VARCHAR(200) | N | 저장 미확인·버전 관리 미사용은 null. 버전 관리 사용 시 연결 전에 고정 |
 | `sha256` | CHAR(64) `_bin` | Y | 원본 UTF-8 바이트의 SHA-256 |
 | `size_bytes` | BIGINT | Y | 원본 UTF-8 바이트 수 |
-| `created_at` | DATETIME(6) | Y | 업로드 추적 시작 시각 |
-| `updated_at` | DATETIME(6) | Y | 파일 연결 상태 변경 시각 |
+| `upload_expires_at` | DATETIME(6) | Y | 업로드 보호 만료 시각. 시작·유효한 갱신 시각 + 24시간 |
+| `uploaded_at` | DATETIME(6) | N | S3 저장 결과·체크섬 확인 시각. 미확인·실패는 null |
+| `upload_finished_at` | DATETIME(6) | N | 기존 S3 쓰기와 재시도가 종료됐음이 확인된 시각. 결과 불명은 null |
+| `failure_code` | VARCHAR(100) | N | 업로드 검증·저장·최종 연결 실패 분류. 실패 없음은 null, 원문·인증 정보 저장 금지 |
+| `created_at` | DATETIME(6) | Y | 업로드 추적 시작 시각. 변경하지 않음 |
+| `updated_at` | DATETIME(6) | Y | 마지막 추적·상태 변경 시각. 정리 유예 기산점으로 사용하지 않음 |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
 | `fk_problem_code_assets_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
 | `uk_problem_code_assets_object_key` | `object_key` | 객체 키 UNIQUE |
+| `idx_problem_code_assets_cleanup` | `(status, upload_finished_at, id)` | 미연결 유예 경과·삭제 중 복구 조회 |
 | `idx_problem_code_assets_status_created_at` | `(status, created_at)` | 미연결 파일 추적 |
 | `idx_problem_code_assets_problem` | `problem_id` | 문제별 파일 참조 |
 
@@ -2680,7 +2725,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 제출 수·결과 중복 방지 | `problem_submission_results.submission_id` UNIQUE·`judge_attempt` 비교. 집계 행 잠금과 동일 트랜잭션으로 최초 제출만 계수 (§4.2.18) | — |
 | 공유 중복 | 생성 컬럼 `active_submission_id` + `uk_solution_shares_study_active_submission` | — |
 | 공유 권한 재검증 | 조회 시점마다 `study_membership_replicas.is_active` 확인 | — |
-| 미연결 이미지 정리 | `status = PENDING` AND 대기 시간 경과 → S3 삭제 후 행 삭제 (ShedLock) | — |
+| 미연결 파일 정리 | §4.2.3의 상태·참조 보호와 정책 §4의 업로드 종료·24시간 유예를 재검증. DELETING 선점 → S3 삭제 → DB 행 삭제, 중단·실패는 스케줄러 §2.1로 복구 | — |
 
 ### 6.3 judge
 
