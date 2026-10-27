@@ -18,8 +18,10 @@ import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.api.PageResponse;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.study.discovery.dto.StudyDetailResponse;
+import com.backtoback.study.discovery.dto.StudyMyListResponse;
 import com.backtoback.study.discovery.dto.StudySummaryResponse;
 import com.backtoback.study.discovery.service.StudyQueryService;
+import com.backtoback.study.membership.domain.MembershipStatus;
 
 import lombok.RequiredArgsConstructor;
 
@@ -74,7 +76,25 @@ public class StudyController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
-    // 요청 size가 상한을 넘으면 낮춘다(API 명세서 5.1.1 size 최대 100).
+    /**
+     * 5.1.3 내 스터디 목록 — 로그인이 필요하다. 본인의 {@code PENDING}·{@code APPROVED} 가입과 참여 카운터를 반환한다.
+     */
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<StudyMyListResponse>> getMyStudies(
+        @RequestParam(required = false) MembershipStatus status,
+        @AuthenticationPrincipal GatewayUser user,
+        @PageableDefault(
+            size = 20,
+            sort = "joinedAt"
+        ) Pageable pageable
+    ) {
+        Long memberId = Long.parseLong(user.userId());
+        Pageable safePageable = clampPageSize(pageable);
+        StudyMyListResponse response = studyQueryService.getMyStudies(memberId, status, safePageable);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // 요청 size가 상한을 넘으면 낮춘다(API 명세서 5.1.1 size 최대 100). 5.1.3도 같은 한도를 적용한다.
     private Pageable clampPageSize(Pageable pageable) {
         if (pageable.getPageSize() <= MAX_PAGE_SIZE) {
             return pageable;
