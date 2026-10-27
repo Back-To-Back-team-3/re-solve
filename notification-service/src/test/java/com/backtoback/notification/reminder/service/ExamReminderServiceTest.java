@@ -2,6 +2,7 @@ package com.backtoback.notification.reminder.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
@@ -25,7 +26,9 @@ import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.notification.event.dto.NotificationCreatedEvent;
 import com.backtoback.notification.notification.domain.Notification;
 import com.backtoback.notification.notification.domain.NotificationType;
+import com.backtoback.notification.notification.domain.NotificationWithdrawnMember;
 import com.backtoback.notification.notification.repository.NotificationRepository;
+import com.backtoback.notification.notification.repository.NotificationWithdrawnMemberRepository;
 import com.backtoback.notification.preference.domain.NotificationPreference;
 import com.backtoback.notification.preference.repository.NotificationPreferenceRepository;
 import com.backtoback.notification.reminder.domain.NotificationReminder;
@@ -41,6 +44,7 @@ class ExamReminderServiceTest {
     private NotificationReminderRepository reminderRepository;
     private NotificationRepository notificationRepository;
     private NotificationPreferenceRepository preferenceRepository;
+    private NotificationWithdrawnMemberRepository withdrawnMemberRepository;
     private ApplicationEventPublisher eventPublisher;
     private ExamReminderService examReminderService;
 
@@ -49,12 +53,14 @@ class ExamReminderServiceTest {
         reminderRepository = mock(NotificationReminderRepository.class);
         notificationRepository = mock(NotificationRepository.class);
         preferenceRepository = mock(NotificationPreferenceRepository.class);
+        withdrawnMemberRepository = mock(NotificationWithdrawnMemberRepository.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
         examReminderService
             = new ExamReminderService(
                 reminderRepository,
                 notificationRepository,
                 preferenceRepository,
+                withdrawnMemberRepository,
                 eventPublisher,
                 clock
             );
@@ -484,5 +490,53 @@ class ExamReminderServiceTest {
         assertThat(dispatched).isFalse();
         verify(notificationRepository, never()).saveAndFlush(any());
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("MemberWithdrawn 수신 시 notification_withdrawn_members에 탈퇴 기록을 남기고 해당 회원의 실제 참가 예약을 삭제한다")
+    void cleanupByMemberWithdrawnInsertsWithdrawnRecordAndDeletesParticipantReminders() {
+        // given
+        LocalDateTime withdrawnAt = LocalDateTime.of(2026, 10, 21, 10, 0, 0);
+
+        // when
+        examReminderService.cleanupByMemberWithdrawn("evt-withdraw-1", 7L, 12, withdrawnAt);
+
+        // then
+        verify(withdrawnMemberRepository)
+            .insertIgnoreWithdrawnMember(eq(7L), eq("evt-withdraw-1"), eq(12), eq(withdrawnAt), eq(fixedNow));
+        verify(reminderRepository).deleteParticipantRemindersByMemberId(7L);
+    }
+
+    @Test
+    @DisplayName("이미 탈퇴 기록이 존재하는 회원의 지연 ExamParticipantRegistered 이벤트는 예약을 생성하지 않는다")
+    void registerReminderWhenMemberAlreadyWithdrawnSkipsInsert() {
+        // given
+        LocalDateTime startsAt = LocalDateTime.of(2026, 10, 20, 21, 0, 0);
+        NotificationWithdrawnMember withdrawnMember
+            = NotificationWithdrawnMember.recordWithdrawal(7L, "evt-withdraw-1", 12, startsAt, fixedNow);
+        given(withdrawnMemberRepository.findByMemberIdForShare(7L)).willReturn(Optional.of(withdrawnMember));
+
+        // when
+        examReminderService.registerReminder("evt-late-reg", 7L, 55L, 411L, 1, startsAt);
+
+        // then
+        verify(reminderRepository, never())
+            .insertIgnoreReminder(any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("다수 수신자 중 탈퇴 기록이 있는 회원 ID 집합을 단건 IN 공유 잠금(FOR SHARE) 쿼리로 일괄 조회한다")
+    void findWithdrawnMemberIdsQueriesInBatchWithShareLock() {
+        // given
+        java.util.List<Long> memberIds = java.util.List.of(7L, 8L, 9L);
+        given(withdrawnMemberRepository.findMemberIdsByMemberIdInForShare(memberIds))
+            .willReturn(java.util.List.of(7L, 9L));
+
+        // when
+        java.util.Set<Long> withdrawnMemberIds = examReminderService.findWithdrawnMemberIds(memberIds);
+
+        // then
+        assertThat(withdrawnMemberIds).containsExactlyInAnyOrder(7L, 9L);
+        verify(withdrawnMemberRepository).findMemberIdsByMemberIdInForShare(memberIds);
     }
 }
