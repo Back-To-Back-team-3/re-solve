@@ -230,7 +230,7 @@ class JudgeResultEvaluatorTest {
     void acceptsLongDecimalWithinOutputBudget() {
         var floating = new TypeSpec(Kind.FLOAT64, null, null, null, null);
         var raw = execution(3, "1." + "0".repeat(1200), "", "1", "100");
-        assertThat(evaluator.evaluate(raw, floating, "1", 262144, 1024).verdict()).isEqualTo(JudgeVerdict.AC);
+        assertThat(evaluator.evaluate(raw, floating, "1", 262144, 64).verdict()).isEqualTo(JudgeVerdict.AC);
         assertThat(evaluator.evaluate(raw, floating, "1", 262144, 1).verdict()).isEqualTo(JudgeVerdict.RE);
     }
 
@@ -267,16 +267,62 @@ class JudgeResultEvaluatorTest {
         assertThat(evaluate(execution(3, "1", "", "0", "8192.25")).memoryKiB()).isEqualByComparingTo("8192.25");
     }
 
-    /** 반환값과 디버그 출력은 각 한도까지 동시에 허용한다. */
-    @Test
-    @DisplayName("반환 JSON 1MiB와 디버그 64KiB를 합산하지 않고 각각 한도까지 허용한다")
-    void appliesSeparateLimits() {
-        String json = "\"" + "x".repeat(1024 * 1024 - 2) + "\"";
+    /**
+     * 반환값과 디버그 출력은 각 한도까지 동시에 허용한다.
+     *
+     * @param outputLimitKiB 회차의 반환값 제한
+     */
+    @ParameterizedTest
+    @ValueSource(
+        ints = {
+            64,
+            256
+        }
+    )
+    @DisplayName("반환 JSON은 기본·최대 한도까지 디버그 64KiB와 별도로 허용한다")
+    void appliesSeparateLimits(int outputLimitKiB) {
+        String json = "\"" + "x".repeat(outputLimitKiB * 1024 - 2) + "\"";
         var result
-            = evaluator.evaluate(execution(3, json, "x".repeat(65536), "1", "100"), STRING, json, MEMORY_LIMIT, 1024);
+            = evaluator
+                .evaluate(
+                    execution(3, json, "x".repeat(65536), "1", "100"),
+                    STRING,
+                    json,
+                    MEMORY_LIMIT,
+                    outputLimitKiB
+                );
         assertThat(result.verdict()).isEqualTo(JudgeVerdict.AC);
         assertThat(result.actualReturnText()).isEqualTo(json);
         assertThat(result.debugOutput()).hasSize(65536);
+        var exceeded
+            = evaluator.evaluate(execution(3, json + " ", "", "1", "100"), STRING, json, MEMORY_LIMIT, outputLimitKiB);
+        assertThat(exceeded.verdict()).isEqualTo(JudgeVerdict.RE);
+        assertThat(exceeded.actualReturnText()).isNull();
+    }
+
+    /**
+     * 허용 범위를 벗어난 회차 제한은 실행 결과 조회 전에 거절한다.
+     *
+     * @param outputLimitKiB 허용하지 않는 반환값 제한
+     */
+    @ParameterizedTest
+    @ValueSource(
+        ints = {
+            -1,
+            0,
+            257,
+            1024,
+            Integer.MAX_VALUE
+        }
+    )
+    @DisplayName("반환값 제한은 1~256KiB 범위만 허용하며 잘못된 제한으로 조회하지 않는다")
+    void rejectsInvalidReturnLimits(int outputLimitKiB) {
+        assertThatThrownBy(
+            () -> evaluator.evaluate(execution(3, "1", "", "0", "0"), INT, "1", MEMORY_LIMIT, outputLimitKiB)
+        ).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> evaluator.findAndEvaluate("unused", INT, "1", MEMORY_LIMIT, outputLimitKiB))
+            .isInstanceOf(IllegalArgumentException.class);
+        verifyNoMoreInteractions(client);
     }
 
     /** 회차별 반환값 제한은 바이트 단위로 적용하고 초과한 출력을 결과에 보관하지 않는다. */
@@ -415,7 +461,7 @@ class JudgeResultEvaluatorTest {
     @DisplayName("Judge0 조회의 연결·타임아웃·응답·설정 실패는 한 번 호출 후 시스템 오류로 전달한다")
     void mapsClientFailures(JudgeErrorCode code) {
         given(client.find("token")).willThrow(new JudgeException(code));
-        var result = evaluator.findAndEvaluate("token", INT, "1", MEMORY_LIMIT, 1024);
+        var result = evaluator.findAndEvaluate("token", INT, "1", MEMORY_LIMIT, 64);
         assertThat(result.verdict()).isEqualTo(JudgeVerdict.SYSTEM_ERROR);
         verify(client).find("token");
         verifyNoMoreInteractions(client);
@@ -426,11 +472,11 @@ class JudgeResultEvaluatorTest {
     @DisplayName("조회 성공은 반환값 비교로 연결하고 비통신 업무 예외와 기대값 오류는 호출자에게 전달한다")
     void preservesCallerFailures() {
         given(client.find("ok")).willReturn(execution(3, "1", "", "0", "0"));
-        assertThat(evaluator.findAndEvaluate("ok", INT, "1", MEMORY_LIMIT, 1024).verdict()).isEqualTo(JudgeVerdict.AC);
+        assertThat(evaluator.findAndEvaluate("ok", INT, "1", MEMORY_LIMIT, 64).verdict()).isEqualTo(JudgeVerdict.AC);
         given(client.find("unavailable")).willThrow(new JudgeException(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE));
-        assertThatThrownBy(() -> evaluator.findAndEvaluate("unavailable", INT, "1", MEMORY_LIMIT, 1024))
+        assertThatThrownBy(() -> evaluator.findAndEvaluate("unavailable", INT, "1", MEMORY_LIMIT, 64))
             .isInstanceOf(JudgeException.class);
-        assertThatThrownBy(() -> evaluator.findAndEvaluate("ok", INT, "\"invalid\"", MEMORY_LIMIT, 1024))
+        assertThatThrownBy(() -> evaluator.findAndEvaluate("ok", INT, "\"invalid\"", MEMORY_LIMIT, 64))
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> evaluator.findAndEvaluate("unused", INT, "1", MEMORY_LIMIT, 0))
             .isInstanceOf(IllegalArgumentException.class);
@@ -443,7 +489,7 @@ class JudgeResultEvaluatorTest {
      * @return 정수 1을 기대한 판정 결과
      */
     private JudgeTestResult evaluate(JudgeExecutionResultResponse raw) {
-        return evaluator.evaluate(raw, INT, "1", MEMORY_LIMIT, 1024);
+        return evaluator.evaluate(raw, INT, "1", MEMORY_LIMIT, 64);
     }
 
     /**

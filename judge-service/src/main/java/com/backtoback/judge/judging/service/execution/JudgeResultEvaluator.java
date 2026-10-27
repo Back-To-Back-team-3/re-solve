@@ -24,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public final class JudgeResultEvaluator {
+    private static final int MAX_RETURN_LIMIT_KIB = 256;
     private static final int DEBUG_LIMIT_BYTES = 64 * 1024;
     private final JudgeReturnComparator comparator;
     private final JudgeClient client;
@@ -36,7 +37,7 @@ public final class JudgeResultEvaluator {
      * @param returnType 고정 회차의 반환 타입
      * @param expectedText 고정 회차의 기대 JSON 텍스트
      * @param memoryLimitKiB 회차의 메모리 제한(KiB)
-     * @param outputLimitKiB 회차의 반환값 제한(KiB)
+     * @param outputLimitKiB 회차의 반환값 제한(KiB, 1~256)
      * @return 실행 진행 상태 또는 테스트 판정
      * @throws JudgeException 통신 장애 이외의 업무 오류가 발생한 경우
      * @throws IllegalArgumentException 제한값·토큰·명세·기대값이 올바르지 않은 경우
@@ -71,7 +72,7 @@ public final class JudgeResultEvaluator {
      * @param returnType 고정 회차의 반환 타입
      * @param expectedText 고정 회차의 기대 JSON 텍스트
      * @param memoryLimitKiB 회차의 메모리 제한(KiB)
-     * @param outputLimitKiB 회차의 반환값 제한(KiB)
+     * @param outputLimitKiB 회차의 반환값 제한(KiB, 1~256)
      * @return 대기·실행 중에는 판정이 없는 결과, 종료 시 테스트 판정 또는 시스템 실패
      * @throws IllegalArgumentException 제한값·명세·기대값이 올바르지 않은 경우
      */
@@ -175,15 +176,15 @@ public final class JudgeResultEvaluator {
     }
 
     /**
-     * 호출자가 전달한 확정 회차의 제한값이 양수인지 확인한다.
+     * 호출자가 전달한 확정 회차의 메모리 제한이 양수이고 반환값 제한이 허용 범위인지 확인한다.
      *
      * @param memoryLimitKiB 메모리 제한(KiB)
-     * @param outputLimitKiB 반환값 제한(KiB)
-     * @throws IllegalArgumentException 제한값이 양수가 아닌 경우
+     * @param outputLimitKiB 반환값 제한(KiB, 1~256)
+     * @throws IllegalArgumentException 메모리 제한이 양수가 아니거나 반환값 제한이 1~256KiB 범위를 벗어난 경우
      */
     private void requireLimits(int memoryLimitKiB, int outputLimitKiB) {
-        if (memoryLimitKiB <= 0 || outputLimitKiB <= 0) {
-            throw new IllegalArgumentException("회차의 메모리·반환값 제한은 양수여야 합니다.");
+        if (memoryLimitKiB <= 0 || outputLimitKiB <= 0 || outputLimitKiB > MAX_RETURN_LIMIT_KIB) {
+            throw new IllegalArgumentException("회차의 메모리 제한은 양수이고 반환값 제한은 1~256KiB여야 합니다.");
         }
     }
 
