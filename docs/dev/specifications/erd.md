@@ -41,6 +41,7 @@
 | problem | MemberProblemStatus | 회원별 일반 풀이 해결 여부 | 해결 여부, 최초 해결 제출 | B |
 | problem | SolutionShare · SolutionComment | 스터디 대상 AC 풀이 공유와 라인 댓글 | 코드 스냅샷, 공유 상태, 라인 번호 | B |
 | judge | Submission | 모든 문맥의 제출과 최종 판정 | 문맥, 회차 고정, 멱등키, 상태, 판정, 채점 회차 | B |
+| judge | ExecutionRuntime | 여러 제출이 공유하는 불변 실행 환경 스냅샷 | 언어, Judge0 실행 환경 ID, 이름·버전, 컴파일 옵션 | B |
 | judge | JudgeJob · JudgeJobRun · JudgeTestResult | 채점 작업(원천), 실행 시도 이력, 테스트별 결과 | 임대 토큰, 실행 시도 수, Judge0 token | B |
 | contest | Exam · ExamProblem · ExamParticipant | 스터디 시험, 회차 고정 문제, 참가자 | 시작·종료, 배점, 개인 종료 시각, 총점 | C |
 | contest | ExamDraft · ExamSubmission · ExamProblemResult | 시험 Draft, 시험 제출, 문제별 점수 | `seq`, 접수 시각, 부분 점수 | C |
@@ -186,6 +187,7 @@ flowchart LR
 - 서비스 내부 관계:
     
     ```
+    execution_runtimes (1) ──< submissions (N)     -- runtime_id NULL이면 아직 실행 환경 미확정
     submissions (1) ──< judge_jobs (N)               -- 채점 회차마다 1건
     judge_jobs (1) ──< judge_job_runs (N)            -- 실행 시도마다 1건, 불변
     judge_jobs (1) ──< judge_test_results (N)        -- 테스트별 결과
@@ -1434,6 +1436,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `idempotency_key` | VARCHAR(100) `_bin` | N | NULL 허용: `PRACTICE` 외. `Idempotency-Key` 헤더 |
 | `request_hash` | CHAR(64) `_bin` | N | NULL 허용: `PRACTICE` 외. 같은 키·다른 본문 판별용 SHA-256 |
 | `language` | VARCHAR(30) | Y | 언어 (공통 모듈 Enum) |
+| `runtime_id` | BIGINT | N | NULL 허용: 최초 실행 환경 확정 전. FK → `execution_runtimes.id`. 확정 후 참조 변경·초기화 불가 |
 | `source_code` | MEDIUMTEXT | Y | 제출 코드 (불변) |
 | `code_size_bytes` | INT | Y | 코드 크기 (64KB 이하) |
 | `status` | VARCHAR(30) | Y | `QUEUED` / `JUDGING` / `RETRY_WAITING` / `COMPLETED` / `FAILED` |
@@ -1453,6 +1456,8 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
+| `fk_submissions_runtime` | `runtime_id` → `execution_runtimes.id` | 서비스 내부 FK. 실행 환경 삭제 시 참조 중인 제출 보호 |
+| `idx_submissions_runtime_id` | `(runtime_id)` | 실행 환경 참조 및 FK 인덱스 |
 | `uk_submissions_member_idempotency_key` | `(member_id, idempotency_key)` | `PRACTICE` 멱등 (NULL은 중복 아님) |
 | `uk_submissions_context_source_submission` | `(context, source_submission_id)` | 시험·대회·진단 채점 요청 멱등 |
 | `idx_submissions_member_created_at` | `(member_id, created_at)` | 내 제출 이력 최신순 |
@@ -1474,6 +1479,8 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 - `status = COMPLETED` ⇔ `verdict IS NOT NULL`
 - `idempotency_key` 보관 24시간: 판단은 `created_at`으로 하고 행은 삭제하지 않는다.
+- 확정한 `runtime_id`는 변경하거나 NULL로 초기화하지 않는다.
+- `runtime_id`가 참조하는 실행 환경의 `language`는 제출의 `language`와 일치해야 한다.
 
 #### 4.3.2 채점 작업 (`judge_jobs`)
 
@@ -1563,6 +1570,30 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `fk_judge_test_results_job` | `judge_job_id` → `judge_jobs.id` | 서비스 내부 FK |
 | `uk_judge_test_results_job_order` | `(judge_job_id, test_order)` | 테스트당 1건 |
 | `idx_judge_test_results_token_status` | `(token_status, updated_at)` | 결과 폴링·응답 유실 복구 |
+
+#### 4.3.5 실행 환경 (`execution_runtimes`) `[IMMUTABLE]`
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK. `submissions.runtime_id`가 참조하는 내부 식별자 |
+| `language` | VARCHAR(30) | Y | 서비스 언어 코드. `java` / `python3` / `cpp` |
+| `judge0_language_id` | INT | Y | Judge0 실행 환경 ID. 외부 참조이며 DB FK 없음 |
+| `runtime_name` | VARCHAR(255) | Y | Judge0가 반환한 실행 환경 이름을 그대로 보존 |
+| `runtime_version` | VARCHAR(100) | Y | 실행 환경 일치 검증에 사용하는 숫자 버전 문자열 |
+| `compiler_options` | TEXT | N | NULL 허용: 컴파일 옵션 없음. 실행에 적용할 옵션을 그대로 보존 |
+| `created_at` | DATETIME(6) | Y | 스냅샷 생성 시각. 불변 테이블이므로 `updated_at`은 두지 않음 |
+
+**제약 및 인덱스**
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `idx_execution_runtimes_language_judge0_id` | `(language, judge0_language_id)` | 동일 실행 환경 스냅샷의 재사용 후보 조회. UNIQUE 아님 |
+
+**불변식**
+
+- 생성한 스냅샷의 속성은 변경하지 않는다. `created_at`만 기록하며 `updated_at`은 두지 않는다.
+- 제출이 참조 중인 스냅샷은 삭제하지 않는다.
+- 내부 식별자 `id`와 외부 식별자 `judge0_language_id`를 구분한다. `judge0_language_id` 하나로는 스냅샷의 유일성을 보장하지 않는다.
 
 ### 4.4 contest
 
@@ -2969,10 +3000,11 @@ judge-service/src/main/resources/db/migration/
   V2__common_create_processed_events.sql
   V3__common_create_shedlock.sql
   V4__common_create_audit_logs.sql
-  V5__submission_create_submissions.sql
-  V6__judging_create_judge_jobs.sql
-  V7__judging_create_judge_job_runs.sql
-  V8__judging_create_judge_test_results.sql
+  V5__judging_create_execution_runtimes.sql
+  V6__submission_create_submissions.sql
+  V7__judging_create_judge_jobs.sql
+  V8__judging_create_judge_job_runs.sql
+  V9__judging_create_judge_test_results.sql
 ```
 
 ### 7.4 Contest (`contest-service`)
