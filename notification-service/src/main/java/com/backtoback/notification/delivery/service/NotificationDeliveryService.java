@@ -6,6 +6,8 @@ import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +49,7 @@ public class NotificationDeliveryService {
     private final NotificationRepository notificationRepository;
     private final NotificationWithdrawnMemberRepository withdrawnMemberRepository;
     private final Clock clock;
+    private final ConcurrentMap<Long, Object> memberLifecycleLocks = new ConcurrentHashMap<>();
 
     @Autowired
     public NotificationDeliveryService(
@@ -82,10 +85,6 @@ public class NotificationDeliveryService {
      * @throws NotificationException 탈퇴한 회원의 구독 요청인 경우 ({@code AUTH_ACCESS_DENIED})
      */
     public SseEmitter subscribe(Long memberId, String lastEventId) {
-        if (withdrawnMemberRepository != null && withdrawnMemberRepository.existsByMemberId(memberId)) {
-            throw new NotificationException(CommonErrorCode.AUTH_ACCESS_DENIED);
-        }
-
         String emitterId = generateEmitterId(memberId);
         SseEmitter emitter = createEmitter();
         Long parsedLastEventId = parseLastEventId(lastEventId);
@@ -97,7 +96,14 @@ public class NotificationDeliveryService {
         emitter.onTimeout(() -> cleanup(emitterId, emitter, null));
         emitter.onError(throwable -> emitterRepository.deleteById(emitterId));
 
-        emitterRepository.save(session);
+        // 탈퇴 여부 확인과 세션 저장을 회원 생명주기 락 안에서 원자적으로 처리하여
+        // MemberWithdrawn의 disconnectMember 스냅샷 조회와의 레이스 컨디션으로 인한 탈퇴 후 세션 잔존을 차단한다.
+        synchronized (getMemberLifecycleLock(memberId)) {
+            if (withdrawnMemberRepository != null && withdrawnMemberRepository.existsByMemberId(memberId)) {
+                throw new NotificationException(CommonErrorCode.AUTH_ACCESS_DENIED);
+            }
+            emitterRepository.save(session);
+        }
 
         // 재전송 중 실시간 발송이 끼어들어 순서가 역전되거나 중복 전송되는 것을 막기 위해 세션 모니터 락을 사용한다.
         synchronized (emitter) {
@@ -169,11 +175,17 @@ public class NotificationDeliveryService {
 
     /**
      * 탈퇴한 회원의 모든 활성 SSE 세션을 저장소에서 제거하고 정상 종료(complete) 처리한다 (이벤트 계약서 4.1 M3, 5.1).
+     * 신규 구독(subscribe)의 탈퇴 여부 확인 및 세션 저장과 동일한 회원 생명주기 락 안에서 스냅샷을 조회해
+     * 탈퇴 직전/도중 등록된 세션이 누락되어 활성 상태로 남는 경합을 방지한다.
      *
      * @param memberId 탈퇴한 회원 ID
      */
     public void disconnectMember(Long memberId) {
-        List<SseSession> sessions = emitterRepository.findAllByMemberId(memberId);
+        List<SseSession> sessions;
+        synchronized (getMemberLifecycleLock(memberId)) {
+            sessions = emitterRepository.findAllByMemberId(memberId);
+        }
+
         for (SseSession session : sessions) {
             SseEmitter emitter = session.emitter();
             synchronized (emitter) {
@@ -313,5 +325,9 @@ public class NotificationDeliveryService {
 
     private String generateEmitterId(Long memberId) {
         return memberId + "_" + clock.millis() + "_" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    private Object getMemberLifecycleLock(Long memberId) {
+        return memberLifecycleLocks.computeIfAbsent(memberId, key -> new Object());
     }
 }

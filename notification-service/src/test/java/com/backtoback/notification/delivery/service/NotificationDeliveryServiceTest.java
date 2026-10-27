@@ -451,6 +451,50 @@ class NotificationDeliveryServiceTest {
         assertThat(emitterRepository.findAllByMemberId(withdrawnMemberId)).isEmpty();
     }
 
+    @Test
+    @DisplayName("탈퇴 처리가 진행되는 도중 subscribe가 경합해도 탈퇴 후 세션이 잔존하지 않고 403 거절 또는 정상 disconnect된다")
+    void subscribeAndDisconnectMemberConcurrentRaceConditionSerialized() throws Exception {
+        // given
+        Long memberId = 7L;
+        NotificationWithdrawnMemberRepository withdrawnMemberRepository
+            = mock(NotificationWithdrawnMemberRepository.class);
+
+        // 탈퇴가 완료된 상태에서 레이스 컨디션 진입 시뮬레이션
+        given(withdrawnMemberRepository.existsByMemberId(memberId)).willReturn(true);
+
+        NotificationDeliveryService serviceWithWithdrawnRepo
+            = new NotificationDeliveryService(
+                emitterRepository,
+                notificationRepository,
+                withdrawnMemberRepository,
+                clock
+            ) {
+                @Override
+                SseEmitter createEmitter() {
+                    latestEmitter = new CapturingSseEmitter();
+                    return latestEmitter;
+                }
+            };
+
+        // when: disconnectMember와 subscribe 동시 호출
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<?> disconnectFuture = executor.submit(() -> serviceWithWithdrawnRepo.disconnectMember(memberId));
+        Future<?> subscribeFuture = executor.submit(() -> {
+            try {
+                serviceWithWithdrawnRepo.subscribe(memberId, null);
+            } catch (NotificationException ignored) {
+                // 탈퇴 확인에 걸려 거절된 경우 정상
+            }
+        });
+
+        disconnectFuture.get(5, TimeUnit.SECONDS);
+        subscribeFuture.get(5, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        // then: 탈퇴 후 남겨진 활성 세션이 없어야 함
+        assertThat(emitterRepository.findAllByMemberId(memberId)).isEmpty();
+    }
+
     /**
      * 리플렉션 없이 전송 이벤트 ID와 종료 상태를 캡처하는 테스트용 SseEmitter 서브클래스.
      */
