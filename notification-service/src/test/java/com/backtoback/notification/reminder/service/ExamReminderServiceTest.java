@@ -154,10 +154,12 @@ class ExamReminderServiceTest {
                 .status(ReminderStatus.CANCELED)
                 .build();
 
-        given(reminderRepository.existsByParticipantId(ExamReminderService.examCanceledTombstoneParticipantId(55L)))
-            .willReturn(false);
-        given(reminderRepository.findByParticipantId(ExamReminderService.examScheduleSnapshotParticipantId(55L)))
-            .willReturn(Optional.of(snapshot));
+        given(
+            reminderRepository.findByParticipantIdForShare(ExamReminderService.examCanceledTombstoneParticipantId(55L))
+        ).willReturn(Optional.empty());
+        given(
+            reminderRepository.findByParticipantIdForShare(ExamReminderService.examScheduleSnapshotParticipantId(55L))
+        ).willReturn(Optional.of(snapshot));
         given(
             reminderRepository
                 .insertIgnoreReminder(
@@ -196,8 +198,19 @@ class ExamReminderServiceTest {
     void registerReminderWhenExamAlreadyCanceledInsertsCanceledTombstone() {
         // given
         LocalDateTime startsAt = LocalDateTime.of(2026, 10, 20, 21, 0, 0);
-        given(reminderRepository.existsByParticipantId(ExamReminderService.examCanceledTombstoneParticipantId(55L)))
-            .willReturn(true);
+        NotificationReminder canceledSentinel
+            = NotificationReminder
+                .createCanceledTombstone(
+                    0L,
+                    55L,
+                    ExamReminderService.examCanceledTombstoneParticipantId(55L),
+                    fixedNow,
+                    4,
+                    "evt-exam-cancel-1"
+                );
+        given(
+            reminderRepository.findByParticipantIdForShare(ExamReminderService.examCanceledTombstoneParticipantId(55L))
+        ).willReturn(Optional.of(canceledSentinel));
 
         // when
         examReminderService.registerReminder("evt-reg-late", 7L, 55L, 411L, 3, startsAt);
@@ -215,6 +228,43 @@ class ExamReminderServiceTest {
                 eq(ReminderStatus.CANCELED.name()),
                 eq(fixedNow)
             );
+    }
+
+    @Test
+    @DisplayName("7.1 참가 등록 INSERT 직전 동시 트랜잭션에서 ExamCanceled가 커밋되면 FOR SHARE 재확인으로 즉시 취소한다")
+    void registerReminderWhenExamCanceledConcurrentlyDuringInsertCancelsReminder() {
+        // given
+        LocalDateTime startsAt = LocalDateTime.of(2026, 10, 20, 21, 0, 0);
+        Long canceledSentinelId = ExamReminderService.examCanceledTombstoneParticipantId(55L);
+        NotificationReminder canceledSentinel
+            = NotificationReminder.createCanceledTombstone(0L, 55L, canceledSentinelId, fixedNow, 4, "evt-cancel-55");
+
+        given(reminderRepository.findByParticipantIdForShare(canceledSentinelId))
+            .willReturn(Optional.empty())
+            .willReturn(Optional.of(canceledSentinel));
+        given(
+            reminderRepository.findByParticipantIdForShare(ExamReminderService.examScheduleSnapshotParticipantId(55L))
+        ).willReturn(Optional.empty());
+        given(
+            reminderRepository
+                .insertIgnoreReminder(
+                    7L,
+                    55L,
+                    411L,
+                    LocalDateTime.of(2026, 10, 20, 20, 55, 0),
+                    startsAt,
+                    3,
+                    "evt-reg-1",
+                    ReminderStatus.SCHEDULED.name(),
+                    fixedNow
+                )
+        ).willReturn(1);
+
+        // when
+        examReminderService.registerReminder("evt-reg-1", 7L, 55L, 411L, 3, startsAt);
+
+        // then
+        verify(reminderRepository).cancelScheduledByParticipantId(411L, fixedNow);
     }
 
     @Test
@@ -263,10 +313,13 @@ class ExamReminderServiceTest {
     }
 
     @Test
-    @DisplayName("7.1 ExamCanceled 수신 시 시험 취소 종단 표식을 기록하고 발화 대기 예약을 일괄 취소한다")
+    @DisplayName("7.1 ExamCanceled 수신 시 실제 이벤트 메타데이터로 시험 취소 종단 표식을 기록하고 발화 대기 예약을 일괄 취소한다")
     void cancelByExamCanceledInsertsTombstoneAndCancelsAllScheduled() {
+        // given
+        LocalDateTime canceledAt = LocalDateTime.of(2026, 10, 20, 20, 15, 0);
+
         // when
-        examReminderService.cancelByExamCanceled(55L);
+        examReminderService.cancelByExamCanceled("evt-exam-cancel-1", 55L, 4, canceledAt);
 
         // then
         verify(reminderRepository)
@@ -274,10 +327,10 @@ class ExamReminderServiceTest {
                 eq(0L),
                 eq(55L),
                 eq(ExamReminderService.examCanceledTombstoneParticipantId(55L)),
-                eq(fixedNow),
-                eq(fixedNow),
-                eq(Integer.MAX_VALUE),
-                eq("EXAM_CANCELED:55"),
+                eq(canceledAt),
+                eq(canceledAt),
+                eq(4),
+                eq("evt-exam-cancel-1"),
                 eq(ReminderStatus.CANCELED.name()),
                 eq(fixedNow)
             );
