@@ -1259,7 +1259,7 @@
     	      "timeMs": 2000, 
     	      "memoryKb": 262144, 
     	      "wallTimeMs": 7000, 
-    	      "outputLimitKb": 64 
+              "outputLimitKb": 64
           },
           "starterCodes": [ 
     	      { 
@@ -1569,8 +1569,9 @@
 | `timeMs` | int 또는 null | ms | CPU 시간 제한. 기본 2,000. C++ 정답 최대 실행 시간 × 3 이상, 최소 1,000 (B-5) |
 | `memoryKb` | int 또는 null | KB | 메모리 제한. 기본 262,144 |
 | `wallTimeMs` | int 또는 null | ms | 생략 시 `timeMs + 5,000` |
-| `outputLimitKb` | int 또는 null | KB | 출력량 제한. 초과는 `RE`(출력 초과) |
+| `outputLimitKb` | int 또는 null | KiB | 테스트별 반환 JSON 크기 제한. 허용 범위 1~256, 생략·null이면 기본 64. 디버그 출력 제한과 별개이며 초과 판정은 정책 및 상태 §3.2·§3.3을 따른다 |
 - 언어별 보정은 두지 않는다. 최종 값은 회차에 저장하고 이후 공통 설정 변경은 기존 회차에 반영하지 않는다.
+- 반환값·디버그 출력의 크기 계산과 개별 제한은 [정책 및 상태 > 3.2 채점 실행](../planning/policy-and-state.md#32-채점-실행)을 따른다. 디버그 출력은 테스트별 공통 64KiB 제한으로, `executionLimits`의 요청·응답 필드나 회차별 설정에 포함하지 않는다.
 
 #### 2.3.1 문제 등록
 
@@ -1740,7 +1741,7 @@
     	      "timeMs": 2000, 
     	      "memoryKb": 262144, 
     	      "wallTimeMs": 7000, 
-    	      "outputLimitKb": 64 
+              "outputLimitKb": 64
           },
           "testCases": [ { 
     	      "testAssetId": "501", 
@@ -2200,7 +2201,7 @@
     	    "timeMs": 2000, 
     	    "memoryKb": 262144, 
     	    "wallTimeMs": 7000, 
-    	    "outputLimitKb": 64 
+            "outputLimitKb": 64
         },
         "cases": [ { 
     	    "testAssetId": "501", 
@@ -2263,7 +2264,7 @@
     	      "timeMs": 2000, 
     	      "memoryKb": 262144, 
     	      "wallTimeMs": 7000, 
-    	      "outputLimitKb": 64 
+              "outputLimitKb": 64
           },
           "starterCodes": [ 
     	      { 
@@ -2801,7 +2802,8 @@
     ```
     
     - `CUSTOM`은 기대값이 없어 `verdict`가 `null`(실행 오류면 `RE`·`TLE` 등)
-    - `stdout`은 디버그 출력, 출력량 제한 적용
+    - `stdout`은 디버그 출력이며 테스트별 64KiB 제한을 적용한다. `actualReturnText`는 회차의 `outputLimitKb`로 별도 제한하며 두 출력은 합산하지 않는다. 어느 하나라도 초과하면 `RE`(출력 초과)로 처리한다. 크기 계산은 [정책 및 상태 > 3.2 채점 실행](../planning/policy-and-state.md#32-채점-실행)을 따른다.
+    - `timeMs`는 Judge0 실행 시간(초)을 밀리초로 변환한 뒤 올림한 정수다. 측정값이 없으면 null을 유지한다(정책 및 상태 §3.2).
 - **에러:**
     - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `RUN_RATE_LIMITED`(429), `PROBLEM_NOT_AVAILABLE`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge0 장애
 

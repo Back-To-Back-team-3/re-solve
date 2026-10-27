@@ -110,12 +110,7 @@ public class Judge0Client implements JudgeClient {
                 throw responseFailure(response.getStatusCode().value());
             }
             int statusId = result.status().id();
-            State state = switch (statusId) {
-                case 1 -> State.QUEUED;
-                case 2 -> State.RUNNING;
-                case 13, 14 -> State.SYSTEM_ERROR;
-                default -> State.COMPLETED;
-            };
+            State state = State.fromStatusId(statusId);
             return new JudgeExecutionResultResponse(
                 state,
                 statusId,

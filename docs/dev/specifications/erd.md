@@ -921,7 +921,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `author_id` | BIGINT | Y | 회차 작성 관리자 (COMMENT: `members.id`) |
 | `created_at` | DATETIME(6) | Y |  |
 | `wall_time_limit_ms` | INT | Y | 해당 회차의 최종 wall time 제한(ms). 팀 논의 B-5의 CPU 제한 + 공통 여유값을 적용하여 저장한다. |
-| `output_limit_kb` | INT | Y | 해당 회차의 최종 출력 크기 제한(KB). API의 executionLimits.outputLimitKb에 대응한다. |
+| `output_limit_kb` | INT | Y | 해당 회차의 테스트별 반환 JSON 크기 제한(KiB, 1KiB = 1,024바이트). API의 executionLimits.outputLimitKb에 대응한다. 허용 범위는 1~256이며, 등록 시 생략·null이면 기본 64를 확정해 저장한다. 디버그 출력의 공통 64KiB 제한은 이 컬럼에 포함하지 않는다(정책 및 상태 §3.2). |
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
@@ -1338,7 +1338,7 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 | `token_status` | VARCHAR(30) | Y | `NOT_CREATED` / `CREATED` / `UNKNOWN`(생성 응답 유실) / `DONE` |
 | `created_try_count` | INT | N | NULL 허용: 실행 생성 전. token을 만든 시도 번호 |
 | `verdict` | VARCHAR(30) | N | NULL 허용: 결과 전. 테스트별 판정 (`SYSTEM_ERROR` 포함) |
-| `time_ms` | INT | N | NULL 허용: 결과 전 |
+| `time_ms` | INT | N | NULL 허용: 결과 전 또는 실행 시간 측정값 없음. Judge0 실행 시간(초)을 밀리초로 변환한 뒤 올림한 값(정책 및 상태 §3.2) |
 | `memory_kb` | INT | N | NULL 허용: 결과 전 |
 | `actual_output` | MEDIUMTEXT | N | NULL 허용: 숨김 테스트는 저장하지 않음 |
 | `created_at` | DATETIME(6) | Y |  |
