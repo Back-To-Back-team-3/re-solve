@@ -31,7 +31,9 @@ import com.backtoback.common.web.security.user.GatewayUser;
 @Testcontainers(disabledWithoutDocker = true)
 class SecurityConfigurationTest {
 
-    private static final String USER_ID = "member-1";
+    // Gateway가 내려주는 X-User-Id는 숫자형 회원 ID 문자열이다. StudyController가 상세·내 스터디 조회에서
+    // Long.parseLong(user.userId())로 파싱하므로 숫자가 아닌 값을 쓰면 500이 난다.
+    private static final String USER_ID = "1";
 
     @Container
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("study_db");
@@ -59,16 +61,17 @@ class SecurityConfigurationTest {
     @DisplayName("스터디 목록·상세 조회는 로그인 없이 허용한다")
     void permitsPublicStudyReads() throws Exception {
         mockMvc.perform(get("/api/v1/studies")).andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/studies/1")).andExpect(content().string("anonymous"));
+        // 테스트 DB에 study id=1이 없어 404지만, 401이 아니라는 것이 permitAll 적용을 증명한다.
+        // @AuthenticationPrincipal 분기(로그인 시 memberId 전달)는 StudyControllerTest(mock)에서 검증한다.
+        mockMvc.perform(get("/api/v1/studies/1")).andExpect(status().isNotFound());
     }
 
     @Test
-    @DisplayName("공개 조회에 인증 헤더가 있으면 사용자 정보를 읽는다")
+    @DisplayName("공개 조회에 인증 헤더가 있어도 permitAll이 유지된다")
     void readsUserOnPublicStudyRead() throws Exception {
         mockMvc
             .perform(get("/api/v1/studies/1").header("X-User-Id", USER_ID).header("X-User-Role", "USER"))
-            .andExpect(status().isOk())
-            .andExpect(content().string(USER_ID));
+            .andExpect(status().isNotFound());
     }
 
     @Test
@@ -124,12 +127,8 @@ class SecurityConfigurationTest {
     @RestController
     static class ProbeController {
 
-        // GET /api/v1/studies는 StudyController(discovery)가 실제로 구현해 더 이상 여기서 가짜 응답을 두지 않는다.
-
-        @GetMapping("/api/v1/studies/{studyId}")
-        String study(@AuthenticationPrincipal GatewayUser user) {
-            return user == null ? "anonymous" : user.userId();
-        }
+        // GET /api/v1/studies, GET /api/v1/studies/{studyId}는 StudyController(discovery)가 실제로
+        // 구현해 더 이상 여기서 가짜 응답을 두지 않는다.
 
         @GetMapping("/api/v1/studies/me")
         String myStudies(@AuthenticationPrincipal GatewayUser user) {
