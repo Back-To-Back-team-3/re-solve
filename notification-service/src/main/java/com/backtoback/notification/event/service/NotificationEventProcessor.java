@@ -123,7 +123,7 @@ public class NotificationEventProcessor {
             case "ExamParticipantRegistered" -> handleExamParticipantRegistered(eventId, payload);
             case "ExamUpdated" -> handleExamUpdatedReminder(eventId, payload);
             case "ExamParticipantCanceled" -> handleExamParticipantCanceled(eventId, payload);
-            case "ExamCanceled" -> handleExamCanceledReminder(payload);
+            case "ExamCanceled" -> handleExamCanceledReminder(eventId, payload);
             default -> {
                 // 예약 알림 부수효과 대상이 아님
             }
@@ -159,9 +159,11 @@ public class NotificationEventProcessor {
             .cancelByParticipantCanceled(eventId, memberId, examId, participantId, contextRevision, canceledAt);
     }
 
-    private void handleExamCanceledReminder(JsonNode payload) {
+    private void handleExamCanceledReminder(String eventId, JsonNode payload) {
         Long examId = requireLong(payload, "examId");
-        examReminderService.cancelByExamCanceled(examId);
+        int examRevision = requireParsedInt(payload, "examRevision");
+        LocalDateTime canceledAt = requireDateTime(payload, "canceledAt");
+        examReminderService.cancelByExamCanceled(eventId, examId, examRevision, canceledAt);
     }
 
     private boolean isPreferenceEnabled(Long memberId, Predicate<NotificationPreference> preferenceFilter) {

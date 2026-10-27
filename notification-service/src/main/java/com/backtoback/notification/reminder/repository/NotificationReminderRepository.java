@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,12 +14,22 @@ import org.springframework.data.repository.query.Param;
 import com.backtoback.notification.reminder.domain.NotificationReminder;
 import com.backtoback.notification.reminder.domain.ReminderStatus;
 
+import jakarta.persistence.LockModeType;
+
 /**
  * 시험 시작 임박 예약 알림 JPA 리포지토리 (스케줄러 명세서 7.1).
  */
 public interface NotificationReminderRepository extends JpaRepository<NotificationReminder, Long> {
 
     Optional<NotificationReminder> findByParticipantId(Long participantId);
+
+    /**
+     * MySQL {@code REPEATABLE READ} 격리 수준에서 스냅샷 읽기가 아닌 현재 읽기({@code SELECT ... FOR SHARE})로
+     * 다른 트랜잭션이 커밋한 최신 시험 스냅샷·취소 표식 행을 조회한다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("SELECT r FROM NotificationReminder r WHERE r.participantId = :participantId")
+    Optional<NotificationReminder> findByParticipantIdForShare(@Param("participantId") Long participantId);
 
     boolean existsByParticipantId(Long participantId);
 
@@ -30,17 +41,17 @@ public interface NotificationReminderRepository extends JpaRepository<Notificati
     );
 
     /**
-     * 상위 트랜잭션을 rollback-only로 오염시키지 않도록 중복 participant_id 충돌을 무시하며 예약 행을 삽입한다.
+     * 상위 트랜잭션을 rollback-only로 오염시키지 않도록 유일 키({@code participant_id}) 충돌만 무연산으로 무시하며 예약 행을 삽입한다.
+     * {@code INSERT IGNORE}와 달리 {@code NOT NULL} 위반이나 컬럼 길이 초과 같은 데이터 오류는 정상적으로 예외를 발생시킨다.
      *
-     * @return 실제 삽입된 행 수 (1 또는 0)
+     * @return 신규 삽입 시 1, 중복 키 존재 시 0
      */
     @Modifying(clearAutomatically = true)
     @Query(
-        value = "INSERT IGNORE INTO notification_reminders "
-            + "(member_id, exam_id, participant_id, fire_at, starts_at, "
+        value = "INSERT INTO notification_reminders " + "(member_id, exam_id, participant_id, fire_at, starts_at, "
             + "context_revision, source_event_id, status, created_at, updated_at) "
             + "VALUES (:memberId, :examId, :participantId, :fireAt, :startsAt, "
-            + ":contextRevision, :sourceEventId, :status, :now, :now)",
+            + ":contextRevision, :sourceEventId, :status, :now, :now) " + "ON DUPLICATE KEY UPDATE id = id",
         nativeQuery = true
     )
     int insertIgnoreReminder(

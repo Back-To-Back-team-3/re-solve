@@ -33,7 +33,6 @@ import lombok.extern.slf4j.Slf4j;
 public class ExamReminderService {
 
     private static final Long SENTINEL_MEMBER_ID = 0L;
-    private static final String EXAM_CANCELED_SOURCE_PREFIX = "EXAM_CANCELED:";
     public static final int SINGLE_OPERATION_TIMEOUT_SECONDS = 1;
 
     private final NotificationReminderRepository reminderRepository;
@@ -44,10 +43,10 @@ public class ExamReminderService {
 
     /**
      * {@code ExamParticipantRegistered} 이벤트 수신 시 시험 시작 5분 전 예약 알림을 등록한다.
-     * 이벤트 순서 역전으로 {@code ExamCanceled} 또는 더 높은 버전의 {@code ExamUpdated}가 먼저 처리된 경우
-     * 저장된 시험 단위 취소 종단 표식과 최신 스케줄 스냅샷을 우선 적용하여 잘못된 시각 발화를 차단한다 (이벤트 계약서 1.5, 스케줄러 명세서 7.1).
+     * 이벤트 순서 역전 또는 동시 경합으로 {@code ExamCanceled}·{@code ExamUpdated}가 먼저 커밋된 경우를 감지하기 위해
+     * MySQL {@code REPEATABLE READ}에서 스냅샷 읽기가 아닌 잠금 현재 읽기({@code SELECT ... FOR SHARE})로 시험 단위 표식을 확인한다.
      * 상위 이벤트 트랜잭션이 {@code DataIntegrityViolationException}으로 {@code rollback-only}가 되지 않도록
-     * 무예외 {@code INSERT IGNORE} 쿼리를 사용한다.
+     * 유일 키 충돌만 무연산으로 무시하는 쿼리를 사용한다.
      *
      * @param sourceEventId 원천 이벤트 ID
      * @param memberId 참가 회원 ID
@@ -67,7 +66,9 @@ public class ExamReminderService {
     ) {
         LocalDateTime now = currentDateTime();
         Long canceledSentinelId = examCanceledTombstoneParticipantId(examId);
-        if (reminderRepository.existsByParticipantId(canceledSentinelId)) {
+        Long snapshotSentinelId = examScheduleSnapshotParticipantId(examId);
+
+        if (reminderRepository.findByParticipantIdForShare(canceledSentinelId).isPresent()) {
             reminderRepository
                 .insertIgnoreReminder(
                     memberId,
@@ -87,8 +88,7 @@ public class ExamReminderService {
         int effectiveRevision = contextRevision;
         String effectiveSourceEventId = sourceEventId;
 
-        Optional<NotificationReminder> snapshotOpt
-            = reminderRepository.findByParticipantId(examScheduleSnapshotParticipantId(examId));
+        Optional<NotificationReminder> snapshotOpt = reminderRepository.findByParticipantIdForShare(snapshotSentinelId);
         if (snapshotOpt.isPresent() && snapshotOpt.get().getContextRevision() > contextRevision) {
             NotificationReminder snapshot = snapshotOpt.get();
             effectiveStartsAt = snapshot.getStartsAt();
@@ -118,8 +118,37 @@ public class ExamReminderService {
             return;
         }
 
-        if (initialStatus == ReminderStatus.SCHEDULED && reminderRepository.existsByParticipantId(canceledSentinelId)) {
-            reminderRepository.cancelScheduledByParticipantId(participantId, now);
+        if (initialStatus == ReminderStatus.SCHEDULED) {
+            if (reminderRepository.findByParticipantIdForShare(canceledSentinelId).isPresent()) {
+                reminderRepository.cancelScheduledByParticipantId(participantId, now);
+                return;
+            }
+
+            Optional<NotificationReminder> latestSnapshotOpt
+                = reminderRepository.findByParticipantIdForShare(snapshotSentinelId);
+            if (latestSnapshotOpt.isPresent() && latestSnapshotOpt.get().getContextRevision() > effectiveRevision) {
+                NotificationReminder latestSnapshot = latestSnapshotOpt.get();
+                LocalDateTime latestStartsAt = latestSnapshot.getStartsAt();
+                if (!latestStartsAt.isAfter(now)) {
+                    reminderRepository
+                        .cancelScheduledByExamIdAndNewerRevision(
+                            examId,
+                            latestSnapshot.getContextRevision(),
+                            latestSnapshot.getSourceEventId(),
+                            now
+                        );
+                } else {
+                    reminderRepository
+                        .rescheduleScheduledByExamId(
+                            examId,
+                            latestSnapshot.getContextRevision(),
+                            latestStartsAt,
+                            latestStartsAt.minusMinutes(5),
+                            latestSnapshot.getSourceEventId(),
+                            now
+                        );
+                }
+            }
         }
     }
 
@@ -225,23 +254,26 @@ public class ExamReminderService {
     }
 
     /**
-     * {@code ExamCanceled} 이벤트 수신 시 지연 등록 차단을 위한 시험 취소 종단 표식을 기록하고,
+     * {@code ExamCanceled} 이벤트 수신 시 지연 등록 차단을 위한 시험 취소 종단 표식을 실제 이벤트 메타데이터로 기록하고,
      * 해당 시험의 발화 대기 예약을 일괄 취소한다.
      *
+     * @param sourceEventId ExamCanceled 이벤트 ID
      * @param examId 취소된 시험 ID
+     * @param examRevision 취소 시점 시험 설정 버전
+     * @param canceledAt 시험 취소 시각
      */
     @Transactional
-    public void cancelByExamCanceled(Long examId) {
+    public void cancelByExamCanceled(String sourceEventId, Long examId, int examRevision, LocalDateTime canceledAt) {
         LocalDateTime now = currentDateTime();
         reminderRepository
             .insertIgnoreReminder(
                 SENTINEL_MEMBER_ID,
                 examId,
                 examCanceledTombstoneParticipantId(examId),
-                now,
-                now,
-                Integer.MAX_VALUE,
-                EXAM_CANCELED_SOURCE_PREFIX + examId,
+                canceledAt,
+                canceledAt,
+                examRevision,
+                sourceEventId,
                 ReminderStatus.CANCELED.name(),
                 now
             );

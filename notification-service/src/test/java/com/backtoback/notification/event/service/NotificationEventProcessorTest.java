@@ -352,7 +352,8 @@ class NotificationEventProcessorTest {
         eventProcessor.process(eventId, "ExamCanceled", payload);
 
         // then
-        verify(examReminderService).cancelByExamCanceled(55L);
+        verify(examReminderService)
+            .cancelByExamCanceled(eq(eventId), eq(55L), eq(4), eq(LocalDateTime.of(2026, 10, 20, 20, 15, 0)));
         verify(notificationRepository).saveAndFlush(any(Notification.class));
     }
 
