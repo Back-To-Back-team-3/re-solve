@@ -11,7 +11,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -194,7 +193,7 @@ class StudyControllerTest {
                 "55",
                 MembershipStatus.APPROVED,
                 MembershipRole.MEMBER,
-                LocalDateTime.of(2026, 9, 22, 9, 10)
+                OffsetDateTime.of(2026, 9, 22, 9, 10, 0, 0, ZoneOffset.ofHours(9))
             );
         StudyMyListResponse response = new StudyMyListResponse(List.of(item), 0, 20, 1, 1, false, 2, 5);
         given(studyQueryService.getMyStudies(eq(7L), any(), any())).willReturn(response);
@@ -204,6 +203,7 @@ class StudyControllerTest {
             .perform(get("/api/v1/studies/me"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.content[0].membershipId").value("55"))
+            .andExpect(jsonPath("$.data.content[0].joinedAt").value("2026-09-22T09:10:00+09:00"))
             .andExpect(jsonPath("$.data.activeJoinCount").value(2))
             .andExpect(jsonPath("$.data.activeJoinLimit").value(5));
     }
