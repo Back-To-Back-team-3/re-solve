@@ -3,6 +3,8 @@ package com.backtoback.study.membership.repository;
 import java.util.Collection;
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.backtoback.study.membership.domain.MembershipRole;
@@ -17,5 +19,11 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
         Long studyId,
         Long memberId,
         Collection<MembershipStatus> statuses
+    );
+
+    Page<StudyMembership> findByMemberIdAndStatusIn(
+        Long memberId,
+        Collection<MembershipStatus> statuses,
+        Pageable pageable
     );
 }

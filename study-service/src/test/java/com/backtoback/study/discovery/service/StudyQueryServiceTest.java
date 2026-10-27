@@ -26,6 +26,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.study.discovery.dto.StudyDetailResponse;
+import com.backtoback.study.discovery.dto.StudyMyListResponse;
 import com.backtoback.study.discovery.dto.StudySummaryResponse;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
@@ -33,7 +34,9 @@ import com.backtoback.study.membership.domain.JoinType;
 import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.Study;
+import com.backtoback.study.membership.domain.StudyMemberQuota;
 import com.backtoback.study.membership.domain.StudyMembership;
+import com.backtoback.study.membership.repository.StudyMemberQuotaRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
 import com.backtoback.study.replica.domain.MemberReplica;
@@ -43,18 +46,24 @@ import com.backtoback.study.replica.repository.MemberReplicaRepository;
 /**
  * 선택 필터가 모두 없거나 모두 있어도 예외 없이 조회되고, 조회 결과가 응답 DTO로 올바르게 바뀌는지 검증한다.
  * {@code Specification.and(null)}이 예외를 던지는 버전 차이 회귀를 잡기 위한 테스트다.
- * 상세 조회(API 명세서 5.1.2)의 정상·예외 시나리오도 함께 검증한다.
+ * 상세 조회(API 명세서 5.1.2)·내 스터디 목록(API 명세서 5.1.3)의 정상·예외 시나리오도 함께 검증한다.
  */
 @ExtendWith(MockitoExtension.class)
 class StudyQueryServiceTest {
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 27, 10, 0);
 
+    private static final List<MembershipStatus> IN_PROGRESS_STATUSES
+        = List.of(MembershipStatus.PENDING, MembershipStatus.APPROVED);
+
     @Mock
     private StudyRepository studyRepository;
 
     @Mock
     private StudyMembershipRepository studyMembershipRepository;
+
+    @Mock
+    private StudyMemberQuotaRepository studyMemberQuotaRepository;
 
     @Mock
     private MemberReplicaRepository memberReplicaRepository;
@@ -64,7 +73,13 @@ class StudyQueryServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new StudyQueryService(studyRepository, studyMembershipRepository, memberReplicaRepository);
+        service
+            = new StudyQueryService(
+                studyRepository,
+                studyMembershipRepository,
+                studyMemberQuotaRepository,
+                memberReplicaRepository
+            );
         pageable = PageRequest.of(0, 20);
     }
 
@@ -188,6 +203,93 @@ class StudyQueryServiceTest {
         // then
         assertThat(response.myMembership()).isNull();
         verify(studyMembershipRepository, never()).findByStudyIdAndMemberIdAndStatusIn(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("필터 없이 조회하면 PENDING·APPROVED 가입을 모두 반환하고 참여 카운터를 포함한다")
+    void getMyStudiesReturnsInProgressMembershipsWithActiveJoinCount() {
+        // given
+        StudyMembership membership = myMembership(55L, 1L, 7L, MembershipRole.MEMBER, MembershipStatus.APPROVED);
+        Page<StudyMembership> membershipPage = new PageImpl<>(List.of(membership), pageable, 1);
+        given(studyMembershipRepository.findByMemberIdAndStatusIn(eq(7L), eq(IN_PROGRESS_STATUSES), eq(pageable)))
+            .willReturn(membershipPage);
+
+        Study study = recruitingStudy();
+        given(studyRepository.findAllById(List.of(1L))).willReturn(List.of(study));
+
+        StudyMemberQuota quota = StudyMemberQuota.init(7L);
+        ReflectionTestUtils.setField(quota, "activeCount", 2);
+        given(studyMemberQuotaRepository.findByMemberId(7L)).willReturn(Optional.of(quota));
+
+        // when
+        StudyMyListResponse response = service.getMyStudies(7L, null, pageable);
+
+        // then
+        assertThat(response.content()).hasSize(1);
+        assertThat(response.content().getFirst().studyId()).isEqualTo(1L);
+        assertThat(response.content().getFirst().membershipId()).isEqualTo(55L);
+        assertThat(response.activeJoinCount()).isEqualTo(2);
+        assertThat(response.activeJoinLimit()).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("status=PENDING만 지정하면 PENDING 가입만 조회한다")
+    void getMyStudiesFiltersByPendingStatus() {
+        // given
+        given(
+            studyMembershipRepository
+                .findByMemberIdAndStatusIn(eq(7L), eq(List.of(MembershipStatus.PENDING)), eq(pageable))
+        ).willReturn(new PageImpl<>(List.of()));
+        given(studyMemberQuotaRepository.findByMemberId(7L)).willReturn(Optional.empty());
+
+        // when
+        service.getMyStudies(7L, MembershipStatus.PENDING, pageable);
+
+        // then
+        verify(studyMembershipRepository)
+            .findByMemberIdAndStatusIn(eq(7L), eq(List.of(MembershipStatus.PENDING)), eq(pageable));
+    }
+
+    @Test
+    @DisplayName("status가 PENDING·APPROVED가 아니면 둘 다 조회한다")
+    void getMyStudiesFallsBackToBothStatusesForOtherValues() {
+        // given
+        given(studyMembershipRepository.findByMemberIdAndStatusIn(eq(7L), eq(IN_PROGRESS_STATUSES), eq(pageable)))
+            .willReturn(new PageImpl<>(List.of()));
+        given(studyMemberQuotaRepository.findByMemberId(7L)).willReturn(Optional.empty());
+
+        // when
+        service.getMyStudies(7L, MembershipStatus.LEFT, pageable);
+
+        // then
+        verify(studyMembershipRepository).findByMemberIdAndStatusIn(eq(7L), eq(IN_PROGRESS_STATUSES), eq(pageable));
+    }
+
+    @Test
+    @DisplayName("참여 카운터 행이 없으면 activeJoinCount는 0이다")
+    void getMyStudiesDefaultsActiveJoinCountToZeroWhenQuotaMissing() {
+        // given
+        given(studyMembershipRepository.findByMemberIdAndStatusIn(eq(7L), eq(IN_PROGRESS_STATUSES), eq(pageable)))
+            .willReturn(new PageImpl<>(List.of()));
+        given(studyMemberQuotaRepository.findByMemberId(7L)).willReturn(Optional.empty());
+
+        // when
+        StudyMyListResponse response = service.getMyStudies(7L, null, pageable);
+
+        // then
+        assertThat(response.activeJoinCount()).isZero();
+    }
+
+    private StudyMembership myMembership(
+        Long membershipId,
+        Long studyId,
+        Long memberId,
+        MembershipRole role,
+        MembershipStatus status
+    ) {
+        StudyMembership membership = StudyMembership.apply(studyId, memberId, role, status, NOW, null, NOW);
+        ReflectionTestUtils.setField(membership, "id", membershipId);
+        return membership;
     }
 
     private Study recruitingStudy() {

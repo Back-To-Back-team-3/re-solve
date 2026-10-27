@@ -1,7 +1,10 @@
 package com.backtoback.study.discovery.service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.springframework.data.domain.Page;
@@ -11,6 +14,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.study.discovery.dto.StudyDetailResponse;
+import com.backtoback.study.discovery.dto.StudyMyListResponse;
+import com.backtoback.study.discovery.dto.StudyMySummaryResponse;
 import com.backtoback.study.discovery.dto.StudySummaryResponse;
 import com.backtoback.study.discovery.repository.StudySpecification;
 import com.backtoback.study.global.error.StudyErrorCode;
@@ -18,7 +23,9 @@ import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.Study;
+import com.backtoback.study.membership.domain.StudyMembership;
 import com.backtoback.study.membership.domain.StudyStatus;
+import com.backtoback.study.membership.repository.StudyMemberQuotaRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
 import com.backtoback.study.replica.repository.MemberReplicaRepository;
@@ -32,11 +39,15 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class StudyQueryService {
 
+    // 정책 및 상태 §7 참여 상한: 1인 동시 참여(APPROVED) 스터디 최대 5개.
+    private static final int ACTIVE_JOIN_LIMIT = 5;
+
     private static final List<MembershipStatus> IN_PROGRESS_STATUSES
         = List.of(MembershipStatus.PENDING, MembershipStatus.APPROVED);
 
     private final StudyRepository studyRepository;
     private final StudyMembershipRepository studyMembershipRepository;
+    private final StudyMemberQuotaRepository studyMemberQuotaRepository;
     private final MemberReplicaRepository memberReplicaRepository;
 
     /**
@@ -100,5 +111,41 @@ public class StudyQueryService {
             .findByStudyIdAndMemberIdAndStatusIn(studyId, memberId, IN_PROGRESS_STATUSES)
             .map(StudyDetailResponse.MyMembership::from)
             .orElse(null);
+    }
+
+    /**
+     * 본인이 진행 중(PENDING·APPROVED)인 가입과 참여 카운터를 조회한다(API 명세서 5.1.3).
+     *
+     * @param statusFilter {@code PENDING}·{@code APPROVED}가 아니면 둘 다 조회한다
+     */
+    @Transactional(readOnly = true)
+    public StudyMyListResponse getMyStudies(Long memberId, MembershipStatus statusFilter, Pageable pageable) {
+        List<MembershipStatus> statuses
+            = isInProgressStatus(statusFilter) ? List.of(statusFilter) : IN_PROGRESS_STATUSES;
+
+        Page<StudyMembership> memberships
+            = studyMembershipRepository.findByMemberIdAndStatusIn(memberId, statuses, pageable);
+        Map<Long, Study> studiesById = findStudiesByIds(memberships);
+
+        Page<StudyMySummaryResponse> content
+            = memberships
+                .map(membership -> StudyMySummaryResponse.from(membership, studiesById.get(membership.getStudyId())));
+
+        int activeJoinCount
+            = studyMemberQuotaRepository.findByMemberId(memberId).map(quota -> quota.getActiveCount()).orElse(0);
+
+        return StudyMyListResponse.of(content, activeJoinCount, ACTIVE_JOIN_LIMIT);
+    }
+
+    private boolean isInProgressStatus(MembershipStatus status) {
+        return status == MembershipStatus.PENDING || status == MembershipStatus.APPROVED;
+    }
+
+    private Map<Long, Study> findStudiesByIds(Page<StudyMembership> memberships) {
+        List<Long> studyIds = memberships.getContent().stream().map(StudyMembership::getStudyId).toList();
+        return studyRepository
+            .findAllById(studyIds)
+            .stream()
+            .collect(Collectors.toMap(Study::getId, Function.identity()));
     }
 }
