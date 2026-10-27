@@ -11,7 +11,9 @@ import static org.mockito.Mockito.verify;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +28,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.notification.delivery.service.NotificationDeliveryService;
 import com.backtoback.notification.event.domain.ProcessedEvent;
+import com.backtoback.notification.event.dto.MemberWithdrawnCleanupEvent;
 import com.backtoback.notification.event.dto.NotificationCreatedEvent;
 import com.backtoback.notification.event.repository.ProcessedEventRepository;
 import com.backtoback.notification.notification.domain.Notification;
@@ -477,5 +480,88 @@ class NotificationEventProcessorTest {
 
         // then
         verify(deliveryService).sendToMember(eq(7L), eq(notification));
+    }
+
+    @Test
+    @DisplayName("MemberWithdrawn 이벤트 수신 시 회원 알림·수신설정·예약을 물리 삭제하고 커밋 후 SSE 종료 이벤트를 발행한다")
+    void processMemberWithdrawnDeletesDataAndPublishesCleanupEvent() {
+        // given
+        String eventId = "evt-member-withdrawn-1";
+        JsonNode payload = objectMapper.readTree("""
+            {
+              "eventId": "evt-member-withdrawn-1",
+              "eventType": "MemberWithdrawn",
+              "schemaVersion": "v1",
+              "occurredAt": "2026-10-21T10:00:00.000000+09:00",
+              "aggregateId": "7",
+              "correlationId": "req-3f81",
+              "memberId": "7",
+              "withdrawnAt": "2026-10-21T10:00:00.000000+09:00",
+              "sourceVersion": 12
+            }
+            """);
+
+        given(processedEventRepository.existsByEventId(eventId)).willReturn(false);
+
+        // when
+        eventProcessor.process(eventId, "MemberWithdrawn", payload);
+
+        // then
+        verify(processedEventRepository).saveAndFlush(any(ProcessedEvent.class));
+        verify(examReminderService)
+            .cleanupByMemberWithdrawn(eq(eventId), eq(7L), eq(12), eq(LocalDateTime.of(2026, 10, 21, 10, 0, 0)));
+        verify(notificationRepository).deleteAllByMemberId(7L);
+        verify(preferenceRepository).deleteAllByMemberId(7L);
+        verify(eventPublisher).publishEvent(new MemberWithdrawnCleanupEvent(7L));
+    }
+
+    @Test
+    @DisplayName("탈퇴 회원(MemberWithdrawn 수신 이후)은 단체 알림 수신자 목록에 포함되어 있어도 알림 생성 대상에서 제외한다")
+    void processExcludesWithdrawnMemberFromRecipients() {
+        // given
+        String eventId = "evt-assign-withdrawn";
+        JsonNode payload = objectMapper.readTree("""
+            {
+              "eventId": "evt-assign-withdrawn",
+              "eventType": "AssignmentPublished",
+              "studyId": "12",
+              "assignmentId": "88",
+              "title": "1주차 그래프",
+              "startsAt": "2026-10-20T09:00:00.000000+09:00",
+              "deadlineAt": "2026-10-27T23:59:59.000000+09:00",
+              "targetMemberIds": ["7", "8"]
+            }
+            """);
+
+        given(processedEventRepository.existsByEventId(eventId)).willReturn(false);
+        given(examReminderService.findWithdrawnMemberIds(List.of(7L, 8L))).willReturn(Set.of(7L));
+        given(preferenceRepository.findByMemberId(8L)).willReturn(Optional.empty());
+        given(
+            notificationRepository
+                .existsBySourceEventIdAndMemberIdAndType(eventId, 8L, NotificationType.ASSIGNMENT_PUBLISHED)
+        ).willReturn(false);
+        given(notificationRepository.saveAndFlush(any(Notification.class)))
+            .willAnswer(invocation -> invocation.getArgument(0));
+
+        // when
+        eventProcessor.process(eventId, "AssignmentPublished", payload);
+
+        // then
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getMemberId()).isEqualTo(8L);
+    }
+
+    @Test
+    @DisplayName("회원 탈퇴 커밋 후 이벤트 리스너가 호출되면 NotificationDeliveryService로 SSE 세션 종료를 위임한다")
+    void onMemberWithdrawnDelegatesToDeliveryService() {
+        // given
+        MemberWithdrawnCleanupEvent event = new MemberWithdrawnCleanupEvent(7L);
+
+        // when
+        eventProcessor.onMemberWithdrawn(event);
+
+        // then
+        verify(deliveryService).disconnectMember(7L);
     }
 }

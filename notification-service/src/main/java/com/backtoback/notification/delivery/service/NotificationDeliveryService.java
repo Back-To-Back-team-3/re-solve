@@ -8,16 +8,19 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.notification.delivery.dto.NotificationEventResponse;
 import com.backtoback.notification.delivery.repository.EmitterRepository;
 import com.backtoback.notification.delivery.repository.SseSession;
+import com.backtoback.notification.global.error.NotificationException;
 import com.backtoback.notification.notification.domain.Notification;
 import com.backtoback.notification.notification.repository.NotificationRepository;
+import com.backtoback.notification.notification.repository.NotificationWithdrawnMemberRepository;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -34,7 +37,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class NotificationDeliveryService {
 
     public static final long SSE_TIMEOUT_MILLIS = 60_000L;
@@ -43,18 +45,47 @@ public class NotificationDeliveryService {
 
     private final EmitterRepository emitterRepository;
     private final NotificationRepository notificationRepository;
+    private final NotificationWithdrawnMemberRepository withdrawnMemberRepository;
     private final Clock clock;
+
+    @Autowired
+    public NotificationDeliveryService(
+        EmitterRepository emitterRepository,
+        NotificationRepository notificationRepository,
+        NotificationWithdrawnMemberRepository withdrawnMemberRepository,
+        Clock clock
+    ) {
+        this.emitterRepository = emitterRepository;
+        this.notificationRepository = notificationRepository;
+        this.withdrawnMemberRepository = withdrawnMemberRepository;
+        this.clock = clock;
+    }
+
+    public NotificationDeliveryService(
+        EmitterRepository emitterRepository,
+        NotificationRepository notificationRepository,
+        Clock clock
+    ) {
+        this(emitterRepository, notificationRepository, null, clock);
+    }
 
     /**
      * 클라이언트의 SSE 구독을 처리하고 SseEmitter를 반환한다.
+     * 이미 탈퇴 처리({@code MemberWithdrawn})된 회원이 유효 기간이 남은 Access Token으로 재연결을 시도하는 경우
+     * {@code AUTH_ACCESS_DENIED}(403)를 던져 브라우저 {@code EventSource} 자동 재연결을 차단한다.
      * 느린 클라이언트로의 SSE 네트워크 전송 중 DB 커넥션을 점유하지 않도록 메서드 레벨 트랜잭션을 두지 않으며,
      * 미수신 알림 조회 시점에만 Repository 읽기 트랜잭션을 짧게 사용한다.
      *
      * @param memberId 회원 ID
      * @param lastEventId 마지막으로 수신한 이벤트 ID (nullable)
      * @return 등록된 SseEmitter 객체
+     * @throws NotificationException 탈퇴한 회원의 구독 요청인 경우 ({@code AUTH_ACCESS_DENIED})
      */
     public SseEmitter subscribe(Long memberId, String lastEventId) {
+        if (withdrawnMemberRepository != null && withdrawnMemberRepository.existsByMemberId(memberId)) {
+            throw new NotificationException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+
         String emitterId = generateEmitterId(memberId);
         SseEmitter emitter = createEmitter();
         Long parsedLastEventId = parseLastEventId(lastEventId);
@@ -134,6 +165,21 @@ public class NotificationDeliveryService {
     public void broadcastHeartbeat() {
         List<SseSession> allSessions = emitterRepository.findAll();
         allSessions.forEach(this::sendHeartbeat);
+    }
+
+    /**
+     * 탈퇴한 회원의 모든 활성 SSE 세션을 저장소에서 제거하고 정상 종료(complete) 처리한다 (이벤트 계약서 4.1 M3, 5.1).
+     *
+     * @param memberId 탈퇴한 회원 ID
+     */
+    public void disconnectMember(Long memberId) {
+        List<SseSession> sessions = emitterRepository.findAllByMemberId(memberId);
+        for (SseSession session : sessions) {
+            SseEmitter emitter = session.emitter();
+            synchronized (emitter) {
+                cleanup(session.emitterId(), emitter, null);
+            }
+        }
     }
 
     /**
