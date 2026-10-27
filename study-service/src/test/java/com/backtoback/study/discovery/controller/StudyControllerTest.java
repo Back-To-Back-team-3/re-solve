@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -187,10 +188,10 @@ class StudyControllerTest {
             .setAuthentication(new TestingAuthenticationToken(new GatewayUser("7", UserRole.USER), null));
         StudyMySummaryResponse item
             = new StudyMySummaryResponse(
-                1L,
+                "1",
                 "코딩테스트 스터디",
                 StudyStatus.ACTIVE,
-                55L,
+                "55",
                 MembershipStatus.APPROVED,
                 MembershipRole.MEMBER,
                 LocalDateTime.of(2026, 9, 22, 9, 10)
@@ -202,7 +203,7 @@ class StudyControllerTest {
         mockMvc
             .perform(get("/api/v1/studies/me"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.content[0].membershipId").value(55))
+            .andExpect(jsonPath("$.data.content[0].membershipId").value("55"))
             .andExpect(jsonPath("$.data.activeJoinCount").value(2))
             .andExpect(jsonPath("$.data.activeJoinLimit").value(5));
     }

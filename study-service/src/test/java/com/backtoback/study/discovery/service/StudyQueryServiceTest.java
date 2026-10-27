@@ -226,8 +226,8 @@ class StudyQueryServiceTest {
 
         // then
         assertThat(response.content()).hasSize(1);
-        assertThat(response.content().getFirst().studyId()).isEqualTo(1L);
-        assertThat(response.content().getFirst().membershipId()).isEqualTo(55L);
+        assertThat(response.content().getFirst().studyId()).isEqualTo("1");
+        assertThat(response.content().getFirst().membershipId()).isEqualTo("55");
         assertThat(response.activeJoinCount()).isEqualTo(2);
         assertThat(response.activeJoinLimit()).isEqualTo(5);
     }

@@ -12,10 +12,10 @@ import com.backtoback.study.membership.domain.StudyStatus;
  * 내 스터디 목록 항목 응답 (API 명세서 5.1.3).
  */
 public record StudyMySummaryResponse(
-    Long studyId,
+    String studyId,
     String name,
     StudyStatus studyStatus,
-    Long membershipId,
+    String membershipId,
     MembershipStatus membershipStatus,
     MembershipRole role,
     LocalDateTime joinedAt
@@ -23,10 +23,10 @@ public record StudyMySummaryResponse(
 
     public static StudyMySummaryResponse from(StudyMembership membership, Study study) {
         return new StudyMySummaryResponse(
-            study.getId(),
+            String.valueOf(study.getId()),
             study.getName(),
             study.getStatus(),
-            membership.getId(),
+            String.valueOf(membership.getId()),
             membership.getStatus(),
             membership.getRole(),
             membership.getJoinedAt()
