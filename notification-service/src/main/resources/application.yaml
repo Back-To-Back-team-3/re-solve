@@ -25,9 +25,17 @@ spring:
     aws:
       region:
         static: ${AWS_REGION:ap-northeast-2}
+      sqs:
+        enabled: ${AWS_SQS_ENABLED:true}
   jackson:
     time-zone: Asia/Seoul
 
+notification:
+  sqs:
+    queue-name: ${NOTIFICATION_SQS_QUEUE_NAME:notification-queue}
+
 logging:
+  pattern:
+    level: "%5p [correlationId=%X{correlationId:-}]"
   level:
     com.backtoback.notification: DEBUG
