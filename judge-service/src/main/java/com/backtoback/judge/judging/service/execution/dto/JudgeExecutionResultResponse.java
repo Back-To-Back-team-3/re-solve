@@ -30,6 +30,21 @@ public record JudgeExecutionResultResponse(
 ) {
     // COMPLETED는 실행 종료를 의미하며 AC/WA 판정은 상위 실행기가 반환값 비교 후 결정한다.
     public enum State {
-        QUEUED, RUNNING, COMPLETED, SYSTEM_ERROR
+        QUEUED, RUNNING, COMPLETED, SYSTEM_ERROR;
+
+        /**
+         * Judge0 상태 코드에 대응하는 실행 진행 상태를 조회한다.
+         *
+         * @param statusId Judge0 상태 코드
+         * @return 대응 상태; 알려지지 않은 코드는 {@code SYSTEM_ERROR}
+         */
+        public static State fromStatusId(int statusId) {
+            return switch (statusId) {
+                case 1 -> QUEUED;
+                case 2 -> RUNNING;
+                case 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 -> COMPLETED;
+                default -> SYSTEM_ERROR;
+            };
+        }
     }
 }
