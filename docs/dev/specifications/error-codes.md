@@ -45,9 +45,13 @@
 | `PROBLEM_NOT_AVAILABLE` | 404 | `PRIVATE`·`ARCHIVED`·`EXAM_ONLY` 문제에 일반 접근 |
 | `PROBLEM_REVISION_NOT_FOUND` | 404 | 문제에 속하지 않는 회차 |
 | `PROBLEM_VERSION_CONFLICT` | 409 | `rowVersion` 불일치 또는 태그 변경의 DB·분산 잠금 경합 (동시 변경) |
-| `PROBLEM_INVALID_STATE_TRANSITION` | 409 | 허용되지 않는 공개 상태 전이 |
+| `PROBLEM_INVALID_STATE_TRANSITION` | 409 | 허용되지 않는 공개 상태 전이, 통과 사용 회차 없는 공개, 보관 문제의 신규 회차·검증 또는 통과한 회차·언어의 코드 교체 |
 | `PROBLEM_IN_ACTIVE_EXAM` | 409 | 예정·진행 중 시험·대회에 포함된 문제의 비공개·보관 |
-| `PROBLEM_TEST_CASE_INVALID` | 400 | 테스트가 함수 명세와 불일치·중복 |
+| `PROBLEM_TEST_CASE_INVALID` | 400 | 테스트가 함수 명세와 불일치·중복, 공개·숨김 구성 또는 최대 50개 제한 위반 |
+| `PROBLEM_VALIDATION_NOT_FOUND` | 404 | 검증 ID를 찾을 수 없음 |
+| `PROBLEM_VALIDATION_IN_PROGRESS` | 409 | 같은 회차·언어의 결과 미반영 검증 요청이 있음 |
+| `PROBLEM_TEST_CASE_TOO_LARGE` | 413 | 테스트 1건 또는 회차 합계 바이트 상한 초과 |
+| `PROBLEM_REQUEST_TOO_LARGE` | 413 | 최초·새 회차 전체 HTTP 본문 상한 초과 |
 | `PROBLEM_IMAGE_INVALID` | 400 | 허용되지 않는 이미지 형식·해상도 |
 | `PROBLEM_IMAGE_TOO_LARGE` | 413 | 이미지 5MiB 초과 |
 | `PROBLEM_TAG_NOT_FOUND` | 404 | 태그를 찾을 수 없음 |

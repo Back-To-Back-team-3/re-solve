@@ -156,7 +156,7 @@ flowchart LR
 > 작성: 담당 B
 > 
 - 서비스 내부 관계:
-    
+
     ```
     problems (1) ──< problem_revisions (N)
     problems (1) ──< problem_body_assets · problem_test_assets · problem_images (N, 최초 연결 전 NULL)
@@ -164,14 +164,18 @@ flowchart LR
     problem_body_assets (1) ──< problem_body_images (N) >── (1) problem_images
     problem_revisions (1) ──< problem_revision_tests (N) >── (1) problem_test_assets
     problem_revisions (1) ──< problem_revision_tags (N) >── (1) tags
+    problems (1) ──< problem_code_assets (N)
+    problem_revisions (1) ──< problem_validations (N) >── (1) problem_code_assets
     problems (1) ──< member_problem_statuses (N)
+    problems (1) ──< problem_submission_results (N)
     problems (1) ──< solution_shares (N) ──< solution_comments (N)
     ```
-    
+
 - 외부 참조: 2.0 표.
 - 소유권·삭제 정책:
     - 문제는 삭제하지 않고 `visibility = ARCHIVED`로 표현한다. 제출이 있는 문제는 `ARCHIVED`로만 전환한다.
-    - 공개된 수정 회차와 연결된 S3 파일은 불변이다. 수정은 새 회차·새 파일로만 한다.
+    - 저장된 수정 회차와 연결된 S3 파일은 불변이다. 수정은 새 회차·새 파일로만 한다.
+    - 검증 코드 원본·요청·결과 요약은 Problem, 실행 작업·시도 이력·판정은 Judge가 소유한다. 참조 중인 검증 코드·요청은 삭제하지 않는다.
     - 본문에 연결되지 않은 이미지(`status = PENDING`)는 대기 시간(미결정) 경과 후 S3 객체와 함께 물리 삭제한다.
     - 공유 풀이·댓글은 상태값(`CANCELED`·`DELETED`·`HIDDEN`)으로 표현한다. 회원 탈퇴 시 공유 풀이는 비공개 처리한다.
 
@@ -758,10 +762,14 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 > 작성: 담당 B
 > 
 - ERD (v1.0)
-    
+
     ```mermaid
     erDiagram
+        problems ||--o{ problem_code_assets : "검증 코드 소유"
+        problem_revisions ||--o{ problem_validations : "검증 요청"
+        problem_code_assets ||--o{ problem_validations : "코드 재사용"
         problems ||--o{ member_problem_statuses : "회원별 풀이 상태"
+        problems ||--o{ problem_submission_results : "제출별 결과 반영"
         problems ||--|{ problem_revisions : "수정 회차 보유"
         problems o|--o{ problem_body_assets : "본문 소유"
         problems o|--o{ problem_test_assets : "테스트 소유"
@@ -852,9 +860,9 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
             varchar status
         }
     ```
-    
+
 - 테이블 계층화
-    
+
     ```mermaid
     flowchart TB
         P["problems"]
@@ -882,7 +890,6 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
         RT --> T
         RG --> G
     ```
-    
 
 #### 4.2.1 문제 (`problems`)
 
@@ -893,6 +900,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `scope` | VARCHAR(30) | Y | `GENERAL` / `EXAM_ONLY` |
 | `visibility` | VARCHAR(30) | Y | `PRIVATE` / `PUBLIC` / `ARCHIVED` |
 | `contest_id` | BIGINT | N | NULL 허용: 일반 문제. 대회 전용 문제의 대회 (외부 참조) |
+| `row_version` | INT | Y | 애플리케이션 초기값 1. 관리자 `rowVersion`과 P1 `sourceVersion` 공유 |
 | `published_at` | DATETIME(6) | N | NULL 허용: 공개 전. 최초 공개 시각 |
 | `created_at` | DATETIME(6) | Y |  |
 | `updated_at` | DATETIME(6) | Y |  |
@@ -905,13 +913,13 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 상태 | 의미 | 전이 |
 | --- | --- | --- |
-| `PRIVATE` | 비공개 (작성 중 포함) | → `PUBLIC` (공개 회차 1개 이상) / `ARCHIVED` |
+| `PRIVATE` | 비공개 (작성 중 포함) | → `PUBLIC` (검증을 통과한 사용 회차 있음) / `ARCHIVED` |
 | `PUBLIC` | 공개 | → `PRIVATE` (진행 중 시험·대회 포함 시 차단) / `ARCHIVED` |
 | `ARCHIVED` | 미사용 (소프트 딜리트, 종단) | — |
 
 #### 4.2.2 문제 수정 회차 (`problem_revisions`) `[IMMUTABLE]`
 
-> 공개된 회차는 수정하지 않는다. 수정은 새 행으로만 한다. 식별·고정은 `id`, 표시는 `revision_number`.
+> 저장된 회차는 수정하지 않는다. 수정은 새 행으로만 한다. 식별·고정은 `id`, 표시는 `revision_number`.
 > 
 
 | 컬럼 | 타입 | NOT NULL | 설명 |
@@ -926,6 +934,9 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `time_limit_ms` | INT | Y | 기준 시간 제한 (기본 2,000, 최소 1,000) |
 | `memory_limit_kb` | INT | Y | 기준 메모리 제한 (기본 262,144) |
 | `author_id` | BIGINT | Y | 회차 작성 관리자 (COMMENT: `members.id`) |
+| `idempotency_key` | VARCHAR(100) `_bin` | Y | 최초·새 회차 등록의 멱등키 |
+| `request_hash` | CHAR(64) `_bin` | Y | 요청 종류·대상 문제·원래 본문·rowVersion의 정규화 해시 |
+| `response_row_version` | INT | Y | 최초 201 응답의 문제 버전. 이후 문제 버전 증가와 무관하게 보존 |
 | `created_at` | DATETIME(6) | Y |  |
 | `wall_time_limit_ms` | INT | Y | 해당 회차의 최종 wall time 제한(ms). 팀 논의 B-5의 CPU 제한 + 공통 여유값을 적용하여 저장한다. |
 | `output_limit_kb` | INT | Y | 해당 회차의 테스트별 반환 JSON 크기 제한(KiB, 1KiB = 1,024바이트). API의 executionLimits.outputLimitKb에 대응한다. 허용 범위는 1~256이며, 등록 시 생략·null이면 기본 64를 확정해 저장한다. 디버그 출력의 공통 64KiB 제한은 이 컬럼에 포함하지 않는다(정책 및 상태 §3.2). |
@@ -935,7 +946,10 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `fk_problem_revisions_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
 | `fk_problem_revisions_body_asset` | `body_asset_id` → `problem_body_assets.id` | 서비스 내부 FK |
 | `uk_problem_revisions_problem_revision_number` | `(problem_id, revision_number)` | 회차 번호 중복 방지 |
+| `uk_problem_revisions_author_idempotency_key` | `(author_id, idempotency_key)` | 최초·새 회차 등록 중복 차단. 같은 키의 다른 요청 종류·대상·본문은 충돌 |
 | `idx_problem_revisions_difficulty` | `difficulty` | 난이도 필터·진단 출제 |
+
+사용 회차는 `PASSED`가 있는 최대 `revision_number`로 정하며 역방향 `current_revision` FK는 두지 않는다(정책 §4). 등록 멱등키·해시는 `rowVersion` 검사보다 먼저 확인한다. 최초 응답의 버전은 이후 문제 상태·검증 결과 반영으로 바뀌는 `problems.row_version`과 구분해 `response_row_version`에 보존한다.
 
 #### 4.2.3 본문 파일 (`problem_body_assets`)
 
@@ -1073,6 +1087,10 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 > `SubmissionJudged`(`PRACTICE`)로 갱신. 한 번 해결되면 이후 오답·문제 수정으로 초기화하지 않는다.
 > 
 
+- `(userId, submissionId)`별 `judgeAttempt`를 비교하고 최초 반영 때만 제출 수를 증가시킨다. 제출별 반영 기록·풀이 상태·통계·`processed_events`는 같은 트랜잭션에서 처리한다.
+- 최초 AC는 `submittedAt` 기준으로 더 이른 AC를 반영하며 이후 오답·문제 수정으로 초기화하지 않는다.
+- 제출별 최신 반영 정보는 §4.2.18에 저장한다. 이 표는 회원·문제 집계이며 공통 `processed_events`의 14일 보관과 별개다.
+
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
@@ -1207,6 +1225,107 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 - 만료된 기록이 남아 있으면 새 요청값과 만료 시각으로 갱신하고 이전 결과를 비운다. 이미 삭제된 기록은 새로 생성한다.
 - 요청 기록·태그 생성·순번 변경·최초 응답 저장은 같은 트랜잭션에서 처리한다. 실패하면 함께 롤백한다.
 - 만료 기록 정리는 스케줄러 명세 §2.2를 따른다. 정리 전이라도 만료 시각이 지나면 새 요청으로 처리한다.
+
+#### 4.2.16 검증 코드 파일 (`problem_code_assets`)
+
+검증 코드 원문은 비공개 S3의 불변 UTF-8 파일로 저장한다. DB에는 기존 본문·테스트 에셋과 같은 파일 메타 정보와 연결 상태를 보관한다.
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `problem_id` | BIGINT | Y | FK → `problems.id`. 문제 저장 후 코드 접수 |
+| `owner_id` | BIGINT | Y | 작성 관리자 (`members.id`, 외부 참조) |
+| `status` | VARCHAR(30) | Y | `PENDING` / `LINKED` / `DISCARDED` |
+| `object_key` | VARCHAR(500) `_bin` | Y | 업로드마다 새로 만드는 불변 S3 객체 키 |
+| `object_version` | VARCHAR(200) | N | 버킷 버전 관리 사용 시 고정 버전, 미사용은 null |
+| `sha256` | CHAR(64) `_bin` | Y | 원본 UTF-8 바이트의 SHA-256 |
+| `size_bytes` | BIGINT | Y | 원본 UTF-8 바이트 수 |
+| `created_at` | DATETIME(6) | Y | 업로드 추적 시작 시각 |
+| `updated_at` | DATETIME(6) | Y | 파일 연결 상태 변경 시각 |
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `fk_problem_code_assets_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
+| `uk_problem_code_assets_object_key` | `object_key` | 객체 키 UNIQUE |
+| `idx_problem_code_assets_status_created_at` | `(status, created_at)` | 미연결 파일 추적 |
+| `idx_problem_code_assets_problem` | `problem_id` | 문제별 파일 참조 |
+
+- 추적 행을 먼저 커밋한 뒤 DB 행 잠금 없이 S3 업로드를 수행한다. 저장·체크섬 확인 후 짧은 트랜잭션에서 요청과 연결한다.
+- 하나의 파일을 같은 문제의 여러 회차 검증이 참조할 수 있다. 자동 재검증은 기존 파일을 재사용하고 별도 코드 버전·연결 테이블을 두지 않는다.
+- 접수 후 키·버전·체크섬·크기·원문은 불변이다. 검증 요청이 참조하는 파일은 성공·실패와 관계없이 미연결 정리 대상에서 제외한다.
+
+#### 4.2.17 검증 코드 요청 (`problem_validations`)
+
+한 행은 고정 회차·한 언어·불변 코드의 검증 요청이다. 진행·시도·판정 이력은 Judge가 소유하며 Problem에는 최종 반영 요약과 통과 실행 환경을 저장한다.
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | 서비스 사이의 `validationId`. JSON은 문자열 |
+| `problem_revision_id` | BIGINT | Y | FK → `problem_revisions.id` |
+| `requested_by` | BIGINT | Y | 작성 관리자 (`members.id`, 외부 참조) |
+| `language` | VARCHAR(30) | Y | `java` / `python3` / `cpp` |
+| `code_asset_id` | BIGINT | Y | FK → `problem_code_assets.id` |
+| `trigger_type` | VARCHAR(20) | Y | `MANUAL` / `AUTO` |
+| `idempotency_key` | VARCHAR(100) `_bin` | N | MANUAL은 필수, AUTO는 null |
+| `request_hash` | CHAR(64) `_bin` | Y | 고정 회차·언어·코드를 포함한 원래 요청 해시 |
+| `result_status` | VARCHAR(30) | N | 반영된 `PASSED` / `REJECTED` / `ERROR`. 미반영은 null |
+| `runtime_key` | VARCHAR(100) | N | 통과한 실행 환경. PASSED는 필수 |
+| `runner_version` | VARCHAR(100) | N | 통과한 생성기 버전. PASSED는 필수 |
+| `finished_at` | DATETIME(6) | N | Judge 최종 결과의 완료 시각. 미반영은 null |
+| `created_at` | DATETIME(6) | Y | 요청 접수 시각 |
+| `updated_at` | DATETIME(6) | Y | 최종 결과 반영 시각 |
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `fk_problem_validations_revision` | `problem_revision_id` → `problem_revisions.id` | 회차 FK |
+| `fk_problem_validations_code_asset` | `code_asset_id` → `problem_code_assets.id` | 파일 FK |
+| `uk_problem_validations_requester_key` | `(requested_by, idempotency_key)` | 수동 멱등. AUTO의 null은 중복 허용 |
+| `idx_problem_validations_revision_language` | `(problem_revision_id, language, id)` | 언어별 요청·코드 조회 |
+| `idx_problem_validations_revision_result` | `(problem_revision_id, result_status)` | 사용 회차·지원 언어 조회 |
+| `idx_problem_validations_code_asset` | `code_asset_id` | 참조 파일 보호 |
+
+**처리 규칙**
+
+- 요청 해시는 Path 대상·원래 입력 필드를 포함한다. 바깥 JSON 객체의 키 순서는 정규화하고 배열 순서·코드·테스트 JSON 텍스트 문자열의 공백·줄바꿈은 보존한다.
+- 문제 → 회차 → 코드 에셋 → 요청 순으로 필요한 행을 짧게 잠근다. 같은 회차·언어에 `result_status IS NULL`인 요청 또는 `PASSED`가 있으면 새 요청을 만들지 않는다. 실패 결과 반영 후 새 키·새 ID를 허용한다.
+- 새 회차 저장 시 직전 사용 가능 회차의 언어별 PASSED 코드 파일을 재사용한다. 새 회차·자동 요청·Outbox를 같은 트랜잭션에 저장하고 등록 멱등 재요청으로 다시 만들지 않는다.
+- 파일 문제 소속과 요청 회차·언어·해시를 검사한다. 결과 미반영일 때만 최종 요약·환경·완료 시각을 기록한다. 같은 종결 결과는 성공 처리하고 상충 결과는 롤백·미삭제 후 공통 DLQ로 격리한다.
+- PASSED이면 실행 환경·생성기 버전이 필수다. 같은 회차의 통과 코드·환경은 교체하지 않는다. 다른 언어의 실패로 기존 통과 결과를 취소하지 않는다.
+- `result_status = 'PASSED'`인 요청이 있는 회차 중 최대 `revision_number`가 사용 회차다. 해당 회차의 언어·실행 환경으로 `supportedLanguages`·`executionProfiles`를 구성한다.
+- `resultApplied`는 최종 요약 반영 여부로 계산한다. Problem이 Judge의 실행 상태·시도 이력을 복제하거나 조회로 결과를 반영하지 않는다.
+- 초기에는 접수된 성공·실패 요청과 참조 중인 코드 파일을 자동 삭제하지 않는다. 일반 제출·태그의 24시간 만료를 일괄 적용하지 않는다.
+
+#### 4.2.18 일반 풀이 제출별 반영 결과 (`problem_submission_results`)
+
+`SubmissionJudged`의 제출별 최신 반영 정보다. 한 제출에 한 행을 유지하며 더 큰 `judgeAttempt`의 결과로 갱신한다.
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `submission_id` | BIGINT | Y | Judge 제출 ID (외부 참조) |
+| `member_id` | BIGINT | Y | 이벤트 `userId`에 대응하는 회원 ID (외부 참조) |
+| `problem_id` | BIGINT | Y | FK → `problems.id` |
+| `judge_attempt` | INT | Y | 마지막 반영 채점 회차, 1 이상 |
+| `verdict` | VARCHAR(30) | Y | 반영 판정: `AC` / `WA` / `TLE` / `MLE` / `RE` / `CE` |
+| `submitted_at` | DATETIME(6) | Y | 최초 AC 비교에 사용하는 제출 접수 시각 |
+| `created_at` | DATETIME(6) | Y | 최초 결과 반영 시각 |
+| `updated_at` | DATETIME(6) | Y | 최신 결과 반영 시각 |
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `fk_problem_submission_results_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
+| `uk_problem_submission_results_submission` | `submission_id` | 제출당 1건, 중복 집계 방지 |
+| `idx_problem_submission_results_member_problem` | `(member_id, problem_id)` | 회원·문제별 반영 결과 조회 |
+
+**처리 규칙**
+
+- `SubmissionJudged`만 반영한다. 시험·대회·진단과 관리자 검증 결과는 이 테이블에 저장하지 않는다.
+- 제출 ID의 회원·문제·접수 시각은 불변이다. 저장된 식별 정보와 다른 이벤트는 업무 반영을 롤백하고 공통 소비 실패 규칙을 따른다.
+- `processed_events` 기록 후 회원·문제 집계 행을 확보·잠그고 제출별 행을 조회한다. 집계 행 최초 생성의 UNIQUE 경합은 롤백 후 재수신으로 처리한다. 같은 회원·문제의 결과는 집계 행 잠금으로 직렬화한다.
+- 제출별 행이 없으면 INSERT하고 `attempt_count`를 1 증가시킨다. 행이 있으면 수신 `judgeAttempt`가 더 클 때만 판정·채점 회차를 갱신하며 제출 수는 증가시키지 않는다. 같거나 작은 회차는 집계를 변경하지 않는다.
+- 반영할 판정이 AC이면 §4.2.10의 최초 AC를 접수 시각 기준으로 갱신한다. 이후 오답은 기존 해결 여부·최초 AC를 지우지 않는다.
+- 제출별 행·회원별 풀이 상태·관련 통계·`processed_events`를 같은 트랜잭션에서 처리한다. 실패하면 모두 롤백한다. 제출별 행은 이벤트 ID 기록의 14일 정리 대상에 포함하지 않는다.
+- 코드·테스트별 결과·실행 시도 이력은 복제하지 않는다. 이 소비 규칙은 PRACTICE 재채점 기능을 추가하지 않는다.
 
 ### 4.3 judge
 
@@ -2496,14 +2615,19 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 규칙 | 보장 방법 | 정책 §2.2 |
 | --- | --- | --- |
-| 공개 회차 불변 | `problem_revisions`는 `[IMMUTABLE]`, UPDATE API 없음. 수정은 새 회차 INSERT | `[제출]` 회차 고정 |
+| 저장 회차 불변 | `problem_revisions`는 `[IMMUTABLE]`, UPDATE API 없음. 수정은 새 회차 INSERT | `[제출]` 회차 고정 |
 | 회차 번호 중복 | `uk_problem_revisions_problem_revision_number`, 다음 번호는 `problems` 행 잠금 후 계산 | — |
 | 태그 순번 연속성·경합 | DB 행 잠금으로 순번을 조정하고 저장·삭제를 같은 트랜잭션으로 처리. `uk_tags_display_order`와 낙관적 락 버전으로 중복 순번·오래된 변경을 거부 (상세: 4.2.8 태그) | — |
 | 테스트 구성 | 회차당 공개·숨김 테스트 각 1개 이상 (작성 단계 검증) | — |
-| 기준 시간 제한 | `time_limit_ms >= max(C++ 정답 최대 실행 시간 × 3, 1000)` (작성 단계 검증) | — |
-| 공개 조건 | `visibility = PUBLIC`은 회차 1개 이상일 때만 | — |
+| 기준 시간 제한 | 저장 시 타입·최솟값을 검증하고 공개 전 관리자가 C++ 실행 결과로 `time_limit_ms >= max(C++ 정답 최대 실행 시간 × 3, 1000)` 확인 (정책 §4) | — |
+| 공개 조건 | 검증 통과 사용 회차가 있어야 `PUBLIC` (정책 §4) | — |
+| 문제 버전 | `row_version` 초기 1. 관리자 변경은 요청 버전 비교, 검증 결과는 문제 행 잠금 아래 사용 회차·언어가 바뀔 때 증가. 이벤트 sourceVersion과 공유 | — |
+| 검증 단일 진행 | 문제·회차 잠금 아래 동일 회차·언어의 미반영 요청·PASSED 존재를 검사. 미반영 결과만 조건부 반영 | — |
+| 자동 재검증 | 직전 사용 회차의 언어별 PASSED 코드 재사용. 새 회차·요청·Outbox 원자 저장과 등록 멱등키로 중복 방지 | — |
+| 관리자 멱등 | 회차·검증 요청의 작성자·키 UNIQUE와 요청 해시 비교. 최초 회차 응답 버전 보존, 태그 24시간 만료와 분리 | — |
 | 진행 중 시험·대회 문제 비공개 차단 | contest 내부 API 확인 (fail-closed) | — |
 | 해결 상태 비초기화 | `is_solved`는 `false → true` 조건부 UPDATE만 | — |
+| 제출 수·결과 중복 방지 | `problem_submission_results.submission_id` UNIQUE·`judge_attempt` 비교. 집계 행 잠금과 동일 트랜잭션으로 최초 제출만 계수 (§4.2.18) | — |
 | 공유 중복 | 생성 컬럼 `active_submission_id` + `uk_solution_shares_study_active_submission` | — |
 | 공유 권한 재검증 | 조회 시점마다 `study_membership_replicas.is_active` 확인 | — |
 | 미연결 이미지 정리 | `status = PENDING` AND 대기 시간 경과 → S3 삭제 후 행 삭제 (ShedLock) | — |
@@ -2734,6 +2858,8 @@ problem-service/src/main/resources/db/migration/
   V17__solution_create_solution_shares.sql      (P2 착수 시)
   V18__solution_create_solution_comments.sql    (P2 착수 시)
 ```
+
+검증 데이터·제출별 반영 결과는 §4.2.16~4.2.18과 문제 `row_version` 정의를 사용한다. 추가 마이그레이션은 이미 적용된 파일과 중복되지 않는 후속 버전을 사용하며, 위 전체 구축 계획 번호를 기존 적용 파일에 재사용하지 않는다.
 
 ### 7.3 Judge (`judge-service`)
 

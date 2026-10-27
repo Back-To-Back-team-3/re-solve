@@ -15,7 +15,7 @@
 | --- | --- | --- | --- |
 | `eventId` | string (UUID v4) | Y | Outbox 행 생성 시 발급. 재발행·재전달에서도 동일 값 유지. 소비자 멱등 키 |
 | `eventType` | string | Y | 이벤트명 (PascalCase, 과거형). SNS 메시지 속성에도 복사해 구독 필터에 사용 |
-| `schemaVersion` | string | Y | 메시지 형식 버전 `v1`. 도메인 순서 값과 무관 |
+| `schemaVersion` | string | Y | 해당 이벤트의 메시지 형식 버전(`v1` / `v2`). 도메인 순서 값과 무관 |
 | `occurredAt` | string (date-time) | Y | 업무 트랜잭션 시각. `+09:00`, 마이크로초 6자리 |
 | `aggregateId` | string | Y | 대상 애그리게이트 PK (접두어 없이 숫자 문자열. 예: `"55"`) |
 | `correlationId` | string | Y | 원 요청의 `X-Correlation-Id`. 스케줄러 발행은 `sched-{작업명}-{UUID}` |
@@ -86,7 +86,7 @@
 
 ## 2. 채널 토폴로지
 
-발행 서비스마다 SNS 토픽 1개, 소비 서비스마다 SQS 큐 1개(+DLQ)를 두고 `eventType` 필터 정책으로 필요한 이벤트만 구독한다. 채점 요청만 SNS를 거치지 않고 `exam-submission-queue`로 직접 보낸다(제안 — 이름·구성은 담당 A 확정).
+발행 서비스마다 SNS 토픽 1개, 소비 서비스마다 SQS 큐 1개(+DLQ)를 두고 `eventType` 필터 정책으로 필요한 이벤트만 구독한다. 시험·대회·진단 채점 요청은 `exam-submission-queue`, 관리자 검증 요청은 `problem-validation-queue`로 직접 보낸다. 환경별 큐·DLQ·권한과 구독 필터의 제공은 담당 A와 확인한다.
 
 ```mermaid
 flowchart LR
@@ -114,6 +114,7 @@ flowchart LR
         QN[notification-queue]
         QI[integration-queue]
         QX[exam-submission-queue]
+        QV[problem-validation-queue]
     end
     M --> TM
     P --> TP
@@ -124,6 +125,8 @@ flowchart LR
     C -->|"Exam/ContestSubmissionRequested"| QX
     M -.->|"DiagnosisSubmissionRequested (확정 필요)"| QX
     QX --> JS[judge consumer]
+    P -->|"ProblemValidationRequested"| QV
+    QV --> JS
     TM --> QP & QC & QS & QN & QI
     TP --> QS & QC
     TJ --> QM & QP & QC & QS & QN & QI
@@ -151,7 +154,8 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `exam-submission-queue` | judge | 2 (+진단 1, 확정 필요) | 120초 | 3회 (정책 §3.4) |
 | `member-queue` | member | 4 (확정 필요 2 포함) | 120초 | 5회 (제안) |
-| `problem-queue` | problem | 7 | 120초 | 5회 |
+| `problem-queue` | problem | 8 | 120초 | 5회 |
+| `problem-validation-queue` | judge | 1 | 공통 수신 규칙 | 담당 A의 검증 큐·DLQ 설정 확인 |
 | `contest-queue` | contest | 10 | 120초 | 5회 |
 | `study-queue` | study | 16 | 120초 | 5회 |
 | `notification-queue` | notification | 19 | 120초 | 5회 |
@@ -169,7 +173,7 @@ flowchart LR
 
 ## 3. 이벤트 카탈로그
 
-발행 6개 서비스의 이벤트 36종이다. 경로가 SQS인 3종은 채점 요청(명령성 메시지)이고 나머지 33종은 SNS 팬아웃 도메인 이벤트다.
+기존 채점·도메인 이벤트에 Problem 검증 요청·결과를 포함한다. 검증 요청은 SQS 직접 전달, 검증 결과는 SNS 팬아웃이다. 같은 이벤트의 버전은 별도 이벤트 종류로 세지 않는다.
 
 | # | 이벤트 · 버전 | 발행 | 구독 | 경로 | 발행 시점 (트랜잭션) | 순서 값 | 상태 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -179,7 +183,9 @@ flowchart LR
 | M4 | `LearningProfileUpdated` v1 | member | study | SNS | 프로필 입력·변경, 레벨 확정·변경 | `profileVersion` | 확정 |
 | M5 | `TagLevelChanged` v1 | member | notification | SNS | 진단 결과·승급·하향·쿨타임 해제 | — | 확정 |
 | M6 | `DiagnosisSubmissionRequested` v1 | member | judge | SQS `exam-submission-queue` | 진단 문항 제출·자동 제출 | — | 확정 필요 (B·E) |
-| P1 | `ProblemStateChanged` v1 | problem | study, contest | SNS | 공개 상태 전환·공개 문제 새 회차 | `sourceVersion` | 확정 |
+| P1 | `ProblemStateChanged` v1 / v2 | problem | study, contest | SNS | v1 기존 공개 계약 / v2 공개 상태·사용 회차·통과 언어 변경 | `sourceVersion` | v1 기존 계약 / v2 소비자 전환 확인 필요 |
+| P2 | `ProblemValidationRequested` v1 | problem | judge | 검증 SQS 직접 | 검증 접수·자동 재검증 요청 저장 | `validationId` 멱등 | 제공·소비 담당 확인 필요 |
+| P3 | `ProblemValidationCompleted` v1 | judge | problem | SNS | 검증 최종 판정 저장 | `validationId` 종결 1회 | 제공·소비 담당 확인 필요 |
 | J1 | `SubmissionJudged` v1 | judge | member, problem, study, notification, integration | SNS | `PRACTICE` 회차 정상 종결 | `judgeAttempt` | 확정 |
 | J2 | `ExamSubmissionJudged` v1 | judge | contest | SNS | `EXAM` 회차 정상 종결 | `judgeAttempt` | 확정 |
 | J3 | `ContestSubmissionJudged` v1 | judge | contest | SNS | `CONTEST` 회차 정상 종결 | `judgeAttempt` | 확정 |
@@ -362,7 +368,7 @@ flowchart LR
 
 ### 4.2 problem (담당 B)
 
-#### P1 `ProblemStateChanged` v1
+#### P1 `ProblemStateChanged` v1 — 기존 계약
 
 - **발행:** 공개(2.3.7)·비공개 전환(2.3.8)·보관(2.3.9)·공개 문제의 새 회차 등록(2.3.4) 트랜잭션. aggregate = `problemId`. 대회 종료 공개(`ContestEnded` 소비)는 `scope`를 바꾸지 않으므로 발행하지 않는다.
 
@@ -382,6 +388,122 @@ flowchart LR
 | --- | --- |
 | study | `PRIVATE`·`ARCHIVED` → 포함된 `assignment_problems` `EXCLUDED`, 멤버별 과제 상태 재계산(분모 감소). `PUBLIC` → `ACTIVE` 복귀. 힌트 캐시는 키에 회차가 있어 별도 무효화 불필요 |
 | contest | `PROBLEM` 가드 완료, 큰 `PUBLIC` 버전에만 해제. 시험·대회에 고정한 회차는 보존 |
+
+#### P1 `ProblemStateChanged` v2
+
+- **발행:** 공개·비공개·보관, 검증 결과에 따른 사용 회차 변경 또는 같은 사용 회차의 통과 언어 추가. 결과 요약·문제 버전·Outbox를 같은 트랜잭션에 기록한다. 새 회차 저장만으로 회차 변경 이벤트를 발행하지 않는다.
+- **순서:** 문제별 `sourceVersion = problems.row_version`. 같은 사용 회차의 언어 추가도 증가한다. 사용 회차·언어가 그대로인 결과 재전달은 버전 증가·재발행 없이 성공 처리한다.
+- **버전:** v1과 v2는 `schemaVersion`으로 분리한다. 회차 필수 여부·의미와 언어 추가 값이 바뀌므로 §1.6에 따라 소비자 전환 확인 후 v1을 중단한다. v2 전환 뒤 같은 변경을 v1으로 중복 발행하지 않는다. 도메인 순서 값은 문제 단위로 공유한다.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `problemId` | string | Y | 문제 ID, aggregateId와 동일 |
+| `sourceVersion` | integer | Y | 증가한 문제 행 버전, 초기 1 |
+| `scope` | string | Y | `GENERAL` / `EXAM_ONLY` |
+| `visibility` | string | Y | `PRIVATE` / `PUBLIC` / `ARCHIVED` |
+| `problemRevisionId` | string 또는 null | Y | 사용 회차. 통과 회차가 없으면 null |
+| `revisionNumber` | integer 또는 null | Y | 사용 회차 번호. 위 ID가 null이면 null |
+| `supportedLanguages` | string[] | Y | 사용 회차의 통과 언어, `java` / `python3` / `cpp`. 사용 회차가 없으면 `[]` |
+| `changeType` | string | Y | `VISIBILITY` / `REVISION` / `LANGUAGE_ADDED` |
+| `changedAt` | string (date-time) | Y | 상태·사용 회차·언어 집합 변경 시각 |
+| `operationId` | string 또는 null | N | 해당 상태 변경의 자원 작업 ID |
+
+- 최초 통과 또는 더 큰 통과 회차로 바뀌면 `REVISION`, 현재 사용 회차에 처음 통과한 언어가 추가되면 `LANGUAGE_ADDED`다. 이미 반영한 통과 결과의 재전달이나 더 작은 회차의 결과는 사용 정보가 같으면 발행하지 않는다.
+- `PUBLIC`은 사용 회차가 있어야 한다. 통과 회차 없는 `PRIVATE`·`ARCHIVED` 이벤트는 두 회차 필드 null과 빈 언어 목록을 보낸다. 검증 성공으로 공개 상태를 자동 변경하지 않는다.
+- 소비자는 문제별 큰 `sourceVersion`만 반영하며 같은 회차 번호라도 새 언어 집합을 반영한다. 원문·함수 명세가 필요하면 해당 고정 회차를 재조회하고 더 최신 버전의 조회 결과를 이전 이벤트로 되돌리지 않는다. 원격 조회는 소비 트랜잭션 밖에서 수행한다.
+
+| 소비자 | 반영 |
+| --- | --- |
+| study | 기존 공개 상태 반영과 함께 사용 회차·통과 언어의 최신 버전을 반영. 과제 진행 인정의 문제 ID 기준은 유지 |
+| contest | 기존 고정 회차를 바꾸지 않고 문제의 최신 상태·통과 언어를 반영. 가드 해제는 기존 큰 PUBLIC 버전 조건 유지 |
+
+```json
+{
+  "eventId": "8f2c4b1e-77a0-4c1d-9e1b-2d5a6f3c8e01",
+  "eventType": "ProblemStateChanged",
+  "schemaVersion": "v2",
+  "occurredAt": "2026-09-28T10:20:01.000000+09:00",
+  "aggregateId": "301",
+  "correlationId": "req-validation-2001",
+  "problemId": "301",
+  "sourceVersion": 3,
+  "scope": "GENERAL",
+  "visibility": "PRIVATE",
+  "problemRevisionId": "1001",
+  "revisionNumber": 1,
+  "supportedLanguages": [
+    "java",
+    "python3"
+  ],
+  "changeType": "LANGUAGE_ADDED",
+  "changedAt": "2026-09-28T10:20:01.000000+09:00",
+  "operationId": null
+}
+```
+
+#### P2 `ProblemValidationRequested` v1
+
+- **발행:** 관리자 접수 또는 새 회차 자동 검증의 파일 연결·요청·Outbox 저장 트랜잭션. aggregate = `validationId`. `problem-validation-queue`로 직접 전달한다.
+- **멱등:** 같은 ID·회차·언어·해시는 같은 요청이다. 재전달은 기존 Judge 작업에 연결하고 다른 내용이면 충돌로 처리한다. Judge 내부 재시도는 같은 ID를 사용한다.
+- **고정 자료:** Judge가 매 실행 시도에 `GET /internal/v1/problems/validations/{validationId}/data`로 코드·함수 명세·제한·전체 테스트를 조회한다. 원문·S3 주소는 메시지에 넣지 않는다.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `validationId` / `problemRevisionId` | string | Y | 요청 ID와 고정 회차 ID |
+| `language` | string | Y | `java` / `python3` / `cpp` |
+| `requestHash` | string | Y | 원래 요청의 SHA-256. 조회 자료와 일치해야 함 |
+
+```json
+{
+  "eventId": "5b0e2a7c-1d3f-4e8a-9b61-0c2f4a7d9e10",
+  "eventType": "ProblemValidationRequested",
+  "schemaVersion": "v1",
+  "occurredAt": "2026-09-28T10:20:00.000000+09:00",
+  "aggregateId": "2001",
+  "correlationId": "req-validation-2001",
+  "validationId": "2001",
+  "problemRevisionId": "1001",
+  "language": "java",
+  "requestHash": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+}
+```
+
+#### P3 `ProblemValidationCompleted` v1
+
+- **발행:** Judge가 최종 작업·시도 이력·결과 Outbox를 같은 트랜잭션으로 저장한다. 기존 `judge-events` SNS에서 `problem-queue`로 전달한다. 중간 실행 상태·상세 판정 이력·코드·테스트 원문은 싣지 않는다.
+- **소비:** `processed_events` 중복 제거 후 검증 ID·회차·언어·요청 해시를 저장 요청과 대조한다. 최종 결과 미반영 요청만 반영하고 동일 결과는 성공 처리한다. 상충 결과는 롤백·미삭제 후 공통 DLQ로 격리한다.
+- **원자성:** 최종 반영 요약·통과 실행 환경·사용 회차/언어 판단·필요한 문제 버전·P1 v2 Outbox·소비 기록을 함께 커밋한다. 일반 PRACTICE 제출 수·최초 AC에는 반영하지 않는다.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `validationId` / `problemRevisionId` | string | Y | 원래 요청과 일치 |
+| `language` / `requestHash` | string | Y | 원래 요청 언어·해시와 일치 |
+| `status` | string | Y | `PASSED` / `REJECTED` / `ERROR` |
+| `runtimeKey` / `runnerVersion` | string 또는 null | Y | PASSED는 필수. 해당 검증에서 고정한 실행 환경·생성기 버전 |
+| `finishedAt` | string (date-time) | Y | Judge가 확정한 최종 완료 시각 |
+
+- `PASSED`는 전체 테스트 AC, `REJECTED`는 코드 판정 실패, `ERROR`는 시스템 실패로 종결한 요청이다. 상세 판정·최대 실행 시간·실패 설명은 Judge 진행 조회에서 제공한다.
+- 이미 통과한 회차·언어의 코드·환경은 교체하지 않는다. 다른 언어의 실패나 늦은 전달로 기존 통과 결과·공개 상태를 취소하지 않는다.
+- 실행 환경 식별자와 요청 해시는 형식 예시다. 실제 요청에 저장된 해시와 검증에 사용한 실행 환경을 보낸다.
+
+```json
+{
+  "eventId": "a1c34b1e-77a0-4c1d-9e1b-2d5a6f3c8e01",
+  "eventType": "ProblemValidationCompleted",
+  "schemaVersion": "v1",
+  "occurredAt": "2026-09-28T10:20:01.000000+09:00",
+  "aggregateId": "2001",
+  "correlationId": "req-validation-2001",
+  "validationId": "2001",
+  "problemRevisionId": "1001",
+  "language": "java",
+  "requestHash": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+  "status": "PASSED",
+  "runtimeKey": "java-runtime-v1",
+  "runnerVersion": "java-runner-v1",
+  "finishedAt": "2026-09-28T10:20:01.000000+09:00"
+}
+```
 
 ### 4.3 judge (담당 B)
 
@@ -407,7 +529,7 @@ flowchart LR
 | 소비자 | 처리 (모두 `judgeAttempt > 저장값`일 때만) |
 | --- | --- |
 | member | `practice_result_replicas` 교체 → (회원, 태그, 난이도) 성취도·레벨 재계산 → 바뀌면 M4·M5 Outbox |
-| problem | `member_problem_statuses` 갱신(`is_solved`는 `false → true`만), 문제별 통계 |
+| problem | `problem_submission_results`의 제출별 `judgeAttempt` 비교·최신 판정 갱신. 최초 INSERT 때만 제출 수 증가, 접수 시각 기준 최초 AC 보존. 회원별 풀이 상태·통계·소비 기록을 같은 트랜잭션에 반영 (ERD §4.2.10·§4.2.18) |
 | study | `member_ac_replicas` upsert(`is_accepted`), 대상 문제집 완료 기록 재계산 (다이어그램 §5.3) |
 | integration | `AC`·`CONNECTED`·자동 커밋 켜짐 → `github_sync_jobs` 생성(`submission_id` 유일) |
 | notification | `SUBMISSION_JUDGED` 생성 (끌 수 없음) |
@@ -755,7 +877,9 @@ flowchart LR
 | `LearningProfileUpdated` |  |  |  |  | ● |  |  |
 | `TagLevelChanged` |  |  |  |  |  | ● |  |
 | `DiagnosisSubmissionRequested` | ○ |  |  |  |  |  |  |
-| `ProblemStateChanged` |  |  |  | ● | ● |  |  |
+| `ProblemStateChanged` v1 / v2 |  |  |  | ● | ● |  |  |
+| `ProblemValidationRequested` v1 | ● |  |  |  |  |  |  |
+| `ProblemValidationCompleted` v1 |  |  | ● |  |  |  |  |
 | `SubmissionJudged` |  | ● | ● |  | ● | ● | ● |
 | `ExamSubmissionJudged` |  |  |  | ● |  |  |  |
 | `ContestSubmissionJudged` |  |  |  | ● |  |  |  |
@@ -785,7 +909,7 @@ flowchart LR
 | `AssignmentIncompleteRepeated` |  |  |  |  |  | ● |  |
 | `HintReady` |  | ○ |  |  |  | ● |  |
 | `GitHubSyncFailed` |  |  |  |  |  | ● |  |
-| **합계** | 2 (+1) | 2 (+2) | 7 | 9 (+1) | 16 | 19 | 2 |
+| **합계** | 3 (+1) | 2 (+2) | 8 | 9 (+1) | 16 | 19 | 2 |
 
 ### 5.1 소비자 구현 체크리스트
 

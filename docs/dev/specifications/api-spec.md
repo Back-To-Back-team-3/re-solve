@@ -1156,15 +1156,25 @@
 
 ### 2.1 외부 API — 문제 조회
 
+이 절의 현재 회차는 정책 및 상태 > 4 > 사용 회차를 뜻한다.
+
 #### 2.1.1 문제 목록 조회
 
 - **Method / URI:** `GET /api/v1/problems`
 - **인증:** 로그인 필요
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`, `tags`, `member_problem_statuses`
 - **설명:** 일반 공개 문제(`GENERAL`·`PUBLIC`)의 현재 회차를 조건으로 검색한다. 시험 전용 문제는 제외한다. 레벨 접근 가능 여부는 프론트가 태그 레벨 목록(1.4.1)의 태그 레벨과 비교해 표시한다(제출 시 judge가 검증).
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
 - **요청 파라미터:**
-    
-    
+
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `keyword` | string | N | — | 제목 검색 |
@@ -1174,113 +1184,185 @@
     | `page` | int | N | 0 |  |
     | `size` | int | N | 20 | 최대 100 |
     | `sort` | string | N | `publishedAt,desc` |  |
-    
+
     허용 정렬 필드: `publishedAt`, `difficulty`, `problemId`
-    
-- **응답 (200):**
-    
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.content` | object[] | 검색 조건에 맞는 사용 회차 목록 |
+    | `data.content[].problemId / problemRevisionId` | string | 문제·사용 회차 ID |
+    | `data.content[].revisionNumber / title / difficulty` | integer / string / integer | 사용 회차 번호·제목·난이도 |
+    | `data.content[].tags` | object[] | 사용 회차의 태그 ID·이름 |
+    | `data.content[].publishedAt / solvedStatus / supportedLanguages` | date-time / string / string[] | 회차 등록 시각·본인 풀이 상태·통과 언어 |
+    | `data.page / size / totalElements / totalPages / hasNext` | integer / integer / integer / integer / boolean | 공통 페이지 정보 |
+
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "content": [
-            {
-              "problemId": "301",
-              "problemRevisionId": "1001",
-              "revisionNumber": 1,
-              "title": "두 수의 합",
-              "difficulty": 1,
-              "tags": [ 
-    	          { 
-    		          "tagId": "1", 
-    		          "name": "구현" 
-    	          } 
-              ],
-              "publishedAt": "2026-09-27T10:00:00+09:00",
-              "solvedStatus": "UNSOLVED"
-            }
-          ],
-          "page": 0, 
-          "size": 20, 
-          "totalElements": 1, 
-          "totalPages": 1, 
-          "hasNext": false
-        }
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "problemId": "301",
+            "problemRevisionId": "1001",
+            "revisionNumber": 1,
+            "title": "두 수의 합",
+            "difficulty": 1,
+            "tags": [
+              {
+                "tagId": "1",
+                "name": "구현"
+              }
+            ],
+            "publishedAt": "2026-09-27T10:00:00+09:00",
+            "solvedStatus": "UNSOLVED",
+            "supportedLanguages": [
+              "python3"
+            ]
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 1,
+        "totalPages": 1,
+        "hasNext": false
       }
+    }
     ```
-    
+
     - `publishedAt`: 현재 회차 등록 시각(`problem_revisions.created_at`)
+    - `supportedLanguages`: 해당 사용 회차에 PASSED가 반영된 언어. 제목·난이도·태그 필터는 사용 회차를 고른 뒤 적용한다.
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 페이지·필터와 응답의 회차 ID를 함께 사용한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
 
 #### 2.1.2 문제 상세 조회
 
 - **Method / URI:** `GET /api/v1/problems/{problemId}`
 - **인증:** 로그인 필요
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tags`, `tags`, `problem_revision_tests`, `problem_test_assets`, `member_problem_statuses`
-- **설명:** 현재 공개 회차의 본문·함수 명세·실행 제한·기본 코드·공개 예제를 조회한다. 숨김 테스트와 과거 회차는 제공하지 않는다.
-- **응답 (200):**
-    
+- **설명:** 일반 공개 문제(`GENERAL`·`PUBLIC`)의 사용 회차 본문·함수 명세·실행 제한·통과 언어의 기본 코드·공개 예제를 조회한다. 숨김 테스트와 과거 회차는 제공하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.problemId / problemRevisionId / revisionNumber` | string / string / integer | 문제·사용 회차·회차 번호 |
+    | `data.title / difficulty / tags` | string / integer / object[] | 사용 회차 제목·난이도·태그 |
+    | `data.publishedAt / solvedStatus` | date-time / string | 회차 등록 시각·본인 풀이 상태 |
+    | `data.description / constraints / examples` | string | 본문·제한·입출력 예시 Markdown |
+    | `data.functionSpec / executionLimits` | object | 회차의 함수 명세·고정 실행 제한 |
+    | `data.supportedLanguages / starterCodes` | string[] / object[] | 통과 언어·언어별 기본 코드 |
+    | `data.samples` | object[] | 공개 테스트의 ID·입력·기대값 |
+
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "problemId": "301",
-          "problemRevisionId": "1001",
-          "revisionNumber": 1,
-          "title": "두 수의 합",
-          "difficulty": 1,
-          "tags": [ 
-    	      { 
-    		      "tagId": "1", 
-    		      "name": "구현" 
-    	      } 
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "problemId": "301",
+        "problemRevisionId": "1001",
+        "revisionNumber": 1,
+        "title": "두 수의 합",
+        "difficulty": 1,
+        "tags": [
+          {
+            "tagId": "1",
+            "name": "구현"
+          }
+        ],
+        "publishedAt": "2026-09-27T10:00:00+09:00",
+        "solvedStatus": "UNSOLVED",
+        "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
+        "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
+        "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
+        "functionSpec": {
+          "name": "solution",
+          "parameters": [
+            {
+              "name": "a",
+              "type": {
+                "kind": "INT32"
+              }
+            },
+            {
+              "name": "b",
+              "type": {
+                "kind": "INT32"
+              }
+            }
           ],
-          "publishedAt": "2026-09-27T10:00:00+09:00",
-          "solvedStatus": "UNSOLVED",
-          "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
-          "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
-          "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
-          "functionSpec": {
-            "name": "solution",
-            "parameters": [ 
-    	        { 
-    		        "name": "a", 
-    		        "type": { "kind": "INT32" } 
-    	        }, 
-    	        { 
-    		        "name": "b", 
-    		        "type": { "kind": "INT32" } 
-    	        } 
-            ],
-            "returnType": { "kind": "INT32" }
-          },
-          "executionLimits": { 
-    	      "timeMs": 2000, 
-    	      "memoryKb": 262144, 
-    	      "wallTimeMs": 7000, 
-              "outputLimitKb": 64
-          },
-          "starterCodes": [ 
-    	      { 
-    		      "language": "python3", 
-    		      "sourceCode": "def solution(a, b):\n    pass\n" 
-    	      } 
-          ],
-          "samples": [ 
-    	      { 
-    		      "testAssetId": "501", 
-    		      "argumentTexts": { "a": "1", "b": "2" }, 
-    		      "expectedReturnText": "3" 
-    	      } 
-          ]
-        }
+          "returnType": {
+            "kind": "INT32"
+          }
+        },
+        "executionLimits": {
+          "timeMs": 2000,
+          "memoryKb": 262144,
+          "wallTimeMs": 7000,
+          "outputLimitKb": 64
+        },
+        "starterCodes": [
+          {
+            "language": "python3",
+            "sourceCode": "def solution(a: int, b: int) -> int:\n    raise NotImplementedError()\n"
+          }
+        ],
+        "samples": [
+          {
+            "testAssetId": "501",
+            "argumentTexts": {
+              "a": "1",
+              "b": "2"
+            },
+            "expectedReturnText": "3"
+          }
+        ],
+        "supportedLanguages": [
+          "python3"
+        ]
       }
+    }
     ```
-    
+
     - `executionLimits`: 모든 지원 언어에 같은 값을 적용한다. `wallTimeMs = timeMs + 5초`
+
 - **에러:**
     - `PROBLEM_NOT_FOUND`(404), `PROBLEM_NOT_AVAILABLE`(404)
+
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** Judge 기본 코드 HTTP(§2.7) — 사용 회차의 `functionSpec`과 통과 언어 `languages`로 `starterCodes`를 받는다. 조회 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)이며 미검증 언어의 코드를 대신 반환하지 않는다.
+- **프론트 계약:** 응답 회차·지원 언어를 기준으로 기본 코드와 공개 예제를 표시한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
 
 #### 2.1.3 일반 문제 본문 이미지 조회
 
@@ -1546,9 +1628,11 @@
 | `tagIds` | string[] | Y | 태그 ID 목록. 없으면 빈 배열. 존재하지 않는·중복 ID 거절 |
 | `functionSpec` | object | Y | 함수명(`solution` 고정)·매개변수·반환 타입(TypeSpec) |
 | `executionLimits` | object 또는 null | N | 생략·null 항목은 등록 시점 공통값 적용 |
-| `testCases` | object[] | Y | 공개(`isSample=true`) 1개 이상·숨김 1개 이상(정책 §4) |
+| `testCases` | object[] | Y | 공개(`isSample=true`) 1개 이상·숨김 1개 이상, 합계 최대 50개·4MB 이하(정책 §4) |
+
 - 일부만 편집해도 전체 본문·테스트를 보낸다. 서버가 기존 파일과 비교해 바뀌지 않은 본문·테스트 파일은 재사용한다.
 - 등록 요청에는 에셋 ID·테스트 순번을 받지 않는다.
+- 등록·새 회차 요청의 전체 HTTP 본문은 JSON 이스케이프·Markdown 포함 8MB 이하. 테스트 크기·개수와 별도로 검사하며 정확한 바이트 기준은 [정책 및 상태 §4](../planning/policy-and-state.md#4-문제테스트케이스-정책)를 따른다.
 
 **testCases[]**
 
@@ -1557,6 +1641,8 @@
 | `isSample` | boolean | Y | true 공개 예제, false 숨김. 둘 다 채점에 사용 |
 | `argumentTexts` | object | Y | 매개변수 이름별 입력 JSON 텍스트. 키는 선언된 이름과 정확히 일치 |
 | `expectedReturnText` | string | Y | 기대 반환값 JSON 텍스트 |
+
+- 테스트 1건의 모든 `argumentTexts` 값과 `expectedReturnText` 문자열의 UTF-8 바이트 합계는 256KB 이하(정확한 바이트 기준은 정책 §4).
 - 숫자는 정밀도 보존을 위해 JSON 텍스트로 보낸다. 예: `"a": "9007199254740993"`. 문자열 `abc`는 `"\"abc\""`.
 - 같은 입력·기대값의 중복 테스트는 공개 여부와 무관하게 거절한다.
 - TypeSpec 필드·지원 타입·검증 규칙은 [TypeSpec 공통 타입 명세](type-spec.md)를 따른다.
@@ -1566,7 +1652,7 @@
 
 | 필드 | 타입 | 단위 | 설명 |
 | --- | --- | --- | --- |
-| `timeMs` | int 또는 null | ms | CPU 시간 제한. 기본 2,000. C++ 정답 최대 실행 시간 × 3 이상, 최소 1,000 (B-5) |
+| `timeMs` | int 또는 null | ms | CPU 시간 제한. 기본 2,000·최소 1,000. 저장 시 정적 조건을 검사하고 공개 전 관리자가 C++ 정답 최대 실행 시간 ×3 이상인지 확인 (B-5) |
 | `memoryKb` | int 또는 null | KB | 메모리 제한. 기본 262,144 |
 | `wallTimeMs` | int 또는 null | ms | 생략 시 `timeMs + 5,000` |
 | `outputLimitKb` | int 또는 null | KiB | 테스트별 반환 JSON 크기 제한. 허용 범위 1~256, 생략·null이면 기본 64. 디버그 출력 제한과 별개이며 초과 판정은 정책 및 상태 §3.2·§3.3을 따른다 |
@@ -1577,86 +1663,160 @@
 
 - **Method / URI:** `POST /api/v1/admin/problems`
 - **인증:** `ADMIN`
-- **Idempotency:** 있음 (`Idempotency-Key` 필수)
+- **Idempotency:** `Idempotency-Key` 필수. 작성 관리자·키별 같은 요청은 저장된 회차의 최초 응답을 반환한다.
+- **Rate Limit:** 없음
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_body_images`, `problem_images`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `audit_logs`
-- **설명:** 완성된 본문과 전체 테스트로 문제와 첫 회차를 등록한다. 최초 상태는 `PRIVATE`다. 작성 단계 검증(정답 코드 AC 포함)은 등록 전 화면 절차로 수행한다.
+- **설명:** 완성된 본문과 전체 테스트로 문제와 첫 회차를 `PRIVATE`로 저장하고 `201`을 반환한다. 정답 코드 검증은 저장 후 별도 `202` 접수로 수행한다(정책 §4).
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `Idempotency-Key` | Y | 1~100자 ASCII, 관리자·업무별 키 |
+    | `X-Correlation-Id` | N | 미지정 시 Gateway 발급 |
+
+- **요청 파라미터:** 없음
 - **요청 바디:**
-    
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `scope` | string | Y | GENERAL / EXAM_ONLY, 최초 등록 후 변경 불가 |
+    | `title` | string | Y | 1~200자 |
+    | `description` / `constraints` / `examples` | string | Y | Markdown 본문·제한·입출력 예시 |
+    | `difficulty` | integer | Y | 1~3 |
+    | `tagIds` | string[] | Y | 중복 없는 존재 태그 ID. 태그 없으면 [] |
+    | `functionSpec` | object | Y | 함수 명세 |
+    | `functionSpec.name` | string | Y | solution 고정 |
+    | `functionSpec.parameters` | object[] | Y | 선언 순서의 이름·TypeSpec, 이름 중복 금지 |
+    | `functionSpec.returnType` | TypeSpec | Y | 반환값 타입 |
+    | `executionLimits` | object 또는 null | N | 생략·null 필드는 등록 시 기본값 |
+    | `executionLimits.timeMs` | integer 또는 null | N | 기본 2,000, 최소 1,000. C++ 실행 시간 ×3은 공개 전 관리자 확인 |
+    | `executionLimits.memoryKb` | integer 또는 null | N | 기본 262,144KB |
+    | `executionLimits.wallTimeMs` | integer 또는 null | N | 기본 timeMs+5,000ms |
+    | `executionLimits.outputLimitKb` | integer 또는 null | N | 1~256KB, 기본 64 |
+    | `testCases` | object[] | Y | 최대 50개, 공개·숨김 각 1개 이상, UTF-8 합계 4MB 이하 |
+    | `testCases[].isSample` | boolean | Y | true 공개, false 숨김 |
+    | `testCases[].argumentTexts` | object (이름→string) | Y | 선언한 매개변수 이름과 일치하는 JSON 텍스트 |
+    | `testCases[].expectedReturnText` | string | Y | 기대 반환값 JSON 텍스트. 한 테스트의 입력·기대값 합계 256KB 이하 |
+
+    전체 HTTP 본문은 8MB 이하이며 테스트 바이트와 별도로 검사한다. 정확한 바이트 수는 정책 §4를 따른다.
+
     ```json
-      {
-        "scope": "GENERAL",
-        "title": "두 수의 합",
-        "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
-        "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
-        "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
-        "difficulty": 1,
-        "tagIds": ["1"],
-        "functionSpec": {
-          "name": "solution",
-          "parameters": [ { 
-    		      "name": "a", 
-    		      "type": { "kind": "INT32" } 
-    	      }, 
-    	      { 
-    		      "name": "b", 
-    		      "type": { "kind": "INT32" } 
-    	      } 
-          ],
-          "returnType": { "kind": "INT32" }
-        },
-        "executionLimits": { 
-    	    "timeMs": 2000, 
-    	    "memoryKb": null 
-        },
-        "testCases": [
-          { 
-    	      "isSample": true, 
-    	      "argumentTexts": { 
-    		      "a": "1", 
-    		      "b": "2" 
-    	      }, 
-    	      "expectedReturnText": "3" 
+    {
+      "scope": "GENERAL",
+      "title": "두 수의 합",
+      "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
+      "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
+      "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
+      "difficulty": 1,
+      "tagIds": ["1"],
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
           },
-          { 
-    	      "isSample": false, 
-    	      "argumentTexts": { 
-    		      "a": "-5", 
-    		      "b": "7" 
-    	      }, 
-    	      "expectedReturnText": "2" 
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
           }
-        ]
-      }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": null
+      },
+      "testCases": [
+        {
+          "isSample": true,
+          "argumentTexts": {
+            "a": "1",
+            "b": "2"
+          },
+          "expectedReturnText": "3"
+        },
+        {
+          "isSample": false,
+          "argumentTexts": {
+            "a": "-5",
+            "b": "7"
+          },
+          "expectedReturnText": "2"
+        }
+      ]
+    }
     ```
-    
-- **응답 (201):**
-    
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (201):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string | 공통 성공 응답 |
+    | `data.problemId` | string | 생성 문제 ID |
+    | `data.problemRevisionId` | string | 첫 회차 ID |
+    | `data.revisionNumber` | integer | 첫 회차 번호 1 |
+    | `data.rowVersion` | integer | 문제 초기 변경 버전 1 |
+
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "문제가 등록되었습니다.", 
-    	  "data": { 
-    		  "problemId": "301", 
-    		  "problemRevisionId": "1001", 
-    		  "revisionNumber": 1, 
-    		  "rowVersion": 1 
-    	  } 
+    {
+      "success": true,
+      "message": "문제가 등록되었습니다.",
+      "data": {
+        "problemId": "301",
+        "problemRevisionId": "1001",
+        "revisionNumber": 1,
+        "rowVersion": 1
       }
+    }
     ```
-    
+
 - **에러:**
-    - `COMMON_INVALID_REQUEST`(400), `PROBLEM_TEST_CASE_INVALID`(400), `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_IMAGE_INVALID`(400) / 본문 이미지 10개 초과·미검증 이미지 참조, `IDEMPOTENCY_KEY_CONFLICT`(422)
-- **동시성/멱등 보장:** S3 업로드 성공 후 DB 트랜잭션에 회차·파일 연결을 저장한다. DB 실패 시 업로드 파일은 `PENDING`으로 남아 정리 배치 대상이 된다.
+    - `COMMON_INVALID_REQUEST`(400), `PROBLEM_TEST_CASE_INVALID`(400), `PROBLEM_TEST_CASE_TOO_LARGE`(413), `PROBLEM_REQUEST_TOO_LARGE`(413), `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_IMAGE_INVALID`(400) / 본문 이미지 10개 초과·미검증 이미지 참조, `IDEMPOTENCY_KEY_CONFLICT`(422), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 파일 저장 실패
+
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "PROBLEM_REQUEST_TOO_LARGE",
+        "message": "요청 본문 크기 제한을 초과했습니다.",
+        "details": []
+      }
+    }
+    ```
+
+- **동시성/멱등 보장:** 기존 작성 관리자·키의 요청 해시를 먼저 확인한다. 신규 파일은 업로드 추적 행을 먼저 저장한 뒤 DB 행 잠금 없이 S3에 업로드한다. 짧은 DB 트랜잭션에 회차·파일 연결·멱등 정보·최초 응답 버전·감사 로그를 저장한다. 최종 DB 실패 시 요청은 발행하지 않으며 미연결 파일은 정리 대상이 된다.
+- **발행:** 없음. 최초 저장은 코드 검증과 분리한다.
+- **외부 의존:** 본문·테스트의 불변 파일 저장소.
+- **프론트 계약:** 201 후 검증 코드 접수 화면으로 진행한다.
+- **비고:** 입력 상세는 §2.3.0·TypeSpec을 따르며 사용 회차 없는 PRIVATE로 시작한다.
 
 #### 2.3.2 관리자 문제 목록 조회
 
 - **Method / URI:** `GET /api/v1/admin/problems`
 - **인증:** `ADMIN`
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`
 - **설명:** 작성자와 무관하게 전체 문제의 회차 목록을 조회한다. 기본은 보관되지 않은 문제의 최신 회차만, `latestOnly=false`면 과거 회차도 포함한다. 한 행은 하나의 `problemRevisionId`다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
 - **요청 파라미터:**
-    
-    
+
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `keyword` | string | N | — | 해당 회차 제목 검색 |
@@ -1667,191 +1827,566 @@
     | `latestOnly` | boolean | N | true | true면 최신 회차를 먼저 고른 뒤 필터 적용 |
     | `page` | int | N | 0 |  |
     | `size` | int | N | 20 |  |
-    | `sort` | string[] | N | `problemId,asc` 
-    → `createdAt,desc` | 여러 개 전달 시 순서대로 적용 |
-    
+    | `sort` | string[] | N | `problemId,asc` → `createdAt,desc` | 여러 개 전달 시 순서대로 적용 |
+
     허용 정렬 필드: `problemId`, `createdAt`(회차 등록일)
-    
-- **응답 (200):**
-    
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.content` | object[] | 최신 또는 지정 조건의 작성 회차 목록 |
+    | `data.content[].problemId / problemRevisionId / revisionNumber` | string / string / integer | 문제·회차·회차 번호 |
+    | `data.content[].title / authorId / scope / visibility / rowVersion` | string / string / string / string / integer | 회차 제목·작성자·문제 용도·공개 상태·변경 버전 |
+    | `data.content[].currentProblemRevisionId / supportedLanguages` | string 또는 null / string[] | 사용 회차 ID·각 행 회차의 통과 언어 |
+    | `data.page / size / totalElements / totalPages / hasNext` | integer / integer / integer / integer / boolean | 공통 페이지 정보 |
+
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "content": [ { 
-    	      "problemId": "301", 
-    	      "problemRevisionId": "1001", 
-    	      "revisionNumber": 1, 
-    	      "title": "두 수의 합", 
-    	      "authorId": "11", 
-    	      "scope": "GENERAL", 
-    	      "visibility": "PUBLIC", 
-    	      "rowVersion": 7 
-    	      } 
-    	    ],
-          "page": 0, 
-          "size": 20, 
-          "totalElements": 1, 
-          "totalPages": 1, 
-          "hasNext": false
-        }
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "problemId": "301",
+            "problemRevisionId": "1001",
+            "revisionNumber": 1,
+            "title": "두 수의 합",
+            "authorId": "11",
+            "scope": "GENERAL",
+            "visibility": "PUBLIC",
+            "rowVersion": 7,
+            "currentProblemRevisionId": "1001",
+            "supportedLanguages": [
+              "java",
+              "python3"
+            ]
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 1,
+        "totalPages": 1,
+        "hasNext": false
       }
+    }
     ```
-    
-    - `rowVersion`은 문제 단위 값이라 같은 문제의 행에서 공유한다.
+
+    - `rowVersion`은 문제 단위 값이라 같은 문제의 행에서 공유한다. `currentProblemRevisionId`는 사용 회차 ID이며 `supportedLanguages`는 각 행의 회차 기준이다. 목록에는 코드 원문·검증 상세를 포함하지 않는다.
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 페이지·필터와 응답의 회차 ID를 함께 사용한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
 
 #### 2.3.3 관리자 문제 상세 조회
 
 - **Method / URI:** `GET /api/v1/admin/problems/{problemId}`
 - **인증:** `ADMIN` (작성 관리자)
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `tags`
-- **설명:** 문제 기본 정보·공개 상태·`rowVersion`과 최신 회차의 전체 내용(숨김 테스트 포함)을 반환한다. 수정 화면은 이 API 한 번으로 채운다.
-- **응답 (200):**
-    
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `tags`, `problem_validations`, `problem_code_assets`
+- **설명:** 문제 기본 정보·공개 상태·`rowVersion`과 최신 작성 회차의 전체 내용(숨김 테스트 포함)을 반환한다. 수정 화면은 이 API 한 번으로 채운다. 사용 회차와 다를 수 있다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.problemId / authorId / problemRevisionId / revisionNumber` | string / string / string / integer | 문제·작성 관리자·조회 회차·번호 |
+    | `data.scope / visibility / rowVersion` | string / string / integer | 문제 용도·공개 상태·변경 버전 |
+    | `data.title / description / constraints / examples / difficulty / tagIds` | string / string / string / string / integer / string[] | 전체 작성 입력 |
+    | `data.publishedAt / functionSpec / executionLimits` | date-time / object / object | 회차 등록 시각·함수 명세·고정 제한 |
+    | `data.testCases` | object[] | 공개·숨김 전체 테스트와 조회 전용 testAssetId |
+
+    | 추가 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `currentProblemRevisionId` | string 또는 null | 사용 가능한 최신 회차 ID. 조회한 작성 회차와 다를 수 있음 |
+    | `supportedLanguages` | string[] | 조회한 회차에 PASSED가 반영된 언어. 없으면 [] |
+    | `referenceSolutions` | object[] | 언어별 코드 원문. PASSED가 있으면 고정된 통과 코드, 없으면 최신 요청 코드 |
+    | `referenceSolutions[].language` / `sourceCode` | string / string | 언어와 Problem이 고정 S3 객체에서 읽은 코드 원문 |
+    | `languageResults` | object[] | 언어별 최신 검증 요청과 Judge 진행 조회를 결합. 요청 없는 언어는 생략 |
+    | `languageResults[].validationId` / `language` | string / string | §2.3.11 조회에 사용할 검증 ID와 언어 |
+    | `languageResults[].status` / `verdict` / `maxTimeMs` / `message` / `resultApplied` | §2.3.11과 동일 | 실행 진행·판정과 Problem 결과 반영 여부 |
+
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "problemId": "301", 
-          "authorId": "11", 
-          "scope": "GENERAL", 
-          "visibility": "PUBLIC", 
-          "rowVersion": 7,
-          "problemRevisionId": "1002", 
-          "revisionNumber": 2, 
-          "publishedAt": "2026-09-28T10:20:00+09:00",
-          "title": "두 수의 합", 
-          "description": "...", 
-          "constraints": "...", 
-          "examples": "...",
-          "difficulty": 1, 
-          "tagIds": ["1"],
-          "functionSpec": { 
-    	      "name": "solution", 
-    	      "parameters": [ { 
-    		      "name": "a", 
-    		      "type": { "kind": "INT32" } 
-    		      } 
-    	      ], 
-    	      "returnType": { "kind": "INT32" } 
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "problemId": "301",
+        "authorId": "11",
+        "scope": "GENERAL",
+        "visibility": "PUBLIC",
+        "rowVersion": 7,
+        "problemRevisionId": "1002",
+        "revisionNumber": 2,
+        "publishedAt": "2026-09-28T10:20:00+09:00",
+        "title": "두 수의 합",
+        "description": "...",
+        "constraints": "...",
+        "examples": "...",
+        "difficulty": 1,
+        "tagIds": [
+          "1"
+        ],
+        "functionSpec": {
+          "name": "solution",
+          "parameters": [
+            {
+              "name": "a",
+              "type": {
+                "kind": "INT32"
+              }
+            },
+            {
+              "name": "b",
+              "type": {
+                "kind": "INT32"
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "INT32"
+          }
+        },
+        "executionLimits": {
+          "timeMs": 2000,
+          "memoryKb": 262144,
+          "wallTimeMs": 7000,
+          "outputLimitKb": 64
+        },
+        "testCases": [
+          {
+            "argumentTexts": {
+              "b": "2",
+              "a": "1"
+            },
+            "expectedReturnText": "3",
+            "isSample": true,
+            "testAssetId": "501"
           },
-          "executionLimits": { 
-    	      "timeMs": 2000, 
-    	      "memoryKb": 262144, 
-    	      "wallTimeMs": 7000, 
-              "outputLimitKb": 64
-          },
-          "testCases": [ { 
-    	      "testAssetId": "501", 
-    	      "isSample": true, 
-    	      "argumentTexts": { "a": "1", "b": "2" }, 
-    	      "expectedReturnText": "3" 
-    	      } 
-          ]
-        }
+          {
+            "argumentTexts": {
+              "b": "7",
+              "a": "-5"
+            },
+            "expectedReturnText": "2",
+            "isSample": false,
+            "testAssetId": "502"
+          }
+        ],
+        "currentProblemRevisionId": "1001",
+        "supportedLanguages": [],
+        "referenceSolutions": [
+          {
+            "language": "java",
+            "sourceCode": "class Solution {\n    public int solution(int a, int b) {\n        return a + b;\n    }\n}\n"
+          }
+        ],
+        "languageResults": [
+          {
+            "validationId": "2002",
+            "language": "java",
+            "status": "REQUESTED",
+            "verdict": null,
+            "maxTimeMs": null,
+            "message": null,
+            "resultApplied": false
+          }
+        ]
       }
+    }
     ```
-    
+
     - `testAssetId`는 조회 응답 전용이며 등록·수정 요청에는 포함하지 않는다.
+
 - **에러:**
-    - `PROBLEM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403) / 작성 관리자가 아님
+    - `PROBLEM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403) / 작성 관리자가 아님, `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 원문 파일·Judge 진행 조회 실패
+
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 고정 S3 원문 저장소와 Judge 검증 진행 조회(§2.7). 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)다.
+- **프론트 계약:** 작성 회차와 사용 회차를 구분하고 검증 상태·결과 반영 여부를 표시한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
 
 #### 2.3.4 새 문제 수정 회차 등록
 
 - **Method / URI:** `POST /api/v1/admin/problems/{problemId}/revisions`
 - **인증:** `ADMIN` (작성 관리자)
-- **Idempotency:** 있음 (`Idempotency-Key` 필수)
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_body_images`, `problem_images`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `outbox_events`
-- **설명:** 전체 본문·테스트로 새 불변 회차를 등록하고 현재 회차를 교체한다. 기존 회차·제출·시험은 그대로 두고 `scope`·공개 상태는 바꾸지 않는다.
-- **요청 바디:** 문제 등록(2.3.1)과 같다. 단 `scope` 대신 `rowVersion`을 보낸다.
-    
+- **Idempotency:** `Idempotency-Key` 필수. 작성 관리자·키별 같은 요청은 저장된 회차의 최초 응답을 반환한다.
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_body_images`, `problem_images`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `problem_code_assets`, `problem_validations`, `audit_logs`, `outbox_events`
+- **설명:** 전체 본문·테스트로 새 불변 회차를 등록하고 기존 통과 코드로 자동 재검증한다. 저장만으로 사용 회차를 교체하지 않으며, 검증 중·전부 실패하면 기존 사용 회차를 유지한다. 기존 회차·제출·시험과 `scope`·공개 상태는 바꾸지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `Idempotency-Key` | Y | 1~100자 ASCII, 관리자·업무별 키 |
+    | `X-Correlation-Id` | N | 미지정 시 Gateway 발급 |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 작성 관리자의 문제 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `rowVersion` | integer | Y | 조회 당시 문제 변경 버전 |
+    | `title` | string | Y | 1~200자 |
+    | `description` / `constraints` / `examples` | string | Y | Markdown 본문·제한·입출력 예시 |
+    | `difficulty` | integer | Y | 1~3 |
+    | `tagIds` | string[] | Y | 중복 없는 존재 태그 ID. 태그 없으면 [] |
+    | `functionSpec` | object | Y | 함수 명세 |
+    | `functionSpec.name` | string | Y | solution 고정 |
+    | `functionSpec.parameters` | object[] | Y | 선언 순서의 이름·TypeSpec, 이름 중복 금지 |
+    | `functionSpec.returnType` | TypeSpec | Y | 반환값 타입 |
+    | `executionLimits` | object 또는 null | N | 생략·null 필드는 등록 시 기본값 |
+    | `executionLimits.timeMs` | integer 또는 null | N | 기본 2,000, 최소 1,000. C++ 실행 시간 ×3은 공개 전 관리자 확인 |
+    | `executionLimits.memoryKb` | integer 또는 null | N | 기본 262,144KB |
+    | `executionLimits.wallTimeMs` | integer 또는 null | N | 기본 timeMs+5,000ms |
+    | `executionLimits.outputLimitKb` | integer 또는 null | N | 1~256KB, 기본 64 |
+    | `testCases` | object[] | Y | 최대 50개, 공개·숨김 각 1개 이상, UTF-8 합계 4MB 이하 |
+    | `testCases[].isSample` | boolean | Y | true 공개, false 숨김 |
+    | `testCases[].argumentTexts` | object (이름→string) | Y | 선언한 매개변수 이름과 일치하는 JSON 텍스트 |
+    | `testCases[].expectedReturnText` | string | Y | 기대 반환값 JSON 텍스트. 한 테스트의 입력·기대값 합계 256KB 이하 |
+
+    전체 HTTP 본문은 8MB 이하이며 테스트 바이트와 별도로 검사한다. 정확한 바이트 수는 정책 §4를 따른다.
+
     ```json
-      { 
-    	  "rowVersion": 6, 
-    	  "title": "두 수의 합", 
-    	  "description": "...", 
-    	  "constraints": "...", 
-    	  "examples": "...", 
-    	  "difficulty": 1, 
-    	  "tagIds": ["1"], 
-    	  "functionSpec": { "...": "..." }, 
-    	  "executionLimits": null, 
-    	  "testCases": [ { 
-    		  "isSample": true, 
-    		  "argumentTexts": { "a": "1", "b": "2" }, 
-    		  "expectedReturnText": "3" 
-    		  } 
-    	  ] 
-      }
+    {
+      "rowVersion": 6,
+      "title": "두 수의 합",
+      "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
+      "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
+      "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
+      "difficulty": 1,
+      "tagIds": ["1"],
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": null
+      },
+      "testCases": [
+        {
+          "isSample": true,
+          "argumentTexts": {
+            "a": "1",
+            "b": "2"
+          },
+          "expectedReturnText": "3"
+        },
+        {
+          "isSample": false,
+          "argumentTexts": {
+            "a": "-5",
+            "b": "7"
+          },
+          "expectedReturnText": "2"
+        }
+      ]
+    }
     ```
-    
-- **응답 (201):**
-    
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (201):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string | 공통 성공 응답 |
+    | `data.problemRevisionId` | string | 새 회차 ID |
+    | `data.revisionNumber` | integer | 문제별 다음 회차 번호 |
+    | `data.rowVersion` | integer | 증가한 문제 변경 버전 |
+
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "새 회차가 등록되었습니다.", 
-    	  "data": { 
-    		  "problemRevisionId": "1002", 
-    		  "revisionNumber": 2, 
-    		  "rowVersion": 7 
-    	  } 
+    {
+      "success": true,
+      "message": "새 회차가 등록되었습니다.",
+      "data": {
+        "problemRevisionId": "1002",
+        "revisionNumber": 2,
+        "rowVersion": 7
       }
+    }
     ```
-    
+
 - **에러:**
-    - `PROBLEM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_TEST_CASE_INVALID`(400), `IDEMPOTENCY_KEY_CONFLICT`(422)
-- **동시성/멱등 보장:** `problems` 행을 `rowVersion` 조건으로 갱신한 뒤 다음 `revision_number`를 계산한다(`uk_problem_revisions_problem_revision_number`).
-- **발행:**
-    - `ProblemStateChanged` — 공개 문제의 새 회차 등록 시 (`revisionNumber` 갱신)
+    - `COMMON_INVALID_REQUEST`(400), `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_IMAGE_INVALID`(400), `PROBLEM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_TEST_CASE_INVALID`(400), `PROBLEM_TEST_CASE_TOO_LARGE`(413), `PROBLEM_REQUEST_TOO_LARGE`(413), `IDEMPOTENCY_KEY_CONFLICT`(422), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 파일 저장 실패, `PROBLEM_INVALID_STATE_TRANSITION`(409) / ARCHIVED 문제의 신규 회차
+
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "PROBLEM_REQUEST_TOO_LARGE",
+        "message": "요청 본문 크기 제한을 초과했습니다.",
+        "details": []
+      }
+    }
+    ```
+
+- **동시성/멱등 보장:** 작성 관리자·키의 기존 요청 해시 확인을 `rowVersion` 검사보다 먼저 수행한다. 신규 파일 업로드 중에는 DB 행 잠금을 유지하지 않는다. 저장 트랜잭션에서 멱등키를 재확인하고 `problems` 행을 `rowVersion` 조건으로 갱신한 뒤 다음 회차 번호를 계산한다. 회차·파일 연결·자동 검증 요청·Outbox·멱등 정보·최초 응답 버전·감사 기록은 함께 커밋한다. 유일 제약 경합으로 패배한 트랜잭션은 롤백하고 먼저 커밋된 최초 응답을 읽는다.
+- **발행:** 자동 검증 요청 Outbox. `ProblemStateChanged`는 검증 결과로 사용 회차·통과 언어가 바뀔 때 발행(이벤트 계약서 §4.2).
+- **외부 의존:** 본문·테스트 파일 저장소. 자동 검증은 Outbox를 사용한다.
+- **프론트 계약:** 201은 새 회차 저장 완료다. 관리자 상세의 `languageResults[].validationId`로 §2.3.11을 조회한다.
+- **비고:** 통과 결과를 복사하지 않고 기존 사용 회차의 언어별 최신 통과 코드 파일만 재사용한다.
 
 #### 2.3.5 문제 수정 회차 내용 조회
 
 - **Method / URI:** `GET /api/v1/admin/problems/{problemId}/revisions/{revisionId}`
 - **인증:** `ADMIN` (작성 관리자)
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `tags`
-- **설명:** 지정한 과거·현재 회차의 전체 내용을 조회한다. 응답은 관리자 문제 상세 조회(2.3.3)에서 `scope`·`visibility`·`rowVersion`을 뺀 구조다.
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `tags`, `problem_validations`, `problem_code_assets`
+- **설명:** 지정한 저장 회차의 전체 내용과 언어별 검증 상태를 조회한다. 통과 언어 없는 회차와 보관 문제도 작성 관리자에게 제공한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `revisionId` | Path | string | Y | 해당 문제 소속의 고정 회차 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.problemId / authorId / problemRevisionId / revisionNumber` | string / string / string / integer | 문제·작성 관리자·지정 회차·번호 |
+    | `data.title / description / constraints / examples / difficulty / tagIds` | string / string / string / string / integer / string[] | 지정 회차의 전체 작성 입력 |
+    | `data.publishedAt / functionSpec / executionLimits / testCases` | date-time / object / object / object[] | 회차 등록 시각·함수 명세·제한·전체 테스트 |
+    | `data.currentProblemRevisionId / supportedLanguages` | string 또는 null / string[] | 사용 회차 ID·지정 회차의 통과 언어 |
+    | `data.referenceSolutions / languageResults` | object[] / object[] | 지정 회차의 언어별 코드 원문·검증 진행. 필드는 §2.3.3과 동일 |
+
+
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "problemId": "301",
+        "authorId": "11",
+        "problemRevisionId": "1002",
+        "revisionNumber": 2,
+        "publishedAt": "2026-09-28T10:20:00+09:00",
+        "title": "두 수의 합",
+        "description": "...",
+        "constraints": "...",
+        "examples": "...",
+        "difficulty": 1,
+        "tagIds": [
+          "1"
+        ],
+        "functionSpec": {
+          "name": "solution",
+          "parameters": [
+            {
+              "name": "a",
+              "type": {
+                "kind": "INT32"
+              }
+            },
+            {
+              "name": "b",
+              "type": {
+                "kind": "INT32"
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "INT32"
+          }
+        },
+        "executionLimits": {
+          "timeMs": 2000,
+          "memoryKb": 262144,
+          "wallTimeMs": 7000,
+          "outputLimitKb": 64
+        },
+        "testCases": [
+          {
+            "argumentTexts": {
+              "b": "2",
+              "a": "1"
+            },
+            "expectedReturnText": "3",
+            "isSample": true,
+            "testAssetId": "501"
+          },
+          {
+            "argumentTexts": {
+              "b": "7",
+              "a": "-5"
+            },
+            "expectedReturnText": "2",
+            "isSample": false,
+            "testAssetId": "502"
+          }
+        ],
+        "currentProblemRevisionId": "1001",
+        "supportedLanguages": [],
+        "referenceSolutions": [
+          {
+            "language": "java",
+            "sourceCode": "class Solution {\n    public int solution(int a, int b) {\n        return a + b;\n    }\n}\n"
+          }
+        ],
+        "languageResults": [
+          {
+            "validationId": "2002",
+            "language": "java",
+            "status": "REQUESTED",
+            "verdict": null,
+            "maxTimeMs": null,
+            "message": null,
+            "resultApplied": false
+          }
+        ]
+      }
+    }
+    ```
+
 - **에러:**
     - `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403)
+
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 고정 S3 원문 저장소와 Judge 검증 진행 조회(§2.7). 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)다.
+- **프론트 계약:** 작성 회차와 사용 회차를 구분하고 검증 상태·결과 반영 여부를 표시한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
 
 #### 2.3.6 문제 수정 기록 목록 조회
 
 - **Method / URI:** `GET /api/v1/admin/problems/{problemId}/revisions`
 - **인증:** `ADMIN` (작성 관리자)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
 - **대응 테이블:** `problems`, `problem_revisions`
-- **설명:** 회차 메타 요약만 반환한다. S3 본문·테스트는 읽지 않는다. 보관된 문제도 조회할 수 있다.
+- **설명:** 통과 언어 없는 회차를 포함해 회차 메타 요약을 반환한다. `currentProblemRevisionId`는 사용 회차 ID, `supportedLanguages`는 각 회차 기준이다. S3 원문과 검증 상세는 읽지 않으며 보관된 문제도 조회한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
 - **요청 파라미터:**
-    
-    
+
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `page` | int | N | 0 |  |
     | `size` | int | N | 20 |  |
-    
+
     허용 정렬 필드: `revisionNumber` (기본 `revisionNumber,desc`)
-    
-- **응답 (200):**
-    
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.content` | object[] | 작성 회차의 메타 요약 |
+    | `data.content[].problemRevisionId / revisionNumber / title / publishedAt` | string / integer / string / date-time | 회차 ID·번호·제목·등록 시각 |
+    | `data.content[].currentProblemRevisionId / supportedLanguages` | string 또는 null / string[] | 사용 회차 ID·각 회차의 통과 언어 |
+    | `data.page / size / totalElements / totalPages / hasNext` | integer / integer / integer / integer / boolean | 공통 페이지 정보 |
+
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "content": [
-            { "problemRevisionId": "1002", "revisionNumber": 2, "title": "두 수의 합", "publishedAt": "2026-09-28T10:20:00+09:00" },
-            { "problemRevisionId": "1001", "revisionNumber": 1, "title": "두 수의 합", "publishedAt": "2026-09-27T14:00:00+09:00" }
-          ],
-          "page": 0, 
-          "size": 20, 
-          "totalElements": 2, 
-          "totalPages": 1, 
-          "hasNext": false
-        }
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "problemRevisionId": "1002",
+            "revisionNumber": 2,
+            "title": "두 수의 합",
+            "publishedAt": "2026-09-28T10:20:00+09:00",
+            "currentProblemRevisionId": "1001",
+            "supportedLanguages": []
+          },
+          {
+            "problemRevisionId": "1001",
+            "revisionNumber": 1,
+            "title": "두 수의 합",
+            "publishedAt": "2026-09-27T14:00:00+09:00",
+            "currentProblemRevisionId": "1001",
+            "supportedLanguages": [
+              "java",
+              "python3"
+            ]
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 2,
+        "totalPages": 1,
+        "hasNext": false
       }
+    }
     ```
-    
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404)
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 페이지·필터와 응답의 회차 ID를 함께 사용한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
 
 #### 2.3.7 문제 공개
 
@@ -1859,30 +2394,33 @@
 - **인증:** `ADMIN` (작성 관리자)
 - **Idempotency:** 있음
 - **대응 테이블:** `problems`, `problem_revisions`, `audit_logs`, `outbox_events`
-- **설명:** 회차가 있는 `GENERAL` 문제를 `PUBLIC`으로 전환한다. `EXAM_ONLY` 문제는 대회 설정으로 공개된다.
+- **설명:** 검증을 통과한 사용 회차가 있는 `GENERAL` 문제를 `PUBLIC`으로 전환한다. `EXAM_ONLY` 문제는 대회 설정으로 공개된다.
+    - 공개 전 관리자가 해당 회차의 C++ 실행 결과와 시간 제한 ×3·최소 1,000ms 기준을 확인한다(정책 §4). 측정 근거가 없으면 관리자 확인이 필요하며 검증 통과만으로 확인 완료로 간주하지 않는다.
 - **요청 바디:**
-    
+
     ```json
-      { "rowVersion": 8 }
+    {
+      "rowVersion": 8
+    }
     ```
-    
+
 - **응답 (200):**
-    
+
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "문제가 공개되었습니다.", 
-    	  "data": { 
-    		  "visibility": "PUBLIC", 
-    		  "rowVersion": 9 
-    	  } 
+    {
+      "success": true,
+      "message": "문제가 공개되었습니다.",
+      "data": {
+        "visibility": "PUBLIC",
+        "rowVersion": 9
       }
+    }
     ```
-    
+
 - **에러:**
-    - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409) / `EXAM_ONLY`·이미 `PUBLIC`·`ARCHIVED`(재공개 허용 여부 확정 필요)
+    - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409) / 통과 사용 회차 없음·`EXAM_ONLY`·이미 `PUBLIC`·`ARCHIVED`(재공개 허용 여부 확정 필요)
 - **발행:**
-    - `ProblemStateChanged` — `visibility = PUBLIC`
+    - `ProblemStateChanged` v2 — `visibility = PUBLIC`
 
 #### 2.3.8 문제 비공개 전환
 
@@ -1892,24 +2430,26 @@
 - **대응 테이블:** `problems`, `audit_logs`, `outbox_events`
 - **설명:** `PUBLIC → PRIVATE`. 일반 목록 노출과 새 일반 풀이 접수를 중단한다. 회차·제출·이미 시험에 고정된 회차는 유지한다.
 - **요청 바디:**
-    
+
     ```json
-      { "rowVersion": 9 }
+    {
+      "rowVersion": 9
+    }
     ```
-    
+
 - **응답 (200):**
-    
+
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "문제가 비공개로 전환되었습니다.", 
-    	  "data": { 
-    		  "visibility": "PRIVATE", 
-    		  "rowVersion": 10 
-    	  } 
+    {
+      "success": true,
+      "message": "문제가 비공개로 전환되었습니다.",
+      "data": {
+        "visibility": "PRIVATE",
+        "rowVersion": 10
       }
+    }
     ```
-    
+
 - **에러:**
     - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409)
     - `PROBLEM_IN_ACTIVE_EXAM`(409) / 진행 중 시험·대회에 포함 (예정 시험 처리는 미결정 B-9)
@@ -1917,7 +2457,7 @@
 - **외부 의존:**
     - `GET /internal/v1/exams/problem-usage?problemId=` (contest) — 진행 중 시험·대회 포함 여부. 실패 시 fail-closed
 - **발행:**
-    - `ProblemStateChanged` — `visibility = PRIVATE` (study 문제집 `EXCLUDED` 처리)
+    - `ProblemStateChanged` v2 — `visibility = PRIVATE` (study 문제집 `EXCLUDED` 처리)
 
 #### 2.3.9 문제 보관
 
@@ -1927,28 +2467,200 @@
 - **대응 테이블:** `problems`, `audit_logs`, `outbox_events`
 - **설명:** `ARCHIVED`(소프트 딜리트)로 전환해 새 풀이·시험 선택을 막는다. 기존에 고정한 회차는 유지한다. 해제 여부는 정책 검토 대상이다.
 - **요청 바디:**
-    
+
     ```json
-      { "rowVersion": 9, "reason": "신규 풀이 제공 종료" }
+    {
+      "rowVersion": 9,
+      "reason": "신규 풀이 제공 종료"
+    }
     ```
-    
+
 - **응답 (200):**
-    
+
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "문제가 보관되었습니다.", 
-    	  "data": { 
-    		  "visibility": "ARCHIVED", 
-    		  "rowVersion": 10 
-    	  } 
+    {
+      "success": true,
+      "message": "문제가 보관되었습니다.",
+      "data": {
+        "visibility": "ARCHIVED",
+        "rowVersion": 10
       }
+    }
     ```
-    
+
 - **에러:**
     - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409), `PROBLEM_IN_ACTIVE_EXAM`(409)
 - **발행:**
-    - `ProblemStateChanged` — `visibility = ARCHIVED`
+    - `ProblemStateChanged` v2 — `visibility = ARCHIVED`
+
+#### 2.3.10 문제 회차 검증 코드 접수
+
+- **Method / URI:** `POST /api/v1/admin/problems/{problemId}/revisions/{problemRevisionId}/validations`
+- **인증:** `ADMIN` (문제 작성 관리자)
+- **Idempotency:** `Idempotency-Key` 필수. 같은 관리자·키·요청에는 기존 검증 ID와 최초 응답을 반환한다.
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_code_assets`, `problem_validations`, `audit_logs`, `outbox_events`
+- **설명:** 저장된 회차의 언어별 정답 코드를 별도로 접수한다. 코드 원문은 S3에 불변 파일로 저장하고, 파일 참조·검증 요청·Outbox 커밋 후 `202`를 반환한다. 실패 코드 수정과 미검증 언어 추가도 이 API를 사용한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 미지정 시 Gateway 발급 |
+
+    | `Idempotency-Key` | Y | 1~100자 ASCII. 코드를 수정한 재요청에는 새 키 사용 |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `problemRevisionId` | Path | string | Y | 해당 문제 소속의 고정 회차 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
+    | `sourceCode` | string | Y | 함수 명세에 맞는 코드 문자열. 공백만인 코드 거절, 기존 공통 코드 크기 제한 적용. 원문 공백·줄바꿈 보존 |
+
+    ```json
+    {
+      "language": "java",
+      "sourceCode": "class Solution {\n    public int solution(int a, int b) {\n        return a + b;\n    }\n}\n"
+    }
+    ```
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (202):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string | 공통 성공 응답 |
+    | `data.validationId` | string | 고정 검증 요청 ID |
+    | `data.problemRevisionId` | string | 검증 대상 회차 |
+    | `data.language` | string | 접수 언어 |
+    | `data.status` | string | `REQUESTED`. Problem 접수·전달 예약 완료이며 Judge 작업 생성과 구분 |
+
+    ```json
+    {
+      "success": true,
+      "message": "검증 코드가 접수되었습니다.",
+      "data": {
+        "validationId": "2001",
+        "problemRevisionId": "1001",
+        "language": "java",
+        "status": "REQUESTED"
+      }
+    }
+    ```
+
+- **에러:**
+    - `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404) / 문제 없음·회차 소속 불일치
+    - `AUTH_ACCESS_DENIED`(403) / 작성 관리자가 아님
+    - `COMMON_INVALID_REQUEST`(400), `CODE_TOO_LARGE`(413) / 언어·코드 형식 또는 크기 오류
+    - `PROBLEM_VALIDATION_IN_PROGRESS`(409) / 같은 회차·언어의 결과 미반영 요청
+    - `PROBLEM_INVALID_STATE_TRANSITION`(409) / 보관 문제의 신규 검증 또는 이미 통과한 회차·언어의 코드 교체
+    - `IDEMPOTENCY_KEY_CONFLICT`(422) / 동일 키의 다른 본문·대상
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 코드 파일 저장 실패
+
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "PROBLEM_VALIDATION_IN_PROGRESS",
+        "message": "같은 회차와 언어의 검증이 진행 중입니다.",
+        "details": []
+      }
+    }
+    ```
+
+- **동시성/멱등 보장:** 기존 멱등 요청을 먼저 확인한다. 신규 파일의 추적 행을 먼저 저장하고, DB 행 잠금 없이 S3 업로드·체크섬을 확인한다. 짧은 트랜잭션에서 문제·회차·파일 순으로 잠그고 권한·상태·멱등키를 재확인한다. 같은 회차·언어에 결과 미반영 요청 또는 `PASSED`가 있으면 새 요청을 만들지 않는다. `REJECTED`·`ERROR` 반영 후에만 새 키·새 ID의 수정 코드를 허용한다.
+- **발행:** `ProblemValidationRequested` — 파일 연결·요청·감사 기록과 같은 트랜잭션의 Outbox를 검증 SQS로 전달
+- **외부 의존:** 비공개 S3 코드 저장소. Judge 실행 완료를 기다리지 않는다.
+- **프론트 계약:** `validationId`와 입력 코드를 보관하고 §2.3.11에서 진행 상태와 결과 반영 여부를 확인한다.
+- **비고:** 이미 통과한 코드·실행 환경을 바꾸려면 새 회차에서 검증한다.
+
+#### 2.3.11 문제 회차 검증 상태·결과 조회
+
+- **Method / URI:** `GET /api/v1/admin/problems/validations/{validationId}`
+- **인증:** `ADMIN` (문제 작성 관리자)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_validations`
+- **설명:** Problem의 결과 반영 여부와 Judge의 진행·최종 판정을 결합한다. Judge 작업이 아직 없으면 `REQUESTED`이며 결과 이벤트가 아직 반영되지 않았으면 최종 판정이어도 `resultApplied=false`다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 미지정 시 Gateway 발급 |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `validationId` | Path | string | Y | 수동 접수 응답 또는 관리자 회차 상세의 검증 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / null | 공통 성공 응답 |
+    | `data.validationId` / `problemId` / `problemRevisionId` | string | 요청·문제·고정 회차 식별자 |
+    | `data.language` | string | 검증 언어 |
+    | `data.status` | string | `REQUESTED` / `QUEUED` / `RUNNING` / `RETRY_WAITING` / `PASSED` / `REJECTED` / `ERROR` |
+    | `data.verdict` | string 또는 null | `AC` / `WA` / `TLE` / `MLE` / `RE` / `CE`. 미판정·시스템 장애는 null |
+    | `data.maxTimeMs` | number 또는 null | 측정 가능한 테스트별 최대 CPU 시간 |
+    | `data.message` | string 또는 null | 관리자용 검증 실패·시스템 장애 설명 |
+    | `data.resultApplied` | boolean | Judge 최종 결과가 Problem에 반영됐는지 여부 |
+    | `data.supportedLanguages` | string[] | 대상 회차에 PASSED 결과가 반영된 언어 |
+    | `data.currentProblemRevisionId` | string 또는 null | 문제의 사용 가능 회차. 대상 회차와 다를 수 있음 |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "validationId": "2001",
+        "problemId": "301",
+        "problemRevisionId": "1001",
+        "language": "java",
+        "status": "PASSED",
+        "verdict": "AC",
+        "maxTimeMs": 12,
+        "message": null,
+        "resultApplied": true,
+        "supportedLanguages": [
+          "java"
+        ],
+        "currentProblemRevisionId": "1001"
+      }
+    }
+    ```
+
+- **에러:** `PROBLEM_VALIDATION_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge 조회 장애·요청 연결 불일치
+
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "PROBLEM_VALIDATION_NOT_FOUND",
+        "message": "검증 요청을 찾을 수 없습니다.",
+        "details": []
+      }
+    }
+    ```
+
+- **동시성/멱등 보장:** 읽기 전용. Judge 조회는 DB 행 잠금 없이 수행하고 검증 ID·회차·언어를 대조한다. 조회로 결과를 저장하거나 실행 재시도를 지시하지 않는다.
+- **발행:** 없음
+- **외부 의존:** `GET /internal/v1/judge/validations/{validationId}` (Judge). Problem에 요청 원본이 있고 Judge가 작업 없음으로 응답한 경우만 `REQUESTED`로 표시한다. 통신 장애를 작업 미생성·코드 실패로 바꾸지 않는다.
+- **프론트 계약:** 2초에서 5초 간격으로 조회하고 종결 상태이면서 `resultApplied=true`일 때 멈춘다. 결과 반영 전에는 지원 언어가 늘지 않을 수 있다.
+- **비고:** 코드 원문·숨김 테스트·Judge 시도 이력은 반환하지 않는다. 진행·상세 판정의 원본은 Judge다.
 
 ### 2.4 관리자 API — 본문 이미지
 
@@ -2155,67 +2867,182 @@
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/validation`
 - **인증:** 내부 호출 (judge)
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`
-- **설명:** 지정 회차의 존재·문제 일치·함수 명세·실행 제한·테스트 연결·파일 준비 상태를 확인한다. 최신 회차 여부는 검사하지 않는다. 사용 기록을 만들지 않으므로 GET으로 둔다(기존 목록의 POST 표기 정정).
-- **응답 (200):**
-    
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`, `problem_validations`
+- **설명:** 지정 회차의 존재·문제 소속·함수 명세·제한·테스트 파일 준비 상태와 통과 언어·실행 환경을 반환한다. 최신 회차 여부는 검사하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `revisionId` | Path | string | Y | 해당 문제 소속의 고정 회차 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `problemId / problemRevisionId` | string | 문제·고정 회차 ID |
+    | `scope / visibility / difficulty / tagIds` | string / string / integer / string[] | 접수·레벨 검증용 상태와 회차 난이도·태그 |
+    | `totalCount / testAssetIds` | integer / string[] | 전체 테스트 수와 파일 ID |
+    | `supportedLanguages` | string[] | 고정 회차의 통과 언어 |
+    | `executionProfiles` | object[] | 통과 언어별 language·runtimeKey·runnerVersion |
+
     ```json
-      { 
-    	  "problemId": "301", 
-    	  "problemRevisionId": "1001", 
-    	  "scope": "GENERAL", 
-    	  "visibility": "PUBLIC", 
-    	  "difficulty": 1, 
-    	  "tagIds": ["1"], 
-    	  "totalCount": 12, 
-    	  "testAssetIds": ["501", "502"] 
-      }
+    {
+      "problemId": "301",
+      "problemRevisionId": "1001",
+      "scope": "GENERAL",
+      "visibility": "PUBLIC",
+      "difficulty": 1,
+      "tagIds": [
+        "1"
+      ],
+      "totalCount": 2,
+      "testAssetIds": [
+        "501",
+        "502"
+      ],
+      "supportedLanguages": [
+        "java"
+      ],
+      "executionProfiles": [
+        {
+          "language": "java",
+          "runtimeKey": "java-runtime-v1",
+          "runnerVersion": "java-runner-v1"
+        }
+      ]
+    }
     ```
-    
-    - `PRACTICE`는 judge가 `scope = GENERAL`·`visibility = PUBLIC`을 확인한다. 시험·대회는 contest가 고정 회차 권한을 확인하므로 이 조건을 적용하지 않는다.
-    - `difficulty`·`tagIds`: 레벨 접근 제한 판단과 `SubmissionJudged` 스냅샷용
-- **실패 시 처리:** judge는 제한 재시도 후 fail-closed. 최신 회차로 자동 치환 금지
+
+    - `supportedLanguages`는 이 고정 회차에 PASSED가 반영된 언어다. `executionProfiles`는 그 언어의 검증 당시 `runtimeKey`·`runnerVersion`이다. 환경 식별자는 형식 예시다.
+    - `PRACTICE`는 Judge가 `GENERAL`·`PUBLIC`을 확인한다. 시험·대회의 참가·공개 권한은 호출 서비스가 확인한다. 모든 실행 문맥에서 고정 회차의 통과 언어·환경을 사용한다.
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404)
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 없음
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다. 실패 시 처리: Judge는 조회 장애 시 fail-closed로 처리한다. 미검증 언어는 기존 `UNSUPPORTED_LANGUAGE`(400)로 거절하고 최신 회차·실행 환경으로 대체하지 않는다.
 
 #### 2.6.2 채점 기준 데이터 조회
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/data`
 - **인증:** 내부 호출 (judge)
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`
-- **설명:** 고정 회차의 함수 명세·실행 제한·테스트 파일 참조를 반환한다. 제출 가능 여부는 다시 검사하지 않는다. 테스트 원문은 judge 실행기가 제한된 S3 읽기 권한으로 가져온다.
-- **응답 (200):**
-    
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`, `problem_validations`
+- **설명:** 고정 회차의 함수 명세·실행 제한·전체 테스트 파일 참조와 통과 언어·실행 환경을 반환한다. 정답 코드는 반환하지 않는다. 검증 전 회차의 관리자 검증 자료는 §2.6.8에서 조회한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `revisionId` | Path | string | Y | 해당 문제 소속의 고정 회차 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `problemId / problemRevisionId` | string | 문제·고정 회차 ID |
+    | `functionSpec / executionLimits` | object / object | 회차의 함수 명세·고정 실행 제한 |
+    | `supportedLanguages / executionProfiles` | string[] / object[] | 통과 언어·검증 당시 실행 환경 |
+    | `cases` | object[] | 공개·숨김 전체 테스트 참조 |
+    | `cases[].testAssetId / testOrder / isSample` | string / integer / boolean | 테스트 파일 ID·순서·공개 여부 |
+    | `cases[].asset` | object | 고정 objectKey·objectVersion·sha256. 원문은 포함하지 않음 |
+
     ```json
-      {
-        "problemId": "301", 
-        "problemRevisionId": "1001",
-        "functionSpec": { 
-    	    "name": "solution", 
-    	    "parameters": [ { 
-    		    "name": "a", 
-    		    "type": { "kind": "INT32" } 
-    		    } 
-    	    ], 
-    	    "returnType": { "kind": "INT32" } 
+    {
+      "problemId": "301",
+      "problemRevisionId": "1001",
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": 262144,
+        "wallTimeMs": 7000,
+        "outputLimitKb": 64
+      },
+      "supportedLanguages": [
+        "java"
+      ],
+      "executionProfiles": [
+        {
+          "language": "java",
+          "runtimeKey": "java-runtime-v1",
+          "runnerVersion": "java-runner-v1"
+        }
+      ],
+      "cases": [
+        {
+          "testAssetId": "501",
+          "testOrder": 1,
+          "isSample": true,
+          "asset": {
+            "objectKey": "test-cases/501.json",
+            "objectVersion": "v-501",
+            "sha256": "c6b8..."
+          }
         },
-        "executionLimits": { 
-    	    "timeMs": 2000, 
-    	    "memoryKb": 262144, 
-    	    "wallTimeMs": 7000, 
-            "outputLimitKb": 64
-        },
-        "cases": [ { 
-    	    "testAssetId": "501", 
-    	    "testOrder": 1, 
-    	    "isSample": true, 
-    	    "asset": { 
-    		    "objectKey": "test-cases/501.json", 
-    		    "objectVersion": "v-501", "sha256": "c6b8..." 
-    		    } 
-    	    } 
-        ]
-      }
+        {
+          "testAssetId": "502",
+          "testOrder": 2,
+          "isSample": false,
+          "asset": {
+            "objectKey": "test-cases/502.json",
+            "objectVersion": "v-502",
+            "sha256": "d7c9..."
+          }
+        }
+      ]
+    }
     ```
-    
+
+    - 공개·숨김 테스트를 모두 반환하고 Judge 실행기가 제한된 S3 읽기 권한으로 원문을 가져온다. 사용 가능 여부는 접수 단계에서 확인한 고정 회차를 기준으로 하며 최신 회차로 치환하지 않는다.
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404)
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 없음
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
 
 #### 2.6.3 고정 회차 본문 조회
 
@@ -2224,65 +3051,76 @@
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tests`, `problem_test_assets`
 - **설명:** 고정 회차의 본문·함수 명세·실행 제한·공개 예제를 반환한다. 숨김 테스트는 읽지 않는다. 참가·공개 권한은 호출 서비스가 확인한 뒤 호출한다.
 - **응답 (200):** 문제 상세 조회(2.1.2)와 같은 형식
-    
+
     ```json
-      {
-        "success": true,
-        "message": null,
-        "data": {
-          "problemId": "301",
-          "problemRevisionId": "1001",
-          "revisionNumber": 1,
-          "title": "두 수의 합",
-          "difficulty": 1,
-          "tags": [ 
-    	      { 
-    		      "tagId": "1", 
-    		      "name": "구현" 
-    	      } 
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "problemId": "301",
+        "problemRevisionId": "1001",
+        "revisionNumber": 1,
+        "title": "두 수의 합",
+        "difficulty": 1,
+        "tags": [
+          {
+            "tagId": "1",
+            "name": "구현"
+          }
+        ],
+        "publishedAt": "2026-09-27T10:00:00+09:00",
+        "solvedStatus": "UNSOLVED",
+        "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
+        "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
+        "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
+        "functionSpec": {
+          "name": "solution",
+          "parameters": [
+            {
+              "name": "a",
+              "type": {
+                "kind": "INT32"
+              }
+            },
+            {
+              "name": "b",
+              "type": {
+                "kind": "INT32"
+              }
+            }
           ],
-          "publishedAt": "2026-09-27T10:00:00+09:00",
-          "solvedStatus": "UNSOLVED",
-          "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
-          "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
-          "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
-          "functionSpec": {
-            "name": "solution",
-            "parameters": [ 
-    	        { 
-    		        "name": "a", 
-    		        "type": { "kind": "INT32" } 
-    	        }, 
-    	        { 
-    		        "name": "b", 
-    		        "type": { "kind": "INT32" } 
-    	        } 
-            ],
-            "returnType": { "kind": "INT32" }
-          },
-          "executionLimits": { 
-    	      "timeMs": 2000, 
-    	      "memoryKb": 262144, 
-    	      "wallTimeMs": 7000, 
-              "outputLimitKb": 64
-          },
-          "starterCodes": [ 
-    	      { 
-    		      "language": "python3", 
-    		      "sourceCode": "def solution(a, b):\n    pass\n" 
-    	      } 
-          ],
-          "samples": [ 
-    	      { 
-    		      "testAssetId": "501", 
-    		      "argumentTexts": { "a": "1", "b": "2" }, 
-    		      "expectedReturnText": "3" 
-    	      } 
-          ]
-        }
+          "returnType": {
+            "kind": "INT32"
+          }
+        },
+        "executionLimits": {
+          "timeMs": 2000,
+          "memoryKb": 262144,
+          "wallTimeMs": 7000,
+          "outputLimitKb": 64
+        },
+        "starterCodes": [
+          {
+            "language": "python3",
+            "sourceCode": "def solution(a, b):\n    pass\n"
+          }
+        ],
+        "samples": [
+          {
+            "testAssetId": "501",
+            "argumentTexts": {
+              "a": "1",
+              "b": "2"
+            },
+            "expectedReturnText": "3"
+          }
+        ],
+        "supportedLanguages": [
+          "python3"
+        ]
       }
+    }
     ```
-    
 
 #### 2.6.4 고정 회차 본문 이미지 조회
 
@@ -2296,38 +3134,41 @@
 - **Method / URI:** `GET /internal/v1/problems/summaries`
 - **인증:** 내부 호출 (study, contest)
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`, `tags`
-- **설명:** 문제집·시험 생성 시 회차 고정·표시용 요약을 반환한다(B-2). 요청 ID 중 사용 불가 문제는 `isAvailable: false`로 표시한다.
+- **설명:** 문제집·시험 생성 시 회차 고정·표시용 요약을 반환한다(B-2). 요청 ID 중 사용 불가 문제는 `isAvailable: false`로 표시한다. 회차는 PASSED가 있는 최대 회차이며 `sourceVersion`·`supportedLanguages`를 함께 반환해 상태 이벤트와 비교한다.
 - **요청 파라미터:**
-    
-    
+
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `ids` | string[] | Y | — | 문제 ID 최대 50개 |
     | `purpose` | string | Y | — | `ASSIGNMENT` / `EXAM`(`GENERAL`·`PUBLIC`만 가용) / `CONTEST`(`EXAM_ONLY` 허용) |
+
 - **응답 (200):**
-    
+    - `items[].sourceVersion`: 문제 행 버전 정수. `items[].supportedLanguages`: 반환 사용 회차의 통과 언어 배열. 존재하는 문제는 비가용 상태여도 이 상태 메타를 반환한다. 재조회가 더 최신이면 그 버전·스냅샷을 함께 반영한다.
+
     ```json
-      {
-        "items": [
-          { 
-    	      "problemId": "101", 
-    	      "problemRevisionId": "201", 
-    	      "revisionNumber": 3, 
-    	      "title": "최단 경로", 
-    	      "difficulty": 3, 
-    	      "tags": [ { 
-    		      "tagId": "7", 
-    		      "name": "그래프" 
-    		      } 
-    	      ], 
-    	      "scope": "GENERAL", 
-    	      "visibility": "PUBLIC", 
-    	      "isAvailable": true 
-          }
-        ]
-      }
+    {
+      "items": [
+        {
+          "problemId": "101",
+          "problemRevisionId": "201",
+          "revisionNumber": 3,
+          "title": "최단 경로",
+          "difficulty": 3,
+          "tags": [
+            {
+              "tagId": "7",
+              "name": "그래프"
+            }
+          ],
+          "scope": "GENERAL",
+          "visibility": "PUBLIC",
+          "isAvailable": true,
+          "sourceVersion": 7,
+          "supportedLanguages": ["java", "python3"]
+        }
+      ]
+    }
     ```
-    
 
 #### 2.6.6 힌트 문맥 조회
 
@@ -2336,18 +3177,17 @@
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tags`
 - **설명:** 힌트 입력(제목·본문·태그)과 현재 공개 회차, 힌트 가능 여부를 반환한다. 대회 전용 문제는 대회 종료 전 `isHintAvailable: false`.
 - **응답 (200):**
-    
+
     ```json
-      { 
-    	  "problemId": "101", 
-    	  "problemRevisionId": "201", 
-    	  "title": "최단 경로", 
-    	  "description": "...", 
-    	  "tags": ["그래프"], 
-    	  "isHintAvailable": true 
-      }
+    {
+      "problemId": "101",
+      "problemRevisionId": "201",
+      "title": "최단 경로",
+      "description": "...",
+      "tags": ["그래프"],
+      "isHintAvailable": true
+    }
     ```
-    
 
 #### 2.6.7 진단 출제 후보 조회
 
@@ -2356,41 +3196,148 @@
 - **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`
 - **설명:** 태그의 `GENERAL`·`PUBLIC` 문제 중 난이도 1·2·3에서 각각 1개를 무작위로 골라 현재 회차와 함께 반환한다. 난이도별 후보가 없으면 해당 항목을 `null`로 반환한다.
 - **요청 파라미터:**
-    
-    
+
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `tagId` | string | Y | — | 태그 ID |
+
 - **응답 (200):**
-    
+
     ```json
-      { 
-    	  "tagId": "3", 
-    	  "problems": [ 
-    		  { 
-    			  "difficulty": 1, 
-    			  "problemId": "301", 
-    			  "problemRevisionId": "1001", 
-    			  "title": "두 수의 합" 
-    		  }, 
-    		  { 
-    			  "difficulty": 2, 
-    			  "problemId": "315", 
-    			  "problemRevisionId": 
-    			  "1040", "title": "..." 
-    		  }, 
-    		  { 
-    			  "difficulty": 3, 
-    			  "problemId": "330", 
-    			  "problemRevisionId": "1092", 
-    			  "title": "..." 
-    		  } 
-    	  ] 
-      }
+    {
+      "tagId": "3",
+      "problems": [
+        {
+          "difficulty": 1,
+          "problemId": "301",
+          "problemRevisionId": "1001",
+          "title": "두 수의 합"
+        },
+        {
+          "difficulty": 2,
+          "problemId": "315",
+          "problemRevisionId": "1040",
+          "title": "..."
+        },
+        {
+          "difficulty": 3,
+          "problemId": "330",
+          "problemRevisionId": "1092",
+          "title": "..."
+        }
+      ]
+    }
     ```
-    
 
 ---
+
+#### 2.6.8 관리자 검증 자료 조회
+
+- **Method / URI:** `GET /internal/v1/problems/validations/{validationId}/data`
+- **인증:** 내부 호출 (judge)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problem_validations`, `problem_code_assets`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`
+- **설명:** Judge가 실행·재시도 때 같은 검증 ID의 불변 코드·함수 명세·제한·전체 테스트를 조회한다. 검증 전 회차도 조회하며 일반 제출용 API에는 정답 코드를 추가하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `X-Correlation-Id` | Y | 원 요청 상관관계 ID. 별도 인증 헤더는 공통 내부 API 규칙을 따름 |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `validationId` | Path | string | Y | 원래 검증 요청 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `validationId` / `problemRevisionId` | string | 요청과 고정 회차 |
+    | `language` / `requestHash` | string | 요청 언어와 원래 요청 해시 |
+    | `sourceCode` | string | 고정 S3 코드 객체에서 읽은 UTF-8 원문. S3 URL은 반환하지 않음 |
+    | `functionSpec` / `executionLimits` | object | 고정 회차의 함수 명세와 최종 제한 |
+    | `testCases` | object[] | 공개·숨김 전체 테스트 |
+    | `testCases[].testAssetId` / `isSample` / `argumentTexts` / `expectedReturnText` | §2.3.0과 동일, ID는 string | 조회 전용 테스트 ID와 공개 여부·입력·기대값 |
+
+    ```json
+    {
+      "validationId": "2001",
+      "problemRevisionId": "1001",
+      "language": "java",
+      "requestHash": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "sourceCode": "class Solution {\n    public int solution(int a, int b) {\n        return a + b;\n    }\n}\n",
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": 262144,
+        "wallTimeMs": 7000,
+        "outputLimitKb": 64
+      },
+      "testCases": [
+        {
+          "testAssetId": "501",
+          "isSample": true,
+          "argumentTexts": {
+            "a": "1",
+            "b": "2"
+          },
+          "expectedReturnText": "3"
+        },
+        {
+          "testAssetId": "502",
+          "isSample": false,
+          "argumentTexts": {
+            "a": "-5",
+            "b": "7"
+          },
+          "expectedReturnText": "2"
+        }
+      ]
+    }
+    ```
+
+- **에러:** `PROBLEM_VALIDATION_NOT_FOUND`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 고정 파일 조회·체크섬 확인 실패
+- **동시성/멱등 보장:** 요청의 고정 회차·파일 참조를 읽고 S3 키·버전·체크섬을 확인한다. 파일 조회 중 DB 행 잠금을 유지하지 않는다. 최신 코드·회차로 대체하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 비공개 S3 원문 저장소
+- **프론트 계약:** 없음
+- **비고:** Judge는 요청 ID·회차·언어·해시를 수신 메시지와 대조하고 코드를 실행 메모리에서 사용한다. 코드·테스트 원문을 메시지나 Judge 업무 DB에 복사하지 않는다.
+
+### 2.7 사용하는 내부 API
+
+| 제공 | Method / URI | 요청 | 성공 응답 | 실패 처리 |
+| --- | --- | --- | --- | --- |
+| judge | `GET /internal/v1/judge/validations/{validationId}` | 원래 검증 ID | 진행 상태·판정·최대 시간·설명·통과 실행 환경. Judge 작업 미생성은 404 | §2.3.11에서 작업 미생성과 조회 장애를 구분 |
+| judge | 기본 코드 HTTP 경로·Method 확인 필요 | 사용 회차의 `functionSpec`, `languages`: 통과 언어 목록 | 래퍼 없는 `{starterCodes:[{language,sourceCode}]}` | 통신 오류·누락/중복 언어·잘못된 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503) |
+
+- 내부 호출 인증·성공 응답 형식은 §0.1·§0.3을 따르며 공통 타임아웃은 2초다. Judge 진행 조회 응답은 검증 ID·회차·언어와 일치해야 한다.
+- 기본 코드의 생성 책임은 Judge다. 기존 `ExecutionCodeGenerator.starterCode(FunctionSpec)`를 연결하며 응답 언어 집합은 요청과 정확히 일치해야 한다. Problem이 기본 코드를 생성하거나 이전 회차·미통과 언어 코드로 대체하지 않는다.
+- 기본 코드 제공 경로는 Judge 제공 계약 확인 후 기재한다. 조회 응답에는 요청한 언어의 `sourceCode` 문자열을 사용한다.
 
 ## 3. 제출·채점 (judge)
 
@@ -7188,7 +8135,7 @@
 | 서비스 | 절 | API |
 | --- | --- | --- |
 | member | 1.6.1 ~ 1.6.3 | 회원 목록, 정지·해제, 권한 변경 |
-| problem | 2.3.1 ~ 2.3.9, 2.4, 2.5.2 ~ 2.5.4 | 문제 등록·회차·공개·비공개·보관, 이미지, 태그 |
+| problem | 2.3.1 ~ 2.3.11, 2.4, 2.5.2 ~ 2.5.4 | 문제 등록·회차·공개·비공개·보관·검증, 이미지, 태그 |
 | judge | 3.2.1 ~ 3.2.5 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구 |
 | contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, `FAILED` 0점 확정, 결과 재확정 |
 | study | 5.6.1 ~ 5.6.2 | 스터디 강제 종료, AC 복제본 재동기화 |
@@ -7209,6 +8156,8 @@
 | problem | study, contest | `GET /internal/v1/problems/summaries` | 문제집·시험·대회 문제 선택(회차 고정) | fail-closed (`COMMON_DEPENDENCY_UNAVAILABLE`) | B(제공)·D·C(요청) |
 | problem | study | `GET /internal/v1/problems/{problemId}/hint-context` | 힌트 입력·현재 회차 | fail-closed | B(제공)·D(요청) |
 | problem | member | `GET /internal/v1/problems/diagnosis-candidates` | 진단 출제 | fail-closed | B(제공)·E(요청) |
+| judge | problem | 기본 코드 HTTP 경로·Method 확인 필요(§2.7) | 함수 명세·통과 언어의 기본 코드 | `COMMON_DEPENDENCY_UNAVAILABLE`(503) | B |
+| judge | problem | `GET /internal/v1/judge/validations/{validationId}` | 관리자 검증 진행·최종 판정 조회 | 작업 미생성과 조회 장애 구분(§2.3.11) | B |
 | judge | contest | `GET /internal/v1/submissions/{submissionId}/result` | 결과 대사·이벤트 유실 복구 | 확정 보류 | B |
 | judge | contest, problem | `GET /internal/v1/submissions/{submissionId}/source` | 시험 결과 코드 열람·풀이 공유 스냅샷 | 거절 | B |
 | judge | integration | `GET /internal/v1/submissions/{submissionId}/accepted/code` | GitHub 커밋 | Sync Job 재시도 | B |
@@ -7236,7 +8185,9 @@
 | `ExamSubmissionJudged` v1 | judge | contest | SNS 팬아웃 | `EXAM` 회차 정상 종결 | B |
 | `ContestSubmissionJudged` v1 | judge | contest | SNS 팬아웃 | `CONTEST` 회차 정상 종결 | B |
 | `SubmissionFailed` v1 | judge | notification, contest (진단 채점 시 member) | SNS 팬아웃 | 실행 시도 상한 초과로 `FAILED` | B |
-| `ProblemStateChanged` v1 | problem | study, contest | SNS 팬아웃 | 공개 상태·용도·회차 변경 | B |
+| `ProblemStateChanged` v2 | problem | study, contest | SNS 팬아웃 | 공개 상태·사용 회차·통과 언어 변경 | B |
+| `ProblemValidationRequested` v1 | problem | judge | 검증 SQS 직접 | 관리자 접수·새 회차 자동 검증 요청 커밋 | B |
+| `ProblemValidationCompleted` v1 | judge | problem | SNS 팬아웃 | 검증 최종 판정·결과 Outbox 커밋 | B |
 | `ExamParticipantRegistered` v1 | contest | study | SNS 팬아웃 | 시험 참가 등록 | C |
 | `ExamStarted` / `ExamClosed` / `ExamFinalized` v1 | contest | study, notification | SNS 팬아웃 | 시험 상태 전이 | C |
 | `ExamUpdated` / `ExamCanceled` v1 | contest | study, notification | SNS 팬아웃 | 시작 전 수정·취소 | C |

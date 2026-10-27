@@ -416,13 +416,13 @@ sequenceDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> PRIVATE : 문제 등록 (첫 회차 포함)
-    PRIVATE --> PUBLIC : 공개 (GENERAL만, 회차 1개 이상)
+    PRIVATE --> PUBLIC : 관리자 공개 (GENERAL만, 검증 통과 사용 회차 필요)
     PUBLIC --> PRIVATE : 비공개 전환 (예정·진행 시험·대회 포함 시 409)
     PRIVATE --> ARCHIVED : 보관
     PUBLIC --> ARCHIVED : 보관 (동일 차단)
     ARCHIVED --> [*]
     note right of PUBLIC
-        전이마다 ProblemStateChanged (sourceVersion = row_version)
+        전이마다 ProblemStateChanged v2 (sourceVersion = row_version)
         study: EXCLUDED ↔ ACTIVE, contest: 고정 회차 유지
         EXAM_ONLY는 공개 API로 PUBLIC 불가, 대회 종료 설정으로 공개
     end note
@@ -436,10 +436,12 @@ stateDiagram-v2
     state "회차 N+1 (불변)" as R2
     [*] --> R1 : 등록
     R1 --> R2 : 새 회차 등록 (rowVersion 조건, revision_number + 1)
-    R2 --> R2 : 이후 제출·문제집·시험 선택은 현재 회차
+    R2 --> R2 : 검증 통과 후 사용 회차 선정 (정책 §4)
     note right of R1
         이미 고정된 제출·시험은 R1로 채점·표시
-        공개 문제면 ProblemStateChanged(REVISION)
+        기존 통과 코드로 자동 재검증, 결과 복사 없음
+        검증 중·전부 실패하면 기존 사용 회차 유지
+        사용 회차·통과 언어 변경 시 ProblemStateChanged v2
         힌트 캐시 키가 회차라 자연 무효화
     end note
 ```
@@ -476,7 +478,43 @@ sequenceDiagram
     else 성공
         P-->>A: 201 problemId · problemRevisionId
     end
+    Note over P,DB: 201 저장 후 코드 검증은 별도 202 접수 (정책 §4)<br/>검증 성공만으로 자동 공개하지 않음
     Note over P,DB: 새 회차 등록은 problems.row_version 조건 UPDATE 후 번호 계산<br/>동시 등록 → 한 건 PROBLEM_VERSION_CONFLICT(409)
+```
+
+**저장 후 검증 접수·결과 반영**
+
+```mermaid
+sequenceDiagram
+    actor A as 작성 관리자
+    participant P as problem-service
+    participant S3 as 비공개 S3
+    participant DB as problem DB
+    participant Q as problem-validation-queue
+    participant J as judge-service
+    participant SNS as judge-events
+    A->>P: 고정 회차의 language·sourceCode 접수
+    P->>DB: 기존 멱등 요청 확인, 파일 PENDING 추적
+    P->>S3: DB 행 잠금 없이 불변 코드 업로드
+    P->>DB: 권한·회차·언어 중복 재확인, 파일 LINKED·요청·감사·Outbox 커밋
+    P-->>A: 202 validationId·REQUESTED
+    DB->>Q: ProblemValidationRequested (Relay)
+    Q->>J: validationId·고정 회차·언어·requestHash
+    J->>P: GET /internal/v1/problems/validations/{validationId}/data
+    P->>S3: 고정 원문·체크섬 확인
+    P-->>J: sourceCode·함수 명세·제한·전체 테스트
+    J->>J: 실행·시도·판정 저장
+    J->>SNS: ProblemValidationCompleted (결과 Outbox Relay)
+    SNS->>P: 기존 problem-queue 전달
+    P->>DB: ID·회차·언어·해시 대조, 최종 요약·통과 환경 반영
+    opt 사용 회차 또는 같은 사용 회차의 통과 언어 변경
+        P->>DB: 같은 트랜잭션에 row_version 증가·P1 v2 Outbox
+    end
+    A->>P: GET /api/v1/admin/problems/validations/{validationId}
+    P->>J: 내부 검증 진행 조회
+    J-->>P: 진행·최종 판정
+    P-->>A: Judge 상태·resultApplied·supportedLanguages
+    Note over P,DB: Judge PASSED와 Problem 결과 반영은 시차가 있음<br/>기존 PASSED·공개 상태 유지, 새 회차는 코드 파일만 재사용
 ```
 
 ### 2.4 비공개 전환·보관
@@ -499,7 +537,7 @@ sequenceDiagram
         opt 자원 가드 도입 시
             P->>C: prepare(PROBLEM) → 신규 편입 차단
         end
-        P->>DB: UPDATE visibility WHERE row_version = :v + 감사 로그 + Outbox ProblemStateChanged
+        P->>DB: UPDATE visibility WHERE row_version = :v + 감사 로그 + Outbox ProblemStateChanged v2
         alt 0행
             P-->>A: 409 PROBLEM_VERSION_CONFLICT
         else
