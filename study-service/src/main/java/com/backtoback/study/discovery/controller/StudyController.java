@@ -7,13 +7,17 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.api.PageResponse;
+import com.backtoback.common.web.security.user.GatewayUser;
+import com.backtoback.study.discovery.dto.StudyDetailResponse;
 import com.backtoback.study.discovery.dto.StudySummaryResponse;
 import com.backtoback.study.discovery.service.StudyQueryService;
 
@@ -55,6 +59,19 @@ public class StudyController {
             = studyQueryService
                 .searchStudies(keyword, goal, skillLevel, preferredLanguage, activeTimeSlot, safePageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.from(result)));
+    }
+
+    /**
+     * 5.1.2 스터디 상세 — 비구성원도 조회할 수 있다. 로그인 시 {@code myMembership}을 함께 반환한다.
+     */
+    @GetMapping("/{studyId}")
+    public ResponseEntity<ApiResponse<StudyDetailResponse>> getStudyDetail(
+        @PathVariable Long studyId,
+        @AuthenticationPrincipal GatewayUser user
+    ) {
+        Long memberId = user == null ? null : Long.parseLong(user.userId());
+        StudyDetailResponse response = studyQueryService.getStudyDetail(studyId, memberId);
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     // 요청 size가 상한을 넘으면 낮춘다(API 명세서 5.1.1 size 최대 100).
