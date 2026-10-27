@@ -2,6 +2,8 @@ package com.backtoback.notification.event.service;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
@@ -12,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.notification.delivery.service.NotificationDeliveryService;
 import com.backtoback.notification.event.domain.ProcessedEvent;
 import com.backtoback.notification.event.dto.NotificationCreatedEvent;
@@ -21,6 +24,7 @@ import com.backtoback.notification.notification.domain.NotificationType;
 import com.backtoback.notification.notification.repository.NotificationRepository;
 import com.backtoback.notification.preference.domain.NotificationPreference;
 import com.backtoback.notification.preference.repository.NotificationPreferenceRepository;
+import com.backtoback.notification.reminder.service.ExamReminderService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +44,7 @@ public class NotificationEventProcessor {
     private final NotificationPreferenceRepository preferenceRepository;
     private final NotificationDeliveryService deliveryService;
     private final ApplicationEventPublisher eventPublisher;
+    private final ExamReminderService examReminderService;
     private final Clock clock;
 
     /**
@@ -58,6 +63,8 @@ public class NotificationEventProcessor {
         }
 
         processedEventRepository.saveAndFlush(ProcessedEvent.create(eventId, eventType, LocalDateTime.now(clock)));
+
+        handleReminderSideEffects(eventId, eventType, payload);
 
         NotificationSpec spec = resolveSpec(eventType, payload);
         if (spec == null) {
@@ -109,6 +116,54 @@ public class NotificationEventProcessor {
                     exception
                 );
         }
+    }
+
+    private void handleReminderSideEffects(String eventId, String eventType, JsonNode payload) {
+        switch (eventType) {
+            case "ExamParticipantRegistered" -> handleExamParticipantRegistered(eventId, payload);
+            case "ExamUpdated" -> handleExamUpdatedReminder(eventId, payload);
+            case "ExamParticipantCanceled" -> handleExamParticipantCanceled(eventId, payload);
+            case "ExamCanceled" -> handleExamCanceledReminder(eventId, payload);
+            default -> {
+                // 예약 알림 부수효과 대상이 아님
+            }
+        }
+    }
+
+    private void handleExamParticipantRegistered(String eventId, JsonNode payload) {
+        Long memberId = requireLong(payload, "memberId");
+        Long examId = requireLong(payload, "examId");
+        Long participantId = requireLong(payload, "participantId");
+        int contextRevision = requireParsedInt(payload, "contextRevision");
+        LocalDateTime startsAt = requireDateTime(payload, "startsAt");
+
+        examReminderService.registerReminder(eventId, memberId, examId, participantId, contextRevision, startsAt);
+    }
+
+    private void handleExamUpdatedReminder(String eventId, JsonNode payload) {
+        Long examId = requireLong(payload, "examId");
+        int examRevision = requireParsedInt(payload, "examRevision");
+        LocalDateTime startsAt = requireDateTime(payload, "startsAt");
+
+        examReminderService.rescheduleByExamUpdated(eventId, examId, examRevision, startsAt);
+    }
+
+    private void handleExamParticipantCanceled(String eventId, JsonNode payload) {
+        Long memberId = requireLong(payload, "memberId");
+        Long examId = requireLong(payload, "examId");
+        Long participantId = requireLong(payload, "participantId");
+        int contextRevision = requireParsedInt(payload, "contextRevision");
+        LocalDateTime canceledAt = requireDateTime(payload, "canceledAt");
+
+        examReminderService
+            .cancelByParticipantCanceled(eventId, memberId, examId, participantId, contextRevision, canceledAt);
+    }
+
+    private void handleExamCanceledReminder(String eventId, JsonNode payload) {
+        Long examId = requireLong(payload, "examId");
+        int examRevision = requireParsedInt(payload, "examRevision");
+        LocalDateTime canceledAt = requireDateTime(payload, "canceledAt");
+        examReminderService.cancelByExamCanceled(eventId, examId, examRevision, canceledAt);
     }
 
     private boolean isPreferenceEnabled(Long memberId, Predicate<NotificationPreference> preferenceFilter) {
@@ -449,6 +504,28 @@ public class NotificationEventProcessor {
             throw new IllegalArgumentException("정수 필드 형식이 올바르지 않습니다: " + fieldName);
         }
         return node.asInt();
+    }
+
+    private int requireParsedInt(JsonNode payload, String fieldName) {
+        String text = requireText(payload, fieldName);
+        try {
+            return Integer.parseInt(text);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("정수 버전 형식이 올바르지 않습니다: " + fieldName, exception);
+        }
+    }
+
+    private LocalDateTime requireDateTime(JsonNode payload, String fieldName) {
+        String text = requireText(payload, fieldName);
+        try {
+            return OffsetDateTime.parse(text).atZoneSameInstant(ClockConfiguration.SERVICE_ZONE).toLocalDateTime();
+        } catch (DateTimeParseException ignored) {
+            try {
+                return LocalDateTime.parse(text);
+            } catch (DateTimeParseException exception) {
+                throw new IllegalArgumentException("시각 필드 형식이 올바르지 않습니다: " + fieldName, exception);
+            }
+        }
     }
 
     private List<Long> requireLongList(JsonNode payload, String fieldName) {
