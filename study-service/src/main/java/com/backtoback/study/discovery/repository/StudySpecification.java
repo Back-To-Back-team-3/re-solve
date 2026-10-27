@@ -7,7 +7,8 @@ import com.backtoback.study.membership.domain.StudyStatus;
 
 /**
  * 스터디 목록 조회(API 명세서 5.1.1)의 선택 필터를 동적으로 조합한다.
- * 각 메서드는 조건이 없으면 {@code null}을 반환하고, {@code Specification.and(null)}은 Spring Data JPA가 그대로 무시한다.
+ * 각 메서드는 조건이 없으면 {@code null}을 반환한다. 이 버전의 Spring Data JPA는 {@code Specification.and(null)}을
+ * 허용하지 않으므로, 호출하는 쪽({@code StudyQueryService})에서 {@code null}을 걸러낸 뒤 조합해야 한다.
  */
 public final class StudySpecification {
 
