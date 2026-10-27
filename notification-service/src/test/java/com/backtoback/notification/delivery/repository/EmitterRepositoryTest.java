@@ -19,65 +19,66 @@ class EmitterRepositoryTest {
     }
 
     @Test
-    @DisplayName("Emitter를 저장하고 회원 ID로 정상 조회한다")
+    @DisplayName("SseSession을 저장하고 회원 ID로 정상 조회한다")
     void saveAndFindAllByMemberId() {
         // given
         Long memberId = 1L;
         String emitterId = "1_1000";
         SseEmitter emitter = new SseEmitter();
+        SseSession session = SseSession.create(emitterId, memberId, emitter, 1000L, 50L);
 
         // when
-        emitterRepository.save(emitterId, memberId, emitter);
+        emitterRepository.save(session);
 
         // then
-        List<SseEmitter> emitters = emitterRepository.findAllByMemberId(memberId);
-        assertThat(emitters).hasSize(1);
-        assertThat(emitters.get(0)).isSameAs(emitter);
-        assertThat(emitterRepository.getCreationTime(emitterId)).isNotNull();
+        List<SseSession> sessions = emitterRepository.findAllByMemberId(memberId);
+        assertThat(sessions).hasSize(1);
+        assertThat(sessions.get(0)).isSameAs(session);
+        assertThat(sessions.get(0).emitter()).isSameAs(emitter);
+        assertThat(sessions.get(0).creationTime()).isEqualTo(1000L);
+        assertThat(sessions.get(0).lastSentNotificationId().get()).isEqualTo(50L);
     }
 
     @Test
-    @DisplayName("동일한 회원이 여러 세션(멀티 탭)을 열면 모든 Emitter가 정상 보관된다")
+    @DisplayName("동일한 회원이 여러 세션(멀티 탭)을 열면 모든 SseSession이 정상 보관된다")
     void saveMultipleEmittersForSameMember() {
         // given
         Long memberId = 1L;
-        String emitterId1 = "1_1001";
-        String emitterId2 = "1_1002";
-        SseEmitter emitter1 = new SseEmitter();
-        SseEmitter emitter2 = new SseEmitter();
+        SseSession session1 = SseSession.create("1_1001", memberId, new SseEmitter(), 1001L, 0L);
+        SseSession session2 = SseSession.create("1_1002", memberId, new SseEmitter(), 1002L, 0L);
 
         // when
-        emitterRepository.save(emitterId1, memberId, emitter1);
-        emitterRepository.save(emitterId2, memberId, emitter2);
+        emitterRepository.save(session1);
+        emitterRepository.save(session2);
 
         // then
-        List<SseEmitter> emitters = emitterRepository.findAllByMemberId(memberId);
-        assertThat(emitters).hasSize(2).containsExactlyInAnyOrder(emitter1, emitter2);
+        List<SseSession> sessions = emitterRepository.findAllByMemberId(memberId);
+        assertThat(sessions).hasSize(2).containsExactlyInAnyOrder(session1, session2);
     }
 
     @Test
-    @DisplayName("식별자로 Emitter를 삭제하면 저장소와 회원 매핑에서 제거된다")
+    @DisplayName("식별자로 SseSession을 삭제하면 저장소와 회원 매핑에서 제거된다")
     void deleteById() {
         // given
         Long memberId = 1L;
         String emitterId1 = "1_1001";
         String emitterId2 = "1_1002";
-        SseEmitter emitter1 = new SseEmitter();
-        SseEmitter emitter2 = new SseEmitter();
+        SseSession session1 = SseSession.create(emitterId1, memberId, new SseEmitter(), 1001L, 0L);
+        SseSession session2 = SseSession.create(emitterId2, memberId, new SseEmitter(), 1002L, 0L);
 
-        emitterRepository.save(emitterId1, memberId, emitter1);
-        emitterRepository.save(emitterId2, memberId, emitter2);
+        emitterRepository.save(session1);
+        emitterRepository.save(session2);
 
         // when
         emitterRepository.deleteById(emitterId1);
 
         // then
-        assertThat(emitterRepository.findAllByMemberId(memberId)).containsExactly(emitter2);
-        assertThat(emitterRepository.getCreationTime(emitterId1)).isNull();
-        assertThat(emitterRepository.getCreationTime(emitterId2)).isNotNull();
+        assertThat(emitterRepository.findAllByMemberId(memberId)).containsExactly(session2);
+        assertThat(emitterRepository.findAll()).containsExactly(session2);
 
-        // 두 번째 emitter도 삭제 시 매핑이 완전히 비워진다
+        // 두 번째 세션도 삭제 시 매핑이 완전히 비워진다
         emitterRepository.deleteById(emitterId2);
         assertThat(emitterRepository.findAllByMemberId(memberId)).isEmpty();
+        assertThat(emitterRepository.findAll()).isEmpty();
     }
 }

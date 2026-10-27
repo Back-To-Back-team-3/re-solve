@@ -39,7 +39,7 @@ class NotificationServiceApplicationTests {
     @DisplayName("DB 연결과 Flyway 마이그레이션 적용 및 Hibernate 엔티티 매핑을 검증한다")
     void contextLoads() {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("notification_db");
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
     }
 
 }
