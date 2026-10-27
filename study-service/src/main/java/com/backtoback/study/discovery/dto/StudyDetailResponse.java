@@ -14,7 +14,7 @@ import com.backtoback.study.replica.domain.MemberReplica;
  * 스터디 상세 조회 응답 (API 명세서 5.1.2).
  */
 public record StudyDetailResponse(
-    Long studyId,
+    String studyId,
     String name,
     String description,
     String goal,
@@ -34,7 +34,7 @@ public record StudyDetailResponse(
 
     public static StudyDetailResponse of(Study study, Leader leader, MyMembership myMembership) {
         return new StudyDetailResponse(
-            study.getId(),
+            String.valueOf(study.getId()),
             study.getName(),
             study.getDescription(),
             study.getGoal(),
@@ -56,20 +56,20 @@ public record StudyDetailResponse(
     /**
      * 스터디장 표시 정보 (API 명세서 5.1.2 leader). 리더를 찾지 못하면(복제본 미동기화 등) {@code null}이다.
      */
-    public record Leader(Long memberId, String nickname) {
+    public record Leader(String memberId, String nickname) {
 
         public static Leader from(MemberReplica replica) {
-            return new Leader(replica.getMemberId(), replica.getNickname());
+            return new Leader(String.valueOf(replica.getMemberId()), replica.getNickname());
         }
     }
 
     /**
      * 요청자의 진행 중 가입 상태 (API 명세서 5.1.2 myMembership). 비로그인이거나 가입 이력이 없으면 전체가 {@code null}이다.
      */
-    public record MyMembership(Long membershipId, MembershipStatus status, MembershipRole role) {
+    public record MyMembership(String membershipId, MembershipStatus status, MembershipRole role) {
 
         public static MyMembership from(StudyMembership membership) {
-            return new MyMembership(membership.getId(), membership.getStatus(), membership.getRole());
+            return new MyMembership(String.valueOf(membership.getId()), membership.getStatus(), membership.getRole());
         }
     }
 }

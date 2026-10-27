@@ -152,7 +152,7 @@ class StudyControllerTest {
         mockMvc
             .perform(get("/api/v1/studies/12"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.studyId").value(12))
+            .andExpect(jsonPath("$.data.studyId").value("12"))
             .andExpect(jsonPath("$.data.myMembership").isEmpty());
     }
 
@@ -164,7 +164,7 @@ class StudyControllerTest {
             .getContext()
             .setAuthentication(new TestingAuthenticationToken(new GatewayUser("7", UserRole.USER), null));
         StudyDetailResponse.MyMembership myMembership
-            = new StudyDetailResponse.MyMembership(55L, MembershipStatus.APPROVED, MembershipRole.MEMBER);
+            = new StudyDetailResponse.MyMembership("55", MembershipStatus.APPROVED, MembershipRole.MEMBER);
         StudyDetailResponse response = detailResponse(myMembership);
         given(studyQueryService.getStudyDetail(eq(12L), eq(7L))).willReturn(response);
 
@@ -172,13 +172,13 @@ class StudyControllerTest {
         mockMvc
             .perform(get("/api/v1/studies/12"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.myMembership.membershipId").value(55))
+            .andExpect(jsonPath("$.data.myMembership.membershipId").value("55"))
             .andExpect(jsonPath("$.data.myMembership.status").value("APPROVED"));
     }
 
     private StudyDetailResponse detailResponse(StudyDetailResponse.MyMembership myMembership) {
         return new StudyDetailResponse(
-            12L,
+            "12",
             "코딩테스트 스터디",
             "취업 준비 알고리즘 스터디",
             "EMPLOYMENT",

@@ -147,7 +147,7 @@ class StudyQueryServiceTest {
         assertThat(response.leader()).isNotNull();
         assertThat(response.leader().nickname()).isEqualTo("leader1");
         assertThat(response.myMembership()).isNotNull();
-        assertThat(response.myMembership().membershipId()).isEqualTo(55L);
+        assertThat(response.myMembership().membershipId()).isEqualTo("55");
     }
 
     @Test
