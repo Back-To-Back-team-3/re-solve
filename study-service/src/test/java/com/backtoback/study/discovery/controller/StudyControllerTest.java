@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -94,5 +95,23 @@ class StudyControllerTest {
         ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
         verify(studyQueryService).searchStudies(any(), any(), any(), any(), any(), pageableCaptor.capture());
         assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("5.1.1 허용되지 않은 정렬 필드를 요청하면 기본 정렬(createdAt desc)로 대체한다")
+    void restrictsSortToAllowedFields() throws Exception {
+        // given
+        given(studyQueryService.searchStudies(any(), any(), any(), any(), any(), any()))
+            .willReturn(new PageImpl<>(List.of()));
+
+        // when
+        mockMvc.perform(get("/api/v1/studies").param("sort", "name,asc")).andExpect(status().isOk());
+
+        // then
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(studyQueryService).searchStudies(any(), any(), any(), any(), any(), pageableCaptor.capture());
+        Sort.Order order = pageableCaptor.getValue().getSort().iterator().next();
+        assertThat(order.getProperty()).isEqualTo("createdAt");
+        assertThat(order.getDirection()).isEqualTo(Sort.Direction.DESC);
     }
 }

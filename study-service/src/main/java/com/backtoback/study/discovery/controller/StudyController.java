@@ -1,5 +1,7 @@
 package com.backtoback.study.discovery.controller;
 
+import java.util.Set;
+
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -27,6 +29,9 @@ public class StudyController {
 
     private static final int MAX_PAGE_SIZE = 100;
 
+    // API 명세서 5.1.1 "허용 정렬 필드"에 없는 값으로 정렬을 요청하면 저장소 조회가 실패할 수 있어 미리 걸러낸다.
+    private static final Set<String> SEARCH_SORT_PROPERTIES = Set.of("createdAt", "memberCount", "lastActivityAt");
+
     private final StudyQueryService studyQueryService;
 
     /**
@@ -45,7 +50,7 @@ public class StudyController {
             direction = Sort.Direction.DESC
         ) Pageable pageable
     ) {
-        Pageable safePageable = clampPageSize(pageable);
+        Pageable safePageable = clampPageSize(restrictToAllowedSort(pageable, SEARCH_SORT_PROPERTIES));
         var result
             = studyQueryService
                 .searchStudies(keyword, goal, skillLevel, preferredLanguage, activeTimeSlot, safePageable);
@@ -58,5 +63,13 @@ public class StudyController {
             return pageable;
         }
         return PageRequest.of(pageable.getPageNumber(), MAX_PAGE_SIZE, pageable.getSort());
+    }
+
+    // 허용되지 않은 정렬 필드는 제거하고, 남는 조건이 없으면 기본 정렬(createdAt desc)로 되돌린다.
+    private Pageable restrictToAllowedSort(Pageable pageable, Set<String> allowedProperties) {
+        Sort allowedSort
+            = Sort.by(pageable.getSort().filter(order -> allowedProperties.contains(order.getProperty())).toList());
+        Sort sort = allowedSort.isUnsorted() ? Sort.by(Sort.Order.desc("createdAt")) : allowedSort;
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
     }
 }
