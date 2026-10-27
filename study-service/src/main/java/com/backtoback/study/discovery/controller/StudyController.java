@@ -2,6 +2,7 @@ package com.backtoback.study.discovery.controller;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,7 +41,8 @@ public class StudyController {
         @RequestParam(required = false) String activeTimeSlot,
         @PageableDefault(
             size = 20,
-            sort = "createdAt"
+            sort = "createdAt",
+            direction = Sort.Direction.DESC
         ) Pageable pageable
     ) {
         Pageable safePageable = clampPageSize(pageable);
