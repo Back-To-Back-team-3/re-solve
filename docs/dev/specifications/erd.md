@@ -1576,6 +1576,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK. `submissions.runtime_id`가 참조하는 내부 식별자 |
+| `snapshot_hash` | CHAR(64) `_bin` | Y | 전체 실행 환경 속성을 정규 직렬화한 SHA-256 소문자 16진수. 계산 규칙은 정책 및 상태 §3.2를 따름 |
 | `language` | VARCHAR(30) | Y | 서비스 언어 코드. `java` / `python3` / `cpp` |
 | `judge0_language_id` | INT | Y | Judge0 실행 환경 ID. 외부 참조이며 DB FK 없음 |
 | `runtime_name` | VARCHAR(255) | Y | Judge0가 반환한 실행 환경 이름을 그대로 보존 |
@@ -1587,10 +1588,12 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
-| `idx_execution_runtimes_language_judge0_id` | `(language, judge0_language_id)` | 동일 실행 환경 스냅샷의 재사용 후보 조회. UNIQUE 아님 |
+| `uk_execution_runtimes_snapshot_hash` | `(snapshot_hash)` | 같은 실행 환경 스냅샷의 동시 중복 저장 방지 (UNIQUE) |
+| `idx_execution_runtimes_language_judge0_id` | `(language, judge0_language_id)` | 언어·Judge0 실행 환경별 스냅샷 조회. UNIQUE 아님 |
 
 **불변식**
 
+- `snapshot_hash`는 전체 속성에서 계산한 값과 일치해야 하며, 같은 해시의 행은 하나만 존재한다.
 - 생성한 스냅샷의 속성은 변경하지 않는다. `created_at`만 기록하며 `updated_at`은 두지 않는다.
 - 제출이 참조 중인 스냅샷은 삭제하지 않는다.
 - 내부 식별자 `id`와 외부 식별자 `judge0_language_id`를 구분한다. `judge0_language_id` 하나로는 스냅샷의 유일성을 보장하지 않는다.
