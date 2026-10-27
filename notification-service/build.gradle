@@ -51,6 +51,10 @@ dependencies {
     implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
 
+    // ShedLock
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:6.3.0'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.3.0'
+
     // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
