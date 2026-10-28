@@ -45,6 +45,9 @@ class OutboxRelayConcurrencyIntegrationTest {
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
         registry.add("integration.crypto.secret-key", () -> TEST_SECRET_KEY_BASE64);
+        // 테스트 중 백그라운드 스케줄러가 실행되어 PENDING 데이터를 선점하지 않도록 지연을 크게 설정
+        registry.add("infra.outbox.relay-initial-delay-ms", () -> "3600000");
+        registry.add("infra.outbox.relay-fixed-delay-ms", () -> "3600000");
     }
 
     @MockitoBean

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.integration.infra.event.domain.OutboxEvent;
+import com.backtoback.integration.infra.event.domain.OutboxEventStatus;
 import com.backtoback.integration.infra.event.publisher.EventPublisher;
 import com.backtoback.integration.infra.event.repository.OutboxEventRepository;
 
@@ -55,15 +56,28 @@ public class OutboxRelayService {
             } catch (Exception exception) {
                 failureCount++;
                 event.recordFailure(OutboxEvent.DEFAULT_MAX_RETRIES);
-                log
-                    .warn(
-                        "Outbox 이벤트 발행 실패 - eventId: {}, eventType: {}, retryCount: {}, status: {}",
-                        event.getEventId(),
-                        event.getEventType(),
-                        event.getRetryCount(),
-                        event.getStatus(),
-                        exception
-                    );
+                if (event.getStatus() == OutboxEventStatus.FAILED) {
+                    log
+                        .error(
+                            "[OPERATIONAL ALERT] Outbox 이벤트 발행 최종 실패 (FAILED 전이, 수동 복구 필요) - "
+                                + "eventId: {}, eventType: {}, aggregateId: {}, retryCount: {}",
+                            event.getEventId(),
+                            event.getEventType(),
+                            event.getAggregateId(),
+                            event.getRetryCount(),
+                            exception
+                        );
+                } else {
+                    log
+                        .warn(
+                            "Outbox 이벤트 발행 실패 - eventId: {}, eventType: {}, retryCount: {}, status: {}",
+                            event.getEventId(),
+                            event.getEventType(),
+                            event.getRetryCount(),
+                            event.getStatus(),
+                            exception
+                        );
+                }
             }
         }
 
