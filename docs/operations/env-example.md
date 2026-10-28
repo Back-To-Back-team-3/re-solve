@@ -63,6 +63,11 @@ REDIS_PASSWORD=
 REDIS_HOST=redis
 REDIS_PORT=6379
 
+# 🔗 연동 (integration-service)
+# 필수 값: GitHub Access Token 암호화 키 (AES-256 GCM). Base64로 인코딩된 32바이트 키
+# 예: openssl rand -base64 32
+INTEGRATION_CRYPTO_SECRET_KEY=
+
 # ☁️ AWS / Judge0 / LocalStack
 LOCALSTACK_IMAGE=localstack/localstack:3.8
 LOCALSTACK_HOST_PORT=4566
