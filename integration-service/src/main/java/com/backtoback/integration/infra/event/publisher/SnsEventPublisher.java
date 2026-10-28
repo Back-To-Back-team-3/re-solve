@@ -35,13 +35,13 @@ public class SnsEventPublisher implements EventPublisher {
     @Override
     public void publish(OutboxEvent event) throws Exception {
         if (snsTemplate == null) {
-            log.warn("SnsTemplate 빈이 주입되지 않아 이벤트 발행을 건너뜁니다 (로컬/테스트): eventId={}", event.getEventId());
-            return;
+            throw new IllegalStateException("SnsTemplate 빈이 주입되지 않아 이벤트를 발행할 수 없습니다: eventId=" + event.getEventId());
         }
 
         Message<String> message
             = MessageBuilder
                 .withPayload(event.getPayload())
+                .setHeader("eventId", event.getEventId())
                 .setHeader("eventType", event.getEventType())
                 .setHeader("schemaVersion", event.getSchemaVersion())
                 .setHeader("correlationId", event.getCorrelationId())

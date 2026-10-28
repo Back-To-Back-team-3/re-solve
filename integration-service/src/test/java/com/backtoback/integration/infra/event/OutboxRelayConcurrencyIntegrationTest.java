@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
@@ -25,6 +26,7 @@ import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.integration.infra.event.domain.OutboxEvent;
 import com.backtoback.integration.infra.event.domain.OutboxEventStatus;
+import com.backtoback.integration.infra.event.publisher.EventPublisher;
 import com.backtoback.integration.infra.event.repository.OutboxEventRepository;
 import com.backtoback.integration.infra.event.service.OutboxRelayService;
 
@@ -44,6 +46,9 @@ class OutboxRelayConcurrencyIntegrationTest {
         registry.add("spring.datasource.password", MYSQL::getPassword);
         registry.add("integration.crypto.secret-key", () -> TEST_SECRET_KEY_BASE64);
     }
+
+    @MockitoBean
+    private EventPublisher eventPublisher;
 
     @Autowired
     private OutboxEventRepository outboxEventRepository;
