@@ -29,6 +29,11 @@ replay_pid*
 # Personal development docs (local only, not committed)
 .personal/
 
+# Skills (local only, not committed)
+.agents/
+.claude/skills/
+skills-lock.json
+
 # IntelliJ IDEA
 .idea/
 *.iml
