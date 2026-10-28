@@ -418,13 +418,15 @@ stateDiagram-v2
     [*] --> PRIVATE : 문제 등록 (첫 회차 포함)
     PRIVATE --> PUBLIC : 관리자 공개 (GENERAL만, 검증 통과 사용 회차 필요)
     PUBLIC --> PRIVATE : 비공개 전환 (예정·진행 시험·대회 포함 시 409)
-    PRIVATE --> ARCHIVED : 보관
+    PRIVATE --> ARCHIVED : 보관 (예정·진행 참조 차단)
     PUBLIC --> ARCHIVED : 보관 (동일 차단)
     ARCHIVED --> [*]
     note right of PUBLIC
         전이마다 ProblemStateChanged v2 (sourceVersion = row_version)
         study: EXCLUDED ↔ ACTIVE, contest: 고정 회차 유지
-        EXAM_ONLY는 공개 API로 PUBLIC 불가, 대회 종료 설정으로 공개
+        EXAM_ONLY는 관리자 공개 API로 PUBLIC 불가
+        연결된 대회 종료 조건을 만족할 때만 공개
+        ARCHIVED는 보관 해제·재공개·종료 공개 불가
     end note
 ```
 
@@ -519,7 +521,7 @@ sequenceDiagram
 
 ### 2.4 비공개 전환·보관
 
-- 경합·실패 포인트: 사용 확인 후 시험 편입 경합(자원 가드 도입 전 허용 리스크), contest 조회 실패.
+- 경합·실패 포인트: 신규 편입과 PROBLEM prepare는 같은 가드 행 잠금으로 직렬화한다. 작업 기록·멱등·복구 계약은 API §2.3.7을 따른다.
 
 ```mermaid
 sequenceDiagram
@@ -527,24 +529,35 @@ sequenceDiagram
     participant P as problem-service
     participant C as contest-service
     participant DB as problem DB
-    A->>P: POST …/unpublication 또는 …/archive {rowVersion}
-    P->>C: GET /internal/v1/exams/problem-usage?problemId
-    alt 조회 실패
-        P-->>A: 503 COMMON_DEPENDENCY_UNAVAILABLE
-    else hasBlockingUsage (예정·진행 중 포함)
-        P-->>A: 409 PROBLEM_IN_ACTIVE_EXAM
-    else 사용 없음
-        opt 자원 가드 도입 시
-            P->>C: prepare(PROBLEM) → 신규 편입 차단
+    A->>P: POST …/unpublication 또는 …/archive + Idempotency-Key + rowVersion
+    P->>DB: 같은 요청 확인 또는 PENDING 작업 기록
+    P->>C: prepare(PROBLEM, operationId, PROBLEM_HIDE, expectedSourceVersion)
+    alt 예정·진행 중 참조 존재
+        C-->>P: 409 PROBLEM_IN_ACTIVE_EXAM (준비 없음)
+        P->>DB: ABORTED·실패 결과 보존
+        P-->>A: 409
+    else 준비 성공
+        C-->>P: 200 PREPARED, ready=true (신규 편입 차단)
+        P->>DB: 문제 잠금·버전 재검증
+        alt 변경하지 않았음 확정
+            P->>DB: ABORTED 기록
+            P->>C: cancel(같은 operationId)
+            P-->>A: 원래 실패 응답
+        else 상태 변경 커밋
+            P->>DB: visibility·row_version·감사·Outbox·COMMITTED 원자 저장
+            P->>C: complete(같은 operationId, 새 sourceVersion)
+            P-->>A: 200 (같은 키 재요청은 최초 응답)
+            Note over P,C: 완료 전달 실패는 상태를 되돌리지 않음
         end
-        P->>DB: UPDATE visibility WHERE row_version = :v + 감사 로그 + Outbox ProblemStateChanged v2
-        alt 0행
-            P-->>A: 409 PROBLEM_VERSION_CONFLICT
-        else
-            P-->>A: 200
-        end
+    else 준비·DB 커밋 결과 불명
+        Note over P,C: PENDING·가드 유지, TTL 자동 해제 없음
+        C->>P: GET …/problems/{problemId}/operations/{operationId}
+        P-->>C: COMMITTED / ABORTED / PENDING
+        Note over P,C: 확정 결과만 complete·cancel, 404·조회 실패는 유지
     end
 ```
+
+- 상태 작업은 ERD §4.2.19에 보존한다. 취소는 준비 전 상태로 복원하고 완료·취소 결과를 유지한다. 더 최신 원천 상태와 버전은 되돌리지 않는다.
 
 ### 2.5 풀이 공유·Diff·댓글 권한
 
@@ -991,7 +1004,7 @@ flowchart TD
 
 ### 4.7 탈퇴·스터디 종료·문제 숨김 가드
 
-- 목적: 확인 API 뒤 상태가 바뀌는 경합을 막는다(자원 가드 도입 결정 대기, API 부록 D).
+- 목적: 확인 API 뒤 상태가 바뀌는 경합을 막는다. PROBLEM 비공개·보관은 API §2.3.7·§4.7.3·§4.7.4를 따른다.
 - 경합·실패 포인트: 원격 처리 상태가 불명확하면 준비 가드를 TTL로 풀지 않는다. 스터디 종료 준비로 취소한 예정 시험은 자동 복원하지 않는다.
 
 ```mermaid
@@ -1014,9 +1027,9 @@ flowchart TD
     R --> O["소유 서비스 자기 DB 상태 변경"]
     O --> D["complete 또는 소유 상태 이벤트"]
     D --> E["BLOCKED·sourceVersion 저장"]
-    R -->|"소유 작업 ABORTED"| F["cancel·OPEN"]
+    R -->|"소유 작업 ABORTED"| F["cancel·ABORTED 보존<br>준비 전 상태·최신 원천 상태로 복원"]
     W --> Z["작업 상태 대사"]
-    Z -->|"PENDING/조회 실패"| W
+    Z -->|"PENDING/404/조회 실패"| W
     Z -->|"COMMITTED"| D
     Z -->|"ABORTED"| F
 ```
@@ -1060,15 +1073,24 @@ sequenceDiagram
 
 ### 4.9 종료 공개·풀이 공유·분석
 
+- 대회 생성은 CONTEST_CREATE 작업·고정 문제를 먼저 저장하고 잠금 밖에서 B의 PUT 연결을 호출한다. 연결 완료 전에는 노출·참가·시작을 차단한다. 응답 유실은 같은 작업으로 재시도하며 확정 실패는 취소·감사·Outbox를 함께 기록한다(API §4.6.1·§2.6.9).
+
 - 목적: 대회 전용 문제 공개와 확정 결과 활용의 경계를 보여준다.
-- 경합·실패 포인트: scope를 GENERAL로 바꾸지 않는다. 공유 코드는 본인 AC만, 분석은 불변 확정 스냅샷만 사용한다.
+- 경합·실패 포인트: 명시적 대회 연결과 고정 회차를 확인한다. ARCHIVED·최신 관리자 변경을 지연 이벤트로 덮어쓰지 않는다. 연결은 API §2.6.9를 사용하고 연결 기준 버전 이후 COMMITTED 관리자 상태 작업을 비교한다.
 
 ```mermaid
 flowchart TD
-    A["대회 ENDED"] --> B{"isProblemsPublicAfterEnd?"}
-    B -->|"예"| C["C 공개 문제 화면<br>B 고정 회차 내부 권한 조회"]
-    B -->|"아니오"| D["실제 입장한 본인 복기만"]
-    C --> E["EXAM_ONLY 유지<br>일반 목록·문제집 노출 없음"]
+    A["대회 ENDED·종료 스냅샷 Outbox"] --> B{"isProblemsPublicAfterEnd?"}
+    B -->|"예"| C["ContestEnded 재전달 가능"]
+    C --> D{"Problem의 대회 연결·EXAM_ONLY 일치?"}
+    D -->|"미연결"| T["롤백·재전달<br>연결 복구 후 같은 이벤트 처리"]
+    D -->|"다른 대회·GENERAL"| X["상태 변경 없음"]
+    D -->|"예"| E{"ARCHIVED 또는 최신 관리자 변경?"}
+    E -->|"예"| X
+    E -->|"아니오"| P["실제 PRIVATE → PUBLIC만 반영<br>연결 기준 이후 관리자 작업 확인<br>행 버전·설정 관리자 감사·P1 v2·소비 기록 원자 저장"]
+    P --> Q["C 종료 공개 화면 → 고정 회차 내부 조회<br>C 참가·공개 권한 / B 자료 소속 검증"]
+    B -->|"아니오"| R["실제 입장한 본인 복기만"]
+    Q --> S["EXAM_ONLY·고정 회차 유지<br>일반 목록·문제집·시험 신규 편입 제외"]
     F["시험·대회 FINALIZED"] --> G["result_snapshots 불변 저장"]
     G --> H{"본인 AC 공유 요청?"}
     H -->|"예"| I["B가 C shareable API 조회<br>코드·회차 스냅샷"]

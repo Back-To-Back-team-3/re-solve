@@ -391,7 +391,7 @@ flowchart LR
 
 #### P1 `ProblemStateChanged` v2
 
-- **발행:** 공개·비공개·보관, 검증 결과에 따른 사용 회차 변경 또는 같은 사용 회차의 통과 언어 추가. 결과 요약·문제 버전·Outbox를 같은 트랜잭션에 기록한다. 새 회차 저장만으로 회차 변경 이벤트를 발행하지 않는다.
+- **발행:** 공개·비공개·보관, 대회 종료 조건에 따른 실제 공개 상태 변경, 검증 결과에 따른 사용 회차 변경 또는 같은 사용 회차의 통과 언어 추가. 결과 요약·문제 버전·Outbox를 같은 트랜잭션에 기록한다. 새 회차 저장만으로 회차 변경 이벤트를 발행하지 않는다.
 - **순서:** 문제별 `sourceVersion = problems.row_version`. 같은 사용 회차의 언어 추가도 증가한다. 사용 회차·언어가 그대로인 결과 재전달은 버전 증가·재발행 없이 성공 처리한다.
 - **버전:** v1과 v2는 `schemaVersion`으로 분리한다. 회차 필수 여부·의미와 언어 추가 값이 바뀌므로 §1.6에 따라 소비자 전환 확인 후 v1을 중단한다. v2 전환 뒤 같은 변경을 v1으로 중복 발행하지 않는다. 도메인 순서 값은 문제 단위로 공유한다.
 
@@ -406,7 +406,7 @@ flowchart LR
 | `supportedLanguages` | string[] | Y | 사용 회차의 통과 언어, `java` / `python3` / `cpp`. 사용 회차가 없으면 `[]` |
 | `changeType` | string | Y | `VISIBILITY` / `REVISION` / `LANGUAGE_ADDED` |
 | `changedAt` | string (date-time) | Y | 상태·사용 회차·언어 집합 변경 시각 |
-| `operationId` | string 또는 null | N | 해당 상태 변경의 자원 작업 ID |
+| `operationId` | string 또는 null | N | 비공개·보관은 prepare와 같은 자원 작업 ID. 그 외 변경은 null |
 
 - 최초 통과 또는 더 큰 통과 회차로 바뀌면 `REVISION`, 현재 사용 회차에 처음 통과한 언어가 추가되면 `LANGUAGE_ADDED`다. 이미 반영한 통과 결과의 재전달이나 더 작은 회차의 결과는 사용 정보가 같으면 발행하지 않는다.
 - `PUBLIC`은 사용 회차가 있어야 한다. 통과 회차 없는 `PRIVATE`·`ARCHIVED` 이벤트는 두 회차 필드 null과 빈 언어 목록을 보낸다. 검증 성공으로 공개 상태를 자동 변경하지 않는다.
@@ -415,7 +415,7 @@ flowchart LR
 | 소비자 | 반영 |
 | --- | --- |
 | study | 기존 공개 상태 반영과 함께 사용 회차·통과 언어의 최신 버전을 반영. 과제 진행 인정의 문제 ID 기준은 유지 |
-| contest | 기존 고정 회차를 바꾸지 않고 문제의 최신 상태·통과 언어를 반영. 가드 해제는 기존 큰 PUBLIC 버전 조건 유지 |
+| contest | 기존 고정 회차를 바꾸지 않고 문제의 최신 상태·통과 언어를 반영. 같은 operationId의 비공개·보관 이벤트로 가드 완료를 복구한다. PREPARED의 다른 작업은 이전 이벤트로 해제하지 않는다. 더 큰 sourceVersion의 visibility·scope를 가드 source_status·source_scope와 함께 보존하고 현재 작업의 complete/cancel 뒤 최신 원천 상태로 판단한다. 완료된 GENERAL 가드의 재공개 해제는 더 큰 PUBLIC sourceVersion만 허용하며 ARCHIVED는 해제하지 않는다 |
 
 ```json
 {
@@ -754,8 +754,15 @@ flowchart LR
 | 이벤트 | 발행 시점 | 필드 (aggregate = `contestId`) | 소비자 처리 |
 | --- | --- | --- | --- |
 | `ContestStarted` | `RUNNING` 전이 | `contestId`, `contestRevision`, `startsAt`, `endsAt`, `targetMemberIds` | notification: `CONTEST_STARTED` |
-| `ContestEnded` | `ENDED` 전이 | `contestId`, `contestRevision`, `endedAt`, `isProblemsPublicAfterEnd`, `problemIds` (추가 제안) | study: 차단 삭제 + 종단. problem: `EXAM_ONLY` 문제 종료 공개 플래그(`scope` 유지). 알림 없음 |
+| `ContestEnded` | `ENDED` 전이 | `contestId`, `contestRevision`, `endedAt`, `isProblemsPublicAfterEnd`, `problemIds` | study: 차단 삭제 + 종단. problem: `EXAM_ONLY` 문제 종료 공개 플래그(`scope` 유지). 알림 없음 |
 | `ContestCanceled` | 시작 전 취소 | `contestId`, `contestRevision`, `canceledAt`, `reason`, `targetMemberIds` | study: 차단 삭제 + 종단. notification: `CONTEST_CANCELED` |
+- `ContestEnded`의 `isProblemsPublicAfterEnd`는 종료 트랜잭션에서 확정한 대회 설정이고, `problemIds`는 해당 대회에 고정된 문제 ID 목록이다. `contestId`·`contestRevision`·`endedAt`·공개 플래그·문제 목록을 종료 상태와 Outbox에 함께 기록한다. 재전달·재발행 시 동일 `eventId`와 스냅샷을 유지한다.
+- Problem은 자기 DB의 `problems.contest_id`와 이벤트 `contestId`가 일치하는 `EXAM_ONLY`만 대상으로 삼는다. 일반 문제와 다른 대회 소속 문제를 공개하지 않는다. EXAM_ONLY의 대회 연결이 아직 없으면 종료 이벤트를 성공 소비로 확정하지 않고 롤백·재전달한다. 연결 복구 후 같은 이벤트를 재처리하며 반복 실패는 §7의 DLQ 복구 절차를 따른다. 공개 플래그 false와 `ContestCanceled`는 공개 상태를 바꾸지 않는다.
+- `ARCHIVED`와 연결 후 더 최신인 관리자 상태 변경을 보존한다. `contestRevision`을 Problem `sourceVersion`과 비교하지 않는다. 문제 행 잠금 아래 contest_link_source_version보다 큰 result_source_version을 가진 COMMITTED 관리자 상태 작업이 있는지 problem_state_operations에서 확인하고, 있으면 공개를 건너뛴다. 검증 결과·통과 언어 추가는 이 관리자 상태 테이블에 넣지 않으므로 row_version 증가만으로 관리자 변경으로 판정하지 않는다.
+- 적용 가능한 `PRIVATE → PUBLIC`만 문제 ID 오름차순 행 잠금 아래 처리한다. `scope=EXAM_ONLY`·대회 연결·고정 회차를 유지하고, 상태·최초 공개 시각(`published_at`이 null일 때)·행 버전 증가·감사·P1 v2 `VISIBILITY` Outbox·`processed_events`를 같은 트랜잭션에 기록한다. 감사 actor_id는 연결 때 보존한 contest_policy_actor_id이며 공개 정책을 설정한 실제 관리자다. action=CONTEST_END_PUBLICATION, reason에 ContestEnded·contestId·eventId를 기록해 자동 실행 원인과 정책 설정자를 구분한다. 0·가상 시스템 계정·문제 작성자로 대체하지 않는다. 이미 PUBLIC·보관·보호 대상은 버전 증가·P1 재발행 없이 중복 소비만 기록한다.
+- 상태 이벤트가 역전돼도 종료 표식을 이전 Started로 되돌리지 않는다. 새 `eventId`로 재발행된 종료 이벤트도 대회 연결·종단·관리자 변경 조건을 다시 확인한다. `processed_events` 14일 보관만으로 장기 중복·재공개 보호를 대신하지 않는다. 처리 실패는 롤백·재전달·DLQ 절차를 따른다.
+- 공개 후 열람은 Contest의 종료 공개 화면과 고정 회차 조회를 사용한다. `EXAM_ONLY`는 일반 목록·문제집·시험 선택 대상이 되지 않으며 일반 풀이·통계로 편입하지 않는다.
+
 - 대회 설정 변경 이벤트(`ContestUpdated`)는 정의하지 않는다. 대회는 관리자만 만들고 시작 전 변경 시 참가자 알림 요구가 없어서다. 변경이 차단 시각에 영향을 주면 study는 4.7.7 hint-blocks로 재구성한다(§8.1 협의).
 
 ### 4.5 study·AI (담당 D)
