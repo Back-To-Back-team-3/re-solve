@@ -56,6 +56,15 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
+    // ShedLock
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:6.3.0'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.3.0'
+
+    // AWS Messaging (SNS/SQS)
+    implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sns'
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
+
     // OpenAPI / Swagger UI
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1'
 
