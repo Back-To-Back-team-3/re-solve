@@ -899,7 +899,10 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `author_id` | BIGINT | Y | 작성 관리자 (COMMENT: `members.id`) |
 | `scope` | VARCHAR(30) | Y | `GENERAL` / `EXAM_ONLY` |
 | `visibility` | VARCHAR(30) | Y | `PRIVATE` / `PUBLIC` / `ARCHIVED` |
-| `contest_id` | BIGINT | N | NULL 허용: 일반 문제. 대회 전용 문제의 대회 (외부 참조) |
+| `contest_id` | BIGINT | N | NULL 허용: GENERAL 또는 연결 전 EXAM_ONLY. 명시적 연결 후 해당 대회 ID를 보존하는 외부 참조. 종료·보관 후에도 유지 |
+| `contest_problem_revision_id` | BIGINT | N | 연결 시 고정한 회차, FK → problem_revisions.id. contest_id와 함께 설정하고 종료·보관 후에도 보존 |
+| `contest_link_source_version` | INT | N | 연결 커밋의 row_version. 이후 관리자 공개 상태 작업의 결과 버전과 비교하는 기준 |
+| `contest_policy_actor_id` | BIGINT | N | C가 ADMIN 권한을 확인한 종료 공개 설정 관리자 ID. 자동 공개 감사의 정책 설정 주체 |
 | `row_version` | INT | Y | 애플리케이션 초기값 1. 관리자 `rowVersion`과 P1 `sourceVersion` 공유 |
 | `published_at` | DATETIME(6) | N | NULL 허용: 공개 전. 최초 공개 시각 |
 | `created_at` | DATETIME(6) | Y |  |
@@ -914,7 +917,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 상태 | 의미 | 전이 |
 | --- | --- | --- |
 | `PRIVATE` | 비공개 (작성 중 포함) | → `PUBLIC` (검증을 통과한 사용 회차 있음) / `ARCHIVED` |
-| `PUBLIC` | 공개 | → `PRIVATE` (진행 중 시험·대회 포함 시 차단) / `ARCHIVED` |
+| `PUBLIC` | 공개 | → `PRIVATE` / `ARCHIVED` (예정·진행 중 시험·대회 포함 시 차단) |
 | `ARCHIVED` | 미사용 (소프트 딜리트, 종단) | — |
 
 #### 4.2.2 문제 수정 회차 (`problem_revisions`) `[IMMUTABLE]`
@@ -1327,6 +1330,41 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 - 제출별 행·회원별 풀이 상태·관련 통계·`processed_events`를 같은 트랜잭션에서 처리한다. 실패하면 모두 롤백한다. 제출별 행은 이벤트 ID 기록의 14일 정리 대상에 포함하지 않는다.
 - 코드·테스트별 결과·실행 시도 이력은 복제하지 않는다. 이 소비 규칙은 PRACTICE 재채점 기능을 추가하지 않는다.
 
+#### 4.2.19 문제 공개 상태 작업 (`problem_state_operations`)
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `operation_id` | VARCHAR(100) `_bin` | Y | Problem이 최초 접수 시 생성한 불변 작업 ID |
+| `problem_id` | BIGINT | Y | FK → problems.id |
+| `actor_id` | BIGINT | Y | 작성 관리자 ID. 외부 참조 |
+| `operation_type` | VARCHAR(30) | Y | PUBLICATION / UNPUBLICATION / ARCHIVE |
+| `idempotency_key` | VARCHAR(100) `_bin` | Y | 원래 Idempotency-Key |
+| `request_hash` | CHAR(64) | Y | 문제·집행자·작업 종류·정규화 요청 본문의 SHA-256 |
+| `expected_source_version` | INT | Y | 요청 rowVersion |
+| `result_source_version` | INT | N | COMMITTED의 결과 버전. 그 외 NULL |
+| `before_visibility` | VARCHAR(30) | Y | 접수 때 확인한 공개 상태 |
+| `target_visibility` | VARCHAR(30) | Y | 요청한 공개 상태 |
+| `state` | VARCHAR(30) | Y | PENDING / COMMITTED / ABORTED |
+| `reason` | VARCHAR(500) | Y | 보관 요청 사유 또는 공개·비공개 작업명 |
+| `response_status` | INT | N | 최초 종결 HTTP 응답 상태. 미종결은 NULL |
+| `response_json` | JSON | N | 최초 성공·확정 실패 응답. 미종결은 NULL |
+| `created_at` | DATETIME(6) | Y | 접수 시간 |
+| `updated_at` | DATETIME(6) | Y | 마지막 상태 갱신 시간 |
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `fk_problem_state_operations_problem` | problem_id → problems.id | 서비스 내부 FK |
+| `uk_problem_state_operations_operation` | operation_id | 작업 대사 식별자 |
+| `uk_problem_state_operations_request` | (actor_id, problem_id, operation_type, idempotency_key) | 같은 상태 요청의 중복 실행 방지 |
+| `idx_problem_state_operations_pending` | (state, updated_at) | 미종결 작업 복구 |
+| `idx_problem_state_operations_version` | (problem_id, state, result_source_version) | 연결 후 관리자 상태 변경 확인 |
+
+- 문제 행을 먼저 잠그고 같은 키·해시와 다른 PENDING 작업 유무를 확인한다. 다른 미종결 상태 작업은 PROBLEM_VERSION_CONFLICT(409)로 거절한다. 작업 ID 생성·PENDING 저장을 커밋한 뒤 원격 prepare를 호출한다.
+- 상태·문제 버전·감사 로그·P1 Outbox·COMMITTED·최초 성공 응답은 한 트랜잭션이다. 확정 실패는 ABORTED·최초 실패 응답을 저장한다. 타임아웃만으로 ABORTED로 바꾸지 않는다.
+- 재요청은 원래 키·해시를 대조해 원래 작업과 종결 응답을 반환한다. COMMITTED·ABORTED를 PENDING으로 되돌리지 않는다. 새 시도는 새 키·작업 ID를 사용한다.
+- 작업·완료 응답은 초기 운영에서 자동 삭제하지 않는다. 일반 제출·태그의 24시간 만료와 processed_events의 14일 정리 대상에서 제외한다. 감사 상세·채점 이력을 이 테이블에 복제하지 않는다.
+
 ### 4.3 judge
 
 > 작성: 담당 B
@@ -1717,6 +1755,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `contest_id` | BIGINT | Y | FK → `contests.id` |
 | `problem_id` | BIGINT | Y | 문제 ID (외부 참조, 주로 `EXAM_ONLY`) |
 | `problem_revision_id` | BIGINT | Y | 고정 회차 |
+| `problem_source_version` | INT | Y | 선택 당시 Problem sourceVersion. 동일 연결 재시도의 rowVersion |
 | `problem_title` | VARCHAR(200) | Y | 스냅샷 |
 | `label` | VARCHAR(30) | Y | 문제 라벨 (`A`, `B` …) |
 | `visible_at` | DATETIME(6) | Y | 문제 공개 시각 |
@@ -1889,6 +1928,10 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `expected_source_version` | BIGINT | N | prepare 요청의 원천 버전. 최초 생성만 NULL, 완료 뒤 보존 |
 | `request_hash` | CHAR(64) | N | resourceType·resourceId·operationId·operationType·expectedSourceVersion의 정규화 SHA-256. 최초 생성만 NULL |
 | `state` | VARCHAR(30) | Y | OPEN / PREPARED / BLOCKED |
+| `prepared_from_state` | VARCHAR(30) | N | OPEN / BLOCKED. 최초 prepare 전만 NULL, 해당 작업의 복원 상태 |
+| `operation_result` | VARCHAR(30) | N | PENDING / COMMITTED / ABORTED. 최초 작업 전만 NULL, 종결 뒤 보존 |
+| `source_status` | VARCHAR(30) | N | PROBLEM의 최신 원천 visibility. 상태 스냅샷 수신 전 또는 다른 자원은 NULL |
+| `source_scope` | VARCHAR(30) | N | 같은 원천 버전의 PROBLEM scope. 다른 자원은 NULL |
 | `source_version` | BIGINT | Y | 기본 0. 소유 서비스 상태 이벤트의 순서 값 |
 | `prepared_at` | DATETIME(6) | N | 준비 시각. 준비 전 NULL |
 | `version` | BIGINT | Y | 기본 0. 낙관적 락 |
@@ -1909,11 +1952,12 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 직렬화 | 가드 준비와 신규 생성·등록·최초 입장은 같은 자원 행의 비관적 락. 기존 등록자의 제출·자동 제출은 STUDY/PROBLEM 가드로 차단하지 않음 |
 | 회원 탈퇴 | 실제 입장한 미확정 시험·대회가 없을 때만 PREPARED. 이후 신규 등록·입장 차단, MemberWithdrawn 수신 시 BLOCKED |
 | 스터디 종료 | 신규 시험 생성 차단·예정 시험 취소. 진행 시험의 CLOSED까지 준비 유지. CLOSED 이후 채점·확정 계속 |
-| 문제 숨김 | SCHEDULED 또는 서버 시간상 진행 중인 사용이 있으면 준비 거절. 성공 뒤 신규 편입 차단. 고정 회차 결과 조회·채점 유지 |
-| 준비 정보 | operation_id·expected_source_version·정규화 request_hash 함께 저장. 동일 operationId의 다른 해시 거절 |
-| 반복 요청 | 동일 operationId의 prepare·complete·cancel 멱등. 취소된 OPEN의 동일 ID prepare는 OPEN 반환. 새 ID만 재준비 |
-| 완료 버전 | complete.sourceVersion > expected_source_version 및 >= stored.source_version. 이전 버전은 거절 |
-| 복구 | TTL로 자동 해제하지 않음. 소유 서비스 작업 상태 조회 또는 감사 로그를 남기는 관리자 대사로 완료·취소 확인. API §4.7.3·§4.7.4 / 스케줄러 §4.7 |
+| 문제 숨김·보관 | SCHEDULED 또는 서버 시간상 진행 중인 사용이 있으면 준비 거절하며 PREPARED를 남기지 않음. 성공 뒤 신규 편입 차단. 기존 고정 회차 열람·채점·종료 처리는 계속 |
+| 준비 정보 | operation_id·expected_source_version·정규화 request_hash·prepared_from_state·operation_result=PENDING 함께 저장. 동일 operationId의 다른 해시 거절 |
+| 반복 요청 | 동일 operationId의 prepare·complete·cancel 멱등. 취소 후 동일 ID prepare는 보존한 복원 상태·ABORTED 반환. 새 ID만 재준비 |
+| 완료 버전 | complete.sourceVersion > expected_source_version·현재 operation_id 일치 확인. source_version은 max(저장값, 결과 버전)으로 보존하며 더 최신 원천 상태로 최종 차단 판단 |
+| 복구 | TTL로 자동 해제하지 않음. PENDING·404·조회 실패·결과 불명은 PREPARED 유지. COMMITTED만 complete, ABORTED만 cancel. 조회 결과 뒤 가드 잠금 안에서 현재 operationId·버전 재확인. API §4.7.3·§4.7.4 / 스케줄러 §4.7 |
+| 후속 문제 작업 | 다른 PREPARED 작업은 점유 충돌. PROBLEM_HIDE는 OPEN·BLOCKED에서 새 작업을 준비할 수 있으며 prepared_from_state를 저장한다. 확정 취소는 이전 상태로 복원하고 ABORTED를 보존한다. 더 최신 원천 상태가 있으면 PUBLIC의 GENERAL만 OPEN, PRIVATE·ARCHIVED는 BLOCKED로 유지한다. 다른 PREPARED 작업은 원천 이벤트로 취소하지 않음 |
 
 #### 4.4.17 회원 정보 복제본 (`member_replicas`)
 
@@ -1944,17 +1988,18 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `operation_id` | VARCHAR(100) `_bin` | Y | 호출자 생성 멱등 작업 ID |
-| `operation_type` | VARCHAR(30) | Y | EXAM_RETRY / EXAM_ZERO_CONFIRM / CONTEST_VOID_CONFIRM / RESULT_REFINALIZE |
+| `operation_type` | VARCHAR(30) | Y | CONTEST_CREATE / EXAM_RETRY / EXAM_ZERO_CONFIRM / CONTEST_VOID_CONFIRM / RESULT_REFINALIZE |
 | `context` | VARCHAR(30) | Y | EXAM / CONTEST |
 | `context_id` | BIGINT | Y | 부모 시험·대회 ID (문맥별 논리 연결) |
-| `receipt_id` | BIGINT | N | 제출 작업이면 `exam_submissions.id` / `contest_submissions.id`. RESULT_REFINALIZE는 NULL |
+| `receipt_id` | BIGINT | N | 제출 작업이면 `exam_submissions.id` / `contest_submissions.id`. CONTEST_CREATE·RESULT_REFINALIZE는 NULL |
 | `request_hash` | CHAR(64) | Y | 대상·회차·사유·집행자 포함 불변 요청 SHA-256 |
-| `expected_judge_attempt` | INT | N | 재처리·실패 종결 대상 회차. RESULT_REFINALIZE는 NULL |
+| `expected_judge_attempt` | INT | N | 재처리·실패 종결 대상 회차. CONTEST_CREATE·RESULT_REFINALIZE는 NULL |
 | `target_judge_attempt` | INT | N | B가 확인한 재처리 회차. EXAM_RETRY 외 또는 확인 전 NULL |
 | `expected_result_revision` | BIGINT | N | RESULT_REFINALIZE의 이전 버전. 다른 작업은 NULL |
 | `state` | VARCHAR(30) | Y | PENDING / SUCCEEDED / FAILED |
 | `actor_member_id` | BIGINT | Y | 집행 회원 ID. 일반 관리자 작업은 ADMIN, EXAM_RETRY는 해당 시험 운영자도 허용 |
 | `reason` | VARCHAR(500) | Y | 불변 작업 사유 |
+| `response_json` | JSON | N | CONTEST_CREATE의 최초 종결 응답. 미종결 및 다른 작업은 NULL |
 | `last_error_code` | VARCHAR(100) | N | 실패 또는 조회 지연 코드. 오류 없으면 NULL |
 | `created_at` | DATETIME(6) | Y | 생성 |
 | `updated_at` | DATETIME(6) | Y | 갱신 |
@@ -1973,6 +2018,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 확정 차단 | PENDING/FAILED 재처리 작업의 원격 성공 여부가 불명확하면 최종 확정 보류. B 상태 조회·동일 operationId 재요청으로 SUCCEEDED 또는 확정 실패 종결 |
 | 회차 저장 | judge_attempt는 마지막 반영 종결 회차. 원격 목표 회차는 target_judge_attempt에 저장 |
 | 재처리 응답 | 현재 judge_attempt < target_judge_attempt인 경우만 REQUESTED 전이. 이미 목표 이상 결과가 반영됐으면 상태·판정 유지. 늦은 성공 응답으로 결과를 되돌리지 않음 |
+| 대회 생성 | CONTEST_CREATE는 생성 operationId·요청 해시·정책 설정 관리자를 보존한다. 대회·고정 문제·PENDING 작업을 함께 저장하고 원격 연결은 커밋 후 수행한다. SUCCEEDED와 최초 응답을 함께 저장하며, SUCCEEDED 전에는 목록 노출·참가·입장·시작을 허용하지 않는다. 동일 ID 재요청은 같은 대회·고정 회차의 연결을 재개한다. 확정 실패는 대회 취소·FAILED·감사·취소 Outbox를 함께 저장하고 이미 생성된 B 연결은 이력으로 보존한다. |
 | 감사 | audit_logs는 불변 이력. 현재 작업 상태는 이 테이블에 갱신하고 완료 시 감사 로그 별도 기록 |
 | 종결 경계 | 시험 실패 재처리·실패 종결은 FINALIZED 전만 허용. FINALIZED에서는 기존 유효 기록 재집계의 재확정만 허용. 미종결 제출 0건 유지. API §4.6 / DB §6.4.2 |
 
@@ -2625,7 +2671,11 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 검증 단일 진행 | 문제·회차 잠금 아래 동일 회차·언어의 미반영 요청·PASSED 존재를 검사. 미반영 결과만 조건부 반영 | — |
 | 자동 재검증 | 직전 사용 회차의 언어별 PASSED 코드 재사용. 새 회차·요청·Outbox 원자 저장과 등록 멱등키로 중복 방지 | — |
 | 관리자 멱등 | 회차·검증 요청의 작성자·키 UNIQUE와 요청 해시 비교. 최초 회차 응답 버전 보존, 태그 24시간 만료와 분리 | — |
-| 진행 중 시험·대회 문제 비공개 차단 | contest 내부 API 확인 (fail-closed) | — |
+| 비공개·보관과 신규 편입 경합 | API §2.3.7의 Problem 작업 기록·Contest PROBLEM 가드 준비 후 상태 커밋. 사용 조회만으로 변경하지 않음 | — |
+| 상태 작업·감사·복구 | operationId·키·요청 해시·기대/결과 버전·PENDING/COMMITTED/ABORTED·최초 응답을 영속 보존. 상태·감사·Outbox·COMMITTED는 같은 트랜잭션. 저장 위치·제약은 §4.2.19 | — |
+| 상태 작업 보관 | 진행·결과 불명 작업과 멱등 응답 기록에 일반 제출·태그의 24시간 만료를 적용하지 않음. 완료·취소 기록도 자동 삭제하지 않음 | — |
+| 보관 종단·고정 참조 | ARCHIVED의 해제·재공개 없음. 회차·본문·이미지·제출·contest_id와 기존 고정 참조를 보존 | — |
+| 대회 전용 연결·종료 공개 | contest_id와 Contest의 고정 problem_revision_id를 대조. 명시적 동일 연결만 멱등 처리하며 다른 대회로 덮어쓰지 않음. 종료 공개는 연결 기준 버전보다 큰 COMMITTED 상태 작업이 없을 때만 반영 (§4.2.19·이벤트 §4.4) | — |
 | 해결 상태 비초기화 | `is_solved`는 `false → true` 조건부 UPDATE만 | — |
 | 제출 수·결과 중복 방지 | `problem_submission_results.submission_id` UNIQUE·`judge_attempt` 비교. 집계 행 잠금과 동일 트랜잭션으로 최초 제출만 계수 (§4.2.18) | — |
 | 공유 중복 | 생성 컬럼 `active_submission_id` + `uk_solution_shares_study_active_submission` | — |
@@ -2700,7 +2750,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 규칙 | 보장 방법 | 정책 §2.2 |
 | --- | --- | --- |
-| 문제 서비스 | B: 문제 선택 시 GENERAL/PUBLIC 및 현재 회차를 확인한다. 고정 회차 본문·공개 예제·이미지만 반환하고 숨김 테스트·정답 코드는 C에 반환하지 않는다. 대회 전용 문제 종료 공개는 C 공개 화면에서 제공하며 scope를 GENERAL로 변경하지 않는다. | — |
+| 문제 서비스 | B: 선택·회차·가용 조건은 API §2.6.5를 따른다. C가 자기 문맥의 참가·열람·고정 참조를 확인하고 B는 문제·회차·이미지 소속을 확인한다(§2.6.3·§2.6.4). 숨김 테스트·정답 코드·근거 없는 solvedStatus는 반환하지 않는다. 대회 종료 공개는 C 화면에서 제공하며 EXAM_ONLY·고정 회차를 유지한다. | — |
 | 스터디 서비스 | D: StudyMemberJoined/StudyMemberLeft 복제본은 membershipId 비교, 동일 가입 탈퇴 우선이다. ExamUpdated 전체 문제 목록·시간과 examRevision을 발행한다. ABSENT도 전체 종료까지 힌트 차단 대상이다. | — |
 | 회원 정지 | E: 회원 변경은 공통 member_replicas를 사용한다. SUSPENDED는 신규 등록·입장·Draft·직접 제출·Run을 차단한다. 정지 전 유효 제출·서버 Draft 자동 제출·채점 결과는 유지하고 기존 점수·순위를 소급 제외하지 않는다. 해제 시 별도 재집계를 실행하지 않는다. | — |
 | 회원 탈퇴 | 탈퇴 조회만으로 입장과의 경합을 해결하지 않는다. 회원 작업 가드 준비 후 member-service가 탈퇴를 수행하고 완료/취소를 전달한다. 탈퇴 회원의 과거 결과는 익명화해 보존한다. | — |
@@ -2859,7 +2909,7 @@ problem-service/src/main/resources/db/migration/
   V18__solution_create_solution_comments.sql    (P2 착수 시)
 ```
 
-검증 데이터·제출별 반영 결과는 §4.2.16~4.2.18과 문제 `row_version` 정의를 사용한다. 추가 마이그레이션은 이미 적용된 파일과 중복되지 않는 후속 버전을 사용하며, 위 전체 구축 계획 번호를 기존 적용 파일에 재사용하지 않는다.
+검증 데이터·제출별 반영 결과·공개 상태 작업은 §4.2.16~4.2.19과 문제 `row_version` 정의를 사용한다. 추가 마이그레이션은 이미 적용된 파일과 중복되지 않는 후속 버전을 사용하며, 위 전체 구축 계획 번호를 기존 적용 파일에 재사용하지 않는다.
 
 ### 7.3 Judge (`judge-service`)
 
