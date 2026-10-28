@@ -1,5 +1,6 @@
 package com.backtoback.integration.github.client;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
@@ -8,21 +9,26 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.integration.github.client.dto.GithubInstallationResponse;
 import com.backtoback.integration.github.client.dto.GithubInstallationTokenResponse;
 import com.backtoback.integration.github.client.dto.GithubRepositoriesResponse;
 import com.backtoback.integration.github.config.GithubProperties;
 import com.backtoback.integration.global.error.IntegrationErrorCode;
 import com.backtoback.integration.global.error.IntegrationException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -39,17 +45,45 @@ public class GithubAppClient {
     private static final String GITHUB_API_VERSION = "2022-11-28";
     private static final String GITHUB_MEDIA_TYPE = "application/vnd.github+json";
 
+    // RSA Encryption AlgorithmIdentifier DER (1.2.840.113549.1.1.1): SEQUENCE { OID, NULL }
+    private static final byte[] RSA_ALGORITHM_IDENTIFIER
+        = new byte[] {
+            0x30,
+            0x0d,
+            0x06,
+            0x09,
+            0x2a,
+            (byte)0x86,
+            0x48,
+            (byte)0x86,
+            (byte)0xf7,
+            0x0d,
+            0x01,
+            0x01,
+            0x01,
+            0x05,
+            0x00
+        };
+    private static final byte[] PKCS8_VERSION
+        = new byte[] {
+            0x02,
+            0x01,
+            0x00
+        };
+
     private final GithubProperties properties;
     private final RestClient restClient;
+    private final ObjectMapper objectMapper;
 
     @Autowired
-    public GithubAppClient(GithubProperties properties) {
-        this(properties, RestClient.builder().requestFactory(timeoutRequestFactory()).build());
+    public GithubAppClient(GithubProperties properties, ObjectMapper objectMapper) {
+        this(properties, RestClient.builder().requestFactory(timeoutRequestFactory()).build(), objectMapper);
     }
 
-    GithubAppClient(GithubProperties properties, RestClient restClient) {
+    GithubAppClient(GithubProperties properties, RestClient restClient, ObjectMapper objectMapper) {
         this.properties = properties;
         this.restClient = restClient;
+        this.objectMapper = objectMapper;
     }
 
     private static SimpleClientHttpRequestFactory timeoutRequestFactory() {
@@ -67,8 +101,10 @@ public class GithubAppClient {
      */
     public String buildInstallUrl(String state) {
         return UriComponentsBuilder
-            .fromUriString("https://github.com/apps/" + properties.getAppSlug() + "/installations/new")
+            .fromUriString("https://github.com/apps")
+            .pathSegment(properties.getAppSlug(), "installations", "new")
             .queryParam("state", state)
+            .encode()
             .build()
             .toUriString();
     }
@@ -91,8 +127,7 @@ public class GithubAppClient {
                 .retrieve()
                 .body(GithubInstallationResponse.class);
         } catch (RestClientException e) {
-            log.error("GitHub App 설치 정보 조회 실패: installationId={}, error={}", installationId, e.getMessage());
-            throw new IntegrationException(IntegrationErrorCode.GITHUB_INSTALLATION_INVALID, e);
+            throw handleRestClientException("GitHub App 설치 정보 조회", e);
         }
     }
 
@@ -114,8 +149,7 @@ public class GithubAppClient {
                 .retrieve()
                 .body(GithubInstallationTokenResponse.class);
         } catch (RestClientException e) {
-            log.error("GitHub App Access Token 발급 실패: installationId={}, error={}", installationId, e.getMessage());
-            throw new IntegrationException(IntegrationErrorCode.GITHUB_INSTALLATION_INVALID, e);
+            throw handleRestClientException("GitHub App Access Token 발급", e);
         }
     }
 
@@ -136,8 +170,7 @@ public class GithubAppClient {
                 .retrieve()
                 .body(GithubRepositoriesResponse.class);
         } catch (RestClientException e) {
-            log.error("GitHub App 저장소 목록 조회 실패: error={}", e.getMessage());
-            throw new IntegrationException(IntegrationErrorCode.GITHUB_INSTALLATION_INVALID, e);
+            throw handleRestClientException("GitHub App 저장소 목록 조회", e);
         }
     }
 
@@ -159,11 +192,13 @@ public class GithubAppClient {
             PrivateKey privateKey = parsePrivateKey(properties.getPrivateKey());
             long now = Instant.now().getEpochSecond();
             long iat = now - 60;
-            long exp = now + (9 * 60); // 9분 후 만료
+            long exp = now + (9 * 60);
 
-            String headerJson = "{\"alg\":\"RS256\",\"typ\":\"JWT\"}";
-            String payloadJson
-                = String.format("{\"iat\":%d,\"exp\":%d,\"iss\":\"%s\"}", iat, exp, properties.getAppId());
+            Map<String, Object> headerMap = Map.of("alg", "RS256", "typ", "JWT");
+            Map<String, Object> payloadMap = Map.of("iat", iat, "exp", exp, "iss", properties.getAppId());
+
+            String headerJson = objectMapper.writeValueAsString(headerMap);
+            String payloadJson = objectMapper.writeValueAsString(payloadMap);
 
             Base64.Encoder urlEncoder = Base64.getUrlEncoder().withoutPadding();
             String headerEncoded = urlEncoder.encodeToString(headerJson.getBytes(StandardCharsets.UTF_8));
@@ -182,18 +217,78 @@ public class GithubAppClient {
         }
     }
 
-    private PrivateKey parsePrivateKey(String key) throws Exception {
+    /**
+     * PKCS#1(BEGIN RSA PRIVATE KEY) 또는 PKCS#8(BEGIN PRIVATE KEY) 형식의 키를 파싱한다.
+     * 환경 변수 리터럴 줄바꿈(\n)을 정상 줄바꿈으로 치환하고 PKCS#1은 PKCS#8 DER로 래핑하여 파싱한다.
+     */
+    public PrivateKey parsePrivateKey(String key) throws Exception {
+        String normalizedKey = key.replace("\\n", "\n").trim();
+        boolean isPkcs1 = normalizedKey.contains("BEGIN RSA PRIVATE KEY");
+
         String cleanKey
-            = key
+            = normalizedKey
                 .replace("-----BEGIN RSA PRIVATE KEY-----", "")
                 .replace("-----END RSA PRIVATE KEY-----", "")
                 .replace("-----BEGIN PRIVATE KEY-----", "")
                 .replace("-----END PRIVATE KEY-----", "")
                 .replaceAll("\\s+", "");
 
-        byte[] keyBytes = Base64.getDecoder().decode(cleanKey);
-        PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyBytes);
+        byte[] decodedKey = Base64.getDecoder().decode(cleanKey);
+        byte[] pkcs8Bytes = isPkcs1 ? wrapPkcs1ToPkcs8(decodedKey) : decodedKey;
+
+        PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(pkcs8Bytes);
         KeyFactory keyFactory = KeyFactory.getInstance("RSA");
         return keyFactory.generatePrivate(keySpec);
+    }
+
+    private static byte[] wrapPkcs1ToPkcs8(byte[] pkcs1Bytes) {
+        byte[] octetString = encodeDer(0x04, pkcs1Bytes);
+        ByteBuffer buffer
+            = ByteBuffer.allocate(PKCS8_VERSION.length + RSA_ALGORITHM_IDENTIFIER.length + octetString.length);
+        buffer.put(PKCS8_VERSION);
+        buffer.put(RSA_ALGORITHM_IDENTIFIER);
+        buffer.put(octetString);
+        return encodeDer(0x30, buffer.array());
+    }
+
+    private static byte[] encodeDer(int tag, byte[] content) {
+        int length = content.length;
+        if (length < 128) {
+            byte[] result = new byte[2 + length];
+            result[0] = (byte)tag;
+            result[1] = (byte)length;
+            System.arraycopy(content, 0, result, 2, length);
+            return result;
+        } else if (length < 256) {
+            byte[] result = new byte[3 + length];
+            result[0] = (byte)tag;
+            result[1] = (byte)0x81;
+            result[2] = (byte)length;
+            System.arraycopy(content, 0, result, 3, length);
+            return result;
+        } else {
+            byte[] result = new byte[4 + length];
+            result[0] = (byte)tag;
+            result[1] = (byte)0x82;
+            result[2] = (byte)(length >> 8);
+            result[3] = (byte)(length & 0xff);
+            System.arraycopy(content, 0, result, 4, length);
+            return result;
+        }
+    }
+
+    private IntegrationException handleRestClientException(String action, RestClientException exception) {
+        log.error("{}: error={}", action, exception.getMessage());
+        if (exception instanceof RestClientResponseException resEx) {
+            int statusCode = resEx.getStatusCode().value();
+            if (statusCode >= 400 && statusCode < 500) {
+                return new IntegrationException(IntegrationErrorCode.GITHUB_INSTALLATION_INVALID, exception);
+            }
+            return new IntegrationException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, exception);
+        }
+        if (exception instanceof ResourceAccessException) {
+            return new IntegrationException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, exception);
+        }
+        return new IntegrationException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, exception);
     }
 }

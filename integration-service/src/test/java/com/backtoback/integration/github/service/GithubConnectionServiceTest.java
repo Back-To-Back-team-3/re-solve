@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
@@ -17,6 +18,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.integration.github.client.GithubAppClient;
 import com.backtoback.integration.github.client.dto.GithubInstallationResponse;
@@ -47,6 +51,9 @@ class GithubConnectionServiceTest {
 
     @Mock
     private TokenEncryptor tokenEncryptor;
+
+    @Mock
+    private TransactionTemplate transactionTemplate;
 
     @InjectMocks
     private GithubConnectionService githubConnectionService;
@@ -103,6 +110,17 @@ class GithubConnectionServiceTest {
 
         assertThat(url).contains("https://github.com/apps/test/installations/new");
         verify(githubStateStore).save(anyString(), eq(1L));
+    }
+
+    @Test
+    @DisplayName("설치 완료 시 installationId 형식이 올바르지 않으면 state를 소비하지 않고 GITHUB_INSTALLATION_INVALID 예외가 발생한다")
+    void installWithInvalidInstallationIdFormat() {
+        assertThatThrownBy(() -> githubConnectionService.install(1L, "not-a-number", "valid-state"))
+            .isInstanceOf(IntegrationException.class)
+            .extracting(e -> ((IntegrationException)e).getErrorCode())
+            .isEqualTo(IntegrationErrorCode.GITHUB_INSTALLATION_INVALID);
+
+        verify(githubStateStore, never()).consume(anyString());
     }
 
     @Test
@@ -219,6 +237,10 @@ class GithubConnectionServiceTest {
                     9
                 }
             );
+        given(transactionTemplate.execute(any())).willAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(null);
+        });
         given(githubConnectionRepository.findByMemberId(1L)).willReturn(Optional.empty());
         given(githubConnectionRepository.save(any(GithubConnection.class)))
             .willAnswer(invocation -> invocation.getArgument(0));
@@ -231,6 +253,47 @@ class GithubConnectionServiceTest {
         // 암호화기 호출 검증
         verify(tokenEncryptor).encrypt("plain-token");
         verify(githubConnectionRepository).save(any(GithubConnection.class));
+    }
+
+    @Test
+    @DisplayName("설치 정보 저장 시 DataIntegrityViolationException이 발생하면 GITHUB_ALREADY_CONNECTED 예외로 변환된다")
+    void installWithDataIntegrityViolationThrowsAlreadyConnected() {
+        given(githubStateStore.consume("valid-state")).willReturn(Optional.of(1L));
+        given(githubConnectionRepository.findByInstallationId(12345L)).willReturn(Optional.empty());
+        given(githubAppClient.getInstallation(12345L))
+            .willReturn(
+                new GithubInstallationResponse(12345L, new GithubInstallationResponse.Account(100L, "kim-dev", "User"))
+            );
+        given(githubAppClient.createInstallationAccessToken(12345L))
+            .willReturn(new GithubInstallationTokenResponse("plain-token", "2026-10-28T00:00:00Z"));
+        given(githubAppClient.getInstallationRepositories("plain-token"))
+            .willReturn(
+                new GithubRepositoriesResponse(
+                    1,
+                    List
+                        .of(
+                            new GithubRepositoryDto(
+                                1L,
+                                "algorithm-repo",
+                                "kim-dev/algorithm-repo",
+                                new GithubRepositoryDto.Owner(100L, "kim-dev")
+                            )
+                        )
+                )
+            );
+        given(tokenEncryptor.encrypt("plain-token"))
+            .willReturn(
+                new byte[] {
+                    1
+                }
+            );
+        given(transactionTemplate.execute(any()))
+            .willThrow(new DataIntegrityViolationException("Unique constraint violation"));
+
+        assertThatThrownBy(() -> githubConnectionService.install(1L, "12345", "valid-state"))
+            .isInstanceOf(IntegrationException.class)
+            .extracting(e -> ((IntegrationException)e).getErrorCode())
+            .isEqualTo(IntegrationErrorCode.GITHUB_ALREADY_CONNECTED);
     }
 
     @Test

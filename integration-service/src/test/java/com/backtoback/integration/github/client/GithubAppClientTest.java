@@ -1,9 +1,12 @@
 package com.backtoback.integration.github.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.security.KeyPair;
@@ -14,14 +17,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.integration.github.client.dto.GithubInstallationResponse;
 import com.backtoback.integration.github.client.dto.GithubInstallationTokenResponse;
 import com.backtoback.integration.github.client.dto.GithubRepositoriesResponse;
 import com.backtoback.integration.github.config.GithubProperties;
+import com.backtoback.integration.global.error.IntegrationErrorCode;
+import com.backtoback.integration.global.error.IntegrationException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 class GithubAppClientTest {
 
@@ -29,12 +37,13 @@ class GithubAppClientTest {
     private GithubAppClient client;
     private MockRestServiceServer server;
     private String testPrivateKeyPem;
+    private KeyPair pair;
 
     @BeforeEach
     void setUp() throws Exception {
         KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
         keyGen.initialize(2048);
-        KeyPair pair = keyGen.generateKeyPair();
+        pair = keyGen.generateKeyPair();
         testPrivateKeyPem = Base64.getEncoder().encodeToString(pair.getPrivate().getEncoded());
 
         properties = new GithubProperties();
@@ -45,7 +54,7 @@ class GithubAppClientTest {
 
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new GithubAppClient(properties, builder.build());
+        client = new GithubAppClient(properties, builder.build(), new ObjectMapper());
     }
 
     @Test
@@ -62,6 +71,17 @@ class GithubAppClientTest {
         assertThat(jwt).isNotNull();
         String[] parts = jwt.split("\\.");
         assertThat(parts).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("개인키 문자열에 헤더/푸터 및 리터럴 \\n 줄바꿈이 포함되어 있어도 정상 파싱된다")
+    void createAppJwtWithPemHeadersAndEscapedNewlines() {
+        String pemWithHeaders = "-----BEGIN PRIVATE KEY-----\\n" + testPrivateKeyPem + "\\n-----END PRIVATE KEY-----";
+        properties.setPrivateKey(pemWithHeaders);
+
+        String jwt = client.createAppJwt();
+        assertThat(jwt).isNotNull();
+        assertThat(jwt.split("\\.")).hasSize(3);
     }
 
     @Test
@@ -87,6 +107,34 @@ class GithubAppClientTest {
         assertThat(response.id()).isEqualTo(58291032L);
         assertThat(response.account().login()).isEqualTo("kim-dev");
         server.verify();
+    }
+
+    @Test
+    @DisplayName("GitHub API에서 404가 반환되면 GITHUB_INSTALLATION_INVALID 예외가 발생한다")
+    void getInstallationReturns404ThrowsInstallationInvalid() {
+        server
+            .expect(requestTo("https://api.github.com/app/installations/58291032"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThatThrownBy(() -> client.getInstallation(58291032L))
+            .isInstanceOf(IntegrationException.class)
+            .extracting(e -> ((IntegrationException)e).getErrorCode())
+            .isEqualTo(IntegrationErrorCode.GITHUB_INSTALLATION_INVALID);
+    }
+
+    @Test
+    @DisplayName("GitHub API에서 500 서버 오류가 반환되면 COMMON_DEPENDENCY_UNAVAILABLE 예외가 발생한다")
+    void getInstallationReturns500ThrowsDependencyUnavailable() {
+        server
+            .expect(requestTo("https://api.github.com/app/installations/58291032"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.getInstallation(58291032L))
+            .isInstanceOf(IntegrationException.class)
+            .extracting(e -> ((IntegrationException)e).getErrorCode())
+            .isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
     }
 
     @Test
