@@ -1634,6 +1634,15 @@
 - 등록 요청에는 에셋 ID·테스트 순번을 받지 않는다.
 - 등록·새 회차 요청의 전체 HTTP 본문은 JSON 이스케이프·Markdown 포함 8MB 이하. 테스트 크기·개수와 별도로 검사하며 정확한 바이트 기준은 [정책 및 상태 §4](../planning/policy-and-state.md#4-문제테스트케이스-정책)를 따른다.
 
+**파일 저장·연결**
+
+- 최초 등록·새 회차·검증 코드 접수·이미지 업로드는 Problem 백엔드가 에셋 추적 행을 먼저 커밋한 뒤 S3에 저장한다. 요청에는 본문·테스트·코드 원문과 이미지 참조를 사용한다. 업로드 시작·갱신은 해당 API의 백엔드 내부 처리다. 추적 필드·상태는 ERD §4.2.3을 따른다.
+- 새 업로드마다 새 파일 행·불변 객체 키를 사용한다. 입력 바이트에서 구한 체크섬·크기와 업로드 결과를 대조하고, 버전 관리 버킷은 저장된 객체 버전을 고정한다. 저장 결과 확인과 업로드 쓰기 종료 기록은 최종 회차·검증 요청 연결과 분리해 커밋한다.
+- 연결은 짧은 최종 트랜잭션에서 파일을 잠그고 저장 완료·연결 가능 상태·작성 관리자·문제 소속을 다시 검사한다. 신규 `PENDING` 파일은 참조 생성과 함께 `LINKED`가 되며, 같은 문제의 `LINKED` 파일은 새 회차·검증 요청이 재사용할 수 있다. `DISCARDED`·`DELETING` 또는 이미 삭제된 파일에는 새 참조를 만들지 않는다.
+- 업로드·정리 유예의 기산점·만료·갱신은 정책 §4를 따른다. 진행 중 유효기간이 만료된 파일은 기존 작업으로 쓰기·연결을 재개하지 않으며, 종료 확인 후 폐기한다. 유효기간 안에 저장·종료를 확정한 미연결 파일은 삭제 선점 전까지 연결할 수 있다. 새 업로드는 새 파일·객체 키를 사용한다.
+- 파일 업로드 중에는 DB 행 잠금을 유지하지 않는다. 최종 DB 실패·버전 충돌·멱등 경합의 패배만으로 S3 객체를 즉시 삭제하지 않는다. 커밋된 최초 회차·요청과 파일 참조를 먼저 확인하고, 미참조 파일만 스케줄러 §2.1에 맡긴다. DB 커밋 결과가 불명확하면 실패로 단정해 폐기하지 않고 같은 멱등키의 저장 결과를 재조회한다.
+- 본문·테스트 재사용은 같은 문제의 저장된 불변 파일을 대상으로 하며 원문·체크섬·크기를 대조한다. 이미지마다 업로드 관리자·같은 문제 소속·실제 저장 완료를 확인하고, 기존 회차가 참조하는 이미지 연결은 제거하지 않는다. 새 회차의 본문에서 이미지를 빼더라도 이전 본문·이미지 참조는 유지한다.
+
 **testCases[]**
 
 | 필드 | 타입 | 필수 | 설명 |
@@ -1794,7 +1803,7 @@
     }
     ```
 
-- **동시성/멱등 보장:** 기존 작성 관리자·키의 요청 해시를 먼저 확인한다. 신규 파일은 업로드 추적 행을 먼저 저장한 뒤 DB 행 잠금 없이 S3에 업로드한다. 짧은 DB 트랜잭션에 회차·파일 연결·멱등 정보·최초 응답 버전·감사 로그를 저장한다. 최종 DB 실패 시 요청은 발행하지 않으며 미연결 파일은 정리 대상이 된다.
+- **동시성/멱등 보장:** 기존 작성 관리자·키의 요청 해시를 먼저 확인한다. 신규 파일은 업로드 추적 행을 먼저 저장한 뒤 DB 행 잠금 없이 S3에 업로드한다. 짧은 DB 트랜잭션에 회차·파일 연결·멱등 정보·최초 응답 버전·감사 로그를 저장한다. 최종 DB 실패 시 요청은 발행하지 않으며, 파일별 저장·종료 기록을 보존하고 §2.3.0 파일 저장·연결 규칙에 따라 미연결 파일을 정리한다.
 - **발행:** 없음. 최초 저장은 코드 검증과 분리한다.
 - **외부 의존:** 본문·테스트의 불변 파일 저장소.
 - **프론트 계약:** 201 후 검증 코드 접수 화면으로 진행한다.
@@ -2169,7 +2178,7 @@
     }
     ```
 
-- **동시성/멱등 보장:** 작성 관리자·키의 기존 요청 해시 확인을 `rowVersion` 검사보다 먼저 수행한다. 신규 파일 업로드 중에는 DB 행 잠금을 유지하지 않는다. 저장 트랜잭션에서 멱등키를 재확인하고 `problems` 행을 `rowVersion` 조건으로 갱신한 뒤 다음 회차 번호를 계산한다. 회차·파일 연결·자동 검증 요청·Outbox·멱등 정보·최초 응답 버전·감사 기록은 함께 커밋한다. 유일 제약 경합으로 패배한 트랜잭션은 롤백하고 먼저 커밋된 최초 응답을 읽는다.
+- **동시성/멱등 보장:** 작성 관리자·키의 기존 요청 해시 확인을 `rowVersion` 검사보다 먼저 수행한다. 신규 파일 업로드 중에는 DB 행 잠금을 유지하지 않는다. 저장 트랜잭션에서 멱등키를 재확인하고 `problems` 행을 `rowVersion` 조건으로 갱신한 뒤 다음 회차 번호를 계산한다. 회차·파일 연결·자동 검증 요청·Outbox·멱등 정보·최초 응답 버전·감사 기록은 함께 커밋한다. 유일 제약 경합으로 패배한 트랜잭션은 롤백하고 먼저 커밋된 최초 응답을 읽는다. 재사용한 파일과 새 업로드 파일의 참조 보호·실패 정리는 §2.3.0 파일 저장·연결 규칙을 따른다.
 - **발행:** 자동 검증 요청 Outbox. `ProblemStateChanged`는 검증 결과로 사용 회차·통과 언어가 바뀔 때 발행(이벤트 계약서 §4.2).
 - **외부 의존:** 본문·테스트 파일 저장소. 자동 검증은 Outbox를 사용한다.
 - **프론트 계약:** 201은 새 회차 저장 완료다. 관리자 상세의 `languageResults[].validationId`로 §2.3.11을 조회한다.
@@ -2674,6 +2683,7 @@
 - **외부 의존:** 비공개 S3 코드 저장소. Judge 실행 완료를 기다리지 않는다.
 - **프론트 계약:** `validationId`와 입력 코드를 보관하고 §2.3.11에서 진행 상태와 결과 반영 여부를 확인한다.
 - **비고:** 이미 통과한 코드·실행 환경을 바꾸려면 새 회차에서 검증한다.
+- **파일 보관:** 업로드 추적·실패 정리는 §2.3.0을 따른다. 연결 파일은 `problem_validations.code_asset_id`로 보호하며 `REQUESTED`·미반영·`PASSED`·`REJECTED`·`ERROR` 모두 정리에서 제외한다. 자동 재검증으로 여러 회차가 공유하는 코드도 모든 요청의 참조를 보존한다.
 
 #### 2.3.11 문제 회차 검증 상태·결과 조회
 
@@ -2761,31 +2771,85 @@
 
 - **Method / URI:** `POST /api/v1/admin/problems/images`
 - **인증:** `ADMIN`
-- **Idempotency:** 있음
+- **Idempotency:** `Idempotency-Key` 필수. 관리자별 최초 접수부터 24시간 보관한다.
+- **Rate Limit:** 없음 (별도 API 제한 없음)
 - **대응 테이블:** `problem_images`
-- **설명:** 이미지 한 개를 백엔드로 업로드한다(`multipart/form-data`, 필드 `file`). 검증·S3 저장 후 `imageId`를 반환한다. 문제 등록 전에도 올릴 수 있으며 첫 본문 연결 시 소속 문제가 정해진다.
-- **응답 (201):**
-    
+- **설명:** 이미지 한 개를 백엔드로 업로드한다. 검증·S3 저장 후 `imageId`를 반환한다. 문제 등록 전에도 올릴 수 있으며 첫 본문 연결 시 소속 문제가 정해진다. 본문에는 S3 주소 대신 `![설명](image:701)`로 넣는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Content-Type` | Y | `multipart/form-data` | 파일 업로드 형식. boundary 포함 |
+    | `Idempotency-Key` | Y | `image-upload-001` | 관리자별 키. 1~100자 ASCII, 대소문자 구별 |
+    | `X-Correlation-Id` | N | `image-request-001` | 없으면 Gateway 발급 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:** `multipart/form-data` (JSON 아님)
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `file` | binary | Y | 이미지 한 개. 정적 PNG/JPEG/WebP, 5MiB·2,000만 픽셀 이하. SVG/GIF 제외 |
+
+    요청 예시: multipart의 `file` 파트에 `example.png` 파일 바이트를 전달한다. 본문당 서로 다른 이미지 10개 이하를 문제 등록 시 검사한다.
+
+- **응답 헤더:**
+
+    | 헤더 | 설명 |
+    | --- | --- |
+    | `X-Correlation-Id` | 요청 추적 ID |
+- **응답 파라미터:** 없음
+- **응답 바디 (201):**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `success` | boolean | Y | 성공 시 `true` |
+    | `message` | string 또는 null | Y | 이 응답은 null |
+    | `data` | object | Y | 생성 결과 |
+    | `data.imageId` | string | Y | 업로드된 이미지 ID |
+
     ```json
-      { 
-    	  "success": true, 
-    	  "message": null, 
-    	  "data": { "imageId": "701" } 
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "imageId": "701"
       }
+    }
     ```
-    
-    - 본문에는 S3 주소 대신 `![설명](image:701)`로 넣는다.
-    - 허용: 정적 PNG/JPEG/WebP, 개당 5MiB, 2,000만 픽셀 이하. 본문당 서로 다른 이미지 10개 이하(등록 시 검사). SVG/GIF 제외
+
 - **에러:**
-    - `PROBLEM_IMAGE_INVALID`(400), `PROBLEM_IMAGE_TOO_LARGE`(413)
-- **동시성/멱등 보장:** 추적 행(`PENDING`)을 먼저 만든 뒤 검증·저장한다. 본문에 연결되지 않은 이미지는 대기 시간(미결정) 후 정리한다.
+    - `COMMON_INVALID_REQUEST`(400) / 필수 파일·키 누락 또는 요청 형식 오류
+    - `PROBLEM_IMAGE_INVALID`(400) / 허용되지 않는 형식·해상도, 삭제 선점된 이미지 연결
+    - `PROBLEM_IMAGE_TOO_LARGE`(413) / 이미지 5MiB 초과
+    - `PROBLEM_IMAGE_UPLOAD_IN_PROGRESS`(409) / 같은 키·해시의 업로드가 진행 중이거나 결과 불명
+    - `IDEMPOTENCY_KEY_CONFLICT`(422) / 유효한 같은 키에 다른 파일 해시
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 파일 저장 의존 실패
+- **동시성/멱등 보장:**
+    - 관리자 ID·키와 원본 파일 바이트 SHA-256으로 요청을 식별한다. 파일명은 해시에 포함하지 않는다. 서로 다른 키의 같은 파일은 별도 업로드다. 추적 행 생성 전 요청 검증 실패는 키를 예약하지 않는다.
+    - 최초 접수부터 24시간 동안 다음 규칙을 적용한다. 조회·재요청은 키 만료를 연장하지 않는다.
+
+    | 유효한 같은 관리자·키의 요청 | 처리 |
+    | --- | --- |
+    | 다른 해시 | 422, 새 S3 쓰기 시작 안 함 |
+    | 같은 해시·성공 종결 | 최초 201·`imageId` 반환 |
+    | 같은 해시·확정 실패 | 보존한 최초 종결 응답 반환. 새 시도는 새 키 사용 |
+    | 같은 해시·진행 중 또는 결과 불명 | 409, 최초 작업 유지·중복 쓰기 시작 안 함 |
+
+    - 만료 키는 잠금 안에서 기존 행의 키를 해제하고 새 행·불변 객체 키로 접수한다. 기존 파일·해시·참조·삭제 상태는 유지한다. 최초 종결 상태와 응답은 파일 행에 함께 저장한다. 필드·유일 제약은 ERD §4.2.4를 따른다.
+    - §2.3.0의 파일 저장·연결 규칙에 따라 추적 행(`PENDING`)을 먼저 커밋하고 DB 행 잠금 없이 저장한다. 저장 결과·쓰기 종료를 확인한 후에만 `imageId`를 반환한다. 응답 시점에는 본문 미연결이며 문제·회차 저장 트랜잭션이 연결한다. 미리보기·동일 요청 조회는 업로드 보호 기간이나 정리 유예를 연장하지 않는다.
+    - 추적 행 생성 후 검증·S3 저장이 확정 실패하면 파일 행에 실패 정보를 남긴다. 결과 불명은 업로드 종료로 기록하지 않는다. 정책 §4의 유예·보호 조건을 충족한 미참조 이미지만 정리한다. 본문 연결과 삭제 선점은 파일 잠금으로 직렬화하며 삭제 선점 후 연결은 `PROBLEM_IMAGE_INVALID`(400)로 거절한다.
+- **발행:** 없음
+- **외부 의존:** S3 파일 저장. 저장 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503), 결과 불명은 종료로 기록하지 않는다.
+- **프론트 계약:** 재시도는 같은 키와 원본 파일을 사용한다. 새 업로드나 확정 실패 후 새 시도는 새 키를 사용한다. 409는 기존 작업이 진행 중이거나 결과 불명임을 표시한다.
+- **비고:** 키 만료, 업로드 보호 만료, 쓰기 종료 후 정리 유예는 별도 기준이다. 정리·복구는 스케줄러 §2.1을 따른다.
 
 #### 2.4.2 관리자 이미지 조회
 
 - **Method / URI:** `GET /api/v1/admin/problems/images/{imageId}/content`
 - **인증:** `ADMIN` (업로드 관리자)
 - **대응 테이블:** `problem_images`
-- **설명:** 등록 전 미리보기·편집용. 백엔드가 S3에서 읽어 바이너리로 반환한다.
+- **설명:** 등록 전 미리보기·편집용. 업로드 저장이 확인된 `PENDING` 또는 `LINKED` 파일을 백엔드가 S3에서 읽어 바이너리로 반환한다. 조회는 파일 연결이나 업로드 갱신으로 처리하지 않는다. `DISCARDED`·`DELETING`·저장 미확인 파일은 반환하지 않는다.
 - **응답 (200):** 이미지 바이너리 (`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`)
 - **에러:**
     - `PROBLEM_NOT_FOUND`(404) / 없음·본인 업로드 아님
@@ -3582,11 +3646,11 @@
 | 제공 | Method / URI | 요청 | 성공 응답 | 실패 처리 |
 | --- | --- | --- | --- | --- |
 | judge | `GET /internal/v1/judge/validations/{validationId}` | 원래 검증 ID | 진행 상태·판정·최대 시간·설명·통과 실행 환경. Judge 작업 미생성은 404 | §2.3.11에서 작업 미생성과 조회 장애를 구분 |
-| judge | 기본 코드 HTTP 경로·Method 확인 필요 | 사용 회차의 `functionSpec`, `languages`: 통과 언어 목록 | 래퍼 없는 `{starterCodes:[{language,sourceCode}]}` | 통신 오류·누락/중복 언어·잘못된 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503) |
+| judge | `POST /internal/v1/judge/starter-codes` | 사용 회차의 `functionSpec`, `languages`: 통과 언어 목록 | 래퍼 없는 `{starterCodes:[{language,sourceCode}]}` | 통신 오류·누락/중복 언어·잘못된 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503) |
 
 - 내부 호출 인증·성공 응답 형식은 §0.1·§0.3을 따르며 공통 타임아웃은 2초다. Judge 진행 조회 응답은 검증 ID·회차·언어와 일치해야 한다.
 - 기본 코드의 생성 책임은 Judge다. 기존 `ExecutionCodeGenerator.starterCode(FunctionSpec)`를 연결하며 응답 언어 집합은 요청과 정확히 일치해야 한다. Problem이 기본 코드를 생성하거나 이전 회차·미통과 언어 코드로 대체하지 않는다.
-- 기본 코드 제공 경로는 Judge 제공 계약 확인 후 기재한다. 조회 응답에는 요청한 언어의 `sourceCode` 문자열을 사용한다.
+- 제공 계약은 §3.3.5를 따른다. 요청 언어 집합과 응답이 정확히 일치하고 각 `sourceCode`가 문자열인지 검사한다.
 
 ## 3. 제출·채점 (judge)
 
@@ -4225,6 +4289,92 @@
     ```
     
     - AC만 반환하므로 판정 필드는 두지 않는다. 회원이 없으면 빈 목록
+
+#### 3.3.5 기본 코드 생성 (내부)
+
+- **Method / URI:** `POST /internal/v1/judge/starter-codes`
+- **인증:** 내부 호출 (problem). 내부 네트워크 기준은 §0.1을 따른다.
+- **Idempotency:** 없음
+- **Rate Limit:** 없음 (별도 API 제한 없음)
+- **대응 테이블:** 없음
+- **설명:** 고정 회차의 함수 명세와 통과 언어로 언어별 기본 코드를 생성한다. 생성 책임은 Judge이며 `ExecutionCodeGenerator.starterCode(FunctionSpec)`를 연결한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Content-Type` | Y | `application/json` | JSON 요청 본문 |
+    | `X-Correlation-Id` | N | `problem-request-001` | 요청 추적 ID 전달 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `functionSpec` | object | Y | 고정 회차의 함수 명세. null 불가 |
+    | `functionSpec.name` | string | Y | `solution` 고정 |
+    | `functionSpec.parameters` | object[] | Y | 선언 순서의 매개변수. null 불가 |
+    | `functionSpec.parameters[].name` | string | Y | 중복 없는 매개변수 이름 |
+    | `functionSpec.parameters[].type` | object | Y | TypeSpec. null 불가 |
+    | `functionSpec.returnType` | object | Y | 반환값 TypeSpec. null 불가 |
+    | `languages` | string[] | Y | 고정 회차의 통과 언어. `java` / `python3` / `cpp`, 중복 없이 전달 |
+
+    ```json
+    {
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "languages": [
+        "python3"
+      ]
+    }
+    ```
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 공통 성공 래퍼 없이 반환한다.
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `starterCodes` | object[] | Y | 요청 언어별 기본 코드. null 불가 |
+    | `starterCodes[].language` | string | Y | 요청 언어. 중복·null 불가 |
+    | `starterCodes[].sourceCode` | string | Y | 해당 언어의 기본 코드. null 불가 |
+
+    ```json
+    {
+      "starterCodes": [
+        {
+          "language": "python3",
+          "sourceCode": "def solution(a: int, b: int) -> int:\n    raise NotImplementedError()\n"
+        }
+      ]
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 요청 필드·함수 명세·언어 형식이 유효하지 않음
+    - `COMMON_INTERNAL_SERVER_ERROR`(500) / Judge의 예상하지 못한 생성 오류
+- **동시성/멱등 보장:** 저장·상태 변경 없음. 같은 입력은 각 요청에서 생성한다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 없음. 프론트는 Problem의 상세 응답을 사용한다.
+- **비고:** TypeSpec 상세는 §2.3.0과 TypeSpec 명세를 따른다. Problem은 응답 언어 집합이 요청과 정확히 일치하는지, 누락·중복 및 비문자열 코드가 없는지 검사한다. 통신 실패·Judge 비정상 HTTP 응답·잘못된 성공 응답은 Problem이 `COMMON_DEPENDENCY_UNAVAILABLE`(503)으로 처리하며, 다른 회차·미통과 언어·로컬 생성 코드로 대체하지 않는다. 타임아웃은 §2.7을 따른다.
 
 ---
 
@@ -8418,7 +8568,7 @@
 | problem | study, contest | `GET /internal/v1/problems/summaries` | 문제집·시험·대회 문제 선택(회차 고정) | fail-closed (`COMMON_DEPENDENCY_UNAVAILABLE`) | B(제공)·D·C(요청) |
 | problem | study | `GET /internal/v1/problems/{problemId}/hint-context` | 힌트 입력·현재 회차 | fail-closed | B(제공)·D(요청) |
 | problem | member | `GET /internal/v1/problems/diagnosis-candidates` | 진단 출제 | fail-closed | B(제공)·E(요청) |
-| judge | problem | 기본 코드 HTTP 경로·Method 확인 필요(§2.7) | 함수 명세·통과 언어의 기본 코드 | `COMMON_DEPENDENCY_UNAVAILABLE`(503) | B |
+| judge | problem | `POST /internal/v1/judge/starter-codes` (§2.7·§3.3.5) | 함수 명세·통과 언어의 기본 코드 | `COMMON_DEPENDENCY_UNAVAILABLE`(503) | B |
 | judge | problem | `GET /internal/v1/judge/validations/{validationId}` | 관리자 검증 진행·최종 판정 조회 | 작업 미생성과 조회 장애 구분(§2.3.11) | B |
 | judge | contest | `GET /internal/v1/submissions/{submissionId}/result` | 결과 대사·이벤트 유실 복구 | 확정 보류 | B |
 | judge | contest, problem | `GET /internal/v1/submissions/{submissionId}/source` | 시험 결과 코드 열람·풀이 공유 스냅샷 | 거절 | B |

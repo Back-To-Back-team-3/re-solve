@@ -54,6 +54,7 @@
 | `PROBLEM_REQUEST_TOO_LARGE` | 413 | 최초·새 회차 전체 HTTP 본문 상한 초과 |
 | `PROBLEM_IMAGE_INVALID` | 400 | 허용되지 않는 이미지 형식·해상도 |
 | `PROBLEM_IMAGE_TOO_LARGE` | 413 | 이미지 5MiB 초과 |
+| `PROBLEM_IMAGE_UPLOAD_IN_PROGRESS` | 409 | 같은 이미지 업로드 키·해시의 작업이 진행 중이거나 결과 불명 |
 | `PROBLEM_TAG_NOT_FOUND` | 404 | 태그를 찾을 수 없음 |
 | `PROBLEM_TAG_DUPLICATED` | 409 | 같은 이름의 태그 존재 |
 | `PROBLEM_TAG_IN_USE` | 409 | 회차에서 사용 중인 태그 삭제 |

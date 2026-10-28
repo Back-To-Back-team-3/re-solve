@@ -12,7 +12,7 @@
 - 공통 모듈에는 공통 응답(`ApiResponse`·`PageResponse`·`ApiErrorResponse`), 오류 처리(`ErrorCode` 인터페이스·`CommonErrorCode`·`BusinessException`·`GlobalExceptionHandler`), `BaseTimeEntity`를 둔다.
 - 에러 코드는 공통 모듈의 `ErrorCode` 인터페이스를 서비스별 enum이 구현한다. `CommonErrorCode`에는 여러 서비스가 쓰는 코드(`COMMON_*`, `IDEMPOTENCY_KEY_CONFLICT`, `AUTH_TOKEN_INVALID`, `AUTH_ACCESS_DENIED`)만 둔다.
 - `api-gateway`는 WebFlux 기반이라 이 기준과 공통 모듈의 MVC 의존 부분을 적용하지 않는다.
-- Outbox Relay·ShedLock 공통 구성은 기획서 2.1(담당 A `common`)에 따라 같은 모듈에 추가하며, 그 구조는 별도 결정으로 정한다.
+- Outbox Relay·ShedLock 공통 구성은 기획서 2.1(담당 A `common`)을 따르며, 모듈 경계는 [서비스 공통 모듈 도입](2026-10-15-common-module.md)의 이벤트·스케줄링 공통 구조를 따른다.
 
 ## 채택 근거
 
