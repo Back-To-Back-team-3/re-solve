@@ -1013,6 +1013,10 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `object_key` | VARCHAR(500) `_bin` | Y | S3 객체 키 |
 | `object_version` | VARCHAR(200) | N | 저장 미확인·버전 관리 미사용은 null. 버전 관리 사용 시 연결 전에 고정 |
 | `sha256` | CHAR(64) `_bin` | Y | SHA-256 체크섬 |
+| `idempotency_key` | VARCHAR(100) `_bin` | N | 관리자별 키, 만료 후 NULL로 해제. 1~100자 ASCII |
+| `idempotency_expires_at` | DATETIME(6) | N | 최초 접수 + 24시간. 키가 없으면 NULL |
+| `response_status` | INT | N | 최초 종결 HTTP 상태. 처리 중·결과 불명은 NULL |
+| `response_json` | JSON | N | 최초 종결 응답 본문. 처리 중·결과 불명은 NULL |
 | `content_type` | VARCHAR(100) | Y | MIME 타입 |
 | `size_bytes` | BIGINT | Y | 파일 크기 |
 | `upload_expires_at` | DATETIME(6) | Y | 업로드 보호 만료 시각. 시작·유효한 갱신 시각 + 24시간 |
@@ -1026,6 +1030,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- | --- |
 | `fk_problem_images_problem` | `problem_id` → `problems.id` | 서비스 내부 FK |
 | `uk_problem_images_object_key` | `object_key` | 객체 키 중복 방지 |
+| `uk_problem_images_owner_idempotency_key` | `(owner_id, idempotency_key)` | 관리자별 유효 키 UNIQUE, NULL 중복 허용 |
 | `idx_problem_images_cleanup` | `(status, upload_finished_at, id)` | 미연결 유예 경과·삭제 중 복구 조회 |
 | `idx_problem_images_status_created_at` | `(status, created_at)` | 상태별 업로드 시작 이력 조회 |
 
@@ -1224,7 +1229,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 #### 4.2.14 문제별 통계 (`problem_statistics`)
 
-> `SubmissionJudged`(`PRACTICE`)를 소비해 갱신한다. 집계 문맥은 협의 E-4 미결정 전까지 `PRACTICE`만. 재채점 대상이 아니므로(`PRACTICE` 재채점 미지원) 판정이 바뀌는 경우는 없다.
+> `SubmissionJudged`(`PRACTICE`)만 소비해 갱신한다. 제출별 판정 차이와 원자 반영 규칙은 §4.2.18을 따른다. PRACTICE 재채점 기능은 제공하지 않는다.
 > 
 
 | 컬럼 | 타입 | NOT NULL | 설명 |
@@ -1369,8 +1374,8 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 - `SubmissionJudged`만 반영한다. 시험·대회·진단과 관리자 검증 결과는 이 테이블에 저장하지 않는다.
 - 제출 ID의 회원·문제·접수 시각은 불변이다. 저장된 식별 정보와 다른 이벤트는 업무 반영을 롤백하고 공통 소비 실패 규칙을 따른다.
-- `processed_events` 기록 후 회원·문제 집계 행을 확보·잠그고 제출별 행을 조회한다. 집계 행 최초 생성의 UNIQUE 경합은 롤백 후 재수신으로 처리한다. 같은 회원·문제의 결과는 집계 행 잠금으로 직렬화한다.
-- 제출별 행이 없으면 INSERT하고 `attempt_count`를 1 증가시킨다. 행이 있으면 수신 `judgeAttempt`가 더 클 때만 판정·채점 회차를 갱신하며 제출 수는 증가시키지 않는다. 같거나 작은 회차는 집계를 변경하지 않는다.
+- 전체 결과 소비 경로에서 문제 통계 행 → 회원·문제 집계 행 → 제출별 결과 행 순서로 확보·잠근다. 최초 행 생성의 UNIQUE 경합은 롤백 후 재수신으로 처리한다. 같은 문제의 결과는 통계 행 잠금으로 직렬화한다.
+- 제출별 행이 없으면 INSERT하고 회원의 `attempt_count`와 문제 통계 `submission_count`를 1 증가시킨다. 최초 판정이 AC면 `accepted_submission_count`도 1 증가시킨다. 행이 있으면 수신 `judgeAttempt`가 더 클 때만 판정·회차를 갱신하며 제출 수는 증가시키지 않는다. 기존과 신규 판정의 AC 여부 차이만 `accepted_submission_count`에 반영한다(AC 진입 +1, 이탈 -1). 같은 이벤트와 같거나 작은 회차는 집계를 변경하지 않는다.
 - 반영할 판정이 AC이면 §4.2.10의 최초 AC를 접수 시각 기준으로 갱신한다. 이후 오답은 기존 해결 여부·최초 AC를 지우지 않는다.
 - 제출별 행·회원별 풀이 상태·관련 통계·`processed_events`를 같은 트랜잭션에서 처리한다. 실패하면 모두 롤백한다. 제출별 행은 이벤트 ID 기록의 14일 정리 대상에 포함하지 않는다.
 - 코드·테스트별 결과·실행 시도 이력은 복제하지 않는다. 이 소비 규칙은 PRACTICE 재채점 기능을 추가하지 않는다.

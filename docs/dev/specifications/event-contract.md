@@ -370,7 +370,7 @@ flowchart LR
 
 #### P1 `ProblemStateChanged` v1 — 기존 계약
 
-- **발행:** 공개(2.3.7)·비공개 전환(2.3.8)·보관(2.3.9)·공개 문제의 새 회차 등록(2.3.4) 트랜잭션. aggregate = `problemId`. 대회 종료 공개(`ContestEnded` 소비)는 `scope`를 바꾸지 않으므로 발행하지 않는다.
+- **이전 발행 계약:** 공개(2.3.7)·비공개 전환(2.3.8)·보관(2.3.9)·공개 문제의 새 회차 등록(2.3.4) 트랜잭션. 신규 구현은 v2만 발행하며 작성 회차·미검증 회차를 v1 REVISION으로 전파하지 않는다. aggregate = `problemId`. 대회 종료 공개(`ContestEnded` 소비)는 `scope`를 바꾸지 않으므로 발행하지 않는다.
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
@@ -393,7 +393,7 @@ flowchart LR
 
 - **발행:** 공개·비공개·보관, 대회 종료 조건에 따른 실제 공개 상태 변경, 검증 결과에 따른 사용 회차 변경 또는 같은 사용 회차의 통과 언어 추가. 결과 요약·문제 버전·Outbox를 같은 트랜잭션에 기록한다. 새 회차 저장만으로 회차 변경 이벤트를 발행하지 않는다.
 - **순서:** 문제별 `sourceVersion = problems.row_version`. 같은 사용 회차의 언어 추가도 증가한다. 사용 회차·언어가 그대로인 결과 재전달은 버전 증가·재발행 없이 성공 처리한다.
-- **버전:** v1과 v2는 `schemaVersion`으로 분리한다. 회차 필수 여부·의미와 언어 추가 값이 바뀌므로 §1.6에 따라 소비자 전환 확인 후 v1을 중단한다. v2 전환 뒤 같은 변경을 v1으로 중복 발행하지 않는다. 도메인 순서 값은 문제 단위로 공유한다.
+- **버전:** 신규 구현은 v2만 발행하고 같은 변경을 v1으로 이중 발행하지 않는다. 소비자는 `eventType`·`schemaVersion`으로 dispatch한다. 소비자 v2 수신 준비와 담당자 승인 → 큐·필터·권한 적용 → v2 발행 활성화 순서로 전환한다. 운영 중인 v1 발행은 중단하고 잔여 메시지를 처리한 후 전환한다. 순서 값은 문제 단위 `sourceVersion`이다. 소비자 승인·배포 확인은 전환 조건이며 이 명세만으로 완료를 뜻하지 않는다.
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
@@ -529,7 +529,7 @@ flowchart LR
 | 소비자 | 처리 (모두 `judgeAttempt > 저장값`일 때만) |
 | --- | --- |
 | member | `practice_result_replicas` 교체 → (회원, 태그, 난이도) 성취도·레벨 재계산 → 바뀌면 M4·M5 Outbox |
-| problem | `problem_submission_results`의 제출별 `judgeAttempt` 비교·최신 판정 갱신. 최초 INSERT 때만 제출 수 증가, 접수 시각 기준 최초 AC 보존. 회원별 풀이 상태·통계·소비 기록을 같은 트랜잭션에 반영 (ERD §4.2.10·§4.2.18) |
+| problem | `problem_submission_results`의 제출별 `judgeAttempt` 비교·최신 판정 갱신. 최초 INSERT 때만 제출 수 증가, 판정 변경은 AC 여부 차이만 통계에 반영, 접수 시각 기준 최초 AC 보존. 회원별 풀이 상태·통계·소비 기록을 같은 트랜잭션에 반영 (ERD §4.2.10·§4.2.18) |
 | study | `member_ac_replicas` upsert(`is_accepted`), 대상 문제집 완료 기록 재계산 (다이어그램 §5.3) |
 | integration | `AC`·`CONNECTED`·자동 커밋 켜짐 → `github_sync_jobs` 생성(`submission_id` 유일) |
 | notification | `SUBMISSION_JUDGED` 생성 (끌 수 없음) |
