@@ -1,9 +1,11 @@
 package com.backtoback.notification.delivery.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 import java.io.IOException;
@@ -30,13 +32,16 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.notification.delivery.repository.EmitterRepository;
 import com.backtoback.notification.delivery.repository.EmitterRepositoryImpl;
 import com.backtoback.notification.delivery.repository.SseSession;
+import com.backtoback.notification.global.error.NotificationException;
 import com.backtoback.notification.notification.domain.Notification;
 import com.backtoback.notification.notification.domain.NotificationType;
 import com.backtoback.notification.notification.repository.NotificationRepository;
+import com.backtoback.notification.notification.repository.NotificationWithdrawnMemberRepository;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationDeliveryServiceTest {
@@ -397,6 +402,97 @@ class NotificationDeliveryServiceTest {
 
         // 중복 전송되지 않고 총 1건만 유지되어야 함
         assertThat(latestEmitter.getSentNotificationIds()).containsExactly("101");
+    }
+
+    @Test
+    @DisplayName("회원 탈퇴로 disconnectMember 호출 시 해당 회원의 모든 활성 SSE 세션이 저장소에서 제거되고 complete가 호출된다")
+    void disconnectMemberRemovesAndCompletesAllMemberSessions() {
+        // given
+        Long withdrawnMemberId = 7L;
+        Long activeMemberId = 8L;
+
+        deliveryService.subscribe(withdrawnMemberId, null);
+        CapturingSseEmitter withdrawnEmitter = latestEmitter;
+        deliveryService.subscribe(activeMemberId, null);
+        CapturingSseEmitter activeEmitter = latestEmitter;
+
+        // when
+        deliveryService.disconnectMember(withdrawnMemberId);
+
+        // then
+        assertThat(emitterRepository.findAllByMemberId(withdrawnMemberId)).isEmpty();
+        assertThat(withdrawnEmitter.isCompleted()).isTrue();
+        assertThat(emitterRepository.findAllByMemberId(activeMemberId)).hasSize(1);
+        assertThat(activeEmitter.isCompleted()).isFalse();
+    }
+
+    @Test
+    @DisplayName("탈퇴 기록이 존재하는 회원이 SSE 구독(재연결)을 시도하면 AUTH_ACCESS_DENIED(403) 예외로 거절한다")
+    void subscribeWhenMemberWithdrawnThrowsAccessDenied() {
+        // given
+        Long withdrawnMemberId = 7L;
+        NotificationWithdrawnMemberRepository withdrawnMemberRepository
+            = mock(NotificationWithdrawnMemberRepository.class);
+        given(withdrawnMemberRepository.existsByMemberId(withdrawnMemberId)).willReturn(true);
+
+        NotificationDeliveryService serviceWithWithdrawnRepo
+            = new NotificationDeliveryService(
+                emitterRepository,
+                notificationRepository,
+                withdrawnMemberRepository,
+                clock
+            );
+
+        // when & then
+        assertThatThrownBy(() -> serviceWithWithdrawnRepo.subscribe(withdrawnMemberId, null))
+            .isInstanceOf(NotificationException.class)
+            .extracting(ex -> ((NotificationException)ex).getErrorCode())
+            .isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED);
+        assertThat(emitterRepository.findAllByMemberId(withdrawnMemberId)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("탈퇴 처리가 진행되는 도중 subscribe가 경합해도 탈퇴 후 세션이 잔존하지 않고 403 거절 또는 정상 disconnect된다")
+    void subscribeAndDisconnectMemberConcurrentRaceConditionSerialized() throws Exception {
+        // given
+        Long memberId = 7L;
+        NotificationWithdrawnMemberRepository withdrawnMemberRepository
+            = mock(NotificationWithdrawnMemberRepository.class);
+
+        // 탈퇴가 완료된 상태에서 레이스 컨디션 진입 시뮬레이션
+        given(withdrawnMemberRepository.existsByMemberId(memberId)).willReturn(true);
+
+        NotificationDeliveryService serviceWithWithdrawnRepo
+            = new NotificationDeliveryService(
+                emitterRepository,
+                notificationRepository,
+                withdrawnMemberRepository,
+                clock
+            ) {
+                @Override
+                SseEmitter createEmitter() {
+                    latestEmitter = new CapturingSseEmitter();
+                    return latestEmitter;
+                }
+            };
+
+        // when: disconnectMember와 subscribe 동시 호출
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<?> disconnectFuture = executor.submit(() -> serviceWithWithdrawnRepo.disconnectMember(memberId));
+        Future<?> subscribeFuture = executor.submit(() -> {
+            try {
+                serviceWithWithdrawnRepo.subscribe(memberId, null);
+            } catch (NotificationException ignored) {
+                // 탈퇴 확인에 걸려 거절된 경우 정상
+            }
+        });
+
+        disconnectFuture.get(5, TimeUnit.SECONDS);
+        subscribeFuture.get(5, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        // then: 탈퇴 후 남겨진 활성 세션이 없어야 함
+        assertThat(emitterRepository.findAllByMemberId(memberId)).isEmpty();
     }
 
     /**

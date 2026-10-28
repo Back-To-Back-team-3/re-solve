@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import org.springframework.context.ApplicationEventPublisher;
@@ -17,6 +18,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.notification.delivery.service.NotificationDeliveryService;
 import com.backtoback.notification.event.domain.ProcessedEvent;
+import com.backtoback.notification.event.dto.MemberWithdrawnCleanupEvent;
 import com.backtoback.notification.event.dto.NotificationCreatedEvent;
 import com.backtoback.notification.event.repository.ProcessedEventRepository;
 import com.backtoback.notification.notification.domain.Notification;
@@ -72,7 +74,13 @@ public class NotificationEventProcessor {
             return;
         }
 
+        Set<Long> withdrawnMemberIds = examReminderService.findWithdrawnMemberIds(spec.memberIds());
         for (Long memberId : spec.memberIds()) {
+            if (withdrawnMemberIds.contains(memberId)) {
+                log.debug("탈퇴 회원 수신자 제외로 알림 생성 생략: memberId={}, type={}", memberId, spec.type());
+                continue;
+            }
+
             if (!isPreferenceEnabled(memberId, spec.preferenceFilter())) {
                 log.debug("수신 설정 비활성화로 알림 생성 생략: memberId={}, type={}", memberId, spec.type());
                 continue;
@@ -118,16 +126,40 @@ public class NotificationEventProcessor {
         }
     }
 
+    /**
+     * 회원 탈퇴({@code MemberWithdrawn}) 데이터 삭제 트랜잭션이 커밋된 이후 해당 회원의 활성 SSE 연결을 모두 종료한다 (이벤트 계약서 4.1 M3, 5.1).
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onMemberWithdrawn(MemberWithdrawnCleanupEvent event) {
+        try {
+            deliveryService.disconnectMember(event.memberId());
+        } catch (Exception exception) {
+            log.warn("커밋 후 탈퇴 회원 SSE 연결 종료 중 예외 발생: memberId={}", event.memberId(), exception);
+        }
+    }
+
     private void handleReminderSideEffects(String eventId, String eventType, JsonNode payload) {
         switch (eventType) {
             case "ExamParticipantRegistered" -> handleExamParticipantRegistered(eventId, payload);
             case "ExamUpdated" -> handleExamUpdatedReminder(eventId, payload);
             case "ExamParticipantCanceled" -> handleExamParticipantCanceled(eventId, payload);
             case "ExamCanceled" -> handleExamCanceledReminder(eventId, payload);
+            case "MemberWithdrawn" -> handleMemberWithdrawn(eventId, payload);
             default -> {
-                // 예약 알림 부수효과 대상이 아님
+                // 예약 알림 및 회원 탈퇴 부수효과 대상이 아님
             }
         }
+    }
+
+    private void handleMemberWithdrawn(String eventId, JsonNode payload) {
+        Long memberId = requireLong(payload, "memberId");
+        int sourceVersion = requireInt(payload, "sourceVersion");
+        LocalDateTime withdrawnAt = requireDateTime(payload, "withdrawnAt");
+
+        examReminderService.cleanupByMemberWithdrawn(eventId, memberId, sourceVersion, withdrawnAt);
+        notificationRepository.deleteAllByMemberId(memberId);
+        preferenceRepository.deleteAllByMemberId(memberId);
+        eventPublisher.publishEvent(new MemberWithdrawnCleanupEvent(memberId));
     }
 
     private void handleExamParticipantRegistered(String eventId, JsonNode payload) {

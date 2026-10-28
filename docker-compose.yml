@@ -224,10 +224,16 @@ services:
       <<: *backend-build
       context: ./integration-service
     environment:
-      <<: *db-environment
+      <<: *db-redis-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/integration_db
+      INTEGRATION_CRYPTO_SECRET_KEY: ${INTEGRATION_CRYPTO_SECRET_KEY:?INTEGRATION_CRYPTO_SECRET_KEY is required}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-resolve-sync}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
     depends_on:
       mysql:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   ai-service:

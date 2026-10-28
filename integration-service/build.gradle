@@ -30,6 +30,10 @@ repositories {
 }
 
 dependencies {
+    // 공통 모듈 (응답·예외·추적 및 JPA 감사)
+    implementation project(':common-web')
+    implementation project(':common-jpa')
+
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
@@ -40,6 +44,9 @@ dependencies {
 
     // Database
     runtimeOnly 'com.mysql:mysql-connector-j'
+
+    // Redis
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
     // Flyway
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
@@ -55,6 +62,7 @@ dependencies {
     // Spring Boot Test
     testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-redis-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-flyway-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-security-oauth2-client-test'

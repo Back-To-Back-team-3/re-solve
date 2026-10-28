@@ -288,6 +288,8 @@ flowchart LR
 
 ```
 notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연결
+notification_reminders (N) ─ member_id / exam_id / participant_id
+notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회원 불변 기록
 ```
 
 - 외부 참조:
@@ -299,10 +301,15 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
     (`userId`, `memberId`) | N |
     | `notification_preferences.member_id` | `member.members.id` | 수신 이벤트 및 API 인증 헤더
     (`X-User-Id`) | N |
+    | `notification_reminders.member_id` | `member.members.id` | 시험 참가 이벤트(`memberId`) | N |
+    | `notification_reminders.exam_id` | `contest.exams.id` | 시험 이벤트(`examId`) | N |
+    | `notification_reminders.participant_id` | `contest.exam_participants.id` | 시험 참가 이벤트(`participantId`) | N |
+    | `notification_withdrawn_members.member_id` | `member.members.id` | `MemberWithdrawn` 이벤트(`memberId`) | N |
 - 소유권·삭제 정책:
     - 알림 내역(`notifications`)은 생성 후 90일이 지난 데이터만 새벽 스케줄러로 물리 삭제한다.
+    - 시험 시작 임박 예약(`notification_reminders`) 중 실제 참가자 종결 행(`participant_id > 0`, `SENT`·`CANCELED`)은 수정 후 7일 경과 시, 시험 단위 역전 방지 음수 표식 행(`participant_id < 0`)은 SQS 최대 보관 기간(14일) 경과 시 물리 삭제한다.
     - 읽음 여부는 논리 상태로 관리한다.
-    - 회원 탈퇴 이벤트 수신 시 해당 회원의 알림을 삭제한다(정책 §9.4). `notification_preferences`도 함께 삭제한다.
+    - 회원 탈퇴 이벤트(`MemberWithdrawn`) 수신 시 `notification_withdrawn_members`에 탈퇴 기록을 남기고 해당 회원의 알림(`notifications`), 수신 설정(`notification_preferences`), 시험 참가 예약(`notification_reminders`)을 물리 삭제한다(정책 §9.4).
 
 ### 2.8 integration
 
@@ -2357,6 +2364,44 @@ notifications (N) ─ member_id ─ notification_preferences (1)   -- 논리 연
 - 제약 및 인덱스
     - `uk_notification_preferences_member_id(member_id)`: 회원당 1건
 
+#### 4.7.3 시험 시작 임박 예약 (`notification_reminders`)
+
+> 시험 시작 5분 전 알림 발화를 위한 예약 저장소(스케줄러 §7.1). 실제 참가자 예약은 양수 `participant_id`를 사용하며, SQS 이벤트 순서 역전(`ExamCanceled`·`ExamUpdated`가 `ExamParticipantRegistered`보다 먼저 도착)을 방어하기 위한 시험 단위 표식 행은 `member_id = 0`과 음수 예약 대역(`-(examId * 2 - 1)`: 시험 취소 표식, `-(examId * 2)`: 시험 최신 일정 스냅샷)을 사용한다.
+
+| **컬럼** | **타입** | **NOT NULL** | **설명** |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `member_id` | BIGINT | Y | 수신 회원 ID (외부 참조, 시험 단위 표식 행은 `0`) |
+| `exam_id` | BIGINT | Y | 시험 ID (외부 참조) |
+| `participant_id` | BIGINT | Y | 시험 참가자 ID (양수: 실제 참가자, 음수: 시험 단위 취소·일정 스냅샷 표식) |
+| `fire_at` | DATETIME(6) | Y | 발화 예정 시각 (`starts_at - 5분`) |
+| `starts_at` | DATETIME(6) | Y | 시험 시작 시각 |
+| `context_revision` | INT | Y | 반영한 시험 설정 버전 (`ExamUpdated` 역전 방지) |
+| `source_event_id` | VARCHAR(64) | Y | 원천 이벤트 ID (`ExamParticipantRegistered` 또는 마지막 `ExamUpdated`) |
+| `status` | VARCHAR(30) | Y | 예약 상태 (`SCHEDULED` / `SENT` / `CANCELED`) |
+| `created_at` | DATETIME(6) | Y | 생성 시각 |
+| `updated_at` | DATETIME(6) | Y | 수정 시각 |
+- 제약 및 인덱스
+    - `uk_notification_reminders_participant_id(participant_id)`: 참가자(또는 시험 단위 표식)당 1건
+    - `idx_notification_reminders_status_fire_at(status, fire_at)`: 10초 주기 발화 대상 조회용
+    - `idx_notification_reminders_exam_id_status(exam_id, status)`: 시험 일정 변경·취소 일괄 반영용
+    - `idx_notification_reminders_status_updated_at(status, updated_at)`: 종결 예약(7일) 및 시험 단위 표식(14일) 만료 배치 삭제용
+
+#### 4.7.4 탈퇴 회원 기록 (`notification_withdrawn_members`) `[IMMUTABLE]`
+
+> `MemberWithdrawn` 이벤트 수신 이후 지연 도착하는 도메인 이벤트의 알림 생성·시험 예약 등록 및 탈퇴 회원의 SSE 재구독을 차단하기 위한 탈퇴 회원 집합 테이블(이벤트 계약서 §4.1 M3, §6).
+
+| **컬럼** | **타입** | **NOT NULL** | **설명** |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `member_id` | BIGINT | Y | 탈퇴 회원 ID (외부 참조) |
+| `source_event_id` | VARCHAR(64) | Y | 원천 `MemberWithdrawn` 이벤트 ID |
+| `source_version` | INT | Y | 원천 회원 이벤트 버전 |
+| `withdrawn_at` | DATETIME(6) | Y | 회원 탈퇴 시각 |
+| `created_at` | DATETIME(6) | Y | 기록 생성 시각 |
+- 제약 및 인덱스
+    - `uk_notification_withdrawn_members_member_id(member_id)`: 회원당 1건
+
 ### 4.8 integration
 
 > 작성: 담당 A
@@ -2767,6 +2812,8 @@ notification-service/src/main/resources/db/migration/
   V2__common_create_shedlock.sql
   V3__notification_create_notifications.sql
   V4__preference_create_notification_preferences.sql
+  V5__reminder_create_notification_reminders.sql
+  V6__notification_create_notification_withdrawn_members.sql
 ```
 
 ### 7.7 Integration (`integration-service`)

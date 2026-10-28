@@ -3,9 +3,14 @@ package com.backtoback.notification.reminder.service;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -15,13 +20,13 @@ import com.backtoback.notification.event.dto.NotificationCreatedEvent;
 import com.backtoback.notification.notification.domain.Notification;
 import com.backtoback.notification.notification.domain.NotificationType;
 import com.backtoback.notification.notification.repository.NotificationRepository;
+import com.backtoback.notification.notification.repository.NotificationWithdrawnMemberRepository;
 import com.backtoback.notification.preference.domain.NotificationPreference;
 import com.backtoback.notification.preference.repository.NotificationPreferenceRepository;
 import com.backtoback.notification.reminder.domain.NotificationReminder;
 import com.backtoback.notification.reminder.domain.ReminderStatus;
 import com.backtoback.notification.reminder.repository.NotificationReminderRepository;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -29,7 +34,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ExamReminderService {
 
     private static final Long SENTINEL_MEMBER_ID = 0L;
@@ -38,8 +42,36 @@ public class ExamReminderService {
     private final NotificationReminderRepository reminderRepository;
     private final NotificationRepository notificationRepository;
     private final NotificationPreferenceRepository preferenceRepository;
+    private final NotificationWithdrawnMemberRepository withdrawnMemberRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
+
+    @Autowired
+    public ExamReminderService(
+        NotificationReminderRepository reminderRepository,
+        NotificationRepository notificationRepository,
+        NotificationPreferenceRepository preferenceRepository,
+        NotificationWithdrawnMemberRepository withdrawnMemberRepository,
+        ApplicationEventPublisher eventPublisher,
+        Clock clock
+    ) {
+        this.reminderRepository = reminderRepository;
+        this.notificationRepository = notificationRepository;
+        this.preferenceRepository = preferenceRepository;
+        this.withdrawnMemberRepository = withdrawnMemberRepository;
+        this.eventPublisher = eventPublisher;
+        this.clock = clock;
+    }
+
+    public ExamReminderService(
+        NotificationReminderRepository reminderRepository,
+        NotificationRepository notificationRepository,
+        NotificationPreferenceRepository preferenceRepository,
+        ApplicationEventPublisher eventPublisher,
+        Clock clock
+    ) {
+        this(reminderRepository, notificationRepository, preferenceRepository, null, eventPublisher, clock);
+    }
 
     /**
      * {@code ExamParticipantRegistered} 이벤트 수신 시 시험 시작 5분 전 예약 알림을 등록한다.
@@ -65,6 +97,10 @@ public class ExamReminderService {
         LocalDateTime startsAt
     ) {
         LocalDateTime now = currentDateTime();
+        if (isWithdrawnMember(memberId)) {
+            log.debug("탈퇴 회원의 지연 시험 참가 예약 등록 생략: memberId={}, participantId={}", memberId, participantId);
+            return;
+        }
         Long canceledSentinelId = examCanceledTombstoneParticipantId(examId);
         Long snapshotSentinelId = examScheduleSnapshotParticipantId(examId);
 
@@ -119,6 +155,10 @@ public class ExamReminderService {
         }
 
         if (initialStatus == ReminderStatus.SCHEDULED) {
+            if (isWithdrawnMember(memberId)) {
+                reminderRepository.deleteParticipantRemindersByMemberId(memberId);
+                return;
+            }
             if (reminderRepository.findByParticipantIdForShare(canceledSentinelId).isPresent()) {
                 reminderRepository.cancelScheduledByParticipantId(participantId, now);
                 return;
@@ -278,6 +318,60 @@ public class ExamReminderService {
                 now
             );
         reminderRepository.cancelAllScheduledByExamId(examId, now);
+    }
+
+    /**
+     * {@code MemberWithdrawn} 이벤트 수신 시 탈퇴 회원 전용 테이블({@code notification_withdrawn_members})에
+     * 탈퇴 기록을 남기고, 해당 회원의 시험 참가 예약을 모두 물리 삭제한다 (ERD 4.7.4, 이벤트 계약서 4.1 M3, 6).
+     *
+     * @param sourceEventId MemberWithdrawn 이벤트 ID
+     * @param memberId 탈퇴한 회원 ID
+     * @param sourceVersion 회원 상태 버전
+     * @param withdrawnAt 탈퇴 시각
+     */
+    @Transactional
+    public void cleanupByMemberWithdrawn(
+        String sourceEventId,
+        Long memberId,
+        int sourceVersion,
+        LocalDateTime withdrawnAt
+    ) {
+        LocalDateTime now = currentDateTime();
+        if (withdrawnMemberRepository != null) {
+            withdrawnMemberRepository
+                .insertIgnoreWithdrawnMember(memberId, sourceEventId, sourceVersion, withdrawnAt, now);
+        }
+        reminderRepository.deleteParticipantRemindersByMemberId(memberId);
+    }
+
+    /**
+     * 해당 회원이 이미 탈퇴 처리({@code MemberWithdrawn})된 회원인지 현재 읽기({@code SELECT ... FOR SHARE})로 확인한다 (ERD 4.7.4, 이벤트 계약서 6).
+     *
+     * @param memberId 확인할 회원 ID
+     * @return 탈퇴 기록이 존재하면 {@code true}
+     */
+    @Transactional(readOnly = true)
+    public boolean isWithdrawnMember(Long memberId) {
+        if (withdrawnMemberRepository == null) {
+            return false;
+        }
+        return withdrawnMemberRepository.findByMemberIdForShare(memberId).isPresent();
+    }
+
+    /**
+     * 수신자 목록 중 이미 탈퇴 처리({@code MemberWithdrawn})된 회원 ID 집합을 단일 {@code SELECT ... FOR SHARE}
+     * {@code IN} 쿼리로 일괄 조회한다 (ERD 4.7.4, 이벤트 계약서 6).
+     *
+     * @param memberIds 확인할 수신 후보 회원 ID 목록
+     * @return 탈퇴 기록이 존재하는 회원 ID 집합
+     */
+    @Transactional(readOnly = true)
+    public Set<Long> findWithdrawnMemberIds(Collection<Long> memberIds) {
+        if (withdrawnMemberRepository == null || memberIds == null || memberIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        List<Long> distinctMemberIds = memberIds.stream().distinct().toList();
+        return new HashSet<>(withdrawnMemberRepository.findMemberIdsByMemberIdInForShare(distinctMemberIds));
     }
 
     /**
