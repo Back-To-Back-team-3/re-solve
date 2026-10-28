@@ -31,21 +31,18 @@ class IntegrationServiceApplicationTests {
         registry.add("integration.crypto.secret-key", () -> TEST_SECRET_KEY_BASE64);
     }
 
-    @Autowired(required = false)
+    @Autowired
     private JdbcTemplate jdbc;
 
-    @Autowired(required = false)
+    @Autowired
     private Flyway flyway;
 
     @Test
     @DisplayName("DB 연결과 Flyway 마이그레이션 적용 및 스프링 컨텍스트 로드를 검증한다")
     void contextLoads() {
-        if (jdbc != null) {
-            assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("integration_db");
-        }
-        if (flyway != null && flyway.info().current() != null) {
-            assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
-        }
+        assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("integration_db");
+        assertThat(flyway.info().current()).isNotNull();
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
     }
 
 }

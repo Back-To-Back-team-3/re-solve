@@ -108,6 +108,7 @@ public class GithubConnection extends BaseTimeEntity {
         Boolean autoCommitEnabled,
         String commitPathRule
     ) {
+        validateRequiredFields(memberId, githubLogin, repositoryOwner, repositoryName, commitPathRule);
         this.memberId = memberId;
         this.installationId = installationId;
         this.encryptedToken = encryptedToken;
@@ -146,6 +147,7 @@ public class GithubConnection extends BaseTimeEntity {
      * @param repositoryName 저장소명
      * @param commitPathRule 커밋 경로 규칙
      * @throws IllegalStateException 현재 상태가 DISCONNECTED가 아닌 경우
+     * @throws IllegalArgumentException 필수 정보가 null이거나 비어 있는 경우
      */
     public void reconnect(
         Long installationId,
@@ -158,6 +160,8 @@ public class GithubConnection extends BaseTimeEntity {
         if (this.status != GithubConnectionStatus.DISCONNECTED) {
             throw new IllegalStateException("DISCONNECTED 상태에서만 재연동할 수 있습니다. 현재 상태: " + this.status);
         }
+        validateConnectionInfo(githubLogin, repositoryOwner, repositoryName, commitPathRule);
+
         this.status = GithubConnectionStatus.CONNECTED;
         this.installationId = installationId;
         this.encryptedToken = encryptedToken;
@@ -166,6 +170,39 @@ public class GithubConnection extends BaseTimeEntity {
         this.repositoryName = repositoryName;
         this.commitPathRule = commitPathRule;
         this.disconnectedReason = null;
+    }
+
+    private static void validateRequiredFields(
+        Long memberId,
+        String githubLogin,
+        String repositoryOwner,
+        String repositoryName,
+        String commitPathRule
+    ) {
+        if (memberId == null) {
+            throw new IllegalArgumentException("memberId는 필수입니다.");
+        }
+        validateConnectionInfo(githubLogin, repositoryOwner, repositoryName, commitPathRule);
+    }
+
+    private static void validateConnectionInfo(
+        String githubLogin,
+        String repositoryOwner,
+        String repositoryName,
+        String commitPathRule
+    ) {
+        if (githubLogin == null || githubLogin.isBlank()) {
+            throw new IllegalArgumentException("githubLogin은 필수이며 비어 있을 수 없습니다.");
+        }
+        if (repositoryOwner == null || repositoryOwner.isBlank()) {
+            throw new IllegalArgumentException("repositoryOwner는 필수이며 비어 있을 수 없습니다.");
+        }
+        if (repositoryName == null || repositoryName.isBlank()) {
+            throw new IllegalArgumentException("repositoryName은 필수이며 비어 있을 수 없습니다.");
+        }
+        if (commitPathRule == null || commitPathRule.isBlank()) {
+            throw new IllegalArgumentException("commitPathRule은 필수이며 비어 있을 수 없습니다.");
+        }
     }
 
     /**

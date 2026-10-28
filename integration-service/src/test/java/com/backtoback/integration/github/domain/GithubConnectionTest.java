@@ -211,4 +211,113 @@ class GithubConnectionTest {
         assertThat(connection.isAutoCommitEnabled()).isFalse();
         assertThat(connection.getCommitPathRule()).isEqualTo("custom-path/{문제번호}.java");
     }
+
+    @Test
+    @DisplayName("생성 시 필수 필드가 null이거나 비어 있으면 IllegalArgumentException이 발생한다")
+    void createWithNullOrBlankRequiredFieldsThrowsException() {
+        // memberId null
+        assertThatThrownBy(
+            () -> GithubConnection
+                .builder()
+                .memberId(null)
+                .githubLogin("test-user")
+                .repositoryOwner("test-user")
+                .repositoryName("repo")
+                .commitPathRule("rule")
+                .build()
+        ).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("memberId는 필수");
+
+        // githubLogin blank
+        assertThatThrownBy(
+            () -> GithubConnection
+                .builder()
+                .memberId(1L)
+                .githubLogin(" ")
+                .repositoryOwner("test-user")
+                .repositoryName("repo")
+                .commitPathRule("rule")
+                .build()
+        ).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("githubLogin은 필수");
+
+        // repositoryOwner null
+        assertThatThrownBy(
+            () -> GithubConnection
+                .builder()
+                .memberId(1L)
+                .githubLogin("test-user")
+                .repositoryOwner(null)
+                .repositoryName("repo")
+                .commitPathRule("rule")
+                .build()
+        ).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("repositoryOwner는 필수");
+
+        // repositoryName blank
+        assertThatThrownBy(
+            () -> GithubConnection
+                .builder()
+                .memberId(1L)
+                .githubLogin("test-user")
+                .repositoryOwner("test-user")
+                .repositoryName("")
+                .commitPathRule("rule")
+                .build()
+        ).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("repositoryName은 필수");
+
+        // commitPathRule null
+        assertThatThrownBy(
+            () -> GithubConnection
+                .builder()
+                .memberId(1L)
+                .githubLogin("test-user")
+                .repositoryOwner("test-user")
+                .repositoryName("repo")
+                .commitPathRule(null)
+                .build()
+        ).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("commitPathRule은 필수");
+    }
+
+    @Test
+    @DisplayName("재연동 시 필수 필드가 null이거나 비어 있으면 상태 변경 없이 IllegalArgumentException이 발생한다")
+    void reconnectWithNullOrBlankRequiredFieldsThrowsException() {
+        GithubConnection connection
+            = GithubConnection
+                .builder()
+                .memberId(1L)
+                .installationId(12345L)
+                .encryptedToken(
+                    new byte[] {
+                        1,
+                        2,
+                        3
+                    }
+                )
+                .githubLogin("test-user")
+                .repositoryOwner("test-user")
+                .repositoryName("algorithm-solutions")
+                .commitPathRule("{난이도}/{문제번호}-{문제명}/풀이.java")
+                .build();
+
+        connection.disconnect(GithubDisconnectedReason.AUTH_EXPIRED);
+        assertThat(connection.getStatus()).isEqualTo(GithubConnectionStatus.DISCONNECTED);
+
+        assertThatThrownBy(
+            () -> connection
+                .reconnect(
+                    99999L,
+                    new byte[] {
+                        9,
+                        8,
+                        7
+                    },
+                    "", // githubLogin blank
+                    "new-user",
+                    "new-repo",
+                    "rule"
+                )
+        ).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("githubLogin은 필수");
+
+        // 상태가 변경되지 않고 DISCONNECTED 유지 확인
+        assertThat(connection.getStatus()).isEqualTo(GithubConnectionStatus.DISCONNECTED);
+        assertThat(connection.getDisconnectedReason()).isEqualTo(GithubDisconnectedReason.AUTH_EXPIRED);
+    }
 }
