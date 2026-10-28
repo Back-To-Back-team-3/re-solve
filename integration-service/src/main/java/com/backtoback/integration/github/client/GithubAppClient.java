@@ -28,9 +28,9 @@ import com.backtoback.integration.github.client.dto.GithubRepositoriesResponse;
 import com.backtoback.integration.github.config.GithubProperties;
 import com.backtoback.integration.global.error.IntegrationErrorCode;
 import com.backtoback.integration.global.error.IntegrationException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.extern.slf4j.Slf4j;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * GitHub App REST API 클라이언트 (api-spec.md > 8.1.2, 8.1.3).

@@ -29,7 +29,8 @@ import com.backtoback.integration.github.client.dto.GithubRepositoriesResponse;
 import com.backtoback.integration.github.config.GithubProperties;
 import com.backtoback.integration.global.error.IntegrationErrorCode;
 import com.backtoback.integration.global.error.IntegrationException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+
+import tools.jackson.databind.ObjectMapper;
 
 class GithubAppClientTest {
 

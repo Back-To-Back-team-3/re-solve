@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -32,7 +33,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class GithubConnectionService {
 
     private static final String DEFAULT_COMMIT_PATH_RULE = "{난이도}/{문제번호}-{문제명}/풀이.java";
@@ -49,6 +49,7 @@ public class GithubConnectionService {
      * @param memberId 회원 ID
      * @return 연동 상태 정보
      */
+    @Transactional(readOnly = true)
     public GithubConnectionInfoResponse getConnection(Long memberId) {
         return githubConnectionRepository
             .findByMemberId(memberId)
@@ -87,6 +88,7 @@ public class GithubConnectionService {
      * @param state CSRF 검증용 state
      * @return 연동 완료 결과
      */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public GithubInstallResultResponse install(Long memberId, String installationIdStr, String state) {
         // 1. installationId 및 state 형식 검증 (형식 오류 시 state 소멸 방지)
         Long installationId = validateAndParseInstallationId(installationIdStr);
