@@ -226,6 +226,7 @@ services:
     environment:
       <<: *db-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/integration_db
+      INTEGRATION_CRYPTO_SECRET_KEY: ${INTEGRATION_CRYPTO_SECRET_KEY:-}
     depends_on:
       mysql:
         condition: service_healthy
