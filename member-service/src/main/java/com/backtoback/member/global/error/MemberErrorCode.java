@@ -20,7 +20,9 @@ public enum MemberErrorCode implements ErrorCode {
     AUTH_OAUTH_FAILED(HttpStatus.BAD_GATEWAY, "GitHub 로그인에 실패했습니다. 잠시 후 다시 시도해 주세요."),
 
     // Member
-    MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다.");
+    MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
+    MEMBER_SUSPENDED(HttpStatus.FORBIDDEN, "정지된 회원은 이용할 수 없습니다."),
+    MEMBER_NICKNAME_INVALID(HttpStatus.BAD_REQUEST, "닉네임은 이모지 없이 2~50자로 입력해 주세요.");
 
     private final HttpStatus status;
     private final String message;
