@@ -21,6 +21,7 @@ public class MemberService {
 
     private static final int MIN_NICKNAME_LENGTH = 2;
     private static final int MAX_NICKNAME_LENGTH = 50;
+    private static final int ASCII_MAX = 0x7F;
 
     private final MemberRepository memberRepository;
 
@@ -51,7 +52,7 @@ public class MemberService {
     }
 
     /**
-     * 닉네임을 변경한다 (API 명세서 1.2.2). {@code null}이면 바꾸지 않는다. 앞뒤 공백은 지우고 2~50자를 확인한다.
+     * 닉네임을 변경한다 (API 명세서 1.2.2). {@code null}이면 바꾸지 않는다. 앞뒤 공백은 지우고 이모지 없는 2~50자인지 확인한다.
      */
     @Transactional
     public Member updateNickname(Long memberId, String nickname) {
@@ -62,7 +63,8 @@ public class MemberService {
         if (nickname != null) {
             String trimmed = nickname.strip();
             int length = trimmed.codePointCount(0, trimmed.length());
-            if (length < MIN_NICKNAME_LENGTH || length > MAX_NICKNAME_LENGTH) {
+            if (length < MIN_NICKNAME_LENGTH || length > MAX_NICKNAME_LENGTH
+                || trimmed.codePoints().anyMatch(MemberService::isEmoji)) {
                 throw new MemberException(MemberErrorCode.MEMBER_NICKNAME_INVALID);
             }
             // shortcut: MemberUpdated Outbox 발행 없음, 공통 이벤트 모듈을 member에 적용할 때 같은 트랜잭션에서 기록한다.
@@ -74,6 +76,14 @@ public class MemberService {
     @Transactional(readOnly = true)
     public Optional<Member> findMember(Long memberId) {
         return memberRepository.findById(memberId);
+    }
+
+    /**
+     * 이모지와 이모지를 이루는 문자(국기·피부색·키캡·조합용 문자)인지 판정한다. ASCII 숫자·{@code #}·{@code *}는 허용한다.
+     */
+    private static boolean isEmoji(int codePoint) {
+        return Character.isExtendedPictographic(codePoint)
+            || (Character.isEmojiComponent(codePoint) && codePoint > ASCII_MAX);
     }
 
     private GitHubMemberRegistration register(GitHubUser gitHubUser) {

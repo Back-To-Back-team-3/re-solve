@@ -142,9 +142,48 @@ class MemberServiceTest {
                 .extracting("errorCode")
                 .isEqualTo(MemberErrorCode.MEMBER_NICKNAME_INVALID);
         }
-        // 이모지 같은 보조 문자도 한 글자로 센다.
-        memberService.updateNickname(7L, "😀".repeat(50));
-        assertThat(member.getNickname()).isEqualTo("😀".repeat(50));
+        // 보조 문자(한자 확장)도 한 글자로 센다.
+        memberService.updateNickname(7L, "𠀀".repeat(50));
+        assertThat(member.getNickname()).isEqualTo("𠀀".repeat(50));
+    }
+
+    @Test
+    @DisplayName("닉네임 수정: 이모지·국기·피부색·키캡·이모지 조합이 들어가면 MEMBER_NICKNAME_INVALID")
+    void updateNicknameRejectsEmoji() {
+        Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
+        given(memberRepository.findById(7L)).willReturn(Optional.of(member));
+
+        for (String invalid : new String[] {
+            "kim😀",
+            "🇰🇷kim",
+            "👍🏻👍🏻",
+            "kim1\uFE0F\u20E3",
+            "👨\u200D👩\u200D👧",
+            "kim♥"
+        }) {
+            assertThatThrownBy(() -> memberService.updateNickname(7L, invalid))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(MemberErrorCode.MEMBER_NICKNAME_INVALID);
+        }
+        assertThat(member.getNickname()).isEqualTo("kim-dev");
+    }
+
+    @Test
+    @DisplayName("닉네임 수정: 한글·영문·숫자·기호(#·*·-·_)는 허용한다")
+    void updateNicknameAllowsText() {
+        Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
+        given(memberRepository.findById(7L)).willReturn(Optional.of(member));
+
+        for (String valid : new String[] {
+            "김알고",
+            "kim_01",
+            "#1 kim*",
+            "あいう"
+        }) {
+            memberService.updateNickname(7L, valid);
+            assertThat(member.getNickname()).isEqualTo(valid);
+        }
     }
 
     @Test
