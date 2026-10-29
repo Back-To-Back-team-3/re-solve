@@ -37,8 +37,8 @@
 ### 1.3 발행 규칙
 
 1. 업무 상태 변경과 `outbox_events` INSERT는 같은 트랜잭션이다. 트랜잭션 밖 직접 발행은 금지한다.
-2. Outbox Relay가 1초 주기로 `status = 'PENDING'` 행을 `SELECT … FOR UPDATE SKIP LOCKED`(배치 100건)로 선점해 SNS Publish 또는 SQS SendMessage 후 `PUBLISHED`·`published_at`을 기록한다. Relay는 ShedLock을 쓰지 않는다.
-3. 발행 실패는 `retry_count + 1`, 5회 초과 시 `FAILED`로 두고 운영 알림을 보낸다. `FAILED → PENDING` 재시도는 관리자 절차다.
+2. Outbox Relay가 1초 주기로 `status = 'PENDING'` 행을 건별 `SELECT … FOR UPDATE SKIP LOCKED`로 선점해 회차당 최대 100건을 시도한다. SNS Publish 또는 SQS SendMessage 후 `PUBLISHED`·`published_at`을 기록한다. Relay는 ShedLock을 쓰지 않으며 건별 트랜잭션·후처리·실패 기록 경계는 스케줄러 §0.2.1을 따른다.
+3. 발행·후처리 실패는 `retry_count + 1`, 5회 초과 시 `FAILED`로 두고 운영 알림을 보낸다. `FAILED → PENDING` 재시도는 관리자 절차다.
 4. 발행 성공 후 `PUBLISHED` 기록 전에 Relay가 죽으면 같은 `eventId`로 다시 발행된다. 이 중복은 소비자 멱등으로 흡수한다(최소 1회 전달).
 5. 같은 애그리게이트 이벤트도 순서를 보장하지 않는다. SNS·SQS는 표준(Standard) 타입을 쓰고 FIFO는 쓰지 않는다.
 

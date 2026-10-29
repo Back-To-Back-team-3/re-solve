@@ -34,8 +34,9 @@
 | --- | --- |
 | 소유 | Outbox를 쓰는 6개 서비스(member·problem·judge·contest·study·integration) / 공통 모듈 |
 | 실행 방식 | `fixedDelay = 1초`, `initialDelay = 5초` |
-| 잠금 | ShedLock 없음. `SELECT … WHERE status = 'PENDING' ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED` |
-| 트랜잭션 경계 | 선점 트랜잭션 안에서 건별 발행 → `PUBLISHED`. 발행 실패 건은 `retry_count + 1` 후 같은 트랜잭션 커밋 |
+| 잠금 | ShedLock 없음. 건별 `SELECT … WHERE status = 'PENDING' AND id > :afterId ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`. `afterId`는 회차 시작 시 0, 한 건을 시도할 때마다 해당 ID로 이동 |
+| 트랜잭션 경계 | 대상 1건당 새 트랜잭션에서 선점 → 발행 → `PUBLISHED` → 업무 후처리를 함께 커밋. 발행·후처리·커밋 실패 시 해당 건을 롤백하고 별도 트랜잭션에서 실패 횟수를 기록. 앞선 성공 건은 보존하고 다음 ID를 계속 처리 |
+| 한 회차 처리량 | 최대 100건 시도. 실패한 건도 횟수에 포함하고 같은 회차에는 재시도하지 않음. 다음 회차·재기동 시 DB 처음부터 재선정 |
 | 대상 조회 | `idx_outbox_events_status_created_at` |
 | 상태 전이 | `PENDING → PUBLISHED`, `retry_count > 5`면 `PENDING → FAILED` |
 | 발행 | SNS Publish(도메인 이벤트) 또는 SQS SendMessage(채점 요청). 메시지 속성 `eventType`·`schemaVersion` |
@@ -45,7 +46,9 @@
 **동시성 설계 포인트:**
 
 - 여러 인스턴스가 `SKIP LOCKED`로 서로 다른 행을 가져가므로 같은 행 중복 발행이 없다. 발행 후 커밋 전 장애 시 재발행은 같은 `eventId`라 소비자가 흡수한다.
-- SNS 호출 중 행 잠금을 쥐지만 배치 100건·호출 타임아웃 2초로 상한을 둔다. 잠금 시간이 길어지면 배치를 줄인다.
+- SNS/SQS 호출 중에는 해당 이벤트 한 건의 행 잠금만 쥔다. 회차당 최대 100건·호출 타임아웃 2초로 상한을 둔다.
+- 실패 횟수 기록은 롤백 뒤 해당 ID의 `PENDING` 행을 `FOR UPDATE`로 다시 조회해 최신 `retry_count + 1`을 커밋한다. 다른 Relay가 처리 중이면 완료를 기다려 재검증하고, 이미 `PUBLISHED`·`FAILED`이면 상태를 덮어쓰지 않는다. 발행·후처리 실패를 합산해 6회째 `FAILED`로 전이한다.
+- 선점 조회나 실패 횟수 기록 자체가 실패하면 해당 회차를 중단한다. 이미 커밋한 다른 이벤트는 유지하며 다음 회차가 DB 상태로 다시 선정한다.
 
 **경합 시나리오:**
 

@@ -378,7 +378,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `correlation_id` | VARCHAR(64) | Y | 요청·메시지 추적 ID |
 | `payload` | JSON | Y | 이벤트 메시지 본문 (순서 값 `judgeAttempt`·`examRevision` 등 포함) |
 | `status` | VARCHAR(30) | Y | `PENDING` / `PUBLISHED` / `FAILED` |
-| `retry_count` | INT | Y | 발행 재시도 횟수 (기본 0) |
+| `retry_count` | INT | Y | 발행·후처리 실패 횟수 (기본 0, 재시도 기준은 스케줄러 §0.2.1) |
 | `occurred_at` | DATETIME(6) | Y | 이벤트 발생 시각 |
 | `published_at` | DATETIME(6) | N | NULL 허용: 발행 전 |
 | `created_at` | DATETIME(6) | Y | 생성 시각 |
