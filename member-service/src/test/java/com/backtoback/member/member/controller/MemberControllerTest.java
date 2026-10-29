@@ -50,6 +50,7 @@ class MemberControllerTest {
             .andExpect(jsonPath("$.data.memberId").value("7"))
             .andExpect(jsonPath("$.data.githubLogin").value("kim-dev"))
             .andExpect(jsonPath("$.data.nickname").value("kim-dev"))
+            .andExpect(jsonPath("$.data.profileImageUrl").value("https://avatars.githubusercontent.com/u/1001"))
             .andExpect(jsonPath("$.data.email").isEmpty())
             .andExpect(jsonPath("$.data.role").value("USER"))
             .andExpect(jsonPath("$.data.status").value("ACTIVE"))
@@ -117,8 +118,24 @@ class MemberControllerTest {
             .andExpect(jsonPath("$.error.code").value("MEMBER_NICKNAME_INVALID"));
     }
 
+    @Test
+    @DisplayName("1.2.2 Gateway 인증 정보가 없으면 401 AUTH_TOKEN_INVALID이고 수정하지 않는다")
+    void updateMeRequiresAuthentication() throws Exception {
+        mockMvc
+            .perform(
+                patch("/api/v1/members/me")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"nickname\":\"kim-algo\"}")
+            )
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+
+        verify(memberService, never()).updateNickname(any(), any());
+    }
+
     private Member member(Long id, String nickname) {
-        Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
+        Member member
+            = Member.registerWithGitHub(1001L, "kim-dev", null, "https://avatars.githubusercontent.com/u/1001");
         ReflectionTestUtils.setField(member, "id", id);
         ReflectionTestUtils.setField(member, "nickname", nickname);
         ReflectionTestUtils.setField(member, "createdAt", LocalDateTime.of(2026, 10, 1, 10, 0));

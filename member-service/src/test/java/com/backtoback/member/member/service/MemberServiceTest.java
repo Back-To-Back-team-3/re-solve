@@ -104,7 +104,7 @@ class MemberServiceTest {
     @DisplayName("닉네임 수정: 앞뒤 공백을 지워 저장하고 profileVersion을 1 올린다")
     void updateNicknameTrimsAndBumpsVersion() {
         Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
-        given(memberRepository.findById(7L)).willReturn(Optional.of(member));
+        given(memberRepository.findForUpdateById(7L)).willReturn(Optional.of(member));
 
         memberService.updateNickname(7L, "  kim-algo  ");
 
@@ -116,7 +116,7 @@ class MemberServiceTest {
     @DisplayName("닉네임 수정: 닉네임이 없거나 같으면 바꾸지 않고 profileVersion도 그대로 둔다")
     void updateNicknameKeepsVersionWhenUnchanged() {
         Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
-        given(memberRepository.findById(7L)).willReturn(Optional.of(member));
+        given(memberRepository.findForUpdateById(7L)).willReturn(Optional.of(member));
 
         memberService.updateNickname(7L, null);
         memberService.updateNickname(7L, "kim-dev");
@@ -129,7 +129,7 @@ class MemberServiceTest {
     @DisplayName("닉네임 수정: 공백을 지운 길이가 2자 미만이거나 50자를 넘으면 MEMBER_NICKNAME_INVALID")
     void updateNicknameRejectsInvalidLength() {
         Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
-        given(memberRepository.findById(7L)).willReturn(Optional.of(member));
+        given(memberRepository.findForUpdateById(7L)).willReturn(Optional.of(member));
 
         for (String invalid : new String[] {
             "a",
@@ -151,7 +151,7 @@ class MemberServiceTest {
     @DisplayName("닉네임 수정: 이모지·국기·피부색·키캡·이모지 조합이 들어가면 MEMBER_NICKNAME_INVALID")
     void updateNicknameRejectsEmoji() {
         Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
-        given(memberRepository.findById(7L)).willReturn(Optional.of(member));
+        given(memberRepository.findForUpdateById(7L)).willReturn(Optional.of(member));
 
         for (String invalid : new String[] {
             "kim😀",
@@ -173,7 +173,7 @@ class MemberServiceTest {
     @DisplayName("닉네임 수정: 한글·영문·숫자·기호(#·*·-·_)는 허용한다")
     void updateNicknameAllowsText() {
         Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
-        given(memberRepository.findById(7L)).willReturn(Optional.of(member));
+        given(memberRepository.findForUpdateById(7L)).willReturn(Optional.of(member));
 
         for (String valid : new String[] {
             "김알고",
@@ -191,7 +191,7 @@ class MemberServiceTest {
     void updateNicknameRejectsSuspendedMember() {
         Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
         ReflectionTestUtils.setField(member, "status", MemberStatus.SUSPENDED);
-        given(memberRepository.findById(7L)).willReturn(Optional.of(member));
+        given(memberRepository.findForUpdateById(7L)).willReturn(Optional.of(member));
 
         assertThatThrownBy(() -> memberService.updateNickname(7L, "kim-algo"))
             .isInstanceOf(BusinessException.class)

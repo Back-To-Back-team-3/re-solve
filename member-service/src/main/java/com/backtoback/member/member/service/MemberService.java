@@ -56,7 +56,10 @@ public class MemberService {
      */
     @Transactional
     public Member updateNickname(Long memberId, String nickname) {
-        Member member = getMember(memberId);
+        Member member
+            = memberRepository
+                .findForUpdateById(memberId)
+                .orElseThrow(() -> new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
         if (member.isSuspended()) {
             throw new MemberException(MemberErrorCode.MEMBER_SUSPENDED);
         }
