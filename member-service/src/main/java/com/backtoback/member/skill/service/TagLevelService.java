@@ -80,6 +80,14 @@ public class TagLevelService {
         }).toList();
     }
 
+    /**
+     * 진입한 태그의 레벨만 조회한다 (API 명세서 1.7.2, judge의 연습 제출 레벨 확인용). 진입하지 않은 태그는 담지 않는다.
+     */
+    @Transactional(readOnly = true)
+    public List<MemberTagLevel> getEnteredTagLevels(Long memberId) {
+        return tagLevelRepository.findAllByMemberIdOrderByTagIdAsc(memberId);
+    }
+
     private LocalDateTime cooldownEndsAt(MemberTagLevel tagLevel, LocalDateTime now) {
         if (tagLevel.getLastDiagnosisEndedAt() == null) {
             return null;
