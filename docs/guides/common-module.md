@@ -1,13 +1,14 @@
 # 공통 모듈 적용 가이드
 
-서비스 공통 응답·예외·사용자 식별·요청 추적·시간 관리를 위한 가이드입니다.
+서비스 공통 응답·예외·사용자 식별·요청 추적·시간·이벤트·스케줄링 기능을 적용하기 위한 가이드입니다.
 각 서비스는 필요한 모듈을 선택하고 설정을 등록합니다.
 
 도입 배경과 설계 선택은 [서비스 공통 모듈 도입](../records/decisions/2026-10-15-common-module.md)을 참고합니다. 기능별 계약은 다음 문서를 따릅니다.
 
 - [API 명세서 v1.1](../dev/specifications/api-spec.md) — §0 공통 규약
 - [도메인 및 데이터베이스 v1.0](../dev/specifications/erd.md) — §5 공통 컬럼 규칙
-- [스케줄러 v1.0](../dev/specifications/scheduler.md) — §0.1 공통 규칙
+- [이벤트 계약서 v1.0](../dev/specifications/event-contract.md) — §1 공통 규약·§5 소비자 기준
+- [스케줄러 v1.0](../dev/specifications/scheduler.md) — §0 공통 규칙·공통 스케줄러
 
 ---
 
@@ -18,8 +19,8 @@
 | `common-core` | 응답·예외·Clock | 도메인 DTO·오류·입력 검증 |
 | `common-web` | MVC 오류·사용자 인증 연결·요청 추적 | 웹 실행 환경·보안 체인·업무 권한 |
 | `common-jpa` | 생성·수정 시각·JPA 감사 | JPA 실행 환경·DB·스캔 설정 |
-| `common-event` (설계) | 이벤트 메타데이터·직렬화·발행·수신 공통 처리 | payload·업무 상태·순서 판단·트랜잭션 |
-| `common-scheduling` (설계) | JDBC ShedLock·공통 이벤트 정리 구성 | DB·잠금 등록·도메인 작업 |
+| `common-event` | 이벤트 메타데이터·직렬화·Outbox 발행·멱등 소비·커밋 후 ACK | payload·업무 상태·순서 판단·DB·AWS·리스너 구성 |
+| `common-scheduling` | JDBC ShedLock·이벤트 기록 정리·선택적 예약 실행 | DB·기존 잠금 설정 교체·도메인 작업 |
 
 서비스의 `build.gradle`에서 필요한 의존성만 추가합니다.
 
@@ -27,13 +28,16 @@
 implementation project(':common-core')
 implementation project(':common-web')
 implementation project(':common-jpa')
+implementation project(':common-event')
+implementation project(':common-scheduling')
 ```
 
 - `common-web`은 `common-core`를 `api` 의존성으로 제공하므로 core 타입도 직접 사용할 수 있습니다.
-- `common-jpa`는 `common-core`를 내부 구현 의존성으로 사용합니다.
+- `common-jpa`·`common-event`·`common-scheduling`은 `common-core`를 내부 구현 의존성으로 사용합니다.
   - 서비스 코드에서 core 타입을 직접 참조하면 `common-core`도 선언합니다.
-- 세 모듈은 Java 라이브러리입니다.
-  - 웹 서버·보안 설정·DB 연결은 서비스에서 구성합니다.
+- `common-scheduling`은 `common-event`를 `api` 의존성으로 제공하며, 역방향 의존은 없습니다.
+- 다섯 모듈은 Java 라이브러리입니다.
+  - 웹 서버·보안 설정·DB 연결·AWS 클라이언트·큐 리스너는 서비스에서 구성합니다.
 
 ---
 
@@ -44,7 +48,7 @@ implementation project(':common-jpa')
 - 명시적 등록: 서비스 설정 클래스의 `@Import`에 필요한 타입을 지정합니다.
 - 스캔으로 등록: 사용할 공통 구성 요소를 컴포넌트 스캔 범위에 포함합니다.
 
-아래는 세 모듈을 모두 사용하는 서비스의 등록 예시입니다. 선택하지 않은 기능의 import는 제외합니다.
+아래는 `common-core`·`common-web`·`common-jpa`를 사용하는 서비스의 기본 등록 예시입니다. 선택하지 않은 기능의 import는 제외하고, 이벤트·스케줄링 설정은 §2.4에서 선택합니다.
 
 ```java
 import org.springframework.context.annotation.Configuration;
@@ -144,12 +148,49 @@ public class CommonConfiguration {
 
 ### 2.4 common-event·common-scheduling — 이벤트와 스케줄링 설계
 
-두 모듈의 설계 계약은 다음과 같다. 의존성 추가만으로 Relay·리스너·정리 작업을 활성화하지 않고, 서비스가 사용할 설정과 작업을 명시적으로 등록한다. 공통 모듈의 설계와 서비스 연결은 각각 구현·검증해야 한다.
+두 모듈은 다음 경계에 따라 공통 기능을 제공한다. 의존성 추가만으로 Relay·리스너·정리 작업을 활성화하지 않고, 서비스가 사용할 설정과 작업을 명시적으로 등록한다. 공통 기능의 구현·검증과 개별 서비스의 연결·검증을 구분한다.
 
 - **발행:** 업무 변경과 Outbox 기록을 한 트랜잭션에 저장한다. Relay의 잠금·배치·주기·재시도와 잠금 중 원격 호출 예외는 스케줄러 §0.2.1을 따른다. 발행 성공 후 업무 상태 갱신은 서비스 확장 지점에서 조건부로 같은 발행 트랜잭션에 연결한다.
 - **수신:** 공통 메타데이터 검사·SNS envelope 해제와 `eventType`·`schemaVersion`별 핸들러 연결을 제공한다. 업무 반영과 `processed_events`는 같은 트랜잭션이며 커밋 후 ACK한다. 해당 `event_id`의 소비 완료가 확인된 경우만 중복 성공으로 처리하고 일반 DB 제약 오류·업무 실패는 재전달 규칙에 맡긴다. 업무 순서 값·상태 판단은 서비스가 담당한다.
 - **정리·잠금:** JDBC LockProvider와 Outbox·소비 기록 정리는 스케줄러 §0.2.2·§0.2.3을 따른다. 도메인 파일 삭제·태그 정리·업무 복구는 서비스가 소유한다. 기존 Problem ShedLock 등록과 중복되지 않도록 공통 설정을 적용하는 서비스는 기존 등록을 교체한다.
 - **DB·의존성:** 각 서비스가 자기 스키마의 공통 테이블과 Flyway 버전·실행을 관리한다. 이미 실행한 SQL은 이동·재실행하지 않는다. `common-scheduling`은 `common-event`를 사용하고 반대 방향 의존은 두지 않는다. 기존 공통 응답·인증·Clock·감사를 재사용한다.
+
+`common-event`를 사용하는 서비스는 필요한 설정만 `@Import`한다.
+
+| 필요한 기능 | 등록할 설정 |
+| --- | --- |
+| 메타데이터·직렬화·업무 트랜잭션의 Outbox 저장 | `OutboxStorageConfiguration` |
+| Outbox 저장과 SNS/SQS 예약 발행 | `OutboxRelayConfiguration` |
+| 수신 해석·업무 핸들러 연결·멱등 소비·커밋 후 ACK | `EventConsumerConfiguration` |
+
+- `OutboxRelayConfiguration`은 저장 설정을 함께 등록한다. 소비 설정은 Outbox 저장·Relay·예약 실행을 활성화하지 않는다.
+- 서비스는 업무와 공통 이벤트 기록이 같은 DB에 반영되도록 `DataSource`와 `PlatformTransactionManager`를 제공하고, JSON 설정을 담은 `ObjectMapper`를 연결한다.
+- 발행 서비스는 업무 트랜잭션 안에서 `OutboxEventWriter.append()`를 호출한다. payload에는 공통 헤더를 제외한 업무 필드를 전달한다.
+- Relay를 사용하는 서비스는 선택한 채널의 `SnsClient` 또는 `SqsClient`와 토픽 ARN·큐 URL을 결정할 `EventDestinationResolver`를 등록한다. AWS 인증·리전·권한·리소스 구성은 서비스에서 관리한다.
+- 발행 성공 후 업무 갱신이 필요하면 `OutboxPublishedCallback`을 등록한다. 이벤트 종류와 현재 업무 상태를 검사하고 같은 DB 트랜잭션에서 조건부로 갱신하며, 별도 트랜잭션이나 원격 호출을 시작하지 않는다.
+- 소비 서비스는 `EventHandler` Bean에 처리할 `eventType()`·`schemaVersion()`과 `handle()`을 구현한다. 업무 반영은 소비 기록과 같은 트랜잭션에 참여하며, 순서 값·상태·권한은 서비스에서 판단한다. 업무 DTO로 변환할 때도 모르는 선택 필드를 무시하도록 구성한다.
+- 서비스의 SQS 리스너는 수동 ACK로 구성하고, 받은 본문과 실제 완료까지 동기적으로 수행할 ACK 동작을 소비기에 전달한다. `messageBody`와 `acknowledgement`는 리스너에서 받은 값이다.
+
+```java
+eventConsumer.consume(messageBody, acknowledgement::acknowledge);
+```
+
+- 리스너는 소비기에서 전파한 예외를 삼키거나 따로 성공 ACK하지 않는다. Visibility Timeout·재전달·DLQ는 이벤트 계약서의 전달 계약을 따르며 서비스가 구성한다.
+- 공통 설정이 등록한 Clock을 재사용하고, 서비스의 고정 Clock은 `@Primary`로 우선 선택한다. 테이블과 Flyway 이력은 서비스가 관리한다.
+
+`common-scheduling`을 사용하는 서비스는 다음 설정 중 필요한 기능만 `@Import`한다.
+
+| 필요한 기능 | 등록할 설정 |
+| --- | --- |
+| 서비스 예약 작업의 공통 JDBC 잠금 | `SchedulerLockConfiguration` |
+| 예약 실행 없이 이벤트 기록 정리 호출 | `EventCleanupStorageConfiguration` |
+| 발행 완료 Outbox의 예약 정리 | `OutboxCleanupConfiguration` |
+| 소비 완료 기록의 예약 정리 | `ProcessedEventCleanupConfiguration` |
+
+- 예약 정리 설정은 공통 잠금·저장 설정을 함께 등록한다. 두 정리 설정을 함께 사용해도 공통 구성은 한 번만 등록된다.
+- 잠금 설정만 등록하면 예약 실행은 활성화하지 않는다. 서비스 자체 예약 작업을 사용한다면 서비스가 `@EnableScheduling`을 등록한다.
+- 서비스는 `DataSource`와 같은 DB의 `PlatformTransactionManager`를 제공한다. 고정 Clock을 사용하면 `@Primary`로 우선 선택한다.
+- 기존 `LockProvider`를 유지한 채 공통 잠금 설정을 추가하면 중복 구성을 시작 시점에 거절한다. 기존 설정을 교체한 뒤 등록한다.
 
 ## 3. 보안 체인 연결
 
