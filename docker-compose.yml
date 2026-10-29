@@ -132,6 +132,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
       DEV_LOGIN_ENABLED: ${DEV_LOGIN_ENABLED:-false}
+      PROBLEM_SERVICE_URL: ${PROBLEM_SERVICE_URL:-http://problem-service:8080}
     depends_on:
       mysql:
         condition: service_healthy
