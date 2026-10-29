@@ -225,7 +225,7 @@ flowchart LR
 
 #### M1 `MemberUpdated` v1
 
-- **발행:** 가입(1.1.2)·닉네임·이미지 변경(1.2.2) 트랜잭션. aggregate = `memberId`. `members.profile_version + 1`을 `sourceVersion`으로 싣는다.
+- **발행:** 가입(1.1.2)·닉네임·이미지 변경(1.2.2) 트랜잭션. aggregate = `memberId`. 변경을 반영한 뒤의 `members.profile_version`(가입 시 1)을 `sourceVersion`으로 싣는다.
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
