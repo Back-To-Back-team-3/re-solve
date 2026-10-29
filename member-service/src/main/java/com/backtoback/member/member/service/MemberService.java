@@ -19,6 +19,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class MemberService {
 
+    private static final int MIN_NICKNAME_LENGTH = 2;
+    private static final int MAX_NICKNAME_LENGTH = 50;
+
     private final MemberRepository memberRepository;
 
     /**
@@ -45,6 +48,27 @@ public class MemberService {
         return memberRepository
             .findById(memberId)
             .orElseThrow(() -> new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
+    }
+
+    /**
+     * 닉네임을 변경한다 (API 명세서 1.2.2). {@code null}이면 바꾸지 않는다. 앞뒤 공백은 지우고 2~50자를 확인한다.
+     */
+    @Transactional
+    public Member updateNickname(Long memberId, String nickname) {
+        Member member = getMember(memberId);
+        if (member.isSuspended()) {
+            throw new MemberException(MemberErrorCode.MEMBER_SUSPENDED);
+        }
+        if (nickname != null) {
+            String trimmed = nickname.strip();
+            int length = trimmed.codePointCount(0, trimmed.length());
+            if (length < MIN_NICKNAME_LENGTH || length > MAX_NICKNAME_LENGTH) {
+                throw new MemberException(MemberErrorCode.MEMBER_NICKNAME_INVALID);
+            }
+            // shortcut: MemberUpdated Outbox 발행 없음, 공통 이벤트 모듈을 member에 적용할 때 같은 트랜잭션에서 기록한다.
+            member.changeNickname(trimmed);
+        }
+        return member;
     }
 
     @Transactional(readOnly = true)

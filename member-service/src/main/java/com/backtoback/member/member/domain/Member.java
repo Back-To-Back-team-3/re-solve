@@ -94,4 +94,19 @@ public class Member extends BaseTimeEntity {
     public boolean isWithdrawn() {
         return status == MemberStatus.WITHDRAWN;
     }
+
+    public boolean isSuspended() {
+        return status == MemberStatus.SUSPENDED;
+    }
+
+    /**
+     * 닉네임을 바꾸고 표시 정보 변경 순번({@code profileVersion})을 올린다. 같은 닉네임이면 아무것도 바꾸지 않는다.
+     */
+    public void changeNickname(String nickname) {
+        if (this.nickname.equals(nickname)) {
+            return;
+        }
+        this.nickname = nickname;
+        this.profileVersion++;
+    }
 }
