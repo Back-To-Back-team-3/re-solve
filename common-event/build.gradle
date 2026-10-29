@@ -47,6 +47,12 @@ dependencies {
     // 서비스의 JSON 설정으로 메타데이터와 업무 필드를 직렬화한다.
     api 'tools.jackson.core:jackson-databind'
 
+    // 서비스와 같은 AWS BOM을 사용하고 자동 설정 없이 필요한 SDK 클라이언트만 연결한다.
+    api platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
+    api 'software.amazon.awssdk:sns'
+    api 'software.amazon.awssdk:sqs'
+    implementation 'org.slf4j:slf4j-api'
+
     // 생성자 주입을 기존 공통 모듈과 동일하게 구성한다.
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
@@ -54,6 +60,7 @@ dependencies {
     // 공통 이벤트 처리의 동작과 결과를 검증한다.
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.assertj:assertj-core'
+    testImplementation 'org.mockito:mockito-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-mysql'
     testRuntimeOnly 'com.mysql:mysql-connector-j'

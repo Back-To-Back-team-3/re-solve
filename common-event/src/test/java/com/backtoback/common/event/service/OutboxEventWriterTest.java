@@ -43,7 +43,11 @@ import tools.jackson.databind.ObjectMapper;
 @Testcontainers(disabledWithoutDocker = true)
 class OutboxEventWriterTest {
     @Container
-    private static final MySQLContainer DATABASE = new MySQLContainer("mysql:8.4");
+    private static final MySQLContainer DATABASE
+        = new MySQLContainer("mysql:8.4")
+            // 포트 개방 직후 MySQL 초기 응답이 없으면 Testcontainers가 준비 확인을 다시 시도하도록 한다.
+            .withUrlParam("connectTimeout", "5000")
+            .withUrlParam("socketTimeout", "10000");
 
     private AnnotationConfigApplicationContext context;
     private JdbcTemplate jdbcTemplate;
