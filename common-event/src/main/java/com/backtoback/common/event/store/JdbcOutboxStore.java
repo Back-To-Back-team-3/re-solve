@@ -4,7 +4,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -65,23 +65,44 @@ public class JdbcOutboxStore {
     }
 
     /**
-     * 미발행 행을 ID 순서로 최대 100건 선점하고 다른 Relay가 잠근 행은 기다리지 않는다.
-     * 예약 회차의 진행 위치를 메모리에 보관하지 않아 재기동 후에도 DB 상태로 재선정한다.
+     * 이번 회차에서 아직 시도하지 않은 다음 미발행 행 한 건을 선점한다.
+     * 다른 Relay의 잠금은 기다리지 않으며 다음 회차는 ID 처음부터 다시 조회한다.
      * <p>기준 문서: 스케줄러 v1.0 / §0.2.1 OutboxRelay — 이벤트 발행</p>
      *
-     * @return 현재 발행 트랜잭션이 잠근 미발행 이벤트
+     * @param afterId 이번 회차에서 마지막으로 시도한 ID, 첫 조회는 0
+     * @return 현재 발행 트랜잭션이 잠근 이벤트, 잠글 대상이 없으면 빈 값
      * @throws org.springframework.transaction.IllegalTransactionStateException 발행 트랜잭션이 없을 때
      * @throws org.springframework.dao.DataAccessException 선점 조회가 실패할 때
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public List<OutboxEvent> lockPendingBatch() {
+    public Optional<OutboxEvent> lockNextPending(long afterId) {
         return jdbcTemplate.query("""
             SELECT id, aggregate_type, event_id, event_type, schema_version,
                 occurred_at, aggregate_id, correlation_id, payload, retry_count
             FROM outbox_events
-            WHERE status = 'PENDING'
-            ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED
-            """, (row, rowNumber) -> readEvent(row));
+            WHERE status = 'PENDING' AND id > ?
+            ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
+            """, (row, rowNumber) -> readEvent(row), afterId).stream().findFirst();
+    }
+
+    /**
+     * 발행 트랜잭션을 롤백한 뒤 실패 횟수를 기록할 행을 다시 잠그고 최신 상태를 읽는다.
+     * 이 사이 다른 Relay가 완료했다면 제외하고, 처리 중이라면 커밋을 기다려 결과를 확인한다.
+     *
+     * @param id 실패한 발행 시도에서 선점했던 Outbox PK
+     * @return 아직 대기 중인 이벤트, 이미 완료·실패 상태이면 빈 값
+     * @throws org.springframework.transaction.IllegalTransactionStateException 실패 기록 트랜잭션이 없을 때
+     * @throws org.springframework.dao.DataAccessException 실패 기록을 위한 잠금 조회가 실패할 때
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<OutboxEvent> lockPendingForFailure(long id) {
+        return jdbcTemplate.query("""
+            SELECT id, aggregate_type, event_id, event_type, schema_version,
+                occurred_at, aggregate_id, correlation_id, payload, retry_count
+            FROM outbox_events
+            WHERE id = ? AND status = 'PENDING'
+            FOR UPDATE
+            """, (row, rowNumber) -> readEvent(row), id).stream().findFirst();
     }
 
     /**
@@ -103,8 +124,8 @@ public class JdbcOutboxStore {
     }
 
     /**
-     * 실제 발행 실패 횟수를 한 번 증가시키고 6번째 실패부터 자동 발행 대상에서 제외한다.
-     * 성공 후 업무 콜백 실패는 이 경로로 처리하지 않고 발행 트랜잭션 자체를 롤백한다.
+     * 발행·후처리 실패 횟수를 한 번 증가시키고 6번째 실패부터 자동 발행 대상에서 제외한다.
+     * 실패한 업무 변경을 롤백한 뒤 다시 잠근 최신 행을 기준으로 호출한다.
      *
      * @param event 현재 트랜잭션이 선점한 이벤트와 기존 실패 횟수
      * @param failedAt 실패 시점의 서울 시간

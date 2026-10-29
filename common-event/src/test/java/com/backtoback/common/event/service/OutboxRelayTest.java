@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -19,6 +21,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.sql.DataSource;
 
@@ -32,6 +36,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
@@ -39,6 +44,9 @@ import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -70,7 +78,8 @@ class OutboxRelayTest {
     @Mock
     private AwsEventPublisher publisher;
 
-    private final AtomicBoolean failAfterBusinessUpdate = new AtomicBoolean();
+    private final AtomicReference<String> failedCallbackAggregateId = new AtomicReference<>();
+    private final AtomicReference<String> failedCommitAggregateId = new AtomicReference<>();
 
     private DataSource dataSource;
     private AnnotationConfigApplicationContext context;
@@ -220,19 +229,20 @@ class OutboxRelayTest {
         // given
         saveBusinessRecord(55, "ACCEPTED");
         var metadata = saveEvent(55);
-        failAfterBusinessUpdate.set(true);
+        failedCallbackAggregateId.set("55");
 
-        // when & then: 콜백 실패가 성공 상태와 업무 변경을 모두 취소해야 한다.
-        assertThatThrownBy(() -> relay.relayBatch())
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessage("simulated callback failure");
+        // when: 실패한 건은 롤백하고 실패 횟수만 별도 커밋한다.
+        var attempted = relay.relayBatch();
+
+        // then
+        assertThat(attempted).isEqualTo(1);
         assertThat(outboxStatus(metadata)).isEqualTo("PENDING");
-        assertThat(retryCount(metadata)).isZero();
+        assertThat(retryCount(metadata)).isEqualTo(1);
         assertThat(businessStatus(55)).isEqualTo("ACCEPTED");
 
         // when: DB를 보존한 채 Bean을 재생성해 새 Relay로 다시 처리한다.
         context.close();
-        failAfterBusinessUpdate.set(false);
+        failedCallbackAggregateId.set(null);
         openContext();
         relay.relayBatch();
 
@@ -245,6 +255,220 @@ class OutboxRelayTest {
             .extracting(event -> event.metadata().eventId())
             .containsExactly(metadata.eventId(), metadata.eventId());
         assertThat(sent.getAllValues().get(0).message()).isEqualTo(sent.getAllValues().get(1).message());
+    }
+
+    /**
+     * 중간 이벤트의 콜백이 실패해도 앞선 커밋과 뒤따르는 정상 발행을 보존하는지 확인한다.
+     */
+    @Test
+    @DisplayName("두 번째 콜백이 실패하면 해당 건만 롤백하고 첫 번째와 세 번째 이벤트는 커밋한다")
+    void isolatesSecondCallbackFailureAndContinuesBatch() {
+        // given
+        saveBusinessRecord(55, "ACCEPTED");
+        saveBusinessRecord(56, "ACCEPTED");
+        saveBusinessRecord(57, "ACCEPTED");
+        var first = saveEvent(55);
+        var second = saveEvent(56);
+        var third = saveEvent(57);
+        failedCallbackAggregateId.set("56");
+
+        // when
+        var attempted = relay.relayBatch();
+
+        // then
+        assertThat(attempted).isEqualTo(3);
+        assertThat(outboxStatus(first)).isEqualTo("PUBLISHED");
+        assertThat(outboxStatus(second)).isEqualTo("PENDING");
+        assertThat(outboxStatus(third)).isEqualTo("PUBLISHED");
+        assertThat(retryCount(first)).isZero();
+        assertThat(retryCount(second)).isEqualTo(1);
+        assertThat(retryCount(third)).isZero();
+        assertThat(businessStatus(55)).isEqualTo("REQUESTED");
+        assertThat(businessStatus(56)).isEqualTo("ACCEPTED");
+        assertThat(businessStatus(57)).isEqualTo("REQUESTED");
+        var sent = ArgumentCaptor.forClass(OutboxEvent.class);
+        verify(publisher, times(3)).publish(sent.capture());
+        assertThat(sent.getAllValues())
+            .extracting(event -> event.metadata().eventId())
+            .containsExactly(first.eventId(), second.eventId(), third.eventId());
+    }
+
+    /**
+     * 콜백 반환 뒤 커밋 준비 단계에서 난 예외도 해당 이벤트만 취소하고 다음 건을 처리하는지 확인한다.
+     */
+    @Test
+    @DisplayName("두 번째 이벤트의 커밋 준비가 실패해도 해당 건만 롤백하고 다른 이벤트는 커밋한다")
+    void isolatesCommitFailureAndContinuesBatch() {
+        // given
+        saveBusinessRecord(55, "ACCEPTED");
+        saveBusinessRecord(56, "ACCEPTED");
+        saveBusinessRecord(57, "ACCEPTED");
+        var first = saveEvent(55);
+        var second = saveEvent(56);
+        var third = saveEvent(57);
+        failedCommitAggregateId.set("56");
+
+        // when
+        var attempted = relay.relayBatch();
+
+        // then
+        assertThat(attempted).isEqualTo(3);
+        assertThat(outboxStatus(first)).isEqualTo("PUBLISHED");
+        assertThat(outboxStatus(second)).isEqualTo("PENDING");
+        assertThat(outboxStatus(third)).isEqualTo("PUBLISHED");
+        assertThat(retryCount(second)).isEqualTo(1);
+        assertThat(businessStatus(55)).isEqualTo("REQUESTED");
+        assertThat(businessStatus(56)).isEqualTo("ACCEPTED");
+        assertThat(businessStatus(57)).isEqualTo("REQUESTED");
+    }
+
+    /**
+     * 외부 발행 실패와 후처리 실패가 같은 재시도 상한을 공유하고 영구 실패가 자동 제외되는지 확인한다.
+     */
+    @Test
+    @DisplayName("발행 실패와 후처리 실패를 합산해 6회째 FAILED로 전이하고 업무 변경은 남기지 않는다")
+    void countsPublicationAndCallbackFailuresTogether() {
+        // given
+        saveBusinessRecord(55, "ACCEPTED");
+        var metadata = saveEvent(55);
+        var publicationAttempts = new AtomicInteger();
+        willAnswer(invocation -> {
+            if (publicationAttempts.incrementAndGet() <= 3) {
+                throw SdkClientException.create("simulated network failure");
+            }
+            return null;
+        }).given(publisher).publish(any(OutboxEvent.class));
+        failedCallbackAggregateId.set("55");
+
+        // when
+        for (var attempt = 0; attempt < 5; attempt++) {
+            assertThat(relay.relayBatch()).isEqualTo(1);
+        }
+
+        // then
+        assertThat(outboxStatus(metadata)).isEqualTo("PENDING");
+        assertThat(retryCount(metadata)).isEqualTo(5);
+
+        // when
+        relay.relayBatch();
+        var attemptedAfterLimit = relay.relayBatch();
+
+        // then
+        assertThat(attemptedAfterLimit).isZero();
+        assertThat(outboxStatus(metadata)).isEqualTo("FAILED");
+        assertThat(retryCount(metadata)).isEqualTo(6);
+        assertThat(businessStatus(55)).isEqualTo("ACCEPTED");
+        assertThat(jdbcTemplate.queryForObject("SELECT published_at FROM outbox_events", LocalDateTime.class)).isNull();
+        verify(publisher, times(6)).publish(any(OutboxEvent.class));
+    }
+
+    /**
+     * 롤백과 실패 기록 사이 다른 Relay가 완료한 행을 이전 시도의 실패가 다시 대기로 바꾸지 않는지 확인한다.
+     *
+     * @throws Exception 작업 스레드 동기화 또는 제한 시간 내 종료에 실패할 때
+     */
+    @Test
+    @DisplayName("실패 기록 전에 다른 Relay가 발행을 완료하면 완료 상태와 업무 변경을 보존한다")
+    void preservesAnotherRelaysSuccessBeforeFailureRecording() throws Exception {
+        // given
+        saveBusinessRecord(55, "ACCEPTED");
+        var metadata = saveEvent(55);
+        failedCallbackAggregateId.set("55");
+        var rolledBack = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        pauseFirstRollback(rolledBack, release);
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var failingRelay = executor.submit(() -> relay.relayBatch());
+            try {
+                assertThat(rolledBack.await(10, TimeUnit.SECONDS)).isTrue();
+
+                // when: 첫 시도의 잠금이 풀린 구간에 다른 Relay가 같은 이벤트를 완료한다.
+                failedCallbackAggregateId.set(null);
+                assertThat(relay.relayBatch()).isEqualTo(1);
+            } finally {
+                release.countDown();
+            }
+
+            // then
+            assertThat(failingRelay.get(10, TimeUnit.SECONDS)).isEqualTo(1);
+        }
+        assertThat(outboxStatus(metadata)).isEqualTo("PUBLISHED");
+        assertThat(retryCount(metadata)).isZero();
+        assertThat(businessStatus(55)).isEqualTo("REQUESTED");
+        verify(publisher, times(2)).publish(any(OutboxEvent.class));
+    }
+
+    /**
+     * 두 Relay의 실패 기록 순서가 바뀌어도 과거 조회값으로 실패 횟수를 덮어쓰지 않는지 확인한다.
+     *
+     * @throws Exception 작업 스레드 동기화 또는 제한 시간 내 종료에 실패할 때
+     */
+    @Test
+    @DisplayName("다른 Relay가 먼저 실패를 기록해도 최신 실패 횟수에 누적한다")
+    void accumulatesConcurrentFailuresFromLatestCount() throws Exception {
+        // given
+        saveBusinessRecord(55, "ACCEPTED");
+        var metadata = saveEvent(55);
+        failedCallbackAggregateId.set("55");
+        var rolledBack = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        pauseFirstRollback(rolledBack, release);
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var firstRelay = executor.submit(() -> relay.relayBatch());
+            try {
+                assertThat(rolledBack.await(10, TimeUnit.SECONDS)).isTrue();
+
+                // when: 두 번째 시도의 실패 기록이 먼저 커밋된다.
+                assertThat(relay.relayBatch()).isEqualTo(1);
+                assertThat(retryCount(metadata)).isEqualTo(1);
+            } finally {
+                release.countDown();
+            }
+
+            // then
+            assertThat(firstRelay.get(10, TimeUnit.SECONDS)).isEqualTo(1);
+        }
+        assertThat(outboxStatus(metadata)).isEqualTo("PENDING");
+        assertThat(retryCount(metadata)).isEqualTo(2);
+        assertThat(businessStatus(55)).isEqualTo("ACCEPTED");
+        verify(publisher, times(2)).publish(any(OutboxEvent.class));
+    }
+
+    /**
+     * 실패 기록까지 DB에서 거절되면 회차를 중단하되 앞선 성공 건의 커밋은 취소하지 않는지 확인한다.
+     */
+    @Test
+    @DisplayName("실패 횟수 저장이 실패하면 회차를 중단하고 이미 커밋한 이벤트는 유지한다")
+    void stopsBatchWhenFailureRecordingFailsAndPreservesEarlierCommit() {
+        // given
+        saveBusinessRecord(55, "ACCEPTED");
+        saveBusinessRecord(56, "ACCEPTED");
+        saveBusinessRecord(57, "ACCEPTED");
+        var first = saveEvent(55);
+        var second = saveEvent(56);
+        var third = saveEvent(57);
+        failedCallbackAggregateId.set("56");
+        jdbcTemplate.execute("ALTER TABLE outbox_events ADD CONSTRAINT reject_retry_count CHECK (retry_count = 0)");
+
+        // when & then
+        assertThatThrownBy(() -> relay.relayBatch())
+            .isInstanceOf(DataAccessException.class)
+            .hasMessageContaining("reject_retry_count")
+            .satisfies(
+                failure -> assertThat(failure.getSuppressed())
+                    .hasSize(1)
+                    .allSatisfy(original -> assertThat(original).hasMessage("simulated callback failure"))
+            );
+        assertThat(outboxStatus(first)).isEqualTo("PUBLISHED");
+        assertThat(outboxStatus(second)).isEqualTo("PENDING");
+        assertThat(outboxStatus(third)).isEqualTo("PENDING");
+        assertThat(retryCount(second)).isZero();
+        assertThat(businessStatus(55)).isEqualTo("REQUESTED");
+        assertThat(businessStatus(56)).isEqualTo("ACCEPTED");
+        assertThat(businessStatus(57)).isEqualTo("ACCEPTED");
+        verify(publisher, times(2)).publish(any(OutboxEvent.class));
     }
 
     /**
@@ -400,7 +624,7 @@ class OutboxRelayTest {
         context = new AnnotationConfigApplicationContext();
         context.registerBean(DataSource.class, () -> dataSource);
         context.registerBean(ObjectMapper.class, () -> new ObjectMapper());
-        context.registerBean(PlatformTransactionManager.class, () -> new JdbcTransactionManager(dataSource));
+        context.registerBean(PlatformTransactionManager.class, () -> spy(new JdbcTransactionManager(dataSource)));
         context
             .registerBean(
                 "testClock",
@@ -416,7 +640,8 @@ class OutboxRelayTest {
                     context.getBean(JdbcOutboxStore.class),
                     publisher,
                     List.of(this::updateBusinessState),
-                    context.getBean(Clock.class)
+                    context.getBean(Clock.class),
+                    context.getBean(PlatformTransactionManager.class)
                 )
             );
         context.refresh();
@@ -436,9 +661,41 @@ class OutboxRelayTest {
                 "UPDATE business_records SET status = 'REQUESTED' WHERE id = ? AND status = 'ACCEPTED'",
                 Long.parseLong(event.metadata().aggregateId())
             );
-        if (failAfterBusinessUpdate.get()) {
+        if (event.metadata().aggregateId().equals(failedCallbackAggregateId.get())) {
             throw new IllegalStateException("simulated callback failure");
         }
+        if (event.metadata().aggregateId().equals(failedCommitAggregateId.get())) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                /**
+                 * 업무 콜백 반환 뒤 커밋 준비 단계에서 실패하도록 한다.
+                 *
+                 * @param readOnly 이번 트랜잭션의 읽기 전용 여부
+                 */
+                @Override
+                public void beforeCommit(boolean readOnly) {
+                    throw new IllegalStateException("simulated commit failure");
+                }
+            });
+        }
+    }
+
+    /**
+     * 실제 DB 롤백으로 잠금을 해제한 뒤 첫 시도의 실패 기록만 지연해 Relay 간 경합을 재현한다.
+     *
+     * @param rolledBack 첫 시도의 롤백 완료 신호
+     * @param release 다른 Relay의 처리 완료 후 첫 시도를 재개할 신호
+     */
+    private void pauseFirstRollback(CountDownLatch rolledBack, CountDownLatch release) {
+        var firstRollback = new AtomicBoolean(true);
+        var transactionManager = context.getBean(PlatformTransactionManager.class);
+        doAnswer(invocation -> {
+            invocation.callRealMethod();
+            if (firstRollback.compareAndSet(true, false)) {
+                rolledBack.countDown();
+                awaitRelease(release);
+            }
+            return null;
+        }).when(transactionManager).rollback(any(TransactionStatus.class));
     }
 
     /**

@@ -70,6 +70,7 @@ class AwsEventPublisherTest {
             .isEqualTo(event.metadata().eventType());
         assertThat(request.getValue().messageAttributes().get("schemaVersion").stringValue()).isEqualTo("v1");
         assertThat(request.getValue().messageAttributes().get("eventType").dataType()).isEqualTo("String");
+        assertThat(request.getValue().messageAttributes().get("schemaVersion").dataType()).isEqualTo("String");
         assertThat(request.getValue().overrideConfiguration().orElseThrow().apiCallTimeout())
             .contains(Duration.ofSeconds(2));
         verifyNoInteractions(sqsClient);
@@ -96,6 +97,8 @@ class AwsEventPublisherTest {
         verify(sqsClient).sendMessage(request.capture());
         assertThat(request.getValue().queueUrl()).isEqualTo(destination.address());
         assertThat(request.getValue().messageBody()).isEqualTo(event.message());
+        assertThat(request.getValue().messageAttributes().get("eventType").dataType()).isEqualTo("String");
+        assertThat(request.getValue().messageAttributes().get("schemaVersion").dataType()).isEqualTo("String");
         assertThat(request.getValue().messageAttributes().get("eventType").stringValue())
             .isEqualTo(event.metadata().eventType());
         assertThat(request.getValue().messageAttributes().get("schemaVersion").stringValue()).isEqualTo("v1");

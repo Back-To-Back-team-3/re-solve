@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.backtoback.common.event.client.AwsEventPublisher;
 import com.backtoback.common.event.client.EventDestinationResolver;
@@ -53,6 +54,7 @@ public class OutboxRelayConfiguration {
      * @param publisher 서비스가 구성한 SNS/SQS 발행기
      * @param callbacks 서비스가 순서를 지정할 수 있는 발행 성공 콜백
      * @param clock 기존 공통 Clock 또는 서비스의 우선 Clock
+     * @param transactionManager 서비스 업무 DB의 트랜잭션 관리자
      * @return 명시적 설정 등록 후에만 예약 실행하는 Relay
      */
     @Bean
@@ -60,8 +62,9 @@ public class OutboxRelayConfiguration {
         JdbcOutboxStore outboxStore,
         AwsEventPublisher publisher,
         ObjectProvider<OutboxPublishedCallback> callbacks,
-        Clock clock
+        Clock clock,
+        PlatformTransactionManager transactionManager
     ) {
-        return new OutboxRelay(outboxStore, publisher, callbacks.orderedStream().toList(), clock);
+        return new OutboxRelay(outboxStore, publisher, callbacks.orderedStream().toList(), clock, transactionManager);
     }
 }

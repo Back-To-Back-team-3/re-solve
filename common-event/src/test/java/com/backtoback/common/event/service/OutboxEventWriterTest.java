@@ -4,12 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.UUID;
 
 import javax.sql.DataSource;
 
@@ -33,6 +36,7 @@ import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.event.config.OutboxStorageConfiguration;
 import com.backtoback.common.event.dto.EventMetadata;
+import com.backtoback.common.time.ClockConfiguration;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -216,6 +220,81 @@ class OutboxEventWriterTest {
         assertThat(first.eventId().version()).isEqualTo(4);
         assertThat(second.eventId().version()).isEqualTo(4);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(2);
+    }
+
+    /**
+     * 공통 헤더를 포함한 UTF-8 메시지가 상한과 정확히 같으면 업무 변경과 함께 저장한다.
+     */
+    @Test
+    @DisplayName("직렬화한 전체 메시지가 정확히 256KB이면 업무 변경과 Outbox를 함께 저장한다")
+    void acceptsMessageAtByteLimit() {
+        // given
+        var payload = payloadWithMessageSize(256 * 1024);
+        var message = context.getBean(EventJsonCodec.class).serialize(sizeTestMetadata(), payload);
+        assertThat(message.getBytes(StandardCharsets.UTF_8)).hasSize(256 * 1024);
+
+        // when
+        var metadata = transaction.execute(status -> {
+            jdbcTemplate.update("INSERT INTO business_records (id, status) VALUES (55, 'ACCEPTED')");
+            return writer.append("SUBMISSION", "SubmissionJudged", "v1", "55", "request-test", payload);
+        });
+
+        // then
+        assertThat(countRecords("business_records")).isEqualTo(1);
+        assertThat(countRecords("outbox_events")).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT event_id FROM outbox_events", String.class))
+            .isEqualTo(metadata.eventId().toString());
+    }
+
+    /**
+     * 한글을 포함해 문자 수는 상한보다 적어도 UTF-8 바이트 수가 초과하면 앞선 업무 변경도 취소한다.
+     */
+    @Test
+    @DisplayName("UTF-8 메시지가 256KB보다 1바이트 크면 Outbox에 저장하지 않고 업무 변경도 롤백한다")
+    void rejectsOversizedUtf8MessageAndRollsBackBusiness() {
+        // given
+        var payload = payloadWithMessageSize(256 * 1024 + 1);
+        var message = context.getBean(EventJsonCodec.class).serialize(sizeTestMetadata(), payload);
+        assertThat(message.length()).isLessThan(256 * 1024);
+        assertThat(message.getBytes(StandardCharsets.UTF_8)).hasSize(256 * 1024 + 1);
+
+        // when & then
+        assertThatIllegalArgumentException().isThrownBy(() -> transaction.executeWithoutResult(status -> {
+            jdbcTemplate.update("INSERT INTO business_records (id, status) VALUES (55, 'ACCEPTED')");
+            writer.append("SUBMISSION", "SubmissionJudged", "v1", "55", "request-test", payload);
+        })).withMessage("Serialized event message exceeds 256KB in UTF-8");
+        assertThat(countRecords("business_records")).isZero();
+        assertThat(countRecords("outbox_events")).isZero();
+    }
+
+    /**
+     * 실제 기록 경로와 길이가 같은 공통 헤더를 사용해 한글을 포함한 경계 크기의 payload를 만든다.
+     *
+     * @param messageBytes 공통 헤더를 포함한 직렬화 메시지의 목표 UTF-8 바이트 수
+     * @return 목표 크기를 채우는 업무 필드
+     */
+    private Map<String, String> payloadWithMessageSize(int messageBytes) {
+        var codec = context.getBean(EventJsonCodec.class);
+        var headerBytes
+            = codec.serialize(sizeTestMetadata(), Map.of("content", "")).getBytes(StandardCharsets.UTF_8).length;
+        var contentBytes = messageBytes - headerBytes;
+        return Map.of("content", "가".repeat(contentBytes / 3) + "a".repeat(contentBytes % 3));
+    }
+
+    /**
+     * 무작위 UUID의 고정 길이와 주입한 시각을 반영해 메시지 경계 계산에 사용할 헤더를 만든다.
+     *
+     * @return 실제 저장 시와 같은 길이로 직렬화되는 공통 메타데이터
+     */
+    private EventMetadata sizeTestMetadata() {
+        return new EventMetadata(
+            UUID.fromString("d65b1858-9741-465f-90f7-5af96ad7bd60"),
+            "SubmissionJudged",
+            "v1",
+            OffsetDateTime.ofInstant(context.getBean(Clock.class).instant(), ClockConfiguration.SERVICE_ZONE),
+            "55",
+            "request-test"
+        );
     }
 
     /**
