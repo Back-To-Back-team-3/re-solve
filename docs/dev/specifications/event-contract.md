@@ -177,7 +177,7 @@ flowchart LR
 
 | # | 이벤트 · 버전 | 발행 | 구독 | 경로 | 발행 시점 (트랜잭션) | 순서 값 | 상태 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| M1 | `MemberUpdated` v1 | member | problem, contest, study | SNS | 가입·닉네임·이미지 변경 | `sourceVersion` | 확정 필요 (이름, E) |
+| M1 | `MemberUpdated` v1 | member | problem, contest, study | SNS | 가입·닉네임·이미지 변경 | `sourceVersion` | 확정 |
 | M2 | `MemberSuspended` v1 | member | problem, contest, study | SNS | 정지·해제 | `sourceVersion` | 확정 |
 | M3 | `MemberWithdrawn` v1 | member | problem, contest, study, notification, integration | SNS | 탈퇴 | `sourceVersion` | 확정 |
 | M4 | `LearningProfileUpdated` v1 | member | study | SNS | 프로필 입력·변경, 레벨 확정·변경 | `profileVersion` | 확정 |
@@ -223,9 +223,9 @@ flowchart LR
 
 ### 4.1 member (담당 E)
 
-#### M1 `MemberUpdated` v1 — 확정 필요(이름)
+#### M1 `MemberUpdated` v1
 
-- **발행:** 가입(1.1.2)·닉네임·이미지 변경(1.2.2) 트랜잭션. aggregate = `memberId`. `members.profile_version + 1`을 `sourceVersion`으로 싣는다.
+- **발행:** 가입(1.1.2)·닉네임·이미지 변경(1.2.2) 트랜잭션. aggregate = `memberId`. 변경을 반영한 뒤의 `members.profile_version`(가입 시 1)을 `sourceVersion`으로 싣는다.
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
@@ -996,7 +996,6 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 
 | # | 항목 | 현재 초안 |
 | --- | --- | --- |
-| 1 | `MemberUpdated` 이벤트명·필드 | M1 표 |
 | 2 | 진단 채점 요청 경로·이벤트명 | M6: `exam-submission-queue` 공용 |
 | 3 | 진단 결과 이벤트 분리 | J5 `DiagnosisSubmissionJudged` |
 | 4 | `SubmissionJudged`에 `problemTagIds`·`language`·`problemTitle`·`judgedAt` 추가 | J1 표 (하위 호환 추가) |
