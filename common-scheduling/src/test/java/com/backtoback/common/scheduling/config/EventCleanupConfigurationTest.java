@@ -29,6 +29,7 @@ import org.springframework.scheduling.support.SimpleTriggerContext;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.common.scheduling.scheduler.OutboxCleanupScheduler;
@@ -36,7 +37,7 @@ import com.backtoback.common.scheduling.scheduler.ProcessedEventCleanupScheduler
 import com.backtoback.common.scheduling.service.EventRecordCleanupService;
 
 /**
- * 실제 Spring 예약 등록 경로에서 작업별 독립 활성화·중복 설정 공유·서울 시간 cron을 검증한다.
+ * 실제 Spring 예약 등록 경로에서 작업별 독립 활성화·중복 설정 공유·서울 시간 cron과 잠금 선언을 검증한다.
  * 실행기는 Mock으로 대체해 테스트 중 예약된 DB 삭제가 시작되지 않도록 한다.
  */
 class EventCleanupConfigurationTest {
@@ -71,14 +72,22 @@ class EventCleanupConfigurationTest {
     }
 
     /**
-     * 발행 정리만 선택했을 때 소비 정리를 켜지 않고 UTC 실행기에서도 서울 02시를 예약하는지 확인한다.
+     * 발행 정리만 선택했을 때 서울 02시 예약과 고유 잠금 이름·30분 잠금 선언을 유지하는지 확인한다.
      */
     @Test
-    @DisplayName("Outbox 정리 설정은 발행 정리 한 건만 서울 시간 02시에 예약한다")
-    void activatesOnlyOutboxCleanupAtSeoulTwoOClock() {
+    @DisplayName("Outbox 정리 설정은 발행 정리 한 건을 30분 잠금으로 서울 시간 02시에 예약한다")
+    void activatesOnlyOutboxCleanupWithLockAtSeoulTwoOClock() throws NoSuchMethodException {
+        // given
+        var cleanupMethod = OutboxCleanupScheduler.class.getDeclaredMethod("cleanup");
+
         // when
         try (var context = openContext(OutboxCleanupConfiguration.class)) {
+            var lock = cleanupMethod.getAnnotation(SchedulerLock.class);
+
             // then
+            assertThat(lock).isNotNull();
+            assertThat(lock.name()).isEqualTo("OutboxCleanupScheduler");
+            assertThat(lock.lockAtMostFor()).isEqualTo("PT30M");
             assertThat(context.getBeansOfType(OutboxCleanupScheduler.class)).hasSize(1);
             assertThat(context.getBeansOfType(ProcessedEventCleanupScheduler.class)).isEmpty();
             assertThat(context.getBean(ScheduledAnnotationBeanPostProcessor.class).getScheduledTasks()).hasSize(1);
@@ -93,14 +102,22 @@ class EventCleanupConfigurationTest {
     }
 
     /**
-     * Outbox가 없는 소비 서비스도 소비 정리만 선택하고 서울 02시 10분을 예약할 수 있는지 확인한다.
+     * 소비 정리만 선택했을 때 서울 02시 10분 예약과 고유 잠금 이름·30분 잠금 선언을 유지하는지 확인한다.
      */
     @Test
-    @DisplayName("소비 기록 정리 설정은 소비 정리 한 건만 서울 시간 02시 10분에 예약한다")
-    void activatesOnlyProcessedCleanupAtSeoulTwoTen() {
+    @DisplayName("소비 기록 정리 설정은 소비 정리 한 건을 30분 잠금으로 서울 시간 02시 10분에 예약한다")
+    void activatesOnlyProcessedCleanupWithLockAtSeoulTwoTen() throws NoSuchMethodException {
+        // given
+        var cleanupMethod = ProcessedEventCleanupScheduler.class.getDeclaredMethod("cleanup");
+
         // when
         try (var context = openContext(ProcessedEventCleanupConfiguration.class)) {
+            var lock = cleanupMethod.getAnnotation(SchedulerLock.class);
+
             // then
+            assertThat(lock).isNotNull();
+            assertThat(lock.name()).isEqualTo("ProcessedEventCleanupScheduler");
+            assertThat(lock.lockAtMostFor()).isEqualTo("PT30M");
             assertThat(context.getBeansOfType(ProcessedEventCleanupScheduler.class)).hasSize(1);
             assertThat(context.getBeansOfType(OutboxCleanupScheduler.class)).isEmpty();
             assertThat(context.getBean(ScheduledAnnotationBeanPostProcessor.class).getScheduledTasks()).hasSize(1);

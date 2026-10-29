@@ -66,7 +66,7 @@
 | --- | --- |
 | 실행 방식 | `cron = 0 0 2 * * *` (Asia/Seoul) |
 | 잠금 | ShedLock `OutboxCleanupScheduler`, `lockAtMostFor = 30분` |
-| 처리 | `DELETE FROM outbox_events WHERE status = 'PUBLISHED' AND published_at < now() - INTERVAL 7 DAY LIMIT 1000` 반복 |
+| 처리 | `DELETE FROM outbox_events WHERE status = 'PUBLISHED' AND published_at < :cutoff ORDER BY id LIMIT 1000` 반복. `cutoff`는 실행 시작 시 공통 `Clock` 기준 7일 전 |
 | 보관 경계 | 실행 시작 시 공통 `Clock`의 서울 시각을 `DATETIME(6)` 정밀도로 고정해 계산. 경계와 같은 시각은 보존 |
 | 트랜잭션 경계 | 최대 1,000건을 삭제하는 배치마다 새 트랜잭션(`REQUIRES_NEW`)에서 커밋. 삭제 건수가 상한보다 작으면 종료 |
 | 실행 상한 | §0.1의 잠금 유지시간 2배 기준에 따라 30분 잠금의 절반인 15분을 실행 예산으로 사용. 배치마다 남은 예산을 트랜잭션 제한시간에 반영하고, 예산 소진 시 새 배치를 시작하지 않음 |
@@ -81,7 +81,7 @@
 | 소유 | 이벤트를 소비하는 7개 서비스 |
 | 실행 방식 | `cron = 0 10 2 * * *` (Asia/Seoul) |
 | 잠금 | ShedLock `ProcessedEventCleanupScheduler`, `lockAtMostFor = 30분` |
-| 처리 | `processed_at < now() - INTERVAL 14 DAY` 1,000건 단위 반복 삭제 (`idx_processed_events_processed_at`) |
+| 처리 | `DELETE FROM processed_events WHERE processed_at < :cutoff ORDER BY id LIMIT 1000` 반복. `cutoff`는 실행 시작 시 공통 `Clock` 기준 14일 전 (`idx_processed_events_processed_at`) |
 | 배치·실행 경계 | 소비 완료 시각으로 보관기간을 판단하며, Clock 경계 고정·배치별 새 트랜잭션·실행 예산·실패 후 재선정은 §0.2.2와 동일 |
 | 경합 | 14일 = SQS 최대 보관 기간이라 삭제된 `eventId`의 메시지는 큐에 남아 있을 수 없다. DLQ redrive는 이벤트 계약서 §7.3 절차로 순서 값 확인 |
 - 감사 로그(`audit_logs`)는 정리하지 않는다. 이미지·알림·차단 복제본 정리는 각 서비스 절에 둔다.
