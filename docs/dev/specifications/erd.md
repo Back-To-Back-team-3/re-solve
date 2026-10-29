@@ -2900,15 +2900,15 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 ```
 member-service/src/main/resources/db/migration/
-  V1__common_create_outbox_events.sql
-  V2__common_create_processed_events.sql
-  V3__common_create_shedlock.sql
-  V4__common_create_audit_logs.sql
-  V5__member_create_members.sql
-  V6__member_create_learning_profiles.sql
-  V7__skill_create_member_tag_levels.sql
-  V8__skill_create_member_tag_achievements.sql
-  V9__skill_create_member_level_histories.sql
+  V1__create_members.sql
+  V2__skill_create_member_tag_levels.sql
+  V3__skill_create_member_level_histories.sql
+  V4__member_create_learning_profiles.sql
+  V5__skill_create_member_tag_achievements.sql
+  V6__common_create_outbox_events.sql
+  V7__common_create_processed_events.sql
+  V8__common_create_shedlock.sql
+  V9__common_create_audit_logs.sql
   V10__diagnosis_create_diagnosis_attempts.sql
   V11__diagnosis_create_diagnosis_problems.sql
   V12__diagnosis_create_diagnosis_drafts.sql
@@ -2917,6 +2917,9 @@ member-service/src/main/resources/db/migration/
   V15__replica_create_practice_result_replica_tags.sql
   V16__replica_create_hint_usage_replicas.sql
 ```
+
+- V1~V3은 적용된 파일이다. V1은 이 규칙을 정하기 전에 만들어 DB에 적용됐으므로 이름을 바꾸지 않는다(Flyway 적용 기록과 어긋남).
+- V4 이후는 아직 만들지 않은 계획 순서다. 실제 생성 순서에 따라 번호를 다시 매긴다.
 
 ### 7.2 Problem (`problem-service`)
 

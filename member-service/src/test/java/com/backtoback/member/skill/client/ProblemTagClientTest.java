@@ -65,8 +65,12 @@ class ProblemTagClientTest {
     }
 
     @Test
-    @DisplayName("경로가 없는 404·서버 오류·통신 오류는 태그 없음이 아니라 COMMON_DEPENDENCY_UNAVAILABLE")
+    @DisplayName("다른 tagId의 200·204·경로가 없는 404·서버 오류·통신 오류는 태그 없음이 아니라 COMMON_DEPENDENCY_UNAVAILABLE")
     void failsClosedOnOtherResponses() {
+        server
+            .expect(requestTo(TAG_URL))
+            .andRespond(withSuccess("{\"tagId\":\"4\",\"name\":\"스택/큐\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(TAG_URL)).andRespond(withStatus(HttpStatus.NO_CONTENT));
         server
             .expect(requestTo(TAG_URL))
             .andRespond(
@@ -77,7 +81,7 @@ class ProblemTagClientTest {
         server.expect(requestTo(TAG_URL)).andRespond(withServerError());
         server.expect(requestTo(TAG_URL)).andRespond(withException(new IOException("connection refused")));
 
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 5; i++) {
             assertThatThrownBy(() -> client.exists(3L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")

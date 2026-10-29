@@ -51,14 +51,17 @@ public class ProblemTagClient {
     }
 
     /**
-     * 태그가 있으면 {@code true}, problem이 {@code PROBLEM_TAG_NOT_FOUND}로 응답하면 {@code false}를 반환한다.
-     * 그 밖의 응답(경로가 없는 404 포함)과 통신 오류는 {@code COMMON_DEPENDENCY_UNAVAILABLE}로 실패시킨다.
+     * 200 본문의 {@code tagId}가 요청과 같으면 {@code true}, problem이 {@code PROBLEM_TAG_NOT_FOUND}로 응답하면 {@code false}를 반환한다.
+     * 그 밖의 응답(본문이 다른 200, 204, 경로가 없는 404 포함)과 통신 오류는 {@code COMMON_DEPENDENCY_UNAVAILABLE}로 실패시킨다.
      */
     public boolean exists(Long tagId) {
         try {
             return restClient.get().uri("/internal/v1/tags/{tagId}", tagId).exchange((request, response) -> {
-                if (response.getStatusCode().is2xxSuccessful()) {
-                    return true;
+                if (response.getStatusCode().isSameCodeAs(HttpStatus.OK)) {
+                    TagBody body = response.bodyTo(TagBody.class);
+                    if (body != null && String.valueOf(tagId).equals(body.tagId())) {
+                        return true;
+                    }
                 }
                 if (response.getStatusCode().isSameCodeAs(HttpStatus.NOT_FOUND)) {
                     ErrorEnvelope body = response.bodyTo(ErrorEnvelope.class);
@@ -73,6 +76,10 @@ public class ProblemTagClient {
             log.warn("Problem tag lookup failed: {}", exception.getClass().getSimpleName());
             throw new MemberException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, exception);
         }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record TagBody(String tagId) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
