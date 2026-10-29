@@ -13,6 +13,7 @@ import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.tag.domain.Tag;
 import com.backtoback.problem.tag.dto.request.TagCreateRequest;
 import com.backtoback.problem.tag.dto.request.TagUpdateRequest;
+import com.backtoback.problem.tag.dto.response.TagExistsResponse;
 import com.backtoback.problem.tag.dto.response.TagResponse;
 import com.backtoback.problem.tag.repository.TagRepository;
 
@@ -25,6 +26,21 @@ public class TagService {
     private final TagRepository tagRepository;
     private final TagCreationRecordService creationRecords;
     private final TagOrderService tagOrderService;
+
+    /**
+     * 태그 ID로 조회해 내부 API(2.6.11)가 반환할 존재 응답을 만든다.
+     *
+     * @param tagId 조회할 태그 ID
+     * @return 태그의 문자열 ID·이름을 담은 내부 응답
+     * @throws ProblemException 태그가 없으면 {@code PROBLEM_TAG_NOT_FOUND}
+     */
+    @Transactional(readOnly = true)
+    public TagExistsResponse getExisting(long tagId) {
+        return tagRepository
+            .findById(tagId)
+            .map(TagExistsResponse::from)
+            .orElseThrow(() -> new ProblemException(ProblemErrorCode.PROBLEM_TAG_NOT_FOUND));
+    }
 
     /**
      * 컨트롤러에서 검증한 검색어 길이·페이지 범위·정렬 조건을 전달받는다.
