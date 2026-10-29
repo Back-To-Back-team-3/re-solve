@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -38,6 +39,10 @@ class EventMessageDecoderTest {
 
         // then
         assertThat(event.metadata().eventId()).isEqualTo(UUID.fromString("d65b1858-9741-465f-90f7-5af96ad7bd60"));
+        assertThat(event.metadata().eventType()).isEqualTo("SubmissionJudged");
+        assertThat(event.metadata().schemaVersion()).isEqualTo("v1");
+        assertThat(event.metadata().aggregateId()).isEqualTo("55");
+        assertThat(event.metadata().correlationId()).isEqualTo("request-test");
         assertThat(event.metadata().occurredAt()).isEqualTo(OffsetDateTime.parse("2026-10-29T21:00:00.123456+09:00"));
         assertThat(event.payload()).isEqualTo(mapper.readTree("""
             {"submissionId":"9007199254740993","judgeAttempt":2,"tags":[],"futureField":"kept"}
@@ -97,6 +102,39 @@ class EventMessageDecoderTest {
         // when & then
         assertThatIllegalArgumentException().isThrownBy(() -> decoder.decode(invalidTime));
         assertThatIllegalArgumentException().isThrownBy(() -> decoder.decode(invalidId));
+    }
+
+    /**
+     * 숫자 형식만 맞는 잘못된 날짜도 문서화된 메타데이터 검증 예외로 전달하는지 확인한다.
+     */
+    @Test
+    @DisplayName("달력상 불가능한 발생 시각은 파싱 원인을 보존한 IllegalArgumentException으로 거절한다")
+    void rejectsInvalidCalendarTimestamp() {
+        // given
+        var invalidDate = message().replace("2026-10-29T21:00:00.123456+09:00", "2026-02-30T21:00:00.123456+09:00");
+
+        // when & then
+        assertThatIllegalArgumentException()
+            .isThrownBy(() -> decoder.decode(invalidDate))
+            .withMessage("occurredAt must be a valid calendar date-time")
+            .withCauseInstanceOf(DateTimeParseException.class);
+    }
+
+    /**
+     * 기본 예시와 다른 애그리게이트 ID도 그대로 전달해 고정값으로 바뀌는 회귀를 방지한다.
+     */
+    @Test
+    @DisplayName("기본 예시와 다른 aggregateId도 문자열 값 그대로 전달한다")
+    void preservesDifferentAggregateId() {
+        // given
+        var body = (ObjectNode)mapper.readTree(message());
+        body.put("aggregateId", "9007199254740993");
+
+        // when
+        var event = decoder.decode(mapper.writeValueAsString(body));
+
+        // then
+        assertThat(event.metadata().aggregateId()).isEqualTo("9007199254740993");
     }
 
     /**

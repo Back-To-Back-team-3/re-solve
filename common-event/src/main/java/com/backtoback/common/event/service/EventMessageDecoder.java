@@ -1,6 +1,7 @@
 package com.backtoback.common.event.service;
 
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.UUID;
 
 import com.backtoback.common.event.dto.EventMetadata;
@@ -55,12 +56,18 @@ public class EventMessageDecoder {
         if (!occurredAt.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}\\+09:00")) {
             throw new IllegalArgumentException("occurredAt must use +09:00 and six fractional digits");
         }
+        OffsetDateTime parsedOccurredAt;
+        try {
+            parsedOccurredAt = OffsetDateTime.parse(occurredAt);
+        } catch (DateTimeParseException invalid) {
+            throw new IllegalArgumentException("occurredAt must be a valid calendar date-time", invalid);
+        }
         var metadata
             = new EventMetadata(
                 UUID.fromString(eventId),
                 requireText(body, "eventType"),
                 requireText(body, "schemaVersion"),
-                OffsetDateTime.parse(occurredAt),
+                parsedOccurredAt,
                 requireText(body, "aggregateId"),
                 requireText(body, "correlationId")
             );

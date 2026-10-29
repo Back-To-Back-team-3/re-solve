@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -62,6 +64,7 @@ class EventConsumerTest {
     private final AtomicInteger acknowledgements = new AtomicInteger();
 
     private AnnotationConfigApplicationContext context;
+    private DataSource dataSource;
     private JdbcTemplate jdbcTemplate;
     private EventConsumer eventConsumer;
     private Consumer<ReceivedEvent> handlerAction;
@@ -71,13 +74,21 @@ class EventConsumerTest {
      */
     @BeforeEach
     void setUp() {
-        var dataSource
-            = new DriverManagerDataSource(DATABASE.getJdbcUrl(), DATABASE.getUsername(), DATABASE.getPassword());
+        dataSource = new DriverManagerDataSource(DATABASE.getJdbcUrl(), DATABASE.getUsername(), DATABASE.getPassword());
         jdbcTemplate = new JdbcTemplate(dataSource);
         jdbcTemplate.execute("DROP TABLE IF EXISTS consumer_business_records");
         jdbcTemplate.execute("DROP TABLE IF EXISTS processed_events");
         new ResourceDatabasePopulator(new ClassPathResource("db/consumer-test-schema.sql")).execute(dataSource);
         handlerAction = this::insertBusinessRecord;
+        openContext(true);
+    }
+
+    /**
+     * 소비 설정의 실제 Clock 선택을 검증할 수 있도록 서비스 Clock의 우선 여부만 바꿔 등록한다.
+     *
+     * @param primaryClock 고정 서비스 Clock을 공통 Clock보다 우선 선택할지 여부
+     */
+    private void openContext(boolean primaryClock) {
         context = new AnnotationConfigApplicationContext();
         context.registerBean(DataSource.class, () -> dataSource);
         context.registerBean(ObjectMapper.class, () -> mapper);
@@ -87,7 +98,7 @@ class EventConsumerTest {
                 "testClock",
                 Clock.class,
                 () -> Clock.fixed(Instant.parse("2026-10-29T12:00:00.123456789Z"), ZoneOffset.UTC),
-                beanDefinition -> beanDefinition.setPrimary(true)
+                beanDefinition -> beanDefinition.setPrimary(primaryClock)
             );
         context.registerBean(EventHandler.class, () -> new TestHandler());
         context.register(EventConsumerConfiguration.class);
@@ -130,6 +141,32 @@ class EventConsumerTest {
 
         // then
         assertThat(handlerCalls.get()).isEqualTo(1);
+        assertThat(acknowledgements.get()).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT processed_at FROM processed_events", LocalDateTime.class))
+            .isEqualTo(LocalDateTime.parse("2026-10-29T21:00:00.123456"));
+    }
+
+    /**
+     * 별도 Clock이 우선 후보가 아닐 때 소비 설정 파라미터 이름으로 공통 clock Bean을 선택하는지 확인한다.
+     */
+    @Test
+    @DisplayName("Primary가 없는 여러 Clock 후보에서는 공통 clock으로 소비 시각을 기록한다")
+    void usesCommonClockWhenAdditionalClockIsNotPrimary() {
+        // given
+        context.close();
+        openContext(false);
+        var metadata = metadata("SubmissionJudged", "v1");
+        var commonClock = context.getBean("clock", Clock.class);
+        var before = LocalDateTime.now(commonClock).truncatedTo(ChronoUnit.MICROS);
+
+        // when
+        eventConsumer.consume(message(metadata, 55, "business-55"), acknowledgements::incrementAndGet);
+        var after = LocalDateTime.now(commonClock).truncatedTo(ChronoUnit.MICROS);
+
+        // then
+        assertThat(jdbcTemplate.queryForObject("SELECT processed_at FROM processed_events", LocalDateTime.class))
+            .isBetween(before, after);
+        assertThat(processedCount(metadata)).isEqualTo(1);
         assertThat(acknowledgements.get()).isEqualTo(1);
     }
 
@@ -357,7 +394,6 @@ class EventConsumerTest {
         var metadata = metadata("SubmissionJudged", "v1");
         var message = message(metadata, 55, "business-55");
         var firstEntered = new CountDownLatch(1);
-        var secondStarted = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         handlerAction = event -> {
             insertBusinessRecord(event);
@@ -369,11 +405,8 @@ class EventConsumerTest {
             var first = executor.submit(() -> eventConsumer.consume(message, acknowledgements::incrementAndGet));
             try {
                 assertThat(firstEntered.await(10, TimeUnit.SECONDS)).isTrue();
-                var second = executor.submit(() -> {
-                    secondStarted.countDown();
-                    eventConsumer.consume(message, acknowledgements::incrementAndGet);
-                });
-                assertThat(secondStarted.await(10, TimeUnit.SECONDS)).isTrue();
+                var second = executor.submit(() -> eventConsumer.consume(message, acknowledgements::incrementAndGet));
+                assertThat(awaitProcessedEventLockWait()).isTrue();
 
                 // when
                 release.countDown();
@@ -403,7 +436,6 @@ class EventConsumerTest {
         var metadata = metadata("SubmissionJudged", "v1");
         var message = message(metadata, 55, "business-55");
         var firstEntered = new CountDownLatch(1);
-        var secondStarted = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         handlerAction = event -> {
             insertBusinessRecord(event);
@@ -418,11 +450,8 @@ class EventConsumerTest {
             var first = executor.submit(() -> eventConsumer.consume(message, acknowledgements::incrementAndGet));
             try {
                 assertThat(firstEntered.await(10, TimeUnit.SECONDS)).isTrue();
-                var second = executor.submit(() -> {
-                    secondStarted.countDown();
-                    eventConsumer.consume(message, acknowledgements::incrementAndGet);
-                });
-                assertThat(secondStarted.await(10, TimeUnit.SECONDS)).isTrue();
+                var second = executor.submit(() -> eventConsumer.consume(message, acknowledgements::incrementAndGet));
+                assertThat(awaitProcessedEventLockWait()).isTrue();
 
                 // when & then
                 release.countDown();
@@ -521,6 +550,37 @@ class EventConsumerTest {
      */
     private int businessCount() {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM consumer_business_records", Integer.class);
+    }
+
+    /**
+     * 테스트 전용 관리자 연결로 소비 기록의 유일 키 잠금 대기를 관측한다.
+     * 업무 연결의 권한은 바꾸지 않고 격리된 Testcontainers DB의 performance_schema만 조회한다.
+     *
+     * @return 제한 시간 내 두 번째 INSERT의 실제 잠금 대기를 확인했으면 true
+     * @throws InterruptedException 대기 중 테스트 스레드가 중단됐을 때
+     */
+    private boolean awaitProcessedEventLockWait() throws InterruptedException {
+        var monitor
+            = new JdbcTemplate(new DriverManagerDataSource(DATABASE.getJdbcUrl(), "root", DATABASE.getPassword()));
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            var waiting = monitor.queryForObject("""
+                SELECT COUNT(*)
+                FROM performance_schema.data_lock_waits waits
+                JOIN performance_schema.data_locks requested
+                    ON requested.ENGINE = waits.ENGINE
+                    AND requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID
+                WHERE requested.OBJECT_SCHEMA = ?
+                    AND requested.OBJECT_NAME = 'processed_events'
+                    AND requested.INDEX_NAME = 'uk_processed_events_event_id'
+                    AND requested.LOCK_STATUS = 'WAITING'
+                """, Integer.class, DATABASE.getDatabaseName());
+            if (waiting > 0) {
+                return true;
+            }
+            Thread.sleep(25);
+        }
+        return false;
     }
 
     /**
