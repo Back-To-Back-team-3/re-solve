@@ -34,3 +34,20 @@ resolve:
       cookie-secure: ${REFRESH_COOKIE_SECURE:true}
     # 개발용 로그인(1.1.6). local·dev에서만 켠다. prod·staging 프로필에서 켜면 기동이 실패한다.
     dev-login-enabled: ${DEV_LOGIN_ENABLED:false}
+  skill:
+    problem-service-url: ${PROBLEM_SERVICE_URL:http://problem-service:8080}
+    diagnosis-cooldown: 3d
+    # 현재 레벨별 다음 승급 기준 (정책 및 상태 8.3 단계별 승급). 실운영 결과를 보고 조정한다.
+    promotions:
+      LV1:
+        target-level: LV2
+        required-solved-count: 5
+        required-achievement-rate: 60.00
+      LV2:
+        target-level: LV3
+        required-solved-count: 6
+        required-achievement-rate: 70.00
+      LV3:
+        target-level: MASTER
+        required-solved-count: 5
+        required-achievement-rate: 65.00
