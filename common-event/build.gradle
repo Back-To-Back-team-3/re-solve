@@ -64,6 +64,8 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-mysql'
     testRuntimeOnly 'com.mysql:mysql-connector-j'
+    // 수신 스레드의 이벤트 추적 정보와 처리 후 MDC 복원을 검증한다.
+    testRuntimeOnly 'ch.qos.logback:logback-classic'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -73,4 +75,6 @@ tasks.named('test') {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+    // 여러 Clock 후보 중 공통 Bean을 파라미터 이름으로 선택할 수 있도록 이름 정보를 유지한다.
+    options.compilerArgs << '-parameters'
 }
