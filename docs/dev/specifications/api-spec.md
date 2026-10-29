@@ -675,7 +675,7 @@
     - `MEMBER_SUSPENDED`(403) /
 - **동시성/멱등 보장:** `uk_member_tag_levels_member_tag`. 위반 시 `LEVEL_ALREADY_ENTERED`.
 - **발행:** `LearningProfileUpdated` — 태그 레벨 확정 (`tagLevels` 갱신)
-- **외부 의존:** 태그 존재 확인 방식(태그 복제본 또는 problem 내부 조회)은 확정 필요
+- **외부 의존:** problem 태그 존재 확인(2.6.11). `PROBLEM_TAG_NOT_FOUND`(404)는 `LEVEL_TAG_NOT_FOUND`(404)로 바꾸고, 통신 오류·그 밖의 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503)로 처리한다(fail-closed).
 
 #### 1.4.3 레벨 변경 근거 조회
 
@@ -1146,6 +1146,14 @@
     ```
     
 - **실패 시 처리:** judge는 fail-closed(`COMMON_DEPENDENCY_UNAVAILABLE`)
+
+### 1.8 사용하는 내부 API
+
+| 제공 | Method / URI | 요청 | 성공 응답 | 실패 처리 |
+| --- | --- | --- | --- | --- |
+| problem | `GET /internal/v1/tags/{tagId}` | 진입할 태그 ID | `{tagId, name}` | `PROBLEM_TAG_NOT_FOUND`(404)는 `LEVEL_TAG_NOT_FOUND`(404), 그 밖의 응답·통신 오류는 `COMMON_DEPENDENCY_UNAVAILABLE`(503) |
+
+- 공통 타임아웃은 2초다.
 
 ---
 
@@ -3638,6 +3646,43 @@
 
 - **에러:** `COMMON_INVALID_REQUEST`(400), `PROBLEM_NOT_FOUND`(404) / 작업 없음·문제 소속 불일치
 - **동시성/멱등 보장:** 영속된 원래 작업의 스냅샷을 반환하며 현재 문제 상태로 치환하지 않는다. C는 조회 후 자기 가드 잠금 안에서 작업 ID·버전을 다시 확인한다. 404·PENDING·통신 실패는 자동 취소 근거가 아니다.
+- **발행:** 없음
+- **외부 의존:** 없음
+
+#### 2.6.11 태그 존재 확인
+
+- **Method / URI:** `GET /internal/v1/tags/{tagId}`
+- **인증:** 내부 호출 (member)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `tags`
+- **설명:** 태그가 있는지 확인한다. member가 태그 진입(1.4.2) 전에 호출한다.
+- **요청 헤더:** `X-Correlation-Id` 선택
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `tagId` | Path | string | Y | 태그 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `tagId` | string | 태그 ID |
+    | `name` | string | 태그 이름 |
+
+    ```json
+    {
+      "tagId": "3",
+      "name": "해시"
+    }
+    ```
+
+- **에러:** `PROBLEM_TAG_NOT_FOUND`(404) / 없는 태그
+- **동시성/멱등 보장:** 조회만 한다.
 - **발행:** 없음
 - **외부 의존:** 없음
 
