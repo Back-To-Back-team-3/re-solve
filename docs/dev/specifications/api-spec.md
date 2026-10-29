@@ -244,7 +244,7 @@
 | 로그인 | GitHub OAuth2 단일. 인가 범위 `read:user`, `user:email` |
 | 토큰 | Access 1시간(응답 본문), Refresh 14일(`HttpOnly`·`Secure`·`SameSite=Strict` 쿠키), Redis 회전 |
 | 레벨 | 태그별 `LV0`~`MASTER`, 저장값 증감 없이 재계산 |
-| 이벤트 발행 | `MemberUpdated`(이벤트명 확정 필요), `LearningProfileUpdated`, `TagLevelChanged`, `MemberWithdrawn`, `MemberSuspended`, `DiagnosisSubmissionRequested`(확정 필요) |
+| 이벤트 발행 | `MemberUpdated`, `LearningProfileUpdated`, `TagLevelChanged`, `MemberWithdrawn`, `MemberSuspended`, `DiagnosisSubmissionRequested`(확정 필요) |
 | 이벤트 구독 | `SubmissionJudged`(레벨·성취도 재계산), `SubmissionFailed`(진단), `HintReady`(힌트 사용 감점, 확정 필요) |
 | 외부 서비스 | GitHub OAuth (`github.com/login/oauth`, `api.github.com/user`) |
 
@@ -289,7 +289,7 @@
     - `AUTH_OAUTH_FAILED`(502) / GitHub 응답 실패
     - `AUTH_TOKEN_INVALID`(401) / `state` 불일치·만료
 - **동시성/멱등 보장:** 신규 가입은 `uk_members_github_id`로 중복 생성을 막는다. 위반 시 기존 회원으로 로그인.
-- **발행:** `MemberUpdated` — 신규 가입 시 (`member_replicas` 원천, 이벤트명 확정 필요)
+- **발행:** `MemberUpdated` — 신규 가입 시 (`member_replicas` 원천)
 - **외부 의존:**
     - `POST https://github.com/login/oauth/access_token` (GitHub) — 인가 코드 교환. 타임아웃 3초, 실패 시 502
     - `GET https://api.github.com/user`, `/user/emails` (GitHub) — 프로필·이메일. 이메일 실패는 `email = null`로 진행
