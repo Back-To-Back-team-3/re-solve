@@ -151,6 +151,20 @@ public class CommonConfiguration {
 - **정리·잠금:** JDBC LockProvider와 Outbox·소비 기록 정리는 스케줄러 §0.2.2·§0.2.3을 따른다. 도메인 파일 삭제·태그 정리·업무 복구는 서비스가 소유한다. 기존 Problem ShedLock 등록과 중복되지 않도록 공통 설정을 적용하는 서비스는 기존 등록을 교체한다.
 - **DB·의존성:** 각 서비스가 자기 스키마의 공통 테이블과 Flyway 버전·실행을 관리한다. 이미 실행한 SQL은 이동·재실행하지 않는다. `common-scheduling`은 `common-event`를 사용하고 반대 방향 의존은 두지 않는다. 기존 공통 응답·인증·Clock·감사를 재사용한다.
 
+`common-scheduling`을 사용하는 서비스는 필요한 설정만 `@Import`한다.
+
+| 필요한 기능 | 등록할 설정 |
+| --- | --- |
+| 서비스 예약 작업의 공통 JDBC 잠금 | `SchedulerLockConfiguration` |
+| 예약 실행 없이 이벤트 기록 정리 호출 | `EventCleanupStorageConfiguration` |
+| 발행 완료 Outbox의 예약 정리 | `OutboxCleanupConfiguration` |
+| 소비 완료 기록의 예약 정리 | `ProcessedEventCleanupConfiguration` |
+
+- 예약 정리 설정은 공통 잠금·저장 설정을 함께 등록한다. 두 정리 설정을 함께 사용해도 공통 구성은 한 번만 등록된다.
+- 잠금 설정만 등록하면 예약 실행은 활성화하지 않는다. 서비스 자체 예약 작업을 사용한다면 서비스가 `@EnableScheduling`을 등록한다.
+- 서비스는 `DataSource`와 같은 DB의 `PlatformTransactionManager`를 제공한다. 고정 Clock을 사용하면 `@Primary`로 우선 선택한다.
+- 기존 `LockProvider`를 유지한 채 공통 잠금 설정을 추가하면 중복 구성을 시작 시점에 거절한다. 기존 설정을 교체한 뒤 등록한다.
+
 ## 3. 보안 체인 연결
 
 서비스의 `SecurityFilterChain`에 공통 인증 필터와 오류 처리기를 연결합니다.
