@@ -64,6 +64,8 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-mysql'
     testRuntimeOnly 'com.mysql:mysql-connector-j'
+    // 수신 스레드의 이벤트 추적 정보와 처리 후 MDC 복원을 검증한다.
+    testRuntimeOnly 'ch.qos.logback:logback-classic'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
