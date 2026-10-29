@@ -17,20 +17,30 @@ import lombok.NoArgsConstructor;
 /**
  * 문제 수정 회차(ERD 4.2.2 problem_revisions, {@code [IMMUTABLE]}). 공개된 회차는 수정하지 않고, 수정은
  * 새 회차 생성으로만 반영한다. 식별·고정은 {@code id}({@code problemRevisionId}), 화면 표시는
- * {@code revisionNumber}를 쓴다. 생성 시각만 있는 불변 테이블이라 {@code BaseTimeEntity}를 상속하지 않고,
- * 기록 시점에 호출자가 시각을 전달한다(공통 모듈 적용 가이드 §2.3 별도 시간 처리).
+ * {@code revisionNumber}를 쓴다. 등록 멱등키·요청 해시·최초 응답 버전은 저장 요청의 중복·충돌을 가려내는 데 쓰인다.
+ * 생성 시각만 있는 불변 테이블이라 {@code BaseTimeEntity}를 상속하지 않고, 기록 시점에 호출자가 시각을 전달한다
+ * (공통 모듈 적용 가이드 §2.3 별도 시간 처리).
  */
 @Getter
 @Entity
 @Table(
     name = "problem_revisions",
-    uniqueConstraints = @UniqueConstraint(
-        name = "uk_problem_revisions_problem_revision_number",
-        columnNames = {
-            "problem_id",
-            "revision_number"
-        }
-    ),
+    uniqueConstraints = {
+        @UniqueConstraint(
+            name = "uk_problem_revisions_problem_revision_number",
+            columnNames = {
+                "problem_id",
+                "revision_number"
+            }
+        ),
+        @UniqueConstraint(
+            name = "uk_problem_revisions_author_idempotency_key",
+            columnNames = {
+                "author_id",
+                "idempotency_key"
+            }
+        )
+    },
     indexes = {
         @Index(
             name = "idx_problem_revisions_difficulty",
@@ -109,6 +119,26 @@ public class ProblemRevision {
     private Long authorId;
 
     @Column(
+        name = "idempotency_key",
+        nullable = false,
+        length = 100
+    )
+    private String idempotencyKey;
+
+    @Column(
+        name = "request_hash",
+        nullable = false,
+        length = 64
+    )
+    private String requestHash;
+
+    @Column(
+        name = "response_row_version",
+        nullable = false
+    )
+    private int responseRowVersion;
+
+    @Column(
         name = "created_at",
         nullable = false
     )
@@ -126,6 +156,9 @@ public class ProblemRevision {
         int wallTimeLimitMs,
         int outputLimitKb,
         Long authorId,
+        String idempotencyKey,
+        String requestHash,
+        int responseRowVersion,
         LocalDateTime createdAt
     ) {
         this.problemId = problemId;
@@ -139,11 +172,16 @@ public class ProblemRevision {
         this.wallTimeLimitMs = wallTimeLimitMs;
         this.outputLimitKb = outputLimitKb;
         this.authorId = authorId;
+        this.idempotencyKey = idempotencyKey;
+        this.requestHash = requestHash;
+        this.responseRowVersion = responseRowVersion;
         this.createdAt = createdAt;
     }
 
     /**
      * 새 문제 수정 회차 1건을 기록한다. 공개된 회차의 수정은 이 팩토리로 새 회차를 만드는 방식으로만 반영한다(ERD 4.2.2).
+     * {@code idempotencyKey}·{@code requestHash}는 등록 요청의 중복·충돌을 가려내는 값이고,
+     * {@code responseRowVersion}은 이 요청에 응답한 최초 문제 버전을 보존한다.
      */
     public static ProblemRevision create(
         Long problemId,
@@ -157,6 +195,9 @@ public class ProblemRevision {
         int wallTimeLimitMs,
         int outputLimitKb,
         Long authorId,
+        String idempotencyKey,
+        String requestHash,
+        int responseRowVersion,
         LocalDateTime createdAt
     ) {
         return new ProblemRevision(
@@ -171,6 +212,9 @@ public class ProblemRevision {
             wallTimeLimitMs,
             outputLimitKb,
             authorId,
+            idempotencyKey,
+            requestHash,
+            responseRowVersion,
             createdAt
         );
     }

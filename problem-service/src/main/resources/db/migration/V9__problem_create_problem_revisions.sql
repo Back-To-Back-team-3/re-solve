@@ -11,11 +11,15 @@ CREATE TABLE problem_revisions (
     wall_time_limit_ms INT NOT NULL COMMENT 'CPU 제한 + 공통 여유값을 적용한 최종 wall time 제한(ms)',
     output_limit_kb INT NOT NULL COMMENT '테스트별 반환 JSON 크기 제한(KiB); 허용 범위 1~256, 기본 64',
     author_id BIGINT NOT NULL COMMENT '회차 작성 관리자; members.id 외부 참조, FK 없음',
+    idempotency_key VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL COMMENT '최초·새 회차 등록의 멱등키',
+    request_hash CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL COMMENT '요청 종류·대상 문제·원래 본문·row_version의 정규화 해시',
+    response_row_version INT NOT NULL COMMENT '최초 201 응답의 문제 버전; 이후 문제 버전 증가와 무관하게 보존',
     created_at DATETIME(6) NOT NULL COMMENT '회차 생성 시각',
     PRIMARY KEY (id),
     CONSTRAINT fk_problem_revisions_problem FOREIGN KEY (problem_id) REFERENCES problems (id),
     CONSTRAINT fk_problem_revisions_body_asset FOREIGN KEY (body_asset_id) REFERENCES problem_body_assets (id),
     CONSTRAINT uk_problem_revisions_problem_revision_number UNIQUE (problem_id, revision_number),
+    CONSTRAINT uk_problem_revisions_author_idempotency_key UNIQUE (author_id, idempotency_key),
     INDEX idx_problem_revisions_difficulty (difficulty)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     COMMENT='공개된 회차는 수정하지 않는 불변 문제 수정 회차를 관리한다';
