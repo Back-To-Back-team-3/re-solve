@@ -157,6 +157,13 @@ class ProblemServiceApplicationTest {
                     Integer.class
                 )
         ).isEqualTo(30);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(DISTINCT problem_id) FROM problem_revisions WHERE revision_number = 1",
+                    Integer.class
+                )
+        ).isEqualTo(30);
     }
 
     @Test
