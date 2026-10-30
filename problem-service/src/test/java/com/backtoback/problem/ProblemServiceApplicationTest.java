@@ -133,6 +133,33 @@ class ProblemServiceApplicationTest {
     }
 
     @Test
+    @DisplayName("시드 태그·문제·회차·본문 자산이 예상한 건수로 적용된다")
+    void seedDataIsAppliedWithExpectedCounts() {
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tags", Integer.class)).isEqualTo(10);
+        assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT display_order) FROM tags", Integer.class)).isEqualTo(10);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM problems WHERE scope = 'GENERAL' AND visibility = 'PUBLIC'",
+                    Integer.class
+                )
+        ).isEqualTo(30);
+        assertThat(
+            jdbc.queryForObject("SELECT COUNT(*) FROM problem_body_assets WHERE status = 'LINKED'", Integer.class)
+        ).isEqualTo(30);
+        assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT function_spec) FROM problem_revisions", Integer.class))
+            .isEqualTo(30);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM problem_revisions r " + "JOIN problems p ON r.problem_id = p.id "
+                        + "JOIN problem_body_assets a ON r.body_asset_id = a.id AND a.problem_id = p.id",
+                    Integer.class
+                )
+        ).isEqualTo(30);
+    }
+
+    @Test
     @DisplayName("설정된 S3 클라이언트로 LocalStack 객체를 저장하고 조회한다")
     void configuredS3ClientCanWriteAndReadLocalStack() {
         // given
