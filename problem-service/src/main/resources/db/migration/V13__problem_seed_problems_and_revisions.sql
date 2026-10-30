@@ -1,4 +1,4 @@
--- 시드 문제 30개(제목·난이도·function_spec)는 .personal/D-2_problem-seed/seed-problem/seed-problems-v1.md를 그대로 옮겼다.
+-- 시드 문제 30개(제목·난이도·function_spec)는 개인 시드 문서의 내용을 그대로 옮겼다.
 -- 검증(problem_validations) 파이프라인이 아직 없어 정상 상태 전이 없이 visibility를 바로 PUBLIC으로 지정한다(그릴링 Q1).
 -- problem_revision_tags(회차-태그 연결)는 T2-03 범위로 남겨 이번 시드에서는 만들지 않는다(그릴링 Q2).
 
