@@ -1736,7 +1736,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `problem_id` | BIGINT | Y | 문제 ID (외부 참조) |
 | `language` | VARCHAR(30) | Y | 언어: JAVA / PYTHON / CPP. B 어댑터에서 java / python3 / cpp로 매핑 |
 | `source_code` | MEDIUMTEXT | Y | 작성 중 코드 |
-| `seq` | BIGINT | Y | 문제별 클라이언트 순번. `WHERE seq < :incomingSeq` 조건부 UPDATE |
+| `seq` | BIGINT | Y | 참가자·문제의 전체 언어 공통 클라이언트 순번. 참가자 잠금 아래 전체 언어 최대 `seq`보다 클 때만 해당 언어 Draft 저장 (§6.4.1) |
 | `saved_at` | DATETIME(6) | Y | 서버 접수 시각. `<= personal_ends_at` |
 | `version` | BIGINT | Y | 낙관적 락 |
 | `created_at` | DATETIME(6) | Y | 생성 시각 |
@@ -2789,7 +2789,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 참가 중복 | 생성 컬럼 `active_member_id`와 `uk_exam_participants_exam_active_member`로 보장 | — |
 | 참가 자격 | `study_membership_replicas.is_active = true` | — |
 | 마감 판정 | 상태가 아니라 서버 시각 `<= personal_ends_at` 비교 | `[시험 제출 유효성]` |
-| Draft 역전 방지 | `WHERE seq < :incomingSeq` 조건부 UPDATE | `[Draft]` |
+| Draft 역전 방지 | 참가자 잠금 아래 문제별 전체 언어 최대 `seq`와 비교. 큰 순번만 해당 언어 Draft에 반영하고 DB 커밋 후 응답 (§6.4.1) | `[Draft]` |
 | 자동·수동 제출 중복 | `uk_exam_submissions_participant_problem_seq`, 위반은 "이미 제출됨" 처리 | `[시험 제출 유효성]` |
 | 제출 접수 원자성 | Draft·`exam_submissions`·Outbox를 한 트랜잭션에 저장 | — |
 | 채점 결과 역전 방지 | `exam_submissions.judge_attempt` 비교 | — |
@@ -2822,13 +2822,13 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 연결 검증 | 참가자·문제·고정 회차 연결이 틀리면 결과를 반영하지 않고 DLQ로 격리한다. | — |
 | 마지막 유효 제출 | 시험의 마지막 유효 제출은 received_at → draft_seq → id 내림차순으로 정한다. 그 제출이 미종결이면 점수는 미산정으로 표시하고 이전 제출을 확정 점수처럼 대체하지 않는다. | — |
 | 시험 점수 | 시험 점수는 FLOOR(배점 × passed_count / total_count × 100) / 100이다. total_count > 0, 0 <= passed_count <= total_count를 검증한다. CE는 0점이다. | — |
-| 확정 조건 | FINALIZED 전이는 CLOSED/ENDED, 시험 자동 제출 완료, 미종결 제출 0건을 함께 확인한다. 시험 FAILED는 is_zero_confirmed=true, 대회 FAILED는 is_void_confirmed=true일 때만 종결로 인정한다. 관리자 사유·집행자·전후 값을 감사 로그에 기록한다. | — |
+| 확정 조건 | FINALIZED 전이는 CLOSED/ENDED, 시험 활성 참가자의 FINISHED/ABSENT·실제 입장자의 자동 제출 완료, 미종결 제출 0건·미확인 원격 관리자 작업 0건을 함께 확인한다. JUDGED는 종결이며 시험 FAILED는 is_zero_confirmed=true, 대회 FAILED는 is_void_confirmed=true일 때만 종결로 인정한다. 관리자 사유·집행자·전후 값을 감사 로그에 기록한다. | — |
 | 순위 참여 대상 | 유효 접수 제출(자동 제출 포함)이 1건 이상인 활성 참가자만 is_ranked=true다. 취소 이력·ABSENT·제출 0건 참가자는 final_rank=NULL이다. | — |
 | 동점과 순위 | 시험은 총점 내림차순·last_valid_submitted_at 오름차순, 대회는 solved_count 내림차순·penalty_minutes 오름차순·last_accepted_at 오름차순이다. 모든 기준이 같으면 공동 순위(1,1,3)다. member_id는 화면 정렬의 안정성에만 쓰고 동점 판정을 바꾸지 않는다. | — |
 | ICPC 집계 | 대회는 received_at·id 순으로 최초 AC를 정한다. 그 이전 WA/TLE/MLE/RE만 오답 횟수에 포함하고 CE·SYSTEM_ERROR·AC 이후 제출은 제외한다. 분은 FLOOR((received_at - starts_at) / 60초)다. | — |
 | Redis 정렬 | Redis에는 전원 score=0인 ZSET의 고정폭 lex 정렬 키를 쓴다. solved 내림차순·penalty 오름차순·lastAcceptedAt 오름차순·memberId 순을 코드화하고 범위 초과는 Redis 갱신을 중단해 DB로 조회한다. 부동소수 합성 점수를 사용하지 않는다. | — |
 | 캐시·SSE 복구 | Redis 갱신과 SSE는 DB 커밋 이후 실행한다. 실패해도 DB를 롤백하지 않고 같거나 더 큰 resultRevision의 최신 DB 결과로 재구성한다. | — |
-| 확정 스냅샷 | 최초 확정·재확정은 result_revision 증가, result_snapshots 저장, ExamFinalized/ContestFinalized Outbox 기록을 같은 트랜잭션으로 수행한다. 재확정은 FINALIZED를 유지하고 기존 스냅샷을 덮어쓰지 않는다. FINALIZED 뒤 새 채점·실패 재처리는 금지하며 재확정은 기존 유효 기록 재집계만 수행한다. 스냅샷 payload_json에 참가자·문제별 유효 submissionCount, firstSubmittedAt, firstAcceptedAt, timeToFirstAcceptedMs를 포함한다. AUTO는 유효 접수로 포함하고 관리자 무효는 제외한다. 첫 AC·소요 시간은 AC 없으면 null이다. 분석(P3)의 문제 정답률은 유효 접수 참가자 중 AC 참가자의 비율이며 미제출자는 분모에서 제외한다. | — |
+| 확정 스냅샷 | 최초 확정·재확정은 result_revision 증가, result_snapshots 저장, ExamFinalized/ContestFinalized Outbox 기록을 같은 트랜잭션으로 수행한다. 재확정은 FINALIZED를 유지하고 기존 스냅샷을 덮어쓰지 않는다. FINALIZED 뒤 새 채점·실패 재처리는 금지하며 재확정은 기존 유효 기록 재집계만 수행한다. 스냅샷 `payload`에 참가자·문제별 유효 submissionCount, firstSubmittedAt, firstAcceptedAt, timeToFirstAcceptedMs를 포함한다. AUTO는 유효 접수로 포함하고 관리자 무효는 제외한다. 첫 AC·소요 시간은 AC 없으면 null이다. 분석(P3)의 문제 정답률은 유효 접수 참가자 중 AC 참가자의 비율이며 미제출자는 분모에서 제외한다. | — |
 
 #### 6.4.3 서비스 간 연결
 

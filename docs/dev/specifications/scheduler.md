@@ -392,7 +392,7 @@
 > 작성: 담당 C · 서비스: `contest-service`
 > 
 
-**검토 메모 (v1.0 통합):** API §4·부록 B와 대조해 불일치가 없어 본문은 작성본을 유지했다. 이벤트명·필드는 이벤트 계약서 C1~C15, 결과 소비 조건은 J2·J3을 따른다. ERD 미반영 테이블(`result_snapshots`, `contest_admin_operations`, `contest_resource_guards`, `contest_participant_histories`)은 ERD 역반영 대상이다(API 부록 D).
+이벤트명·필드는 이벤트 계약서 C1~C15, 결과 소비 조건은 J2·J3을 따른다. 확정 스냅샷·관리자 작업·자원 가드·참가 이력의 저장 구조는 ERD §4.4를 따른다.
 
 - `ExamLifecycleScheduler` — 5초 주기, 시험 시작·종료
 - `ExamAutoSubmissionScheduler` — 5초 주기, 개인 마감 Draft 자동 제출
@@ -658,7 +658,7 @@
 
 **동작:**
 
-1. EXAM_RETRY는 같은 operationId·expectedJudgeAttempt로 B 계약(3.3.6)을 재요청하고 접수 상태를 대사한다. 응답 유실로 새 operationId를 만들지 않는다.
+1. EXAM_RETRY는 같은 operationId·expectedJudgeAttempt로 B 계약(API §3.3.7)을 재요청하고 접수 상태를 대사한다. 응답 유실로 새 operationId를 만들지 않는다.
 2. 성공 목표를 targetJudgeAttempt에 저장한다. 마지막 반영 judge_attempt보다 큰 목표일 때만 REQUESTED·is_zero_confirmed=false로 전이하고 judge_attempt는 유지한다. 이미 목표 이상 결과가 반영됐으면 상태·판정을 보존한다.
 3. 확인된 작업 SUCCEEDED·감사 로그를 함께 저장한다. B가 동일 작업 미실행 실패를 확정하면 FAILED·마지막 오류로 종결한다. 타임아웃·5xx·조회 실패는 미실행 증거가 아니다.
 4. CONTEST_CREATE는 같은 대회·고정 회차·선택 버전·설정 관리자로 미확인 B 연결을 재요청한다. 전체 확인은 SUCCEEDED, 확정 거절·미완료 상태의 시작 시각 경과는 대회 CANCELED·FAILED·감사·취소 Outbox로 함께 종결한다. 해당 작업 SUCCEEDED 전에는 대회를 노출·참가·시작시키지 않는다.
@@ -701,7 +701,7 @@
 1. ID 순으로 한 바퀴 대조한다. 실행 한도에 도달하면 다음 회차는 마지막 ID 다음부터 이어가며 한 바퀴 후 처음으로 돌아간다.
 2. 같은 result_revision 결과를 일관된 읽기로 확보한다. 생성 중 DB 버전이 바뀌면 폐기하고 최신 버전으로 재선정한다.
 3. 대회 ZSET score는 모두 0. lex 키는 (20-solvedCount) 2자리, 패널티 분 20자리, 마지막 AC UTC epoch 마이크로초 20자리, memberId 20자리를 콜론으로 연결하고 0으로 왼쪽 패딩한다. 미해결자의 마지막 AC는 최대값이다.
-4. 공동 순위는 memberId를 제외한 앞 세 값으로 판정한다. 부동소수 합성 score는 사용하지 않는다(정책 §6 합성 점수 초안 대체, 역반영 필요). 값 상한 초과는 캐시 오류·DB 조회로 처리한다.
+4. 공동 순위는 memberId를 제외한 앞 세 값으로 판정한다. 정책 §6·DB §6.4.2에 따라 부동소수 합성 score는 사용하지 않는다. 값 상한 초과는 캐시 오류·DB 조회로 처리한다.
 5. 새 버전 키 전체 생성 후 Lua로 작은 버전 교체를 거절하고 포인터·버전을 원자 교체한다. 같은 버전 재구성은 동일 결과만 만들며 이전 키는 교체 성공 후 삭제한다.
 6. API는 캐시 없음·버전 불일치 때 DB를 조회한다. 시험 점수 캐시도 같은 검증을 적용한다. SSE 재연결은 현재 DB 버전을 안내하며 전송 성공을 결과 저장 성공으로 간주하지 않는다.
 
