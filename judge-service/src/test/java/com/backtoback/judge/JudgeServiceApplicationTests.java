@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.Map;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -88,9 +89,10 @@ class JudgeServiceApplicationTests {
      * Judge 전용 DB 연결과 Flyway 마이그레이션 적용 결과를 검증한다.
      */
     @Test
+    @DisplayName("Judge 전용 DB에 연결하고 최신 마이그레이션을 적용한다")
     void applicationConnectsToJudgeDatabaseAndAppliesMigrations() {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("judge_db");
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM setup_probe", Integer.class)).isZero();
     }
 

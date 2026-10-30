@@ -1,0 +1,48 @@
+CREATE TABLE submissions (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    member_id BIGINT NOT NULL COMMENT 'members.id external reference',
+    problem_id BIGINT NOT NULL COMMENT 'problem.problems.id external reference',
+    problem_revision_id BIGINT NOT NULL COMMENT 'problem.problem_revisions.id',
+    context VARCHAR(30) NOT NULL,
+    context_id BIGINT NULL,
+    source_submission_id BIGINT NULL,
+    idempotency_key VARCHAR(100) COLLATE utf8mb4_0900_bin NULL,
+    request_hash CHAR(64) COLLATE utf8mb4_0900_bin NULL,
+    language VARCHAR(30) COLLATE utf8mb4_0900_bin NOT NULL,
+    runtime_id BIGINT NULL,
+    source_code MEDIUMTEXT NOT NULL,
+    code_size_bytes INT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    verdict VARCHAR(30) NULL,
+    judge_attempt INT NOT NULL,
+    passed_count INT NULL,
+    total_count INT NULL,
+    max_time_ms INT NULL,
+    max_memory_kb INT NULL,
+    compile_message MEDIUMTEXT NULL,
+    submitted_at DATETIME(6) NOT NULL,
+    judged_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_submissions_runtime FOREIGN KEY (runtime_id) REFERENCES execution_runtimes(id),
+    CONSTRAINT uk_submissions_member_idempotency_key UNIQUE (member_id, idempotency_key),
+    CONSTRAINT uk_submissions_context_source_submission UNIQUE (context, source_submission_id),
+    CONSTRAINT chk_submissions_context CHECK (context IN ('PRACTICE', 'EXAM', 'CONTEST', 'DIAGNOSIS')),
+    CONSTRAINT chk_submissions_status CHECK (status IN ('QUEUED', 'JUDGING', 'RETRY_WAITING', 'COMPLETED', 'FAILED')),
+    CONSTRAINT chk_submissions_verdict CHECK (verdict IS NULL OR verdict IN ('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE')),
+    CONSTRAINT chk_submissions_completed CHECK ((status = 'COMPLETED') = (verdict IS NOT NULL)),
+    CONSTRAINT chk_submissions_language CHECK (language IN ('java', 'python3', 'cpp')),
+    CONSTRAINT chk_submissions_attempt CHECK (judge_attempt >= 1),
+    CONSTRAINT chk_submissions_code_size CHECK (code_size_bytes BETWEEN 1 AND 65536
+        AND code_size_bytes = OCTET_LENGTH(source_code)),
+    CONSTRAINT chk_submissions_context_keys CHECK (
+        (context = 'PRACTICE' AND context_id IS NULL AND source_submission_id IS NULL
+            AND idempotency_key IS NOT NULL AND request_hash IS NOT NULL)
+        OR (context <> 'PRACTICE' AND context_id IS NOT NULL AND source_submission_id IS NOT NULL
+            AND idempotency_key IS NULL AND request_hash IS NULL)),
+    INDEX idx_submissions_runtime_id (runtime_id),
+    INDEX idx_submissions_member_created_at (member_id, created_at),
+    INDEX idx_submissions_member_problem_created_at (member_id, problem_id, created_at),
+    INDEX idx_submissions_status_updated_at (status, updated_at),
+    INDEX idx_submissions_context_member_verdict (context, member_id, verdict)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
