@@ -265,7 +265,7 @@
 > 작성: 담당 B · 서비스: `judge-service`
 > 
 - `JudgeJobExecutor` — 1초(유휴 시 최대 5초), `judge_jobs` 선점·실행 (워커)
-- `JudgeLeaseRecoveryScheduler` — 30초, 임대 만료·`RUNNING` 10분 초과 회수
+- `JudgeLeaseRecoveryScheduler` — 30초, 전체 처리 기한 초과 종결·임대 만료·`RUNNING` 10분 초과 회수
 - `JudgeTokenRecoveryScheduler` — 30초, Judge0 token 응답 유실(`UNKNOWN`) 복구
 - `JudgeReconciliationScheduler` — 5분, `submissions` ↔ `judge_jobs` 상태 대사
 - `RunLockReconciliationScheduler` — 1분, 비정상 종료된 `run:{memberId}` 락 해제
@@ -287,10 +287,10 @@
 | --- | --- |
 | 소유 서비스·패키지 | `judge-service` / `executor` |
 | 실행 방식 | 폴링 루프. 대상 있으면 1초, 없으면 1→2→5초 백오프 (정책 §2.1) |
-| 잠금 | ShedLock 없음. `SELECT … WHERE status IN ('PENDING','RETRY_WAITING') AND next_run_at <= now() ORDER BY next_run_at LIMIT :slots FOR UPDATE SKIP LOCKED` |
+| 잠금 | ShedLock 없음. `SELECT … WHERE status IN ('PENDING','RETRY_WAITING') AND next_run_at <= now() AND deadline_at > now() ORDER BY next_run_at LIMIT :slots FOR UPDATE SKIP LOCKED` |
 | 동시 처리 | 인스턴스당 `slots` = 2 (부하 측정에서 2 → 4 → 8 비교, 정책 §11) |
-| 트랜잭션 경계 | ① 선점 Tx: `RUNNING`·`lease_token` 신규·`lease_until = now + 120초`·`try_count`는 그대로, 제출 `JUDGING` ② Tx 밖: 채점 데이터 조회·Judge0 실행·폴링 ③ 결과 Tx: 조건부 UPDATE + 제출 반영 + Outbox |
-| 임대 연장 | 실행 중 30초마다 `UPDATE … SET lease_until = now + 120초 WHERE id = :id AND status = 'RUNNING' AND lease_token = :token`. 0행이면 즉시 실행 중단 |
+| 트랜잭션 경계 | ① 선점 Tx: `RUNNING`·`lease_token` 신규·`lease_until = now + 120초`·`try_count`는 그대로, 제출 `JUDGING` ② Tx 밖: 채점 데이터 조회·Judge0 실행·폴링 ③ 결과 Tx: 상태·임대 토큰·처리 기한 조건부 UPDATE + 제출 반영 + Outbox |
+| 임대 연장 | 실행 중 30초마다 `UPDATE … SET lease_until = now + 120초 WHERE id = :id AND status = 'RUNNING' AND lease_token = :token AND deadline_at > :now`. 0행이면 즉시 실행 중단 |
 | 상태 전이 | 성공: 작업 `SUCCEEDED`, 제출 `COMPLETED`(+판정). `SYSTEM_ERROR`: `try_count + 1`, `RETRY_WAITING`·`next_run_at = now + 10초/30초`, 제출 `QUEUED`. `try_count > 3`: 작업·제출 `FAILED` |
 | 발행 이벤트 | 문맥별 `SubmissionJudged` / `ExamSubmissionJudged` / `ContestSubmissionJudged`(+진단 확정 필요), 실패 시 `SubmissionFailed` |
 | 지표 | 대기→선점 p95(평시 ≤ 10초, 마감 폭주 ≤ 60초), 실행 시간, 시도 결과별 건수 |
@@ -299,8 +299,8 @@
 
 1. 선점 후 `judge_job_runs`에 시도 1행을 만들고 고정 회차 채점 데이터(2.6.2)를 조회한다. 조회 실패는 `SYSTEM_ERROR` 처리.
 2. 테스트별로 `judge_test_results.token_status`를 보고 `NOT_CREATED`면 Judge0 실행 생성, `CREATED`면 기존 token으로 폴링만 한다(조회 실패로 새 실행 생성 금지, T2-09-03). 생성 응답이 유실되면 `UNKNOWN`으로 기록하고 3.3이 복구한다.
-3. 전체 테스트 종결 후 판정 정규화(MLE 메모리 보정 포함) → 결과 Tx에서 `WHERE status = 'RUNNING' AND lease_token = :token`으로 저장. 0행이면 결과를 버린다.
-4. Judge0 서킷이 열리면 새 선점을 멈춘다(정책 §3.4). 실행 중 작업은 임대 만료로 회수되도록 둔다.
+3. 전체 테스트 종결 후 판정 정규화(MLE 메모리 보정 포함) → 결과 Tx에서 `WHERE status = 'RUNNING' AND lease_token = :token AND deadline_at > :now`로 저장. 0행이면 결과를 버린다. 실행 생성·폴링을 시작하기 전에도 기한을 확인하며, 기한이 지났으면 추가 호출을 중단하고 3.2의 실패 종결 대상으로 둔다.
+4. Judge0 서킷이 열리면 새 선점을 멈춘다(정책 §3.4). 실행 중 작업은 임대 만료로 회수되도록 둔다. 3.2의 기한 초과 작업 종결은 서킷 상태나 선점 중단과 무관하게 계속 수행한다.
 
 **동시성 설계 포인트:**
 
@@ -316,25 +316,31 @@
 | 관리자 재채점 | 회차 실행 중 재채점 요청 | `SUBMISSION_JUDGING_IN_PROGRESS`(409) | 미종결 회차 확인 |
 | 관리자 작업 복구 API | 같은 작업 동시 처리 | 먼저 커밋한 쪽만 | 상태 조건부 UPDATE |
 
-**재기동·지연 시:** 메모리 큐가 없으므로 재기동 후 DB 조건으로 다시 선점한다. 실행 중이던 작업은 3.2가 회수한다(정책 §11 "10분 내 종결 경로 복귀").
+**재기동·지연 시:** 메모리 큐가 없으므로 재기동 후 DB 조건으로 다시 선점한다. 기한이 지난 대기 작업은 선점하지 않으며 3.2가 종결한다. 실행 중이던 작업도 3.2가 회수한다. 서비스·DB 중단 중에는 상태를 갱신할 수 없으므로 기한은 연장하지 않고 복구 후 3.2에서 처리한다(정책 §11 "10분 내 종결 경로 복귀").
 
 **명세서와의 관계:** 정책 §3.2·§3.4 / 기획서 T2-06·T2-09 / ERD 4.3.2~4.3.4, 6.3
 
-### 3.2 `JudgeLeaseRecoveryScheduler` — 임대 만료·장시간 작업 회수
+### 3.2 `JudgeLeaseRecoveryScheduler` — 기한 초과 종결·임대 만료·장시간 작업 회수
 
 | 항목 | 값 |
 | --- | --- |
 | 실행 방식 | `fixedDelay = 30초` |
 | 잠금 | ShedLock `JudgeLeaseRecoveryScheduler`, `lockAtMostFor = 25초` |
-| 대상 조회 | ① `status = 'RUNNING' AND lease_until < now()` ② `status = 'RUNNING' AND started_at < now() - 10분` (`deadline_at` 초과 포함) / `idx_judge_jobs_status_lease_until` |
-| 상태 전이 | `RUNNING → RETRY_WAITING`(`try_count + 1`, `lease_token = NULL`, `judge_job_runs.result = LEASE_EXPIRED`), 제출 `QUEUED`. `try_count > 3` 또는 `deadline_at` 경과면 `FAILED` + `SubmissionFailed` |
-- 회수 UPDATE는 `WHERE id = :id AND status = 'RUNNING' AND lease_token = :observedToken`. 그사이 결과가 저장됐거나 연장됐으면 0행으로 건너뛴다.
-- 회수도 `try_count`에 포함한다(정책 §3.4). 종결된 회차는 되살리지 않는다(T2-09-04).
+| 대상 조회 | ① `status IN ('PENDING','RETRY_WAITING','RUNNING') AND deadline_at <= :now` ② 기한 내 `RUNNING` 중 `lease_until < :now` 또는 `started_at < :now - 10분`. 기한 초과 조회는 `next_run_at`과 무관하며, 임대 조회는 `idx_judge_jobs_status_lease_until`을 사용한다. |
+| 상태 전이 | 기한 초과는 원래 상태에서 `FAILED`로 직접 종결한다. 기한 내 임대 만료·장시간 실행 회수는 `RUNNING → RETRY_WAITING`(`try_count + 1`, 실행 시도 `LEASE_EXPIRED`), 제출 `QUEUED`. `try_count > 3`이면 `FAILED`로 종결한다. |
+| 실패 반영 | 작업의 `finished_at`을 기록하고 `lease_token`·`lease_until`을 해제한다. 최신 채점 회차와 일치하는 제출을 `FAILED`로 전이하고 같은 트랜잭션에서 `SubmissionFailed` Outbox를 기록한다. WA 등 사용자 판정으로 바꾸지 않는다. |
+
+- 대상 1건당 별도 트랜잭션에서 현재 상태와 기한을 재검증한다. `SUCCEEDED`·`FAILED`는 처리하지 않으며 정상 결과와 실패 이벤트를 중복 반영하지 않는다.
+- 기한 초과 대기 작업은 `WHERE id = :id AND status = :observedStatus AND deadline_at <= :now`로 종결한다. 실행 시도 이력을 새로 만들거나 `try_count`를 늘리지 않는다. 실행기와 경합해 상태가 바뀌면 이번 갱신은 0행으로 건너뛰고 다음 회차에서 재조회한다.
+- 기한 초과 `RUNNING` 작업은 상태·관측한 `lease_token`·`deadline_at <= :now` 조건으로 종결한다. 미종결 실행 시도는 `SYSTEM_ERROR`로 마무리하며, 늦은 실행 결과는 상태·토큰·기한 조건에 의해 폐기한다.
+- 기한 내 임대 회수 UPDATE는 상태·관측한 `lease_token` 외에 임대 만료 또는 장시간 실행 조건도 다시 확인한다. 그사이 결과가 저장됐거나 해당 회수 조건이 해소됐으면 0행으로 건너뛴다. 이 회수는 기존대로 `try_count`에 포함한다(정책 §3.4).
+- 기한 초과 종결은 Judge0 서킷이 열려 있어도 수행한다. 상태 변경은 30초 주기의 회차별 처리량 범위에서 처리하므로 정확히 기한 시각에 완료됨을 보장하지 않는다. 서비스·DB 중단 중에는 기한을 연장하지 않고 복구 후 다시 조회해 종결한다. 종결된 회차는 되살리지 않는다(T2-09-04).
 
 | 경합 상대 | 상황 | 결과 | 근거 |
 | --- | --- | --- | --- |
 | 실행기 결과 저장 | 회수와 결과 저장 동시 | 먼저 커밋한 쪽 | 둘 다 `lease_token` 조건 |
 | 실행기 임대 연장 | 연장 직전 회수 | 회수 성공 시 연장 0행 → 실행기 중단 | 동일 |
+| 실행기 선점 | 기한 초과 대기 작업의 선점·종결 경합 | 기한이 지난 작업은 선점하지 않음. 종결은 관측 상태 조건으로 한 번만 반영 | `deadline_at`·상태 조건 |
 
 ### 3.3 `JudgeTokenRecoveryScheduler` — Judge0 응답 유실 복구
 

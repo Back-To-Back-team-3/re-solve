@@ -39,6 +39,7 @@
 | 채점 작업 임대 | 120초 | 실행기가 작업을 점유하는 시간 | 최대 채점 시간보다 길게 |
 | 임대 연장 주기 | 30초 | 실행 중 `lease_until` 갱신 주기 | `lease_token` 일치 조건 |
 | 임대 만료 회수 주기 | 30초 | 만료된 작업을 되돌리는 스케줄러 주기 | 실행기 비정상 종료 대응 |
+| 일반 제출 채점 작업 전체 처리 기한 | 접수 저장 기준 시각 + 10분 | 저장 트랜잭션에서 확정한 기준 시각부터 대기열 체류·실행·재시도를 포함한다. 동일 작업의 멱등 재요청·선점·재시도는 기한을 연장하지 않음. 기한 이후 새 실행·재시도와 정상 결과 반영은 허용하지 않으며 종결 처리는 스케줄러 §3.1·§3.2를 따름 | 일반 제출의 실행 허용 기한 |
 | 장시간 채점 작업 회수 | `RUNNING` 10분 초과 | 멈춘 작업 판정 기준 | 최대 채점 시간 대비 충분한 여유 |
 | 채점 상태 대사 주기 | 5분 | 제출 상태와 작업 상태 불일치 점검 | §10 대응표 기준 |
 | Outbox Relay 주기 | 1초 | 미발행 이벤트 발행 주기 | 반영 지연 최소화 |
@@ -77,8 +78,8 @@ submission.judge_attempt       = 채점 회차, 재채점마다 +1 (감소 불�
 
 [채점 작업]
 (submission_id, judge_attempt)  = judge_jobs 유일
-선점 조건: status = PENDING | RETRY_WAITING  AND  next_run_at <= now
-결과 저장 조건: job.status = RUNNING  AND  lease_token = :token
+선점 조건: status IN (PENDING, RETRY_WAITING)  AND  next_run_at <= now  AND  deadline_at > now
+결과 저장 조건: job.status = RUNNING  AND  lease_token = :token  AND  deadline_at > now
 try_count <= 3   (초과 시 submissions.FAILED)
 
 [채점 메시지 — EXAM·CONTEST]
@@ -198,10 +199,16 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | --- | --- |
 | 실행 방식 | 제출이 고정한 문제 수정 회차의 테스트케이스를 독립적으로 Judge0에 실행 요청한다. |
 | 실행 데이터 | 고정 `problemRevisionId`의 함수 명세·실행 제한·전체 테스트 파일 참조를 조회하고, Judge가 비공개 S3에서 입력·기대값을 읽는다. 최초 실행과 재시도는 같은 조회 모듈을 사용하며 제출 가능 여부를 다시 검사하지 않는다. |
-| 실행 환경 확정 | 최초 Judge0 실행 생성 요청 전에 선택한 실행 환경 스냅샷과 제출의 `runtime_id` 연결을 한 트랜잭션에서 저장한다. 동시에 여러 실행기가 처리해도 미확정 제출에는 한 번만 연결하며, 이후에는 이미 확정한 환경을 사용한다. 저장 구조는 [ERD > 4.3.1 제출](../specifications/erd.md#431-제출-submissions)과 [4.3.5 실행 환경](../specifications/erd.md#435-실행-환경-execution_runtimes)을 따른다. |
+| 실행 환경 확정 | 신규 일반 제출은 접수 완료 전에, 그 외 문맥은 최초 Judge0 실행 생성 요청 전에 고정 회차·언어의 통과 프로필에서 `runtimeKey`로 복원한 실행 환경 스냅샷을 확정한다. 제출의 `runtime_id` 연결을 한 트랜잭션에서 한 번만 저장하며, 동시에 여러 실행기가 처리해도 이미 확정한 환경을 변경하지 않는다. 저장 구조는 [ERD > 4.3.1 제출](../specifications/erd.md#431-제출-submissions)과 [4.3.5 실행 환경](../specifications/erd.md#435-실행-환경-execution_runtimes)을 따른다. |
 | 실행 환경 공유 | `language`·`judge0_language_id`·`runtime_name`·`runtime_version`·`compiler_options` 전체 속성을 SHA-256으로 식별하고 `snapshot_hash` UNIQUE 제약으로 동시 중복 저장을 막는다. 해시가 같아도 원본 속성을 모두 비교하며 불일치하면 재사용하지 않는다. 같은 환경은 기존 스냅샷을 사용하고, 속성이 달라지면 기존 행을 수정하지 않고 새 스냅샷을 만든다. |
 | 실행 환경 해시 형식 | 버전 바이트 `1` 뒤에 언어·Judge0 환경 ID·이름·버전·컴파일 옵션 순으로 기록한다. ID는 32비트 빅엔디언 정수이고, 문자열은 UTF-8 바이트 길이를 32비트 빅엔디언 정수로 기록한 뒤 원문 바이트를 붙인다. NULL은 길이 `-1`, 빈 문자열은 길이 `0`으로 구분한다. 이 바이트열의 SHA-256을 소문자 16진수 64자로 저장한다. |
-| 고정 환경 재사용 | 확정한 실행 환경을 같은 제출의 모든 테스트·시스템 오류 재시도·관리자 재채점에 재사용한다. 고정 환경을 더 이상 사용할 수 없으면 다른 버전으로 자동 대체하지 않으며, 기존 Judge0 클라이언트의 실행 환경 가용성 검증과 오류 처리를 따른다. |
+| 외부 실행 환경 식별자 | `runtimeKey`는 `execution_runtimes.snapshot_hash`에 대응하는 소문자 16진수 64자다. Judge가 발급·해석하고 Problem은 통과 검증에서 받은 값을 그대로 보관·반환한다. Judge는 해당 스냅샷을 조회해 언어·Judge0 ID·이름·버전·컴파일 옵션을 복원한다. 키 자체에서 속성을 역산하거나 Judge0 ID·최신 환경으로 치환하지 않는다. 외부에 발행한 키의 의미와 해시 형식은 변경하지 않는다. |
+| 생성기 정보 | `runnerVersion`은 관리자 코드 검증에 사용한 생성기 구현의 참고 식별 정보다. Judge가 기록하고 Problem은 통과 결과의 값을 그대로 보관·반환한다. 런타임 버전과 구분하며 실행 환경 해시에는 포함하지 않는다. 언어별 현재 생성기 하나를 사용하고 이전 버전 선택은 제공하지 않는다. 반환된 식별자가 현재 구현과 다르다는 이유만으로 일반 제출을 거절하지 않는다. |
+| 검증 프로필 발행 | 관리자 코드 검증은 실제 사용한 런타임 스냅샷의 `runtimeKey`와 생성기 참고 정보인 `runnerVersion`을 통과 결과 Outbox에 기록한다. Problem은 회차·언어·검증 요청을 대조해 이를 보관하고 통과 프로필로 반환한다. |
+| 제출 프로필 확인 | 유효한 동일 멱등 요청은 환경을 재선택하지 않고 원래 응답을 반환한다. 신규 일반 제출은 요청 회차·언어의 통과 프로필에서 키로 실행 환경을 복원하고 언어·Judge0 가용성을 검사한다. 외부 조회는 저장 트랜잭션 밖에서 수행하고 제출·작업·초기 결과와 `runtime_id`를 함께 저장한다. |
+| 고정 환경 재사용 | 확정한 실행 환경을 같은 제출의 모든 테스트·시스템 오류 재시도·허용된 재채점·재처리에 재사용한다. 원래 런타임을 지원하지 못하면 최신 런타임으로 대체하지 않는다. 생성기는 현재 구현을 사용하므로 과거 생성 코드와 완전히 동일한 실행 재현은 보장하지 않는다. 생성기 변경 시 기존 실행·입출력 변환 회귀 테스트로 호환성을 확인하며, 호환성을 깨는 변경은 적용 전에 문제 재검증 또는 이전 구현 지원 여부를 합의한다. |
+| 실행 환경 보관 | Problem의 통과 프로필은 제출이 없는 실행 환경도 참조할 수 있으므로 초기 운영에서는 실행 환경 스냅샷을 자동 삭제하지 않는다. DB 복구·환경 이전 시 통과 키가 가리키는 스냅샷을 보존한다. |
+| 기존 환경 키 이행 | 기존 외부 키는 원래 검증 자료로 대응 관계를 입증하거나 관리자 재검증으로 처리한다. 현재 런타임 재선택이나 임의의 문자열 치환으로 보정하지 않는다. 키 확인 전 새 실행은 거절하되 기존 결과 조회는 유지한다. |
 | Judge0 호출 | 테스트별로 실행을 생성해 token을 받고 결과를 폴링한다. 호출량이 부담이 되면 배치 제출을 검토한다. |
 | 중단 기준 | 네 문맥 모두 전체 테스트를 실행한다. `EXAM`은 부분 점수를 위해 통과 수를 기록한다. 실패·전체 채점 기한 초과 시에는 회차를 실패로 종결할 수 있다. |
 | 제한 값 | 기준 제한(`time_limit_ms` 기본 2,000ms, `memory_limit_kb` 기본 262,144KB)을 언어 공통으로 적용한다. `wall_time_limit = cpu_time_limit + 5초`(고정값, 환경변수로 조정 가능). 언어별 보정은 유의미한 차이가 확인되면 도입을 검토한다. |
@@ -248,15 +255,15 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | --- | --- |
 | 작업 원천 | 채점 작업은 `judge-service` 스키마의 `judge_jobs` 테이블을 원천으로 한다. SQS 메시지는 작업 생성 수단일 뿐 원천이 아니다. |
 | 작업 생성 | `PRACTICE`·`DIAGNOSIS`는 접수 트랜잭션에서 `submissions`(`QUEUED`)와 `judge_jobs`(`PENDING`)를 함께 저장한다. `EXAM`·`CONTEST`는 `exam-submission-queue` 소비 트랜잭션에서 `processed_events`·`submissions`·`judge_jobs`를 저장한 뒤 메시지를 삭제한다. |
-| 작업 선점 | 실행기가 `SELECT … FOR UPDATE SKIP LOCKED`로 동시 처리 수만큼 선점하고 `RUNNING`·`lease_token`·`lease_until = now + 120초`로 전이한다. |
-| 임대 연장 | 실행 중 30초마다 `lease_token` 일치 조건으로 임대를 연장한다. |
-| 재시도 대상 | `SYSTEM_ERROR`만 재시도한다. `AC`~`CE`는 확정 판정이므로 재시도하지 않는다. |
+| 작업 선점 | 실행기가 `deadline_at` 이전의 작업만 `SELECT … FOR UPDATE SKIP LOCKED`로 동시 처리 수만큼 선점하고 `RUNNING`·`lease_token`·`lease_until = now + 120초`로 전이한다. |
+| 임대 연장 | 실행 중 30초마다 상태·`lease_token`·기한 내 조건으로 임대를 연장한다. 구체 조건은 스케줄러 §3.1을 따른다. |
+| 재시도 대상 | 전체 처리 기한이 남은 작업의 `SYSTEM_ERROR`만 재시도한다. `AC`~`CE`는 확정 판정이므로 재시도하지 않는다. |
 | 재시도 방식 | `try_count`를 1 올리고 `RETRY_WAITING`으로 전이한 뒤 10초 → 30초 백오프로 다시 선점한다. `try_count`가 3을 넘으면 작업을 `FAILED`로 종결하고 제출을 `FAILED`로 전이한 뒤 "채점 실패, 재처리 예정" 알림을 보낸다. |
-| 임대 만료 회수 | 30초 주기 스케줄러가 `lease_until`이 지난 `RUNNING` 작업을 `RETRY_WAITING`으로 되돌린다. 회수도 `try_count`에 포함한다. |
+| 임대 만료 회수 | 30초 주기 스케줄러가 전체 처리 기한이 남아 있고 `lease_until`이 지난 `RUNNING` 작업을 `RETRY_WAITING`으로 되돌린다. 회수도 `try_count`에 포함한다. 기한 초과 작업은 스케줄러 §3.2에 따라 실패 종결한다. |
 | 장시간 작업 | `RUNNING` 상태로 10분이 지난 작업은 회수 대상이다. |
-| 늦은 결과 | 결과 저장은 `job.status = RUNNING AND lease_token = :token` 조건부 UPDATE로 한다. 회수·재채점으로 임대나 회차가 바뀐 뒤 도착한 이전 실행기의 결과는 버린다. |
+| 늦은 결과 | 결과 저장은 `job.status = RUNNING AND lease_token = :token AND deadline_at > :now` 조건부 UPDATE로 한다. 회수·재채점으로 임대나 회차가 바뀌었거나 전체 처리 기한이 지난 결과는 버린다. |
 | 실행 이력 | 실행 시도마다 `judge_job_runs`에 1행을 불변 이력으로 남긴다. |
-| 서킷브레이커 | Judge0 장애로 서킷이 열리면 새 작업 선점을 멈춘다. 장애 중 반복 실패로 `try_count`가 소진되어 대량 `FAILED`가 생기는 것을 막는다. |
+| 서킷브레이커 | Judge0 장애로 서킷이 열리면 새 작업 선점을 멈춘다. 장애 중 반복 실패로 `try_count`가 소진되어 대량 `FAILED`가 생기는 것을 막되, 스케줄러 §3.2의 기한 초과 종결은 계속 수행한다. |
 | 중복 수신 | 시험·대회 채점 요청 메시지가 중복 수신되면 `processed_events` 유일 제약으로 반영 없이 메시지만 삭제한다. |
 | DLQ | `exam-submission-queue` 수신 횟수가 3회를 넘은 메시지는 DLQ로 격리하고 운영 알림을 보낸다. |
 | 대사(Reconciliation) | 5분마다 제출 상태와 작업 상태가 어긋난 건(§10 대응표)을 찾아 재개하거나 기록한다. |
@@ -508,7 +515,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 레벨 단위 | 레벨은 사용자 전체가 아니라 **태그별**로 관리한다. 한 태그는 Lv.3, 다른 태그는 Lv.1일 수 있다. 사용자는 관심 있는 태그만 이용해도 된다. |
 | 태그 상태 | `Lv.0`(미시작·첫 진단 응시 중) → `Lv.1`/`Lv.2`/`Lv.3` → 마스터 |
 | 진입 선택 | 태그에 처음 진입할 때 진단 응시와 Lv.1 시작 중 하나를 고른다. 건너뛰어도 쿨타임을 걸지 않으며, 마이페이지·문제 목록에 "진단 테스트로 레벨 올리기" 안내를 상시 노출한다. |
-| 문제 접근 제한 | 태그별로 자기 레벨에 해당하는 난이도까지만 연습 문제를 풀 수 있다. `Lv.1`은 난이도 1, `Lv.2`는 1~2, `Lv.3`·마스터는 1~3이다. 진단 중에는 레벨과 무관하게 출제된 문제를 푼다. 스터디·모의 코테의 예외 적용 여부는 확정 필요. |
+| 문제 접근 제한 | 태그별로 자기 레벨에 해당하는 난이도까지만 연습 문제를 풀 수 있다. 다중 태그 문제는 모든 태그의 레벨이 난이도를 충족해야 허용하며 미진입 태그는 Lv.0으로 본다. `Lv.1`은 난이도 1, `Lv.2`는 1~2, `Lv.3`·마스터는 1~3이다. 진단 중에는 레벨과 무관하게 출제된 문제를 푼다. 스터디·모의 코테의 예외 적용 여부는 확정 필요. |
 | 레벨 상승 경로 | ① 단계별 승급(연습 문제 해결) ② 진단 테스트 (재)응시 결과가 현재 레벨보다 높은 경우 |
 
 **진단 테스트**
@@ -775,9 +782,9 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 문제 용도(`problem.scope`) | `GENERAL` / `EXAM_ONLY` (생성 시 결정) |
 | 문제 파일 | `PENDING → LINKED / DISCARDED / DELETING`, `DISCARDED → DELETING`, `DELETING → 물리 삭제`. LINKED는 보존. 업로드 종료·유예·무참조 조건과 경합은 §4·ERD §4.2.3을 따름 |
 | 문제 수정 회차(`problem_revision`) | 저장된 회차는 수정하지 않고 새 회차를 만든다(`revision_number + 1`). 이전 회차는 이력으로 보존한다. (P2 검수 워크플로 도입 시: `DRAFT → IN_REVIEW → 승인 / REJECTED`, `REJECTED → DRAFT`) |
-| 제출(`submissions`) | `QUEUED → JUDGING → COMPLETED`, <br>`JUDGING → RETRY_WAITING → JUDGING`(시스템 오류·임대 만료 회수), <br>`RETRY_WAITING / JUDGING → FAILED`(실행 시도 상한 초과), <br>`FAILED → QUEUED`(관리자 재처리), <br>`COMPLETED → QUEUED`(관리자 재채점, `judge_attempt + 1`) |
+| 제출(`submissions`) | `QUEUED → JUDGING → COMPLETED`, <br>`JUDGING → RETRY_WAITING → JUDGING`(시스템 오류·임대 만료 회수), <br>`RETRY_WAITING / JUDGING → FAILED`(실행 시도 상한 초과), <br>`QUEUED / JUDGING → FAILED`(전체 처리 기한 초과), <br>`FAILED → QUEUED`(관리자 재처리), <br>`COMPLETED → QUEUED`(관리자 재채점, `judge_attempt + 1`) |
 | 제출 판정(`submissions.verdict`) | `COMPLETED`일 때만 `AC / WA / TLE / MLE / RE / CE` 중 하나 |
-| 채점 작업(`judge_jobs`) | `PENDING → RUNNING → SUCCEEDED`, <br>`RUNNING → RETRY_WAITING → RUNNING`(`try_count + 1`, 백오프 10→30초), <br>`RETRY_WAITING / RUNNING → FAILED`(`try_count` 3 초과) |
+| 채점 작업(`judge_jobs`) | `PENDING → RUNNING → SUCCEEDED`, <br>`RUNNING → RETRY_WAITING → RUNNING`(`try_count + 1`, 백오프 10→30초), <br>`RETRY_WAITING / RUNNING → FAILED`(`try_count` 3 초과), <br>`PENDING / RETRY_WAITING / RUNNING → FAILED`(전체 처리 기한 초과) |
 | 채점 실행 이력(`judge_job_runs`) | 실행 시도마다 1행 생성, 불변 이력 |
 | Outbox(`outbox_events`) | `PENDING → PUBLISHED`, `PENDING → FAILED → PENDING`(재시도) |
 | 시험(`exams`) | `SCHEDULED → IN_PROGRESS → CLOSED → FINALIZED`, <br>`SCHEDULED → CANCELED`, <br>`FINALIZED → FINALIZED`(관리자 재확정, 감사 로그) |
