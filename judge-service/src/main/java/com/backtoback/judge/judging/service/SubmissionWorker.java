@@ -39,6 +39,12 @@ public class SubmissionWorker {
     private final JudgeResultEvaluator evaluator;
     private final Clock clock;
 
+    /**
+     * 작업을 선점해 DB 트랜잭션 밖에서 실행한다. 생성 응답이 불명확하면 재생성하지 않고 복구 대상으로 남긴다.
+     * 실행 오류는 시스템 실패 처리로 넘기며, 인터럽트나 소유권 상실 시 추가 실행을 중단한다.
+     *
+     * @return 실행 성공 여부와 무관하게 작업을 선점했으면 true, 중단 상태이거나 선점 대상이 없으면 false
+     */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public boolean runOnce() {
         if (Thread.currentThread().isInterrupted()) {
@@ -51,7 +57,7 @@ public class SubmissionWorker {
         var lease = claimed.orElseThrow();
         var heartbeat = new SubmissionHeartbeat(lease, store, clock);
         String previous = MDC.get("correlationId");
-        MDC.put("correlationId", "judge-job-" + lease.jobId());
+        MDC.put("correlationId", lease.correlationId());
         String errorCode = "TEST_DATA_UNAVAILABLE";
         try {
             if (!heartbeat.active()) {
