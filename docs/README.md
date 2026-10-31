@@ -10,6 +10,7 @@
 | 개발·협업 가이드 | [컨벤션·빌드 매뉴얼](guides/convention-build-manual.md) | Spotless·Checkstyle·빌드·주석·코드 구조 규칙 |
 | 개발·협업 가이드 | [공통 모듈 적용 가이드](guides/common-module.md) | 모듈 선택·설정 등록·보안 체인 연결·기존 서비스 적용 주의점 |
 | 개발·협업 가이드 | [채점 실행 코드 가이드](guides/judge-execution.md) | 생성기 연결·내부 입출력 변환·결과 매핑·검증 방법 |
+| 개발·협업 가이드 | [시험·대회 내부 HTTP Stub 사용 가이드](guides/contest-internal-http-stub.md) | 개발 실행 선택·고정 시나리오·내부 호출·실제 구현 교체 |
 | 개발·협업 가이드 | [AI 협업 안내](guides/ai/README.md) | AI 도구별 설정 파일·세션 시작·세 도구의 GitHub MCP 연결 |
 | 기획 | [기획서](dev/planning/planning.md) | 서비스 개요, 기능 목록, 마일스톤 |
 | 기획 | [정책 및 상태](dev/planning/policy-and-state.md) | 도메인 정책, 상태 전이, 불변식 |
