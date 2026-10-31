@@ -3928,6 +3928,7 @@
     ```
     
     - `status`: `QUEUED` / `JUDGING` / `RETRY_WAITING` / `COMPLETED` / `FAILED`. `RETRY_WAITING`은 화면에 "채점 중"으로 표시
+    - `effectiveResult.verdict`: 정책 및 상태 §3.3의 대표 판정 규칙(CE 우선, 그 외 고정 `testOrder` 기준 첫 비AC, 모두 AC이면 AC)을 따른다. 미완료·시스템 실패를 코드 판정으로 확정하지 않는다.
     - `compileMessage`: `CE`일 때만, 본인에게만 제공
     - `failureCode`: `FAILED`일 때 (예: `ENGINE_UNAVAILABLE`)
 - **에러:**
@@ -4065,16 +4066,17 @@
             },
             { 
     	        "testOrder": 2, 
-    	        "isSample": false, 
-    	        "verdict": "AC", 
-    	        "timeMs": 10, 
-    	        "memoryKb": 8100 
+            "passed": true
             }
           ]
         }
       }
     ```
     
+    - `testOrder` 오름차순으로 반환한다.
+    - 공개 테스트는 예시의 상세 필드를 유지한다. 숨김 테스트 항목은 `testOrder`·`passed` 두 필드만 반환하며 `isSample`·`verdict`·`timeMs`·`memoryKb`·원문 필드를 포함하지 않는다.
+    - 숨김 테스트의 `passed`는 AC이면 true, 확정된 비AC 판정이면 false다. 미판정·SYSTEM_ERROR는 null로 반환하며 시스템 실패를 코드 실패로 표시하지 않는다. 재시도 중 이전 실행 시도의 결과를 현재 시도의 확정 결과로 사용하지 않는다.
+    - 제출 전체 대표 판정은 정책 및 상태 §3.3을 따르며 테스트별 판정을 덮어쓰지 않는다.
     - token·S3 경로·체크섬·stderr는 반환하지 않는다.
 
 #### 3.1.8 코드 실행 (Run)
