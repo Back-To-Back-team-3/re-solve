@@ -57,3 +57,9 @@ logging:
     org.springframework.security: INFO
     org.hibernate.SQL: INFO
     org.hibernate.orm.jdbc.bind: INFO
+
+judge:
+  messaging:
+    enabled: ${JUDGE_MESSAGING_ENABLED:false}
+    topic-arn: ${JUDGE_EVENTS_TOPIC_ARN:}
+    validation-queue-url: ${PROBLEM_VALIDATION_QUEUE_URL:}

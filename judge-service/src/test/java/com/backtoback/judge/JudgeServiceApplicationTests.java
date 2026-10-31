@@ -92,7 +92,7 @@ class JudgeServiceApplicationTests {
     @DisplayName("Judge 전용 DB에 연결하고 최신 마이그레이션을 적용한다")
     void applicationConnectsToJudgeDatabaseAndAppliesMigrations() {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("judge_db");
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("10");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM setup_probe", Integer.class)).isZero();
     }
 
