@@ -3121,8 +3121,8 @@
 - **인증:** 내부 호출 (judge)
 - **Idempotency:** 조회, 상태 변경 없음
 - **Rate Limit:** 없음
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`, `problem_validations`
-- **설명:** 고정 회차의 함수 명세·실행 제한·전체 테스트 파일 참조와 통과 언어·실행 환경을 반환한다. 정답 코드는 반환하지 않는다. 검증 전 회차의 관리자 검증 자료는 §2.6.8에서 조회한다.
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`, `problem_validations`, `problem_revision_tags`, `tags`
+- **설명:** 고정 회차의 함수 명세·실행 제한·전체 테스트 파일 참조와 통과 언어·실행 환경, 결과 이벤트에 사용할 제목·난이도·태그 정보를 반환한다. 정답 코드는 반환하지 않는다. 검증 전 회차의 관리자 검증 자료는 §2.6.8에서 조회한다.
 - **요청 헤더:**
 
     | 헤더 | 필수 | 설명 |
@@ -3144,6 +3144,10 @@
     | 필드 | 타입 | 설명 |
     | --- | --- | --- |
     | `problemId / problemRevisionId` | string | 문제·고정 회차 ID |
+    | `problemTitle` | string | 필수. 요청한 고정 회차의 제목 |
+    | `problemDifficulty` | integer | 필수. 요청한 고정 회차의 난이도(1~3) |
+    | `problemTags` | string[] | 필수. 해당 회차에 연결된 태그의 조회 시점 이름. `problemTagIds`와 같은 길이·순서 |
+    | `problemTagIds` | string[] | 필수. 해당 회차에 연결된 태그 ID. 중복 없이 숫자 ID 오름차순으로 반환 |
     | `functionSpec / executionLimits` | object / object | 회차의 함수 명세·고정 실행 제한 |
     | `supportedLanguages / executionProfiles` | string[] / object[] | 통과 언어·검증 당시 실행 프로필. 목록 대응·원본 반환 규칙은 §2.6.1과 같음 |
     | `executionProfiles[].language` | string | 통과한 언어. 언어당 한 항목 |
@@ -3157,6 +3161,14 @@
     {
       "problemId": "301",
       "problemRevisionId": "1001",
+      "problemTitle": "두 수의 합",
+      "problemDifficulty": 1,
+      "problemTags": [
+        "구현"
+      ],
+      "problemTagIds": [
+        "3"
+      ],
       "functionSpec": {
         "name": "solution",
         "parameters": [
@@ -3218,6 +3230,9 @@
     }
     ```
 
+    - 제목·난이도는 `problem_revisions`, 태그 소속은 `problem_revision_tags`의 요청 회차를 기준으로 조회한다. 최신 사용 회차의 값으로 대체하지 않는다. 태그 이름은 `tags.name`의 조회 시점 값이며 회차 생성 당시 이름의 복원을 보장하지 않는다.
+    - `problemTags[i]`는 `problemTagIds[i]`의 이름이다. Judge는 같은 응답에서 받은 네 필드를 결과 이벤트 J1에 사용하며, 다른 회차나 별도 조회 결과를 섞지 않는다. 필수 정보가 누락되거나 배열 대응이 올바르지 않으면 정상 결과 이벤트를 만들지 않고 시스템 실패·재시도 정책을 따른다.
+    - Judge 제출 테이블에 제목·난이도·태그 복제 컬럼을 추가하지 않는다. 결과 저장 트랜잭션에서 Outbox payload에 포함하고, Relay 재발행은 저장된 payload를 그대로 사용한다. 이 응답 확장은 이벤트 계약 J1의 `problemTagIds` 소비 관련 B·E 협의 상태를 변경하지 않는다.
     - 공개·숨김 테스트를 모두 반환하고 Judge 실행기가 제한된 S3 읽기 권한으로 원문을 가져온다. 사용 가능 여부는 접수 단계에서 확인한 고정 회차를 기준으로 하며 최신 회차로 치환하지 않는다.
 
 - **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404)
@@ -3928,6 +3943,7 @@
     ```
     
     - `status`: `QUEUED` / `JUDGING` / `RETRY_WAITING` / `COMPLETED` / `FAILED`. `RETRY_WAITING`은 화면에 "채점 중"으로 표시
+    - `effectiveResult.verdict`: 정책 및 상태 §3.3의 대표 판정 규칙(CE 우선, 그 외 고정 `testOrder` 기준 첫 비AC, 모두 AC이면 AC)을 따른다. 미완료·시스템 실패를 코드 판정으로 확정하지 않는다.
     - `compileMessage`: `CE`일 때만, 본인에게만 제공
     - `failureCode`: `FAILED`일 때 (예: `ENGINE_UNAVAILABLE`)
 - **에러:**
@@ -4065,16 +4081,17 @@
             },
             { 
     	        "testOrder": 2, 
-    	        "isSample": false, 
-    	        "verdict": "AC", 
-    	        "timeMs": 10, 
-    	        "memoryKb": 8100 
+            "passed": true
             }
           ]
         }
       }
     ```
     
+    - `testOrder` 오름차순으로 반환한다.
+    - 공개 테스트는 예시의 상세 필드를 유지한다. 숨김 테스트 항목은 `testOrder`·`passed` 두 필드만 반환하며 `isSample`·`verdict`·`timeMs`·`memoryKb`·원문 필드를 포함하지 않는다.
+    - 숨김 테스트의 `passed`는 AC이면 true, 확정된 비AC 판정이면 false다. 미판정·SYSTEM_ERROR는 null로 반환하며 시스템 실패를 코드 실패로 표시하지 않는다. 재시도 중 이전 실행 시도의 결과를 현재 시도의 확정 결과로 사용하지 않는다.
+    - 제출 전체 대표 판정은 정책 및 상태 §3.3을 따르며 테스트별 판정을 덮어쓰지 않는다.
     - token·S3 경로·체크섬·stderr는 반환하지 않는다.
 
 #### 3.1.8 코드 실행 (Run)
