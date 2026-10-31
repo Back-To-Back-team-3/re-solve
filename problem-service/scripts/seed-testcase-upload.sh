@@ -28,6 +28,10 @@ if [ -z "${SOURCE_DIR}" ] || [ ! -d "${SOURCE_DIR}" ]; then
 fi
 
 if command -v awslocal >/dev/null 2>&1; then
+    # awslocal은 ENDPOINT가 아니라 LOCALSTACK_HOST(스킴 없는 host:port)로 대상을 정하므로,
+    # LOCALSTACK_ENDPOINT를 명시적으로 넘겨도 두 실행 경로가 같은 대상을 가리키도록 맞춘다.
+    export LOCALSTACK_HOST="${LOCALSTACK_HOST:-${ENDPOINT#http://}}"
+    export LOCALSTACK_HOST="${LOCALSTACK_HOST#https://}"
     AWS_CMD=(awslocal)
 else
     # awslocal이 없는 환경(예: 로컬 쉘)에서는 LocalStack 기본 테스트 자격 증명을 쓴다.

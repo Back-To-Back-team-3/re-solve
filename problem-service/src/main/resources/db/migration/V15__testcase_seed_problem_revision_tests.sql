@@ -5,6 +5,19 @@
 -- 전역 순번(1~150) = (problem_id-1)*5+test_order, test_order 1~2는 공개(is_sample=true), 3~5는 숨김(false).
 -- 불변식(회차마다 공개·숨김 각 1개 이상, erd.md > 4.2.7)은 이 150행이 문제당 2+3으로 고정 분배되어 자동으로 충족된다.
 
+-- 아래 INNER JOIN은 revision_number=1 회차가 없는 문제의 테스트 연결 5개를 오류 없이 건너뛸 수 있다.
+-- 대상 문제 30개에 초기 회차가 모두 있는지 먼저 확인하고, 개수가 다르면 스칼라 서브쿼리가 2행을 반환해
+-- "Subquery returns more than 1 row" 오류로 마이그레이션 자체를 중단시킨다(Flyway가 성공으로 기록하지 않음).
+SELECT IF(
+    (
+        SELECT COUNT(*) FROM problem_revisions pr
+        JOIN problems p ON pr.problem_id = p.id
+        WHERE p.created_at = '2026-10-31 00:00:00.000000' AND pr.revision_number = 1
+    ) = 30,
+    1,
+    (SELECT 1 UNION SELECT 2)
+);
+
 INSERT INTO problem_revision_tests (
     problem_revision_id, test_asset_id, test_order, is_sample, created_at
 )

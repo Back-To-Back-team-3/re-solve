@@ -200,6 +200,14 @@ class ProblemServiceApplicationTest {
                     Integer.class
                 )
         ).isEqualTo(30);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM (SELECT problem_revision_id FROM problem_revision_tests "
+                        + "GROUP BY problem_revision_id HAVING COUNT(*) = 5 AND SUM(is_sample) = 2) t",
+                    Integer.class
+                )
+        ).isEqualTo(30);
     }
 
     @Test
