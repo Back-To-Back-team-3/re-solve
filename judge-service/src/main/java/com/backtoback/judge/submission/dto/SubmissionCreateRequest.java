@@ -8,8 +8,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
-import com.backtoback.judge.global.exception.custom.CodeTooLargeException;
-import com.backtoback.judge.global.exception.custom.CommonInvalidRequestException;
+import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.error.JudgeException;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -40,18 +41,18 @@ public record SubmissionCreateRequest(
      * HTTP 검증을 거치지 않는 호출에서도 식별자·원본·키의 필수 조건을 확인한다.
      *
      * @param key 멱등 키
-     * @throws CommonInvalidRequestException 식별자·키·필수 값의 형식이 유효하지 않은 경우
-     * @throws CodeTooLargeException 코드가 UTF-8 64KiB를 초과한 경우
+     * @throws JudgeException {@code COMMON_INVALID_REQUEST}: 식별자·키·필수 값의 형식이 유효하지 않은 경우; {@code CODE_TOO_LARGE}: 코드가
+     *     UTF-8 64KiB를 초과한 경우
      */
     public void validate(String key) {
         parseId(problemId);
         parseId(problemRevisionId);
         if (key == null || key.isBlank() || !key.matches("[\\x00-\\x7F]{1,100}") || language == null
             || language.isBlank() || sourceCode == null || sourceCode.isBlank()) {
-            throw new CommonInvalidRequestException();
+            throw new JudgeException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
         if (sourceCode.getBytes(StandardCharsets.UTF_8).length > 64 * 1024) {
-            throw new CodeTooLargeException();
+            throw new JudgeException(JudgeErrorCode.CODE_TOO_LARGE);
         }
     }
 
@@ -60,7 +61,7 @@ public record SubmissionCreateRequest(
      *
      * @param value JSON 식별자
      * @return 양수 ID
-     * @throws CommonInvalidRequestException 식별자 형식이나 범위가 유효하지 않은 경우
+     * @throws JudgeException {@code COMMON_INVALID_REQUEST}: 식별자 형식이나 범위가 유효하지 않은 경우
      */
     public static long parseId(String value) {
         try {
@@ -69,7 +70,7 @@ public record SubmissionCreateRequest(
             }
             return Long.parseLong(value);
         } catch (NumberFormatException exception) {
-            throw new CommonInvalidRequestException();
+            throw new JudgeException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
     }
 

@@ -9,8 +9,9 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
-import com.backtoback.judge.global.exception.custom.IdempotencyKeyConflictException;
+import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.backtoback.judge.submission.domain.Submission;
 import com.backtoback.judge.submission.domain.SubmissionDraft;
@@ -37,7 +38,7 @@ public class SubmissionAcceptanceStore {
      * @param key 멱등 키
      * @param hash 요청 해시
      * @return 유효한 원래 접수 응답
-     * @throws IdempotencyKeyConflictException 유효한 동일 키의 다른 본문인 경우
+     * @throws JudgeException {@code IDEMPOTENCY_KEY_CONFLICT}: 유효한 동일 키의 다른 본문인 경우
      */
     @Transactional(readOnly = true)
     public Optional<SubmissionCreateResponse> findReusable(long memberId, String key, String hash) {
@@ -60,7 +61,7 @@ public class SubmissionAcceptanceStore {
      * @return 새 접수 또는 동시 승자의 원래 응답
      * @throws org.springframework.dao.DataIntegrityViolationException 유일 키 경합 또는 저장 제약 위반으로 전체 저장이 롤백된 경우
      * @throws ObjectOptimisticLockingFailureException 다른 요청이 만료 키를 먼저 해제해 새 트랜잭션에서 재조회해야 하는 경우
-     * @throws IdempotencyKeyConflictException 동시 요청의 본문이 다른 경우
+     * @throws JudgeException {@code IDEMPOTENCY_KEY_CONFLICT}: 동시 요청의 본문이 다른 경우
      */
     @Transactional
     public SubmissionCreateResponse accept(
@@ -109,14 +110,14 @@ public class SubmissionAcceptanceStore {
      * @param hash 새 요청 해시
      * @param now 서버 시각
      * @return 유효기간 내 원래 응답
-     * @throws IdempotencyKeyConflictException 같은 키의 본문이 다른 경우
+     * @throws JudgeException {@code IDEMPOTENCY_KEY_CONFLICT}: 같은 키의 본문이 다른 경우
      */
     private Optional<SubmissionCreateResponse> reusable(Submission submission, String hash, LocalDateTime now) {
         if (!submission.getCreatedAt().plusHours(24).isAfter(now)) {
             return Optional.empty();
         }
         if (!hash.equals(submission.getRequestHash())) {
-            throw new IdempotencyKeyConflictException();
+            throw new JudgeException(CommonErrorCode.IDEMPOTENCY_KEY_CONFLICT);
         }
         return Optional.of(SubmissionCreateResponse.from(submission));
     }

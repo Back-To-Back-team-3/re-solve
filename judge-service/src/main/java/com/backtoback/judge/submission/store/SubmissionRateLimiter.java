@@ -7,8 +7,9 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
-import com.backtoback.judge.global.exception.custom.CommonDependencyUnavailableException;
-import com.backtoback.judge.global.exception.custom.SubmissionRateLimitedException;
+import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.error.JudgeException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -42,8 +43,8 @@ public class SubmissionRateLimiter {
      *
      * @param memberId 인증 회원 ID
      * @param problemId 문제 ID
-     * @throws SubmissionRateLimitedException 제출 요청 한도를 초과한 경우
-     * @throws CommonDependencyUnavailableException Redis 조회가 실패하거나 응답이 유효하지 않은 경우
+     * @throws JudgeException {@code SUBMISSION_RATE_LIMITED}: 제출 요청 한도를 초과한 경우; {@code COMMON_DEPENDENCY_UNAVAILABLE}:
+     *     Redis 조회가 실패하거나 응답이 유효하지 않은 경우
      */
     public void acquire(long memberId, long problemId) {
         Long wait;
@@ -53,15 +54,15 @@ public class SubmissionRateLimiter {
                 = redis
                     .execute(SCRIPT, List.of(prefix + "minute", prefix + "problem:" + problemId, prefix + "sequence"));
         } catch (org.springframework.dao.DataAccessException exception) {
-            throw new CommonDependencyUnavailableException();
+            throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
         if (wait == null || wait < 0) {
-            throw new CommonDependencyUnavailableException();
+            throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
         if (wait > 0) {
             var headers = new HttpHeaders();
             headers.set(HttpHeaders.RETRY_AFTER, Long.toString(wait));
-            throw new SubmissionRateLimitedException(headers);
+            throw new JudgeException(JudgeErrorCode.SUBMISSION_RATE_LIMITED, headers, null);
         }
     }
 }

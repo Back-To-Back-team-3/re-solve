@@ -8,8 +8,9 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
-import com.backtoback.judge.global.exception.custom.CommonDependencyUnavailableException;
-import com.backtoback.judge.global.exception.custom.ProblemNotAvailableException;
+import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.submission.config.SubmissionClientProperties;
 import com.backtoback.judge.submission.dto.MemberStatusResponse;
 import com.backtoback.judge.submission.dto.MemberTagLevelsResponse;
@@ -47,8 +48,8 @@ public class SubmissionDependencyClient {
      * @param problemId 문제 ID
      * @param revisionId 고정 회차 ID
      * @return 내부 사전 검증 응답
-     * @throws ProblemNotAvailableException 제출할 수 없거나 존재하지 않는 문제인 경우
-     * @throws CommonDependencyUnavailableException 내부 조회 실패 또는 응답 계약 불일치인 경우
+     * @throws JudgeException {@code PROBLEM_NOT_AVAILABLE}: 제출할 수 없거나 존재하지 않는 문제인 경우;
+     *     {@code COMMON_DEPENDENCY_UNAVAILABLE}: 내부 조회 실패 또는 응답 계약 불일치인 경우
      */
     public ProblemValidationResponse validation(long problemId, long revisionId) {
         return get(
@@ -65,8 +66,8 @@ public class SubmissionDependencyClient {
      * @param problemId 문제 ID
      * @param revisionId 고정 회차 ID
      * @return 고정 테스트 메타데이터
-     * @throws ProblemNotAvailableException 제출할 수 없거나 존재하지 않는 문제인 경우
-     * @throws CommonDependencyUnavailableException 내부 조회 실패 또는 응답 계약 불일치인 경우
+     * @throws JudgeException {@code PROBLEM_NOT_AVAILABLE}: 제출할 수 없거나 존재하지 않는 문제인 경우;
+     *     {@code COMMON_DEPENDENCY_UNAVAILABLE}: 내부 조회 실패 또는 응답 계약 불일치인 경우
      */
     public ProblemJudgingDataResponse data(long problemId, long revisionId) {
         return get(
@@ -82,7 +83,7 @@ public class SubmissionDependencyClient {
      *
      * @param memberId 인증 회원 ID
      * @return 회원 상태 응답
-     * @throws CommonDependencyUnavailableException 내부 조회가 실패한 경우
+     * @throws JudgeException {@code COMMON_DEPENDENCY_UNAVAILABLE}: 내부 조회가 실패한 경우
      */
     public MemberStatusResponse status(long memberId) {
         return get(member, "/internal/v1/members/" + memberId + "/status", MemberStatusResponse.class, false);
@@ -93,7 +94,7 @@ public class SubmissionDependencyClient {
      *
      * @param memberId 인증 회원 ID
      * @return 태그 레벨 응답
-     * @throws CommonDependencyUnavailableException 내부 조회가 실패한 경우
+     * @throws JudgeException {@code COMMON_DEPENDENCY_UNAVAILABLE}: 내부 조회가 실패한 경우
      */
     public MemberTagLevelsResponse levels(long memberId) {
         return get(member, "/internal/v1/members/" + memberId + "/tag-levels", MemberTagLevelsResponse.class, false);
@@ -108,23 +109,23 @@ public class SubmissionDependencyClient {
      * @param type 응답 클래스
      * @param problemRequest Problem 404를 제출 불가로 변환할지 여부
      * @return null이 아닌 응답
-     * @throws ProblemNotAvailableException Problem이 대상 미존재를 반환한 경우
-     * @throws CommonDependencyUnavailableException 내부 조회 실패 또는 본문 변환 실패인 경우
+     * @throws JudgeException {@code PROBLEM_NOT_AVAILABLE}: Problem이 대상 미존재를 반환한 경우;
+     *     {@code COMMON_DEPENDENCY_UNAVAILABLE}: 내부 조회 실패 또는 본문 변환 실패인 경우
      */
     private <T> T get(RestClient client, String path, Class<T> type, boolean problemRequest) {
         try {
             T response = client.get().uri(path).retrieve().body(type);
             if (response == null) {
-                throw new CommonDependencyUnavailableException();
+                throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
             }
             return response;
         } catch (RestClientResponseException exception) {
             if (problemRequest && exception.getStatusCode().value() == 404) {
-                throw new ProblemNotAvailableException();
+                throw new JudgeException(JudgeErrorCode.PROBLEM_NOT_AVAILABLE);
             }
-            throw new CommonDependencyUnavailableException();
+            throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         } catch (RestClientException exception) {
-            throw new CommonDependencyUnavailableException();
+            throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
     }
 
