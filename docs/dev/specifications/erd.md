@@ -1478,7 +1478,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 **불변식**
 
 - `status = COMPLETED` ⇔ `verdict IS NOT NULL`
-- `idempotency_key` 보관 24시간: 판단은 `created_at`으로 하고 행은 삭제하지 않는다. 같은 키로 새 접수 시 만료된 이전 행의 키만 NULL로 해제하며 코드·요청 해시·결과를 보존한다. 키 해제와 새 접수 저장은 같은 트랜잭션이다.
+- `idempotency_key` 유효기간은 `created_at` 기준 24시간이다. 만료 키를 NULL로 해제해도 제출 행·코드·요청 해시·결과는 보존한다. 키 해제·재접수의 처리 순서와 트랜잭션 규칙은 API 명세서 §3.1.2를 따른다.
 - 확정한 `runtime_id`는 변경하거나 NULL로 초기화하지 않는다.
 - `runtime_id`가 참조하는 실행 환경의 `language`는 제출의 `language`와 일치해야 한다.
 

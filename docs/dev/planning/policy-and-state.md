@@ -78,8 +78,8 @@ submission.judge_attempt       = 채점 회차, 재채점마다 +1 (감소 불�
 
 [채점 작업]
 (submission_id, judge_attempt)  = judge_jobs 유일
-선점 조건: status = PENDING | RETRY_WAITING  AND  next_run_at <= now
-결과 저장 조건: job.status = RUNNING  AND  lease_token = :token
+선점 조건: status IN (PENDING, RETRY_WAITING)  AND  next_run_at <= now  AND  deadline_at > now
+결과 저장 조건: job.status = RUNNING  AND  lease_token = :token  AND  deadline_at > now
 try_count <= 3   (초과 시 submissions.FAILED)
 
 [채점 메시지 — EXAM·CONTEST]
@@ -255,15 +255,15 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | --- | --- |
 | 작업 원천 | 채점 작업은 `judge-service` 스키마의 `judge_jobs` 테이블을 원천으로 한다. SQS 메시지는 작업 생성 수단일 뿐 원천이 아니다. |
 | 작업 생성 | `PRACTICE`·`DIAGNOSIS`는 접수 트랜잭션에서 `submissions`(`QUEUED`)와 `judge_jobs`(`PENDING`)를 함께 저장한다. `EXAM`·`CONTEST`는 `exam-submission-queue` 소비 트랜잭션에서 `processed_events`·`submissions`·`judge_jobs`를 저장한 뒤 메시지를 삭제한다. |
-| 작업 선점 | 실행기가 `SELECT … FOR UPDATE SKIP LOCKED`로 동시 처리 수만큼 선점하고 `RUNNING`·`lease_token`·`lease_until = now + 120초`로 전이한다. |
-| 임대 연장 | 실행 중 30초마다 `lease_token` 일치 조건으로 임대를 연장한다. |
-| 재시도 대상 | `SYSTEM_ERROR`만 재시도한다. `AC`~`CE`는 확정 판정이므로 재시도하지 않는다. |
+| 작업 선점 | 실행기가 `deadline_at` 이전의 작업만 `SELECT … FOR UPDATE SKIP LOCKED`로 동시 처리 수만큼 선점하고 `RUNNING`·`lease_token`·`lease_until = now + 120초`로 전이한다. |
+| 임대 연장 | 실행 중 30초마다 상태·`lease_token`·기한 내 조건으로 임대를 연장한다. 구체 조건은 스케줄러 §3.1을 따른다. |
+| 재시도 대상 | 전체 처리 기한이 남은 작업의 `SYSTEM_ERROR`만 재시도한다. `AC`~`CE`는 확정 판정이므로 재시도하지 않는다. |
 | 재시도 방식 | `try_count`를 1 올리고 `RETRY_WAITING`으로 전이한 뒤 10초 → 30초 백오프로 다시 선점한다. `try_count`가 3을 넘으면 작업을 `FAILED`로 종결하고 제출을 `FAILED`로 전이한 뒤 "채점 실패, 재처리 예정" 알림을 보낸다. |
-| 임대 만료 회수 | 30초 주기 스케줄러가 `lease_until`이 지난 `RUNNING` 작업을 `RETRY_WAITING`으로 되돌린다. 회수도 `try_count`에 포함한다. |
+| 임대 만료 회수 | 30초 주기 스케줄러가 전체 처리 기한이 남아 있고 `lease_until`이 지난 `RUNNING` 작업을 `RETRY_WAITING`으로 되돌린다. 회수도 `try_count`에 포함한다. 기한 초과 작업은 스케줄러 §3.2에 따라 실패 종결한다. |
 | 장시간 작업 | `RUNNING` 상태로 10분이 지난 작업은 회수 대상이다. |
-| 늦은 결과 | 결과 저장은 `job.status = RUNNING AND lease_token = :token` 조건부 UPDATE로 한다. 회수·재채점으로 임대나 회차가 바뀐 뒤 도착한 이전 실행기의 결과는 버린다. |
+| 늦은 결과 | 결과 저장은 `job.status = RUNNING AND lease_token = :token AND deadline_at > :now` 조건부 UPDATE로 한다. 회수·재채점으로 임대나 회차가 바뀌었거나 전체 처리 기한이 지난 결과는 버린다. |
 | 실행 이력 | 실행 시도마다 `judge_job_runs`에 1행을 불변 이력으로 남긴다. |
-| 서킷브레이커 | Judge0 장애로 서킷이 열리면 새 작업 선점을 멈춘다. 장애 중 반복 실패로 `try_count`가 소진되어 대량 `FAILED`가 생기는 것을 막는다. |
+| 서킷브레이커 | Judge0 장애로 서킷이 열리면 새 작업 선점을 멈춘다. 장애 중 반복 실패로 `try_count`가 소진되어 대량 `FAILED`가 생기는 것을 막되, 스케줄러 §3.2의 기한 초과 종결은 계속 수행한다. |
 | 중복 수신 | 시험·대회 채점 요청 메시지가 중복 수신되면 `processed_events` 유일 제약으로 반영 없이 메시지만 삭제한다. |
 | DLQ | `exam-submission-queue` 수신 횟수가 3회를 넘은 메시지는 DLQ로 격리하고 운영 알림을 보낸다. |
 | 대사(Reconciliation) | 5분마다 제출 상태와 작업 상태가 어긋난 건(§10 대응표)을 찾아 재개하거나 기록한다. |
