@@ -1,9 +1,11 @@
 package com.backtoback.judge.submission.repository;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -13,6 +15,33 @@ import jakarta.persistence.LockModeType;
 
 /** {@code Submission} 저장과 식별자 조회를 제공한다. */
 public interface SubmissionRepository extends JpaRepository<Submission, Long> {
+    /**
+     * 회원에게 현재 연결된 멱등 키의 제출을 조회한다.
+     *
+     * @param memberId 인증 회원 ID
+     * @param idempotencyKey 멱등 키
+     * @return 기존 제출
+     */
+    Optional<Submission> findByMemberIdAndIdempotencyKey(long memberId, String idempotencyKey);
+
+    /**
+     * 만료된 원본 행의 키만 해제하며 코드·해시·결과는 보존한다.
+     *
+     * @param id 이전 제출 ID
+     * @param key 해제할 원래 키
+     * @param cutoff 만료 경계 시각
+     * @return 해제한 행 수
+     */
+    @Modifying
+    @Query(
+        value = """
+            UPDATE submissions SET idempotency_key = NULL
+            WHERE id = :id AND idempotency_key = :key AND created_at <= :cutoff
+            """,
+        nativeQuery = true
+    )
+    int releaseExpiredKey(@Param("id") long id, @Param("key") String key, @Param("cutoff") LocalDateTime cutoff);
+
     /**
      * 관리 엔티티 캐시를 거치지 않고 제출 행을 잠가 최신 실행 환경 참조를 읽는다.
      *

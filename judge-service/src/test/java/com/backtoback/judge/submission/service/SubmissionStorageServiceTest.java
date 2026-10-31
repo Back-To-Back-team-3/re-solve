@@ -133,7 +133,7 @@ class SubmissionStorageServiceTest {
         var saved = storage.register(request("request-1", JAVA));
         var submission = submissions.findById(saved.submissionId()).orElseThrow();
         var job = jobs.findBySubmissionIdAndJudgeAttempt(saved.submissionId(), saved.judgeAttempt()).orElseThrow();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("10");
         assertThat(submission.getStatus()).isEqualTo(Submission.Status.QUEUED);
         assertThat(submission.getVerdict()).isNull();
         assertThat(submission.getJudgeAttempt()).isEqualTo(1);

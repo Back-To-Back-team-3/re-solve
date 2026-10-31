@@ -15,6 +15,16 @@ import jakarta.persistence.LockModeType;
 /** {@code ExecutionRuntime} 저장과 해시 기반 재사용을 제공한다. */
 public interface ExecutionRuntimeRepository extends JpaRepository<ExecutionRuntime, Long> {
     /**
+     * 외부 통과 키의 불변 스냅샷을 잠금 없이 복원한다.
+     *
+     * @param hash 외부 실행 환경 키
+     * @return 저장된 실행 환경
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    @Query("select runtime from ExecutionRuntime runtime where runtime.snapshotHash = :hash")
+    Optional<ExecutionRuntime> findSnapshot(@Param("hash") String hash);
+
+    /**
      * UNIQUE 해시가 없을 때만 스냅샷을 생성한다. 중복이면 기존 속성·생성 시각을 유지한다.
      * 호출자의 트랜잭션에 참여하며 JPA 중복 INSERT 예외로 트랜잭션을 실패시키지 않는다.
      *
