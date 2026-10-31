@@ -1575,7 +1575,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
-| `id` | BIGINT AUTO_INCREMENT | Y | PK. `submissions.runtime_id`가 참조하는 내부 식별자 |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK. 제출과 검증 작업이 참조하는 내부 식별자 |
 | `snapshot_hash` | CHAR(64) `_bin` | Y | 외부 `runtimeKey`에 대응하는 실행 환경 속성의 SHA-256 소문자 16진수. 계산·해석 규칙은 정책 및 상태 §3.2를 따름 |
 | `language` | VARCHAR(30) | Y | 서비스 언어 코드. `java` / `python3` / `cpp` |
 | `judge0_language_id` | INT | Y | Judge0 실행 환경 ID. 외부 참조이며 DB FK 없음 |
@@ -1595,8 +1595,115 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 - `snapshot_hash`는 전체 속성에서 계산한 값과 일치해야 하며, 같은 해시의 행은 하나만 존재한다.
 - 생성한 스냅샷의 속성은 변경하지 않는다. `created_at`만 기록하며 `updated_at`은 두지 않는다.
-- 제출 또는 Problem 통과 프로필이 참조하는 스냅샷을 보존한다. 보관·배포 규칙은 정책 및 상태 §3.2를 따른다.
+- 제출·검증 작업 또는 Problem 통과 프로필이 참조하는 스냅샷을 보존한다. 보관·배포 규칙은 정책 및 상태 §3.2를 따른다.
 - 내부 식별자 `id`와 외부 식별자 `judge0_language_id`를 구분한다. `judge0_language_id` 하나로는 스냅샷의 유일성을 보장하지 않는다.
+
+#### 4.3.6 관리자 검증 작업 (`judge_validation_jobs`) — 검토안
+
+정책 및 상태 §3.5의 검토안에 대응한다. Problem의 요청·코드 원본을 복제하지 않고, 검증 ID별 Judge 처리 상태를 보관한다. 아래 세 테이블은 제안이며 마이그레이션 적용 전 계약을 확정한다.
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `validation_id` | BIGINT | Y | PK. Problem이 발급한 `problem_validations.id`의 외부 참조. AUTO_INCREMENT·서비스 간 FK 없음 |
+| `problem_revision_id` | BIGINT | Y | 고정 회차 외부 참조. 변경 불가 |
+| `language` | VARCHAR(30) | Y | `java` / `python3` / `cpp`. 변경 불가 |
+| `request_hash` | CHAR(64) `_bin` | Y | Problem 요청의 SHA-256 원본. 변경 불가 |
+| `correlation_id` | VARCHAR(64) | Y | 최초 접수 이벤트의 추적 ID. 재시도·결과 발행에 사용 |
+| `runtime_id` | BIGINT | N | FK → `execution_runtimes.id`. 최초 실행 환경 확정 전 NULL, 확정 후 변경 불가 |
+| `status` | VARCHAR(30) | Y | `QUEUED` / `RUNNING` / `RETRY_WAITING` / `PASSED` / `REJECTED` / `ERROR` |
+| `try_count` | INT | Y | 시작한 실행 시도 수. 초기 0, 선점 시 증가. 상한은 정책 §3.5 검토안 참조 |
+| `lease_token` | VARCHAR(64) | N | 현재 실행 시도의 소유권 토큰. 미선점·시도 종료 후 NULL |
+| `lease_until` | DATETIME(6) | N | 현재 임대 기한. 미선점·시도 종료 후 NULL |
+| `next_run_at` | DATETIME(6) | Y | 다음 선점 가능 시각 |
+| `deadline_at` | DATETIME(6) | Y | 최초 접수 때 확정한 전체 처리 기한. 재전달·재시도로 연장하지 않음 |
+| `started_at` | DATETIME(6) | N | 현재 또는 마지막 시도의 시작 시각. 최초 선점 전 NULL |
+| `finished_at` | DATETIME(6) | N | 작업 최종 종결 시각. 비종결 상태는 NULL |
+| `last_error` | VARCHAR(500) | N | 원문·자격 정보가 없는 오류 분류·요약. 오류 없음은 NULL |
+| `created_at` | DATETIME(6) | Y | Judge 최초 접수 시각 |
+| `updated_at` | DATETIME(6) | Y | 마지막 갱신 시각 |
+
+**제약 및 인덱스**
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `pk_judge_validation_jobs` | `validation_id` | 같은 검증 ID의 작업 중복 방지 |
+| `fk_judge_validation_jobs_runtime` | `runtime_id` → `execution_runtimes.id` | 기존 실행 환경 공유 |
+| `idx_judge_validation_jobs_runtime` | `(runtime_id)` | FK 인덱스 |
+| `idx_judge_validation_jobs_next_run` | `(status, next_run_at)` | 실행 가능 작업 선점 |
+| `idx_judge_validation_jobs_lease` | `(status, lease_until)` | 임대 만료 조회 |
+| `idx_judge_validation_jobs_deadline` | `(status, deadline_at)` | 전체 처리 기한 초과 조회 |
+
+**상태값**
+
+| 상태 | 의미 | 전이 |
+| --- | --- | --- |
+| `QUEUED` | 최초 실행 대기 | → `RUNNING` / `ERROR` (기한 초과) |
+| `RUNNING` | 실행 중 | → `PASSED` / `REJECTED` / `RETRY_WAITING` / `ERROR` |
+| `RETRY_WAITING` | 시스템 실패 후 재시도 대기 | → `RUNNING` / `ERROR` |
+| `PASSED` / `REJECTED` / `ERROR` | 최종 종결 | 전이 없음. 수정 코드 검증은 새 validationId |
+
+**불변식**
+
+- 같은 `validation_id`의 회차·언어·요청 해시는 변경하지 않는다. `(problem_revision_id, language)`에는 UNIQUE를 두지 않는다. 실패 후 새 검증 ID로 재요청할 수 있다.
+- 실행 환경의 언어는 작업 언어와 같으며, 확정한 `runtime_id`를 변경하거나 초기화하지 않는다.
+- 종결 상태일 때만 `finished_at`이 존재한다. `PASSED`·`REJECTED`는 최종 시도의 종결 이력이 존재하며, `PASSED`는 실행 환경·생성기 정보가 필수다.
+- 처리·동시성·결과 발행 규칙은 정책 및 상태 §3.5를 따른다.
+
+#### 4.3.7 검증 실행 시도 이력 (`judge_validation_runs`) `[IMMUTABLE]` — 검토안
+
+일반 채점의 `judge_job_runs`처럼 시도가 끝날 때 한 번 기록한다. 진행 중 시도의 임대·시각은 작업 행이 보유한다.
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `validation_id` | BIGINT | Y | FK → `judge_validation_jobs.validation_id` |
+| `try_count` | INT | Y | 실제 시작한 시도 번호. 1부터 |
+| `lease_token` | VARCHAR(64) | Y | 해당 시도의 소유권 토큰 |
+| `runner_version` | VARCHAR(100) | N | 실제 사용한 생성기 참고 식별 정보. 생성 전 실패면 NULL |
+| `result` | VARCHAR(30) | Y | `SUCCEEDED` / `SYSTEM_ERROR` / `LEASE_EXPIRED`. 코드 정답 여부와 구분 |
+| `verdict` | VARCHAR(30) | N | 정상 판정된 시도의 대표 `AC` / `WA` / `TLE` / `MLE` / `RE` / `CE`. 시스템 실패는 NULL |
+| `max_time_ms` | INT | N | 해당 시도에서 측정한 최대 CPU 시간. 측정값 없음은 NULL |
+| `error_message` | VARCHAR(500) | N | 원문·자격 정보가 없는 실패 설명. 설명 없음은 NULL |
+| `started_at` | DATETIME(6) | Y | 실제 시도 시작 시각 |
+| `finished_at` | DATETIME(6) | Y | 시도 종료 시각 |
+| `created_at` | DATETIME(6) | Y | 이력 기록 시각 |
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `fk_judge_validation_runs_job` | `validation_id` → `judge_validation_jobs.validation_id` | 서비스 내부 FK |
+| `uk_judge_validation_runs_try` | `(validation_id, try_count)` | 시도당 종결 이력 1건 |
+
+- 기록 이후 수정·삭제하지 않는다. 대표 판정·최대 시간·생성기 정보는 이 시도 요약을 사용하며 작업 행에 다시 저장하지 않는다.
+- `result = SUCCEEDED`이면 `verdict`·`runner_version`이 존재한다. 실행 전 기한 초과는 시도 이력을 만들지 않는다.
+
+#### 4.3.8 검증 테스트 결과 (`judge_validation_test_results`) — 검토안
+
+검증 작업별 테스트 실행 상태를 보관한다. 일반 채점의 테스트 결과와 같은 token·판정 표현을 사용하되, 코드·입력·기대값·실제 출력 원문은 저장하지 않는다.
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `validation_id` | BIGINT | Y | FK → `judge_validation_jobs.validation_id` |
+| `test_asset_id` | BIGINT | Y | 고정 검증 자료의 테스트 ID. Problem 외부 참조 |
+| `test_order` | INT | Y | 고정 자료 배열 순서에 따른 번호. 1부터 |
+| `judge0_token` | VARCHAR(64) | N | 실행 생성 전 NULL |
+| `token_status` | VARCHAR(30) | Y | `NOT_CREATED` / `CREATED` / `UNKNOWN` / `DONE` |
+| `created_try_count` | INT | N | token 생성 요청 시도의 번호. 생성 요청 전 NULL |
+| `verdict` | VARCHAR(30) | N | 테스트별 판정. `SYSTEM_ERROR` 포함. 결과 전 NULL |
+| `time_ms` | INT | N | 올림한 CPU 시간. 측정값 없음은 NULL |
+| `memory_kb` | INT | N | 메모리 측정값. 측정값 없음은 NULL |
+| `created_at` | DATETIME(6) | Y | 최초 결과 자리 생성 시각 |
+| `updated_at` | DATETIME(6) | Y | 마지막 갱신 시각 |
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `fk_judge_validation_test_results_job` | `validation_id` → `judge_validation_jobs.validation_id` | 서비스 내부 FK |
+| `uk_judge_validation_test_results_order` | `(validation_id, test_order)` | 작업의 테스트당 1건 |
+| `uk_judge_validation_test_results_asset` | `(validation_id, test_asset_id)` | 같은 테스트의 중복 연결 방지 |
+| `idx_judge_validation_test_results_token` | `(token_status, updated_at)` | 미완료 실행 조회 |
+
+- 테스트 ID·순서는 초기 자료와 일치해야 하며 재시도에서 변경하지 않는다. 테스트별 최신 실행 상태만 유지하고 이전 시도의 요약은 §4.3.7에 보존한다.
+- 사용자 공개용 결과 테이블이 아니므로 `is_sample`·`actual_output`은 복제하지 않는다. Problem의 테스트 원본은 기존 자료 API로 읽는다.
 
 ### 4.4 contest
 
@@ -3012,7 +3119,14 @@ judge-service/src/main/resources/db/migration/
   V8__judging_create_judge_job_runs.sql
   V9__judging_create_judge_test_results.sql
   V10__submission_release_expired_idempotency_keys.sql
+  V11__common_create_outbox_events.sql
+  V12__common_create_processed_events.sql
+  V13__judging_create_validation_jobs.sql
+  V14__judging_create_validation_runs.sql
+  V15__judging_create_validation_test_results.sql
 ```
+
+기존 V1~V4는 공통 테이블 구축 계획 번호이며 실제 적용 이력과 구분한다. 기존 마이그레이션을 재사용하지 않고 Outbox·소비 기록은 V11·V12, 검증 작업·시도·테스트 결과는 V13~V15로 추가한다.
 
 ### 7.4 Contest (`contest-service`)
 
