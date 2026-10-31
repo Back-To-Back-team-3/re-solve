@@ -92,9 +92,13 @@ class ProblemRepositoriesTest {
 
     @BeforeEach
     void clearData() {
+        // 시드 데이터(problem_test_assets·problem_revision_tests)가 problems·problem_revisions를 참조하므로
+        // 먼저 지워야 FK 위반 없이 정리된다.
+        jdbc.update("DELETE FROM problem_revision_tests");
         jdbc.update("DELETE FROM problem_body_images");
         jdbc.update("DELETE FROM problem_revisions");
         jdbc.update("DELETE FROM problem_images");
+        jdbc.update("DELETE FROM problem_test_assets");
         jdbc.update("DELETE FROM problem_body_assets");
         jdbc.update("DELETE FROM problems");
     }
