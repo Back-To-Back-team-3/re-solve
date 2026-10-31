@@ -18,6 +18,6 @@
 | `wa.java` | WA | 오답 (틀린 값 반환) |
 | `tle.java` | TLE | 시간 초과 (무한 루프·극단적 복잡도) |
 | `re.java` | RE | 실행 오류 (예외 발생) |
-| `ce.java` | CE | 컴파일 오류 (문법 오류) |
+| `ce.java` | CE | 컴파일 오류 (타입 불일치) |
 
 각 파일은 `JavaExecutionCodeGenerator`가 그대로 받을 수 있는 `class Solution` 단독 코드다. 패키지 선언 없음.
