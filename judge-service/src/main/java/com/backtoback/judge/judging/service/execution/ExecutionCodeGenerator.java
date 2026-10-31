@@ -19,6 +19,16 @@ public interface ExecutionCodeGenerator {
     JudgeLanguage language();
 
     /**
+     * 현재 생성기의 참고 식별자를 반환한다. 과거 생성기 선택이나 실행 허용 조건으로 사용하지 않는다.
+     * 템플릿 계약을 변경할 때 구현체에서 식별자를 함께 갱신한다. (정책 §3.2)
+     *
+     * @return 언어별 생성기 식별 정보
+     */
+    default String runnerVersion() {
+        return language().getCode() + "-runner-v1";
+    }
+
+    /**
      * 고정 회차의 함수 명세에 맞는 언어별 기본 코드를 생성한다.
      *
      * @param spec 함수 이름·선언 순서의 매개변수·반환 타입
