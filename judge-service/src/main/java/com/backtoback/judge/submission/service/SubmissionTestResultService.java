@@ -30,6 +30,12 @@ public class SubmissionTestResultService {
     private final SubmissionJudgingDataClient dataClient;
     private final TestAssetClient assets;
 
+    /**
+     * 소유권과 회차를 확인한 뒤 공개 테스트 원문만 조회한다. 원격 조회 중 DB 잠금을 유지하지 않는다.
+     *
+     * @throws JudgeException {@code SUBMISSION_NOT_FOUND}: 본인 일반 제출 또는 회차가 없는 경우;
+     *     {@code COMMON_DEPENDENCY_UNAVAILABLE}: 고정 채점 자료·원문을 조회하거나 검증할 수 없는 경우
+     */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public SubmissionTestResultsResponse read(long memberId, long submissionId, int judgeAttempt) {
         var snapshot = history.read(memberId, submissionId);
@@ -61,13 +67,7 @@ public class SubmissionTestResultService {
                     && test.getTokenStatus() == JudgeTestResult.TokenStatus.DONE;
             var verdict = current && test.getVerdict() != JudgeVerdict.SYSTEM_ERROR ? test.getVerdict() : null;
             if (!test.isSample()) {
-                content
-                    .add(
-                        new SubmissionTestResultsResponse.HiddenTest(
-                            test.getTestOrder(),
-                            verdict == null ? null : verdict == JudgeVerdict.AC
-                        )
-                    );
+                content.add(SubmissionTestResultsResponse.HiddenTest.from(test.getTestOrder(), verdict));
                 continue;
             }
             var fixed = cases.get(Long.toString(test.getTestAssetId()));
@@ -75,20 +75,8 @@ public class SubmissionTestResultService {
                 throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
             }
             var source = assets.read(fixed.asset());
-            content
-                .add(
-                    new SubmissionTestResultsResponse.PublicTest(
-                        test.getTestOrder(),
-                        true,
-                        verdict,
-                        verdict == null ? null : test.getTimeMs(),
-                        verdict == null ? null : test.getMemoryKb(),
-                        source.argumentTexts(),
-                        source.expectedReturnText(),
-                        verdict == null ? null : test.getActualOutput()
-                    )
-                );
+            content.add(SubmissionTestResultsResponse.PublicTest.from(test, verdict, source));
         }
-        return new SubmissionTestResultsResponse(content);
+        return SubmissionTestResultsResponse.from(content);
     }
 }
