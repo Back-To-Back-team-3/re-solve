@@ -1433,7 +1433,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `context` | VARCHAR(30) | Y | `PRACTICE` / `EXAM` / `CONTEST` / `DIAGNOSIS` |
 | `context_id` | BIGINT | N | NULL 허용: `PRACTICE`. 시험·대회·진단 응시 ID (외부 참조) |
 | `source_submission_id` | BIGINT | N | NULL 허용: `PRACTICE`. `examSubmissionId`·`contestSubmissionId`·진단 제출 ID (멱등키) |
-| `idempotency_key` | VARCHAR(100) `_bin` | N | NULL 허용: `PRACTICE` 외. `Idempotency-Key` 헤더 |
+| `idempotency_key` | VARCHAR(100) `_bin` | N | NULL 허용: `PRACTICE` 외 또는 24시간이 지나 키를 해제한 이전 제출. 신규 일반 접수는 필수 |
 | `request_hash` | CHAR(64) `_bin` | N | NULL 허용: `PRACTICE` 외. 같은 키·다른 본문 판별용 SHA-256 |
 | `language` | VARCHAR(30) | Y | 언어 (공통 모듈 Enum) |
 | `runtime_id` | BIGINT | N | NULL 허용: 실행 환경 확정 전. FK → `execution_runtimes.id`. 신규 일반 제출 접수 완료 시 필수. 확정 후 참조 변경·초기화 불가 |
@@ -1458,7 +1458,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- | --- |
 | `fk_submissions_runtime` | `runtime_id` → `execution_runtimes.id` | 서비스 내부 FK. 실행 환경 삭제 시 참조 중인 제출 보호 |
 | `idx_submissions_runtime_id` | `(runtime_id)` | 실행 환경 참조 및 FK 인덱스 |
-| `uk_submissions_member_idempotency_key` | `(member_id, idempotency_key)` | `PRACTICE` 멱등 (NULL은 중복 아님) |
+| `uk_submissions_member_idempotency_key` | `(member_id, idempotency_key)` | `PRACTICE`의 현재 연결 키 UNIQUE. 만료 해제한 NULL은 중복 허용 |
 | `uk_submissions_context_source_submission` | `(context, source_submission_id)` | 시험·대회·진단 채점 요청 멱등 |
 | `idx_submissions_member_created_at` | `(member_id, created_at)` | 내 제출 이력 최신순 |
 | `idx_submissions_member_problem_created_at` | `(member_id, problem_id, created_at)` | 문제별 내 제출 |
@@ -1478,7 +1478,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 **불변식**
 
 - `status = COMPLETED` ⇔ `verdict IS NOT NULL`
-- `idempotency_key` 보관 24시간: 판단은 `created_at`으로 하고 행은 삭제하지 않는다.
+- `idempotency_key` 보관 24시간: 판단은 `created_at`으로 하고 행은 삭제하지 않는다. 같은 키로 새 접수 시 만료된 이전 행의 키만 NULL로 해제하며 코드·요청 해시·결과를 보존한다. 키 해제와 새 접수 저장은 같은 트랜잭션이다.
 - 확정한 `runtime_id`는 변경하거나 NULL로 초기화하지 않는다.
 - `runtime_id`가 참조하는 실행 환경의 `language`는 제출의 `language`와 일치해야 한다.
 
@@ -1497,7 +1497,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `lease_token` | VARCHAR(64) | N | NULL 허용: 선점 전. 선점마다 새로 발급 |
 | `lease_until` | DATETIME(6) | N | NULL 허용: 선점 전. `now + 120초`, 30초마다 연장 |
 | `next_run_at` | DATETIME(6) | Y | 선점 가능 시각 (백오프 10→30초 반영) |
-| `deadline_at` | DATETIME(6) | Y | 전체 처리 기한 (`RUNNING` 10분 초과 회수 기준 포함) |
+| `deadline_at` | DATETIME(6) | Y | 전체 처리 기한. 일반 제출은 정책 및 상태 §2에 따라 접수 저장 시 확정하며 같은 작업의 재요청·재시도에서 변경하지 않음 |
 | `started_at` | DATETIME(6) | N | NULL 허용: 최초 선점 전 |
 | `finished_at` | DATETIME(6) | N | NULL 허용: 종결 전 |
 | `last_error` | VARCHAR(500) | N | NULL 허용: 오류 없음 |
@@ -3011,6 +3011,7 @@ judge-service/src/main/resources/db/migration/
   V7__judging_create_judge_jobs.sql
   V8__judging_create_judge_job_runs.sql
   V9__judging_create_judge_test_results.sql
+  V10__submission_release_expired_idempotency_keys.sql
 ```
 
 ### 7.4 Contest (`contest-service`)

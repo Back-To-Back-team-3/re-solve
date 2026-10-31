@@ -1130,7 +1130,7 @@
 - **인증:** 내부 호출
 - **대응 테이블:** `member_tag_levels`
 - **설명:** judge가 `PRACTICE` 제출 전 레벨 접근 제한(난이도 ≤ 레벨)을 확인할 때 호출한다.
-    - **다중 태그 문제의 판정 기준(최고·최저 레벨)은 확정 필요.**
+    - 다중 태그 문제는 모든 태그의 레벨이 난이도를 충족해야 허용한다(최저 레벨 기준). 미진입 태그는 `LV0`으로 본다.
 - **응답 (200):**
     
     ```json
@@ -3866,10 +3866,15 @@
     - 외부 검증과 고정 런타임 가용성 조회는 저장 트랜잭션 밖에서 수행한다. 프로필의 키로 복원한 고정 실행 환경을 확인한다. `runnerVersion`과 현재 생성기의 식별자 일치는 접수 조건으로 검사하지 않는다.
     - 검증 통과 후 `submissions`(`QUEUED`)의 `runtime_id`, `judge_jobs`(`PENDING`)·테스트별 결과 자리를 한 트랜잭션에 저장한다. 실패하면 접수 전체를 롤백한다. `PREPARING` 선저장 단계는 두지 않는다.
     - 접수 완료 후 모든 테스트·재시도는 저장한 실행 환경과 현재 언어별 생성기를 사용한다. 고정 런타임 부재를 최신 런타임 선택이나 사용자 WA로 바꾸지 않는다.
+    - 정확히 24시간이 지난 키는 만료다. 만료된 이전 제출의 키만 NULL로 해제하고 코드·요청 해시·결과를 보존하며, 키 해제와 새 접수 저장을 같은 트랜잭션에서 처리한다. 동시 접수는 UNIQUE 제약으로 승자를 정하고 실패한 저장 트랜잭션 종료 후 기존 응답을 조회한다.
+    - 작업의 `deadline_at`은 정책 및 상태 §2의 일반 제출 전체 처리 기한에 따라 접수 저장 트랜잭션에서 확정한다. 대기열 체류를 포함하며 멱등 재요청·동일 작업 재시도로 연장하지 않는다.
     - 일반 풀이 채점 요청은 SQS를 거치지 않는다.
 - **외부 의존:**
     - `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/validation` (problem) — 회차 검증. 실패 시 fail-closed
-    - `GET /internal/v1/members/{memberId}/tag-levels` (member) — 레벨 접근 제한. 실패 시 fail-closed
+    - `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/data` (problem) — 초기 결과 자리의 테스트 순번·공개 여부 조회. 사전 검증의 회차·파일 목록·프로필과 대조하고, S3 원문은 읽지 않는다. 실패 시 fail-closed
+    - `GET /internal/v1/members/{memberId}/status` (member) — 회원 상태 복제본이 없을 때 조회. 실패 시 fail-closed
+    - `GET /internal/v1/members/{memberId}/tag-levels` (member) — 모든 태그의 레벨이 난이도를 충족해야 허용. 미진입 태그는 LV0, 실패 시 fail-closed
+    - 내부 HTTP 연결·응답 제한은 각각 2초이며 요청 한 번 안에서 자동 재시도하지 않는다. `judge.clients.problem-base-url`·`member-base-url`은 Compose 서비스 주소를 기본으로 하고 `judge.clients.timeout`으로 제한 시간을 설정한다.
 - **프론트 계약:**
     - 202 후 SSE(`/api/v1/notifications/subscribe`)의 `SUBMISSION_JUDGED` 알림을 받으면 제출 상태·결과 조회(3.1.3)으로 결과를 조회한다. SSE 연결이 없으면 3.1.3을 2초 → 5초 간격으로 조회한다.
     - 응답이 유실되면 같은 키·본문으로 재요청한다. 새 코드에는 새 키를 쓴다.
