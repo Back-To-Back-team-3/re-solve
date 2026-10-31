@@ -127,7 +127,7 @@ class ProblemServiceApplicationTest {
     @DisplayName("문제 DB와 ShedLock을 포함한 Flyway 마이그레이션을 적용한다")
     void applicationConnectsToProblemDatabaseAndAppliesMigrations() {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("problem_db");
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("13");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM setup_probe", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM shedlock", Integer.class)).isZero();
     }
