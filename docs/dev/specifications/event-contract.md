@@ -189,7 +189,7 @@ flowchart LR
 | J1 | `SubmissionJudged` v1 | judge | member, problem, study, notification, integration | SNS | `PRACTICE` 회차 정상 종결 | `judgeAttempt` | 확정 |
 | J2 | `ExamSubmissionJudged` v1 | judge | contest | SNS | `EXAM` 회차 정상 종결 | `judgeAttempt` | 확정 |
 | J3 | `ContestSubmissionJudged` v1 | judge | contest | SNS | `CONTEST` 회차 정상 종결 | `judgeAttempt` | 확정 |
-| J4 | `SubmissionFailed` v1 | judge | notification, contest, member(진단) | SNS | 시도 상한 초과 `FAILED` | `judgeAttempt` | 확정 |
+| J4 | `SubmissionFailed` v1 | judge | notification, contest, member(진단) | SNS | 시도 상한 또는 전체 처리 기한 초과 `FAILED` | `judgeAttempt` | 확정 |
 | J5 | `DiagnosisSubmissionJudged` v1 | judge | member | SNS | `DIAGNOSIS` 회차 정상 종결 | `judgeAttempt` | 확정 필요 (B·E) |
 | C1 | `ExamSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 시험 직접·자동 제출 접수 | — (`examSubmissionId` 멱등) | 확정 |
 | C2 | `ContestSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 대회 제출 접수 | — (`contestSubmissionId` 멱등) | 확정 |
@@ -585,7 +585,7 @@ flowchart LR
 
 #### J4 `SubmissionFailed` v1
 
-- **발행:** `try_count` 3 초과로 작업·제출이 `FAILED`가 되는 트랜잭션. aggregate = `submissionId`. 판정이 아니므로 사용자 판정으로 해석하지 않는다.
+- **발행:** `try_count` 3 초과 또는 전체 처리 기한 초과로 작업·제출이 `FAILED`가 되는 트랜잭션. 기한 초과는 실행 전 대기 상태도 포함하며, 종결 규칙은 스케줄러 §3.2를 따른다. aggregate = `submissionId`. 판정이 아니므로 사용자 판정으로 해석하지 않는다.
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |

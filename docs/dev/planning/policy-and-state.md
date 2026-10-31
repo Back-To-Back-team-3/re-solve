@@ -39,7 +39,7 @@
 | 채점 작업 임대 | 120초 | 실행기가 작업을 점유하는 시간 | 최대 채점 시간보다 길게 |
 | 임대 연장 주기 | 30초 | 실행 중 `lease_until` 갱신 주기 | `lease_token` 일치 조건 |
 | 임대 만료 회수 주기 | 30초 | 만료된 작업을 되돌리는 스케줄러 주기 | 실행기 비정상 종료 대응 |
-| 일반 제출 채점 작업 전체 처리 기한 | 접수 저장 기준 시각 + 10분 | 저장 트랜잭션에서 확정한 기준 시각부터 대기열 체류·실행·재시도를 포함한다. 동일 작업의 멱등 재요청·선점·재시도는 기한을 연장하지 않음 | 일반 제출 처리 시간의 상한 |
+| 일반 제출 채점 작업 전체 처리 기한 | 접수 저장 기준 시각 + 10분 | 저장 트랜잭션에서 확정한 기준 시각부터 대기열 체류·실행·재시도를 포함한다. 동일 작업의 멱등 재요청·선점·재시도는 기한을 연장하지 않음. 기한 이후 새 실행·재시도와 정상 결과 반영은 허용하지 않으며 종결 처리는 스케줄러 §3.1·§3.2를 따름 | 일반 제출의 실행 허용 기한 |
 | 장시간 채점 작업 회수 | `RUNNING` 10분 초과 | 멈춘 작업 판정 기준 | 최대 채점 시간 대비 충분한 여유 |
 | 채점 상태 대사 주기 | 5분 | 제출 상태와 작업 상태 불일치 점검 | §10 대응표 기준 |
 | Outbox Relay 주기 | 1초 | 미발행 이벤트 발행 주기 | 반영 지연 최소화 |
@@ -199,7 +199,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | --- | --- |
 | 실행 방식 | 제출이 고정한 문제 수정 회차의 테스트케이스를 독립적으로 Judge0에 실행 요청한다. |
 | 실행 데이터 | 고정 `problemRevisionId`의 함수 명세·실행 제한·전체 테스트 파일 참조를 조회하고, Judge가 비공개 S3에서 입력·기대값을 읽는다. 최초 실행과 재시도는 같은 조회 모듈을 사용하며 제출 가능 여부를 다시 검사하지 않는다. |
-| 실행 환경 확정 | 신규 일반 제출은 접수 완료 전에, 그 외 문맥은 최초 Judge0 실행 생성 요청 전에 실행 환경 스냅샷을 확정한다. 제출의 `runtime_id` 연결을 한 트랜잭션에서 한 번만 저장하며, 동시에 여러 실행기가 처리해도 이미 확정한 환경을 변경하지 않는다. 저장 구조는 [ERD > 4.3.1 제출](../specifications/erd.md#431-제출-submissions)과 [4.3.5 실행 환경](../specifications/erd.md#435-실행-환경-execution_runtimes)을 따른다. |
+| 실행 환경 확정 | 신규 일반 제출은 접수 완료 전에, 그 외 문맥은 최초 Judge0 실행 생성 요청 전에 고정 회차·언어의 통과 프로필에서 `runtimeKey`로 복원한 실행 환경 스냅샷을 확정한다. 제출의 `runtime_id` 연결을 한 트랜잭션에서 한 번만 저장하며, 동시에 여러 실행기가 처리해도 이미 확정한 환경을 변경하지 않는다. 저장 구조는 [ERD > 4.3.1 제출](../specifications/erd.md#431-제출-submissions)과 [4.3.5 실행 환경](../specifications/erd.md#435-실행-환경-execution_runtimes)을 따른다. |
 | 실행 환경 공유 | `language`·`judge0_language_id`·`runtime_name`·`runtime_version`·`compiler_options` 전체 속성을 SHA-256으로 식별하고 `snapshot_hash` UNIQUE 제약으로 동시 중복 저장을 막는다. 해시가 같아도 원본 속성을 모두 비교하며 불일치하면 재사용하지 않는다. 같은 환경은 기존 스냅샷을 사용하고, 속성이 달라지면 기존 행을 수정하지 않고 새 스냅샷을 만든다. |
 | 실행 환경 해시 형식 | 버전 바이트 `1` 뒤에 언어·Judge0 환경 ID·이름·버전·컴파일 옵션 순으로 기록한다. ID는 32비트 빅엔디언 정수이고, 문자열은 UTF-8 바이트 길이를 32비트 빅엔디언 정수로 기록한 뒤 원문 바이트를 붙인다. NULL은 길이 `-1`, 빈 문자열은 길이 `0`으로 구분한다. 이 바이트열의 SHA-256을 소문자 16진수 64자로 저장한다. |
 | 외부 실행 환경 식별자 | `runtimeKey`는 `execution_runtimes.snapshot_hash`에 대응하는 소문자 16진수 64자다. Judge가 발급·해석하고 Problem은 통과 검증에서 받은 값을 그대로 보관·반환한다. Judge는 해당 스냅샷을 조회해 언어·Judge0 ID·이름·버전·컴파일 옵션을 복원한다. 키 자체에서 속성을 역산하거나 Judge0 ID·최신 환경으로 치환하지 않는다. 외부에 발행한 키의 의미와 해시 형식은 변경하지 않는다. |
@@ -782,9 +782,9 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 문제 용도(`problem.scope`) | `GENERAL` / `EXAM_ONLY` (생성 시 결정) |
 | 문제 파일 | `PENDING → LINKED / DISCARDED / DELETING`, `DISCARDED → DELETING`, `DELETING → 물리 삭제`. LINKED는 보존. 업로드 종료·유예·무참조 조건과 경합은 §4·ERD §4.2.3을 따름 |
 | 문제 수정 회차(`problem_revision`) | 저장된 회차는 수정하지 않고 새 회차를 만든다(`revision_number + 1`). 이전 회차는 이력으로 보존한다. (P2 검수 워크플로 도입 시: `DRAFT → IN_REVIEW → 승인 / REJECTED`, `REJECTED → DRAFT`) |
-| 제출(`submissions`) | `QUEUED → JUDGING → COMPLETED`, <br>`JUDGING → RETRY_WAITING → JUDGING`(시스템 오류·임대 만료 회수), <br>`RETRY_WAITING / JUDGING → FAILED`(실행 시도 상한 초과), <br>`FAILED → QUEUED`(관리자 재처리), <br>`COMPLETED → QUEUED`(관리자 재채점, `judge_attempt + 1`) |
+| 제출(`submissions`) | `QUEUED → JUDGING → COMPLETED`, <br>`JUDGING → RETRY_WAITING → JUDGING`(시스템 오류·임대 만료 회수), <br>`RETRY_WAITING / JUDGING → FAILED`(실행 시도 상한 초과), <br>`QUEUED / JUDGING → FAILED`(전체 처리 기한 초과), <br>`FAILED → QUEUED`(관리자 재처리), <br>`COMPLETED → QUEUED`(관리자 재채점, `judge_attempt + 1`) |
 | 제출 판정(`submissions.verdict`) | `COMPLETED`일 때만 `AC / WA / TLE / MLE / RE / CE` 중 하나 |
-| 채점 작업(`judge_jobs`) | `PENDING → RUNNING → SUCCEEDED`, <br>`RUNNING → RETRY_WAITING → RUNNING`(`try_count + 1`, 백오프 10→30초), <br>`RETRY_WAITING / RUNNING → FAILED`(`try_count` 3 초과) |
+| 채점 작업(`judge_jobs`) | `PENDING → RUNNING → SUCCEEDED`, <br>`RUNNING → RETRY_WAITING → RUNNING`(`try_count + 1`, 백오프 10→30초), <br>`RETRY_WAITING / RUNNING → FAILED`(`try_count` 3 초과), <br>`PENDING / RETRY_WAITING / RUNNING → FAILED`(전체 처리 기한 초과) |
 | 채점 실행 이력(`judge_job_runs`) | 실행 시도마다 1행 생성, 불변 이력 |
 | Outbox(`outbox_events`) | `PENDING → PUBLISHED`, `PENDING → FAILED → PENDING`(재시도) |
 | 시험(`exams`) | `SCHEDULED → IN_PROGRESS → CLOSED → FINALIZED`, <br>`SCHEDULED → CANCELED`, <br>`FINALIZED → FINALIZED`(관리자 재확정, 감사 로그) |

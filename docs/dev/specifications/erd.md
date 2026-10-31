@@ -1517,15 +1517,15 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 상태 | 의미 | 전이 |
 | --- | --- | --- |
-| `PENDING` | 선점 대기 | → `RUNNING` |
+| `PENDING` | 선점 대기 | → `RUNNING` / `FAILED` (전체 처리 기한 초과) |
 | `RUNNING` | 실행기 점유 중 | → `SUCCEEDED` / `RETRY_WAITING` / `FAILED` |
-| `RETRY_WAITING` | 백오프 대기 | → `PENDING` / `FAILED` (`try_count` 3 초과) |
+| `RETRY_WAITING` | 백오프 대기 | → `PENDING` / `FAILED` (`try_count` 3 초과 또는 전체 처리 기한 초과) |
 | `SUCCEEDED` · `FAILED` | 종단 | 재채점은 새 행 |
 
 **불변식**
 
-- 선점: `status IN ('PENDING','RETRY_WAITING') AND next_run_at <= now()`
-- 결과 저장: `WHERE status = 'RUNNING' AND lease_token = :token` (이전 실행기·이전 회차 결과 폐기)
+- 선점: `status IN ('PENDING','RETRY_WAITING') AND next_run_at <= now() AND deadline_at > now()`
+- 결과 저장: `WHERE status = 'RUNNING' AND lease_token = :token AND deadline_at > :now` (이전 실행기·이전 회차·기한 초과 결과 폐기)
 
 #### 4.3.3 실행 시도 이력 (`judge_job_runs`) `[IMMUTABLE]`
 
