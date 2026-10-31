@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120" viewBox="0 0 320 120" role="img" aria-labelledby="title">
+  <title id="title">덧셈 예시</title>
+  <rect width="320" height="120" rx="16" fill="#f2f6ff"/>
+  <text x="160" y="76" fill="#243b64" font-family="sans-serif" font-size="36" text-anchor="middle">1 + 2 = 3</text>
+</svg>
