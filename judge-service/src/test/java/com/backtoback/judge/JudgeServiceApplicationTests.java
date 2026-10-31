@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -67,6 +68,20 @@ class JudgeServiceApplicationTests {
 
     @Autowired
     private MockMvc mvc;
+
+    @Autowired
+    private ApplicationContext context;
+
+    /** 기본 비활성 설정에서 원격 실행과 예약 작업이 시작되지 않는지 확인한다. */
+    @Test
+    @DisplayName("메시징 비활성 시 검증 수신·실행·발행 예약을 등록하지 않는다")
+    void disablesValidationExecution() {
+        assertThat(context.containsBean("validationMessageListener")).isFalse();
+        assertThat(context.containsBean("outboxRelay")).isFalse();
+        assertThat(context.containsBean("validationScheduler")).isFalse();
+        assertThat(context.containsBean("judgeValidationExecutor")).isFalse();
+        assertThat(context.containsBean("judgeValidationScheduler")).isFalse();
+    }
 
     /**
      * 테스트 컨테이너의 DB·Redis·SNS·SQS 연결 정보를 Spring 설정에 등록한다.

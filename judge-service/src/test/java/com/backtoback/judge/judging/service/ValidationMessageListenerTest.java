@@ -12,11 +12,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
@@ -61,6 +63,32 @@ class ValidationMessageListenerTest {
     private PlatformTransactionManager manager;
     @Autowired
     private ObjectMapper mapper;
+
+    // 수신·발행 검증 중 작업 자체를 소비하지 않도록 상위 실행만 대체한다.
+    @MockitoBean
+    private ValidationWorker worker;
+    @Autowired
+    private ApplicationContext context;
+
+    /** 기존 메시지 활성화 설정이 실제 주기 실행까지 등록하는지 확인한다. */
+    @Test
+    @DisplayName("메시징 활성화 시 수신·실행·발행과 기한 초과 정리를 함께 등록한다")
+    void enablesValidationExecution() {
+        assertThat(context.containsBean("validationMessageListener")).isTrue();
+        assertThat(context.containsBean("outboxRelay")).isTrue();
+        assertThat(context.containsBean("validationScheduler")).isTrue();
+        var executor
+            = context
+                .getBean(
+                    "judgeValidationExecutor",
+                    org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor.class
+                );
+        assertThat(executor.getCorePoolSize()).isEqualTo(2);
+        assertThat(executor.getMaxPoolSize()).isEqualTo(2);
+        await()
+            .atMost(Duration.ofSeconds(10))
+            .untilAsserted(() -> org.mockito.Mockito.verify(worker, org.mockito.Mockito.atLeastOnce()).runOnce());
+    }
 
     /**
      * 리스너 시작 전에 Standard 큐·토픽·결과 구독을 준비한다.
