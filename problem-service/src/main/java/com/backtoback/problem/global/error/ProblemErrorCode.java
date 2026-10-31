@@ -11,6 +11,10 @@ import lombok.Getter;
  */
 @Getter
 public enum ProblemErrorCode implements ErrorCode {
+    PROBLEM_NOT_FOUND(HttpStatus.NOT_FOUND, "문제 또는 상태 작업을 찾을 수 없습니다."),
+    PROBLEM_REVISION_NOT_FOUND(HttpStatus.NOT_FOUND, "문제에 속한 회차를 찾을 수 없습니다."),
+    PROBLEM_VALIDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "검증 요청을 찾을 수 없습니다."),
+    PROBLEM_INVALID_STATE_TRANSITION(HttpStatus.CONFLICT, "요청한 문제 상태 변경을 적용할 수 없습니다."),
     PROBLEM_TEST_CASE_INVALID(HttpStatus.BAD_REQUEST, "테스트 데이터의 타입·구성 또는 중복 여부를 확인해 주세요."),
     PROBLEM_TAG_NOT_FOUND(HttpStatus.NOT_FOUND, "태그를 찾을 수 없습니다."),
     PROBLEM_TAG_DUPLICATED(HttpStatus.CONFLICT, "같은 이름의 태그가 이미 존재합니다."),
