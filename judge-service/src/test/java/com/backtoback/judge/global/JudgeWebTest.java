@@ -400,7 +400,7 @@ class JudgeWebTest {
             )
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.error.code").value("SUBMISSION_RUNTIME_UNAVAILABLE"))
-            .andExpect(jsonPath("$.error.message").value("기존 실행 환경을 사용할 수 없어 재채점할 수 없습니다."));
+            .andExpect(jsonPath("$.error.message").value("지정된 실행 환경을 사용할 수 없습니다."));
     }
 
     /**

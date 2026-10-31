@@ -1,6 +1,9 @@
 package com.backtoback.judge.global.error;
 
+import org.springframework.http.HttpHeaders;
+
 import com.backtoback.common.exception.BusinessException;
+import com.backtoback.common.exception.ErrorCode;
 
 import lombok.Getter;
 
@@ -16,7 +19,7 @@ public class JudgeException extends BusinessException {
      *
      * @param errorCode 채점 오류 코드
      */
-    public JudgeException(JudgeErrorCode errorCode) {
+    public JudgeException(ErrorCode errorCode) {
         this(errorCode, null);
     }
 
@@ -27,8 +30,20 @@ public class JudgeException extends BusinessException {
      * @param errorCode 채점 오류 코드
      * @param upstreamStatus 외부 HTTP 상태; 확인할 수 없으면 null
      */
-    public JudgeException(JudgeErrorCode errorCode, Integer upstreamStatus) {
+    public JudgeException(ErrorCode errorCode, Integer upstreamStatus) {
         super(errorCode);
+        this.upstreamStatus = upstreamStatus;
+    }
+
+    /**
+     * 공개 응답 헤더와 진단용 HTTP 상태를 보관하는 예외를 생성한다.
+     *
+     * @param errorCode 공통 또는 채점 오류 코드
+     * @param headers 공개할 응답 헤더
+     * @param upstreamStatus 외부 HTTP 상태; 없으면 {@code null}
+     */
+    public JudgeException(ErrorCode errorCode, HttpHeaders headers, Integer upstreamStatus) {
+        super(errorCode, headers);
         this.upstreamStatus = upstreamStatus;
     }
 }
