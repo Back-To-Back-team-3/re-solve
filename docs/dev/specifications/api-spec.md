@@ -7596,6 +7596,7 @@
 - **Method / URI:** `POST /internal/v1/judge/runs`
 - **요청 필드:** `context`, `contextId`, `memberId`, `problemId`, `problemRevisionId`, `language`, `sourceCode`, `customTests[].args`
 - **비고:** §4.7.1 `RUN` 검증 후 공개 예제·사용자 입력만 동기 실행 (30초). 결과 저장·이벤트 발행 없음.
+- **재시도:** `RUN_TIMEOUT`(504)은 §4.8 공통 자동 재시도 대상에서 제외하고 호출자에게 반환한다.
 
 #### 4.8.7 스터디 구성원 조회 (study)
 
