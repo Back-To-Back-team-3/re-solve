@@ -45,6 +45,8 @@ import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.contest.global.config.CommonConfiguration;
 import com.backtoback.contest.global.config.SecurityConfiguration;
 
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.RequestDispatcher;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
@@ -166,6 +168,28 @@ class CommonWebIntegrationTest {
         assertThat(unexpected.getStatus()).isEqualTo(500);
         assertThat(unexpected.getContentAsString()).contains("COMMON_INTERNAL_SERVER_ERROR");
         assertThat(unexpected.getContentAsString()).doesNotContain("private server detail");
+    }
+
+    /**
+     * 일반 /error 요청은 인증을 요구하고 ERROR 디스패치는 원래 서버 오류 상태를 유지하는지 확인한다.
+     *
+     * @throws Exception MockMvc 요청을 수행하지 못한 경우
+     */
+    @Test
+    @DisplayName("ERROR 디스패치만 오류 경로 인가를 통과하고 원래 상태를 유지한다")
+    void allowsErrorDispatchWithoutPermittingNormalRequests() throws Exception {
+        // given: 익명 일반 요청은 보호하고 원래 500 상태를 가진 ERROR 디스패치를 준비한다.
+        mockMvc.perform(get("/error")).andExpect(status().isUnauthorized());
+
+        // when: ERROR 디스패치를 Boot 오류 경로로 전달한다.
+        // then: 보안 체인의 인증 오류 대신 원래 서버 오류 상태를 반환한다.
+        mockMvc.perform(get("/error").with(request -> {
+            request.setDispatcherType(DispatcherType.ERROR);
+            request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, 500);
+            request.setAttribute(RequestDispatcher.ERROR_REQUEST_URI, "/api/v1/test/private");
+            request.setAttribute(RequestDispatcher.ERROR_MESSAGE, "private server detail");
+            return request;
+        })).andExpect(status().isInternalServerError());
     }
 
     /**

@@ -16,6 +16,7 @@ import com.backtoback.common.web.security.RequestAuthenticationFilter;
 import com.backtoback.common.web.security.SecurityAccessDeniedHandler;
 import com.backtoback.common.web.security.SecurityAuthenticationEntryPoint;
 
+import jakarta.servlet.DispatcherType;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -26,7 +27,7 @@ import tools.jackson.databind.ObjectMapper;
 public class SecurityConfiguration {
 
     /**
-     * 공개 대회 조회와 인증된 contest API를 구분하는 상태 비저장 보안 체인을 구성한다.
+     * 공개 대회 조회와 인증된 contest API를 구분하고 ERROR 디스패치를 허용하는 상태 비저장 보안 체인을 구성한다.
      *
      * @param http 서비스의 HTTP 보안 구성기
      * @param objectMapper 공통 보안 오류 응답에 사용할 JSON 매퍼
@@ -56,6 +57,7 @@ public class SecurityConfiguration {
                     .accessDeniedHandler(new SecurityAccessDeniedHandler(objectMapper))
             )
             .authorizeHttpRequests(authorize -> {
+                authorize.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll();
                 authorize.requestMatchers(HttpMethod.GET, "/actuator/health").permitAll();
                 if (environment.acceptsProfiles(Profiles.of("local"))) {
                     authorize.requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll();
