@@ -1,0 +1,6 @@
+[
+  {"label": "홀수 길이 팰린드롬", "arguments": {"s": "\"racecar\""}, "expected": "true"},
+  {"label": "팰린드롬 아님", "arguments": {"s": "\"hello\""}, "expected": "false"},
+  {"label": "글자 하나", "arguments": {"s": "\"a\""}, "expected": "true"},
+  {"label": "짝수 길이 팰린드롬", "arguments": {"s": "\"abba\""}, "expected": "true"}
+]

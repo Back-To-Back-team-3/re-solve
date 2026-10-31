@@ -1,0 +1,10 @@
+{
+  "name": "solution",
+  "parameters": [
+    {
+      "name": "nums",
+      "type": {"kind": "ARRAY", "elementType": {"kind": "INT32"}}
+    }
+  ],
+  "returnType": {"kind": "INT32"}
+}

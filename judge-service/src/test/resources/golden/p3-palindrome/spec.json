@@ -1,0 +1,7 @@
+{
+  "name": "solution",
+  "parameters": [
+    {"name": "s", "type": {"kind": "STRING"}}
+  ],
+  "returnType": {"kind": "BOOLEAN"}
+}
