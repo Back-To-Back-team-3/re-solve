@@ -520,7 +520,7 @@
     - `WITHDRAWAL_BLOCKED_STUDY_LEADER`(409) / `CLOSED`가 아닌 스터디의 스터디장 (위임 또는 종료 안내)
     - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 차단 조건 조회 실패
 - **외부 의존:**
-    - `GET /internal/v1/participations/active?memberId=` (contest, 4.7.2) — 실제 입장한 미확정 시험·대회 여부. 실패 시 fail-closed
+    - `GET /internal/v1/contest/members/{memberId}/active-participations` (contest, 4.7.2) — 실제 입장한 미확정 시험·대회 여부. 실패 시 fail-closed
     - `GET /internal/v1/studies/memberships?memberId=&role=LEADER&activeOnly=true` (study, 5.7.2) — 스터디장 여부. 실패 시 fail-closed
 - **발행:**
     - `MemberWithdrawn` — 탈퇴 트랜잭션 (전 서비스 정리)
@@ -1146,6 +1146,25 @@
     ```
     
 - **실패 시 처리:** judge는 fail-closed(`COMMON_DEPENDENCY_UNAVAILABLE`)
+
+#### 1.7.3 회원 탈퇴 작업 상태 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/members/{memberId}/operations/{operationId}`
+- **인증:** 내부 호출 (contest)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **설명:** Contest 자원 가드에 사용한 원래 회원 탈퇴 작업의 확정 여부를 반환한다. 조회로 탈퇴나 가드 상태를 변경하지 않는다.
+- **요청 파라미터:** `memberId`, `operationId` — 모두 Path, string, 필수.
+- **응답 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 조회한 원래 탈퇴 작업 ID |
+    | `state` | string | PENDING / COMMITTED / ABORTED |
+    | `sourceVersion` | string | 원래 작업에 대응하는 원천 상태 순서 값 |
+    | `resourceStatus` | string | 원래 작업에 대응하는 회원 상태 |
+
+- **실패 시 처리:** 없는 작업은 404. Contest는 `PENDING`·404·조회 실패 시 PREPARED 차단을 유지한다. `COMMITTED`는 §4.7.4 complete, `ABORTED`는 cancel로 복구한다.
+- **대사 기준:** 원래 작업의 결과를 반환한다. 현재 회원 상태만으로 원래 작업의 성공·취소를 추정하지 않는다.
 
 ### 1.8 사용하는 내부 API
 
@@ -4439,6 +4458,84 @@
 - **프론트 계약:** 없음. 프론트는 Problem의 상세 응답을 사용한다.
 - **비고:** TypeSpec 상세는 §2.3.0과 TypeSpec 명세를 따른다. Problem은 응답 언어 집합이 요청과 정확히 일치하는지, 누락·중복 및 비문자열 코드가 없는지 검사한다. 통신 실패·Judge 비정상 HTTP 응답·잘못된 성공 응답은 Problem이 `COMMON_DEPENDENCY_UNAVAILABLE`(503)으로 처리하며, 다른 회차·미통과 언어·로컬 생성 코드로 대체하지 않는다. 타임아웃은 §2.7을 따른다.
 
+#### 3.3.6 접수 ID 기준 시험·대회 채점 상태 조회
+
+- **Method / URI:** `GET /internal/v1/judge/submissions/by-receipt`
+- **인증:** 내부 호출 (contest)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** `submissions`, `judge_jobs`
+- **설명:** Judge 제출 ID를 아직 받지 못했거나 결과 이벤트가 유실된 C 접수를 원래 접수 ID로 대사한다. §3.3.1의 제출 ID 기준 조회를 대체하지 않는다.
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `context` | Query | string | Y | EXAM / CONTEST |
+    | `receiptId` | Query | string | Y | C의 원래 시험·대회 접수 ID |
+
+- **응답 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `found` | boolean | 원래 접수에 대응하는 Judge 제출 존재 여부 |
+    | `submissionId` | string | found=true일 때 Judge 제출 ID |
+    | `context / contextId / receiptId` | string | found=true일 때 원래 실행 문맥·접수 식별자 |
+    | `userId / problemId / problemRevisionId` | string | found=true일 때 원래 회원·문제·고정 회차 |
+    | `submittedAt` | string (date-time) | found=true일 때 C가 확정한 원래 접수 시각 |
+    | `status` | string | found=true일 때 Judge 제출 상태 |
+    | `judgeAttempt` | integer | found=true일 때 채점 회차 |
+    | `verdict` | string 또는 null | 미종결·실패는 null |
+    | `passedCount / totalCount` | integer 또는 null | 미종결·실패는 null |
+
+- **실패 시 처리:** C는 원래 접수와 문맥·회원·문제·고정 회차·접수 시각을 대조하고 불일치를 격리한다. 미발견·조회 실패를 정상 채점 결과로 처리하거나 결과를 확정하지 않는다.
+
+
+#### 3.3.7 실패 시험 제출 재처리 (내부)
+
+- **Method / URI:** `POST /internal/v1/judge/submissions/{submissionId}/retry`
+- **인증:** 내부 호출 (contest). 시험 운영 권한은 C가 검증한다.
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** `submissions`, `judge_jobs`, `audit_logs`
+- **설명:** `EXAM`·`FAILED`이고 기대 회차가 일치하는 제출에 새 채점 회차를 접수한다. C는 부모 결과 `FINALIZED` 전을 확인하고 관리자 작업을 먼저 `PENDING` 저장한다.
+- **요청 파라미터:** `submissionId` — Path, string, 필수.
+- **요청 본문:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `context` | string | Y | EXAM만 허용 |
+    | `receiptId` | string | Y | C의 원래 시험 접수 ID |
+    | `expectedJudgeAttempt` | integer | Y | 재처리할 종결 채점 회차 |
+    | `operationId` | string | Y | 원래 재처리 작업 ID. 1~100자 |
+    | `actorMemberId` | string | Y | C가 운영 권한을 검증한 실행자 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+
+- **응답 (202):** `submissionId`(string), `judgeAttempt`(integer, `expectedJudgeAttempt + 1`), `status`(string, `QUEUED`).
+- **동시성/멱등 보장:** 같은 operationId·같은 본문 재요청은 기존 접수 결과를 반환하고 회차를 다시 올리지 않는다. 같은 operationId·다른 본문은 §0.1에 따라 422 IDEMPOTENCY_KEY_CONFLICT로 거절한다. C는 응답 유실 시 같은 operationId·expectedJudgeAttempt로 재요청한다. 새 회차 반영과 기존 회차 무시는 §4.6.3과 시퀀스 §3.6을 따른다.
+- **실패 시 처리:** EXAM·FAILED·기대 회차 조건 불일치는 409. 조회·호출 결과가 불명확하면 C의 관리자 작업과 확정 보류를 유지한다.
+- **발행:** 새 회차 결과는 `ExamSubmissionJudged`로 전달한다.
+- **비고:** §3.2.3·§3.2.4의 외부 관리자 경로와 구분한다.
+
+#### 3.3.8 시험·대회 코드 실행 (내부)
+
+- **Method / URI:** `POST /internal/v1/judge/runs`
+- **인증:** 내부 호출 (contest)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** 없음. Draft·제출·점수·통계를 저장하거나 이벤트를 발행하지 않는다.
+- **설명:** §4.7.1의 RUN 검증을 거쳐 공개 예제·사용자 입력만 동기 실행한다. 숨김 테스트는 실행하지 않는다.
+- **요청 본문:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `context` | string | Y | EXAM / CONTEST |
+    | `contextId / memberId / problemId / problemRevisionId` | string | Y | C가 확인한 문맥·회원·문제·고정 회차 |
+    | `language` | string | Y | java / python3 / cpp |
+    | `sourceCode` | string | Y | 공통 코드 크기·빈 코드 규칙 적용 |
+    | `customTests` | object[] | N | 사용자 입력, 최대 10개 |
+    | `customTests[].args` | JSON value[] | Y | 사용자 입력 인수 배열 |
+
+- **응답 (200):** §4.2.13·§4.4.11의 실행 결과를 전달한다. `results[]`는 `type`(SAMPLE/CUSTOM), `index`, `output`, `error`, `timeMs`, `memoryKb`를 포함하고 `completedAt`을 반환한다.
+- **실패 시 처리:** 실행 기한 30초, 초과 504 RUN_TIMEOUT. 실행 중 재요청은 429 RUN_IN_PROGRESS. 의존 서비스 장애는 C에서 503으로 처리한다.
+- **비고:** §3.1.8의 외부 PRACTICE Run은 customInputs 최대 5개와 다른 입출력 형식을 사용하므로 이 내부 계약과 구분한다.
+
 ---
 
 ## 4. 모의 코테·대회 (contest)
@@ -4451,9 +4548,9 @@
 | 항목 | 값 |
 | --- | --- |
 | 외부 경로 | `/api/v1/studies/{studyId}/exams`, `/api/v1/exams/**`, `/api/v1/contests/**`, `/api/v1/admin/exams/**`, `/api/v1/admin/contests/**` |
-| 내부 경로 | `/internal/v1/exams/**`, `/internal/v1/participations/**` |
+| 내부 경로 | `/internal/v1/contest/**`, `/internal/v1/exams/{examId}/rejudge-eligibility` |
 | 소유 테이블 | 스키마 `contest` |
-| 시간 판정 | 모든 시작·종료·저장·제출 유효성은 서버 시각과 `personalEndsAt` 비교로 판정한다. 클라이언트 타이머는 표시용 (응답마다 `serverNow` 포함) |
+| 시간 판정 | 모든 시작·종료·저장·제출 유효성은 서버 시각과 `personalEndsAt` 비교로 판정한다. 클라이언트 타이머는 표시용이며, 서버 시각 필드는 `serverNow`로 통일한다 |
 | 제출 경로 | 접수(`received_at` 기록) → Outbox → SQS `exam-submission-queue` → judge. 결과는 `ExamSubmissionJudged`·`ContestSubmissionJudged`로 받는다 |
 | 공개 범위 | 시험: `IN_PROGRESS` 공개 테스트 결과만 → `CLOSED` 잠정 점수·순위(화면) → `FINALIZED` 확정(알림). 대회: 판정 즉시 공개 |
 | 순위 | Redis Sorted Set 조회용, 원천은 DB 결과 테이블. 확정 시 DB로 재계산 |
@@ -4664,7 +4761,7 @@
     | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
     | `startsAt` | string (date-time) | 시작 시각 |
     | `endsAt` | string (date-time) | 전체 종료 시각 |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
     | `totalScore` | string | 배점 합계 문자열 |
     | `problemCount` | integer | 편입된 문제 수 |
     | `examRevision` | string | 시험 설정 변경 버전 문자열 |
@@ -4897,7 +4994,7 @@
     | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
     | `enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
     | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
     | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
     
     ```json
@@ -4946,8 +5043,6 @@
     | 헤더 | 값 | 설명 |
     | --- | --- | --- |
     | `Content-Type` | `application/json` | 응답 본문 형식 |
-- **응답 본문 (200):**
-- **비고:**
 - **응답 (200):**
     
     
@@ -4957,7 +5052,7 @@
     | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
     | `enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
     | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
     | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
     
     ```json
@@ -5011,7 +5106,7 @@
     | --- | --- | --- |
     | `examId` | string | 시험 ID 문자열 |
     | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
     | `problems` | object[] | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
     | `problems[].problemId` | string | 문제 ID 문자열 |
     | `problems[].problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
@@ -5063,7 +5158,7 @@
 - **인증:** 로그인 필요 + `ACTIVE`·`STARTED` 본인
 - **Rate Limit:** 참가자당 초당 1회 (초과 요청은 마지막 요청만 반영하는 서버 버퍼 처리)
 - **대응 테이블:** `exams`, `exam_participants`, `exam_drafts`, `member_replicas`
-- **설명:** 참가자 잠금 아래 문제의 전체 언어 최대 `seq`보다 큰 경우 해당 언어 Draft를 저장. 같거나 작으면 무시하고 `applied: false` 반환. 직접 제출은 이 버퍼를 우회해 최신 코드를 트랜잭션에서 저장.
+- **설명:** 참가자 잠금 아래 문제의 전체 언어 최대 `seq`보다 큰 경우 해당 언어 Draft를 저장. 같거나 작으면 무시하고 `applied: false` 반환. 직접 제출은 이 버퍼를 우회해 최신 코드를 트랜잭션에서 저장. 저장 성공은 DB 커밋 후 응답하며 개인 마감 판정은 DB §6.4.1을 따른다.
 - **요청 헤더:**
     
     
@@ -5082,7 +5177,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `language` | string | Y | JAVA / PYTHON / CPP |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
     | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
     | `seq` | string | Y | 문제별 전체 언어 공통 증가 순번 문자열 |
     
@@ -5109,7 +5204,7 @@
     | `serverSeq` | string | 서버의 전체 언어 최대 순번 문자열 |
     | `savedAt` | string (date-time) | 서버 Draft 저장 시각 |
     | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
     
     ```json
     {
@@ -5154,7 +5249,7 @@
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
     | `problemId` | string | Y | 문제 ID 문자열 |
-    | `language` | string | Y | JAVA / PYTHON / CPP |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
     | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
     | `seq` | string | Y | 문제별 전체 언어 공통 증가 순번 문자열 |
     
@@ -5290,7 +5385,7 @@
     | `score` | string 또는 null | 소수점 둘째 자리 점수 문자열 |
     | `rank` | integer 또는 null | 공동 순위. 미집계는 null |
     | `isRanked` | boolean | 순위 집계 대상 여부 |
-    | `progress` | object | 종결 제출 수·전체 접수 제출 수 |
+    | `progress` | object 또는 null | 종결 제출 수·전체 접수 제출 수. 시험 전체 `CLOSED` 전에는 null |
     | `progress.terminalCount` | integer | 종결 제출 수 |
     | `progress.totalSubmissionCount` | integer | 전체 유효 접수 제출 수 |
     | `problems` | object[] | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
@@ -5483,7 +5578,7 @@
 - **Method / URI:** `POST /api/v1/exams/{examId}/participants/me/cancellation`
 - **인증:** 로그인 필요 (회원·문맥 권한 적용)
 - **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `outbox_events`
-- **설명:** 시작 전 `REGISTERED`만 `CANCELED`로 전이. 이미 취소됐으면 기존 취소 반환. 시작 이후 `EXAM_PARTICIPATION_CANCEL_NOT_ALLOWED`(409).
+- **설명:** 시작 전 `REGISTERED`만 `CANCELED`로 전이. 이미 취소됐으면 기존 취소 반환. 시작 이후 `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409).
 - **요청 헤더:**
     
     
@@ -5523,7 +5618,7 @@
     }
     ```
     
-- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_PARTICIPATION_CANCEL_NOT_ALLOWED`(409)
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409)
 - **발행:** `ExamParticipantCanceled`
 
 #### 4.2.11 시험 Draft 조회
@@ -5557,13 +5652,13 @@
     | --- | --- | --- |
     | `participantId` | string | 참가 ID 문자열 |
     | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
-    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
-    | `items[].problemId` | string | 문제 ID 문자열 |
-    | `items[].language` | string | JAVA / PYTHON / CPP |
-    | `items[].sourceCode` | string | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
-    | `items[].seq` | string | 문제별 전체 언어 공통 증가 순번 문자열 |
-    | `items[].savedAt` | string (date-time) | 서버 Draft 저장 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    | `content` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `content[].problemId` | string | 문제 ID 문자열 |
+    | `content[].language` | string | `java` / `python3` / `cpp` |
+    | `content[].sourceCode` | string | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
+    | `content[].seq` | string | 문제별 전체 언어 공통 증가 순번 문자열 |
+    | `content[].savedAt` | string (date-time) | 서버 Draft 저장 시각 |
     | `problemSequences` | object[] | 문제별 전체 언어 최고 seq 목록 |
     | `problemSequences[].problemId` | string | 문제 ID 문자열 |
     | `problemSequences[].serverSeq` | string | 서버의 전체 언어 최대 순번 문자열 |
@@ -5638,7 +5733,7 @@
 - **Method / URI:** `POST /api/v1/exams/{examId}/problems/{problemId}/runs`
 - **인증:** 로그인 필요 + `ACTIVE`·입장 본인·접수 시간 안. 종료 후 신규 Run은 `EXAM_CLOSED`(409).
 - **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `member_replicas`
-- **설명:** B의 스터디의 예정·진행 중 시험 조회(4.6.3) Run 계약에 전달. Draft·제출·점수·통계를 저장하거나 이벤트를 발행하지 않음. 공개 예제만 실행하며 숨김 테스트는 실행하지 않음. 실행 기한 30초, 초과 `504 RUN_TIMEOUT`. 실행 중 재요청 `429 RUN_IN_PROGRESS`.
+- **설명:** B의 `POST /internal/v1/judge/runs`(§4.8.6) Run 계약에 전달. Draft·제출·점수·통계를 저장하거나 이벤트를 발행하지 않음. 공개 예제만 실행하며 숨김 테스트는 실행하지 않음. 실행 기한 30초, 초과 `504 RUN_TIMEOUT`. 실행 중 재요청 `429 RUN_IN_PROGRESS`.
 - **요청 헤더:**
     
     
@@ -5657,7 +5752,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `language` | string | Y | JAVA / PYTHON / CPP |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
     | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
     | `customTests` | object[] | N | 선택 사용자 입력. 최대 10개 |
     | `customTests[].args` | JSON value[] | Y | 사용자 입력 인수 배열 |
@@ -5753,7 +5848,7 @@
     | --- | --- | --- | --- |
     | exam-state-updated / exam-result-updated | `examId` | string | 시험 ID |
     | exam-state-updated | `status` | string | 시험 상태 |
-    | exam-state-updated | `serverTime` | string (date-time) | C 서버 시각 |
+    | exam-state-updated | `serverNow` | string (date-time) | C 서버 시각 |
     | exam-result-updated | `resultStatus` | string | PROVISIONAL / FINALIZED |
     | exam-result-updated | `resultRevision` | string | DB 결과 버전 |
     | exam-result-updated | `terminalCount` | integer | 해당 본인 종결 접수 수 |
@@ -5880,7 +5975,7 @@
     | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
     | `startsAt` | string (date-time) | 시작 시각 |
     | `endsAt` | string (date-time) | 전체 종료 시각 |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
     | `problemCount` | integer | 편입된 문제 수 |
     | `isProblemsPublicAfterEnd` | boolean | 대회 종료 후 로그인 회원의 문제 열람 허용 여부 |
     | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
@@ -5939,7 +6034,7 @@
     | `enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
     | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
     | `endsAt` | string (date-time) | 전체 종료 시각 |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
     
     ```json
     {
@@ -6040,7 +6135,7 @@
     | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
     | `enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
     | `endsAt` | string (date-time) | 전체 종료 시각 |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
     | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
     
     ```json
@@ -6156,7 +6251,7 @@
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
     | `problemId` | string | Y | 문제 ID 문자열 |
-    | `language` | string | Y | JAVA / PYTHON / CPP |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
     | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
     
     ```json
@@ -6418,7 +6513,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `language` | string | Y | JAVA / PYTHON / CPP |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
     | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
     | `customTests` | object[] | N | 선택 사용자 입력. 최대 10개 |
     | `customTests[].args` | JSON value[] | Y | 사용자 입력 인수 배열 |
@@ -6479,7 +6574,7 @@
     | contest-rank-updated | `resultRevision` | string | DB 결과 버전 |
     | contest-rank-updated | `updatedAt` | string (date-time) | 결과 갱신 시각 |
     | contest-state-updated | `status` | string | 대회 상태 |
-    | contest-state-updated | `serverTime` | string (date-time) | C 서버 시각 |
+    | contest-state-updated | `serverNow` | string (date-time) | C 서버 시각 |
     
     ```
     event: contest-state-updated
@@ -6665,7 +6760,7 @@
 - **Method / URI:** `POST /api/v1/admin/exam-submissions/{examSubmissionId}/retry`
 - **인증:** `ADMIN` 또는 해당 시험 스터디의 현재 `LEADER`·`MANAGER`. C가 최종 검증.
 - **대응 테이블:** `exams`, `exam_submissions`, `contest_admin_operations`, `audit_logs`
-- **설명:** `EXAM`·`FAILED` 및 부모 `FINALIZED` 전만. 4.6.2(내부) `POST /internal/v1/judge/submissions/{submissionId}/retry`로 새 회차 요청. `contest_admin_operations`를 먼저 `PENDING` 저장 후 원격 호출. 이 작업이 남으면 결과 확정을 보류.
+- **설명:** `EXAM`·`FAILED` 및 부모 `FINALIZED` 전만. §4.8.5의 `POST /internal/v1/judge/submissions/{submissionId}/retry`로 새 회차 요청. `contest_admin_operations`를 먼저 `PENDING` 저장 후 원격 호출. 이 작업이 남으면 결과 확정을 보류.
 - **요청 헤더:**
     
     
@@ -6813,7 +6908,7 @@
 - **Method / URI:** `POST /api/v1/admin/exams/{examId}/results/refinalization`
 - **인증:** `ADMIN`
 - **대응 테이블:** `exams`, `exam_participants`, `exam_submissions`, `exam_problem_results`, `result_snapshots`, `contest_admin_operations`, `audit_logs`, `outbox_events`
-- **설명:** `FINALIZED`·미종결/미완료 관리자 작업 0건만. 기존 유효 제출을 DB 기준으로 재계산, `resultRevision` 증가·새 불변 스냅샷·`ExamResultFinalized` Outbox·감사 로그. 기존 스냅샷 보존.
+- **설명:** `FINALIZED`·미종결/미완료 관리자 작업 0건만. 기존 유효 제출을 DB 기준으로 재계산, `resultRevision` 증가·새 불변 스냅샷·`ExamFinalized` Outbox·감사 로그. 기존 스냅샷 보존.
 - **요청 헤더:**
     
     
@@ -6873,14 +6968,14 @@
     ```
     
 - **에러:** `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `RESULT_NOT_FINALIZED`(409), `RESULT_FINALIZATION_BLOCKED`(409), `IDEMPOTENCY_KEY_CONFLICT`(422)
-- **발행:** `ExamResultFinalized`
+- **발행:** `ExamFinalized`
 
 #### 4.6.6 대회 결과 재확정
 
 - **Method / URI:** `POST /api/v1/admin/contests/{contestId}/results/refinalization`
 - **인증:** `ADMIN`
 - **대응 테이블:** `contests`, `contest_participants`, `contest_submissions`, `contest_problem_results`, `result_snapshots`, `contest_admin_operations`, `audit_logs`, `outbox_events`
-- **설명:** 4.6.5의 조건을 대회에 적용. ICPC 접수 순서로 재계산. `resultRevision` 증가·새 스냅샷·`ContestResultFinalized` Outbox·관리자 작업·감사 로그를 한 트랜잭션에 저장.
+- **설명:** 4.6.5의 조건을 대회에 적용. ICPC 접수 순서로 재계산. `resultRevision` 증가·새 스냅샷·`ContestFinalized` Outbox·관리자 작업·감사 로그를 한 트랜잭션에 저장.
 - **요청 헤더:**
     
     
@@ -6940,7 +7035,7 @@
     ```
     
 - **에러:** `CONTEST_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `RESULT_NOT_FINALIZED`(409), `RESULT_FINALIZATION_BLOCKED`(409), `IDEMPOTENCY_KEY_CONFLICT`(422)
-- **발행:** `ContestResultFinalized`
+- **발행:** `ContestFinalized`
 
 #### 4.6.7 관리자 작업 상태 조회
 
@@ -7054,9 +7149,9 @@
     | `allowed` | boolean | 문맥·행위 권한 검증 성공 |
     | `participantId` | string 또는 null | 검증한 본인 참가 ID. 대회 종료 공개 일반 열람은 null |
     | `problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
-    | `resultVisibility` | string | SAMPLES_ONLY / PROVISIONAL / FINALIZED / FULL_VERDICT. §4.5.1 공개 단계 적용 |
+    | `resultVisibility` | string | SAMPLES_ONLY / PROVISIONAL / FINALIZED / FULL_VERDICT. §4.0의 시험·대회 공개 범위 적용 |
     | `personalEndsAt` | string (date-time) 또는 null | EXAM 개인 마감 / CONTEST 전체 마감. 종료 공개 일반 열람은 null |
-    | `serverTime` | string (date-time) | C 서버 기준 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
     
     ```json
     {
@@ -7110,7 +7205,7 @@
 - **비고:**
     - **기준:** enteredAt이 있고 부모 상태가 FINALIZED/CANCELED가 아닌 참가는 포함한다.
     - 단순 등록·ABSENT는 포함하지 않는다.
-    - 조회 결과만으로 탈퇴를 확정하지 않고 4.5.3 가드를 준비한다.
+    - 조회 결과만으로 탈퇴를 확정하지 않고 §4.7.3 가드를 준비한다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
 #### 4.7.3 자원 작업 준비
@@ -7259,7 +7354,7 @@
     | `hasMore` | boolean | 다음 페이지 존재 여부 |
 - **비고:**
     - **응답 조건:** CLOSED와 FINALIZED를 구분한다.
-    - 종료 가능 여부는 4.5.3의 ready로 확정한다.
+    - 종료 가능 여부는 §4.7.3의 ready로 확정한다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
 #### 4.7.6 고정 문제 사용 조회
@@ -7379,7 +7474,7 @@
     | `memberId` | string | 회원 ID 문자열 |
     | `problemId` | string | 문제 ID 문자열 |
     | `problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
-    | `language` | string | JAVA / PYTHON / CPP |
+    | `language` | string | `java` / `python3` / `cpp` |
     | `sourceCode` | string | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
     | `verdict` | string 또는 null | 최종 판정. 미산정·공개 제한은 null |
     | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
@@ -7454,6 +7549,27 @@
     - 미확정은 RESULT_NOT_FINALIZED(409), 없는 버전은 RESULT_REVISION_NOT_FOUND(404). 코드·이메일·숨김 케이스 없음. PRACTICE 승급·진행률 집계에 사용하지 않는다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
+#### 4.7.10 시험 재채점 가능 여부 조회
+
+- **계약 기준:** §3.2.3·부록 A의 기존 호출 경로를 유지한다. 부모 시험의 상태별 허용 여부와 응답 필드는 아래 기준을 적용한다.
+- **Method / URI:** `GET /internal/v1/exams/{examId}/rejudge-eligibility`
+- **인증:** 내부 호출 (judge)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** `exams`
+- **설명:** 실패 EXAM 제출 재채점 전 부모 시험의 결과 확정 여부를 확인한다. 기존 호출 경로를 유지하며, 이 조회 자체로 재채점 작업을 접수하거나 확정을 보류하지 않는다.
+- **요청 파라미터:** `examId` — Path, string, 필수.
+- **응답 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `examId` | string | 조회한 시험 ID |
+    | `status` | string | 부모 시험 상태 |
+    | `eligible` | boolean | IN_PROGRESS·CLOSED이면 true, SCHEDULED·CANCELED·FINALIZED이면 false. 제출의 FAILED·회차·입력 조건은 Judge가 별도로 검증 |
+
+- **실패 시 처리:** 시험 없음은 404 EXAM_NOT_FOUND. 조회 실패는 Judge에서 fail-closed. FINALIZED 후에는 허용하지 않는다(§3.2.3).
+- **응답 필드:** `examId`, `status`, `eligible`만 반환한다. 허용하지 않는 상태도 200·`eligible=false`로 반환하며 별도 거절 사유 필드는 추가하지 않는다.
+- **동시성:** 이 조회는 상태 확인용이며 결과 확정을 막지 않는다. 단순 eligible=true 응답을 §4.6.3의 PENDING 관리자 작업과 같은 확정 방지 수단으로 간주하지 않는다.
+
 ### 4.8 내부 API — C가 사용하는 외부 서비스
 
 > 공통 규칙: contest-service 내부 호출. 조회 타임아웃 2초. 검증 실패는 503 `CONTEST_DEPENDENCY_UNAVAILABLE`. 
@@ -7478,10 +7594,14 @@
 
 #### 4.8.4 채점 상태 대사 (judge)
 
+- **제공 명세:** §3.3.6. 요청·응답과 처리 조건은 해당 절을 따른다.
+
 - **Method / URI:** `GET /internal/v1/judge/submissions/by-receipt?context=&receiptId=`
 - **비고:** `found=true`이면 `context`·`contextId`·`receiptId`·`userId`·`problemId`·`problemRevisionId`·`submittedAt` 대조. 미종결·실패의 `verdict`/`passedCount`/`totalCount`는 `null`.
 
 #### 4.8.5 시험 실패 재처리 (judge)
+
+- **제공 명세:** §3.3.7. 요청·응답과 처리 조건은 해당 절을 따른다.
 
 - **Method / URI:** `POST /internal/v1/judge/submissions/{submissionId}/retry`
 - **요청 필드:** `context`(`EXAM`만), `receiptId`, `expectedJudgeAttempt`, `operationId`, `actorMemberId`, `reason`
@@ -7489,9 +7609,12 @@
 
 #### 4.8.6 코드 실행 (judge)
 
+- **제공 명세:** §3.3.8. 요청·응답과 처리 조건은 해당 절을 따른다.
+
 - **Method / URI:** `POST /internal/v1/judge/runs`
 - **요청 필드:** `context`, `contextId`, `memberId`, `problemId`, `problemRevisionId`, `language`, `sourceCode`, `customTests[].args`
 - **비고:** §4.7.1 `RUN` 검증 후 공개 예제·사용자 입력만 동기 실행 (30초). 결과 저장·이벤트 발행 없음.
+- **재시도:** `RUN_TIMEOUT`(504)은 §4.8 공통 자동 재시도 대상에서 제외하고 호출자에게 반환한다.
 
 #### 4.8.7 스터디 구성원 조회 (study)
 
@@ -7504,6 +7627,8 @@
 - **비고:** 신규 등록·입장·Draft·제출·Run 전 `ACTIVE` 확인. 이미 접수한 동일 요청 반환·자동 제출·채점 반영·읽기는 소급 취소 안 함.
 
 #### 4.8.9 외부 작업 상태 대사 (member·study·problem)
+
+- **제공 명세:** member §1.7.3, study §5.7.3, problem §2.6.10. 회원·스터디 요청·응답과 처리 조건은 해당 절을 따른다.
 
 - **Method / URI:** `GET /internal/v1/members/{memberId}/operations/{operationId}`, `GET /internal/v1/studies/{studyId}/operations/{operationId}`, `GET /internal/v1/problems/{problemId}/operations/{operationId}`
 - **응답 필드:** `operationId`, `state`(`PENDING`/`COMMITTED`/`ABORTED`), `sourceVersion`, `resourceStatus`
@@ -7878,7 +8003,7 @@
     - `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **동시성/멱등 보장:** `UPDATE studies SET status='CLOSED' WHERE id=? AND status <> 'CLOSED'`가 먼저 실행되고, 이후 가입 확보 문장은 `status` 조건으로 모두 실패한다.
 - **외부 의존:**
-    - `GET /internal/v1/exams/pending?studyId=` (contest) — 예정·진행 중 시험 수. 실패 시 fail-closed
+    - `GET /internal/v1/contest/studies/{studyId}/exams` (contest) — 예정·진행 중 시험 수. 실패 시 fail-closed
 
 ### 5.4 외부 API — 문제집·과제
 
@@ -8195,6 +8320,25 @@
       { "memberId": "7", "items": [ { "studyId": "12", "membershipId": "40", "role": "LEADER", "studyStatus": "ACTIVE" } ] }
     ```
     
+
+#### 5.7.3 스터디 종료 작업 상태 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/studies/{studyId}/operations/{operationId}`
+- **인증:** 내부 호출 (contest)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **설명:** Contest 자원 가드에 사용한 원래 스터디 종료 작업의 확정 여부를 반환한다. 조회로 스터디나 가드 상태를 변경하지 않는다.
+- **요청 파라미터:** `studyId`, `operationId` — 모두 Path, string, 필수.
+- **응답 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 조회한 원래 종료 작업 ID |
+    | `state` | string | PENDING / COMMITTED / ABORTED |
+    | `sourceVersion` | string | 원래 작업에 대응하는 원천 상태 순서 값 |
+    | `resourceStatus` | string | 원래 작업에 대응하는 스터디 상태 |
+
+- **실패 시 처리:** 없는 작업은 404. Contest는 `PENDING`·404·조회 실패 시 PREPARED 차단을 유지한다. `COMMITTED`는 §4.7.4 complete, `ABORTED`는 cancel로 복구한다.
+- **대사 기준:** 원래 작업의 결과를 반환한다. 현재 스터디 상태만으로 원래 작업의 성공·취소를 추정하지 않는다.
 
 ---
 
@@ -8637,10 +8781,15 @@
 | judge | contest, problem | `GET /internal/v1/submissions/{submissionId}/source` | 시험 결과 코드 열람·풀이 공유 스냅샷 | 거절 | B |
 | judge | integration | `GET /internal/v1/submissions/{submissionId}/accepted/code` | GitHub 커밋 | Sync Job 재시도 | B |
 | judge | study, member | `GET /internal/v1/submissions/accepted` | AC 복제본 재동기화 (관리자 절차 전용) | 재동기화 중단, 운영 알림 | B(제공)·D(요청) |
-| contest | problem | `GET /internal/v1/exams/problem-usage` | 문제 비공개·보관 전 시험 사용 확인 | fail-closed | C |
-| contest | member | `GET /internal/v1/participations/active` | 탈퇴 차단 확인 | fail-closed | C(제공)·E(요청) |
-| contest | study | `GET /internal/v1/exams/pending` | 스터디 종료 전 시험 확인 (D-1) | fail-closed | C(제공)·D(요청) |
+| contest | problem | `GET /internal/v1/contest/problems/{problemId}/usages` | 문제 비공개·보관 전 시험 사용 확인 | fail-closed | C |
+| contest | member | `GET /internal/v1/contest/members/{memberId}/active-participations` | 탈퇴 차단 확인 | fail-closed | C(제공)·E(요청) |
+| contest | study | `GET /internal/v1/contest/studies/{studyId}/exams` | 스터디 종료 전 시험 확인 (D-1) | fail-closed | C(제공)·D(요청) |
 | contest | judge | `GET /internal/v1/exams/{examId}/rejudge-eligibility` | 재채점 가능 여부 | fail-closed | C(제공)·B(요청) |
+| judge | contest | `GET /internal/v1/judge/submissions/by-receipt` | 원래 접수 기준 채점 대사 (§3.3.6) | 확정 보류·불일치 격리 | B(제공)·C(요청) |
+| judge | contest | `POST /internal/v1/judge/submissions/{submissionId}/retry` | 실패 시험 제출 재처리 (§3.3.7) | 같은 작업 ID로 대사 | B(제공)·C(요청) |
+| judge | contest | `POST /internal/v1/judge/runs` | 시험·대회 공개 예제·사용자 입력 실행 (§3.3.8) | C의 Run 오류 응답 | B(제공)·C(요청) |
+| member | contest | `GET /internal/v1/members/{memberId}/operations/{operationId}` | 탈퇴 작업 확정 여부 (§1.7.3) | PREPARED 차단 유지 | E(제공)·C(요청) |
+| study | contest | `GET /internal/v1/studies/{studyId}/operations/{operationId}` | 종료 작업 확정 여부 (§5.7.3) | PREPARED 차단 유지 | D(제공)·C(요청) |
 | study | contest | `GET /internal/v1/studies/{studyId}/members` | 시험 생성 권한·스터디 상태 확인 | fail-closed (생성 거절) | D |
 | study | member | `GET /internal/v1/studies/memberships` | 탈퇴 차단(스터디장) 확인 | fail-closed | D(제공)·E(요청) |
 
@@ -8663,9 +8812,13 @@
 | `ProblemStateChanged` v2 | problem | study, contest | SNS 팬아웃 | 공개 상태·사용 회차·통과 언어 변경 | B |
 | `ProblemValidationRequested` v1 | problem | judge | 검증 SQS 직접 | 관리자 접수·새 회차 자동 검증 요청 커밋 | B |
 | `ProblemValidationCompleted` v1 | judge | problem | SNS 팬아웃 | 검증 최종 판정·결과 Outbox 커밋 | B |
-| `ExamParticipantRegistered` v1 | contest | study | SNS 팬아웃 | 시험 참가 등록 | C |
-| `ExamStarted` / `ExamClosed` / `ExamFinalized` v1 | contest | study, notification | SNS 팬아웃 | 시험 상태 전이 | C |
-| `ExamUpdated` / `ExamCanceled` v1 | contest | study, notification | SNS 팬아웃 | 시작 전 수정·취소 | C |
+| `ExamParticipantRegistered` v1 | contest | study, notification | SNS 팬아웃 | 새 활성 참가 생성. study 차단 복제본 생성·notification 시작 5분 전 알림 예약 | C |
+| `ExamParticipantCanceled` v1 | contest | study, notification | SNS 팬아웃 | 시작 전 참가 취소. study 해당 참가 차단 삭제·notification 시작 임박 예약 무효화 | C |
+| `ExamStarted` v1 | contest | study | SNS 팬아웃 | `IN_PROGRESS` 전이. 힌트 차단 행 진단, 사용자 알림 없음 | C |
+| `ExamClosed` v1 | contest | study | SNS 팬아웃 | 전체 마감 초과 `CLOSED` 전이. 차단 삭제·종단 표식, 사용자 알림 없음 | C |
+| `ExamFinalized` v1 | contest | notification (분석 P3) | SNS 팬아웃 | 최초 확정·재확정. 확정 결과 알림, 분석은 확정 스냅샷 조회 | C |
+| `ExamUpdated` v1 | contest | study, notification | SNS 팬아웃 | `SCHEDULED` 설정 변경. study 차단 갱신·notification 변경 알림과 시작 임박 예약 재설정 | C |
+| `ExamCanceled` v1 | contest | study, notification | SNS 팬아웃 | 시작 전 취소. study 차단 삭제·종단 표식, notification 취소 알림·예약 무효화 | C |
 | `ContestParticipantRegistered` v1 | contest | study | SNS 팬아웃 | 대회 참가 등록 | C |
 | `ContestStarted` / `ContestEnded` / `ContestFinalized` / `ContestCanceled` v1 | contest | study, notification, problem(전용 문제 공개) | SNS 팬아웃 | 대회 상태 전이 | C |
 | `StudyMemberJoined` v1 | study | notification, contest, problem | SNS 팬아웃 | 가입이 `APPROVED`가 되는 트랜잭션 | D |
@@ -8860,10 +9013,10 @@
 | 채점 작업 | `PENDING → RUNNING → SUCCEEDED`, `RUNNING → RETRY_WAITING → PENDING`, `→ FAILED` | 3.2.1, 3.2.5 |
 | 문제 공개 상태 | `PRIVATE ↔ PUBLIC`, `→ ARCHIVED` | 2.3.7 ~ 2.3.9 |
 | 진단 응시 | `IN_PROGRESS → CLOSED → SCORED` | 1.5.1, 1.5.6 |
-| 시험 | `SCHEDULED → IN_PROGRESS → CLOSED → FINALIZED`, `SCHEDULED → CANCELED` | 4.1.4, 4.1.5, 4.5.3 |
+| 시험 | `SCHEDULED → IN_PROGRESS → CLOSED → FINALIZED`, `SCHEDULED → CANCELED` | 4.1.4, 4.1.5, 4.2.7, 4.6.5 |
 | 시험 참가자 | `REGISTERED → STARTED → FINISHED`, `→ ABSENT`, `→ CANCELED`(시작 전) | 4.2.1 ~ 4.2.3, 4.2.10 |
-| 시험·대회 제출 | `ACCEPTED → REQUESTED → JUDGED`, `REQUESTED → FAILED` | 4.2.8, 4.4.5 |
-| 대회 | `SCHEDULED → RUNNING → ENDED → FINALIZED`, `SCHEDULED → CANCELED` | 4.5.1 |
+| 시험·대회 제출 | `ACCEPTED → REQUESTED → JUDGED`, `REQUESTED → FAILED` | 4.2.5, 4.2.9, 4.4.7 |
+| 대회 | `SCHEDULED → RUNNING → ENDED → FINALIZED`, `SCHEDULED → CANCELED` | 4.4.8, 4.6.1, 4.6.2, 4.6.6 |
 | 스터디 가입 | `PENDING → APPROVED / REJECTED / CANCELED / EXPIRED`, `APPROVED → LEFT / REMOVED` | 5.2.2, 5.2.3, 5.2.5 |
 | 힌트 요청 | `REQUESTED → GENERATING → READY / FALLBACK / BLOCKED`, `REQUESTED → BLOCKED` | 6.1.1 |
 | GitHub Sync Job | `PENDING → RUNNING → SUCCEEDED`, `→ RETRY_WAITING / RATE_LIMITED → PENDING`, `→ FAILED`, `→ CANCELED` | 8.1.7 |
