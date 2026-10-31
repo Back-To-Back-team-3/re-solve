@@ -167,6 +167,42 @@ class ProblemServiceApplicationTest {
     }
 
     @Test
+    @DisplayName("시드 테스트케이스 데이터가 예상한 건수·정합성으로 적용된다")
+    void testCaseSeedDataIsAppliedWithExpectedCounts() {
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM problem_test_assets", Integer.class)).isEqualTo(150);
+        assertThat(
+            jdbc.queryForObject("SELECT COUNT(*) FROM problem_test_assets WHERE status = 'LINKED'", Integer.class)
+        ).isEqualTo(150);
+        assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT object_key) FROM problem_test_assets", Integer.class))
+            .isEqualTo(150);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM problem_revision_tests", Integer.class)).isEqualTo(150);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM problem_revision_tests rt "
+                        + "JOIN problem_revisions r ON rt.problem_revision_id = r.id "
+                        + "JOIN problems p ON r.problem_id = p.id "
+                        + "JOIN problem_test_assets a ON rt.test_asset_id = a.id AND a.problem_id = p.id",
+                    Integer.class
+                )
+        ).isEqualTo(150);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(DISTINCT problem_revision_id) FROM problem_revision_tests WHERE is_sample = TRUE",
+                    Integer.class
+                )
+        ).isEqualTo(30);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(DISTINCT problem_revision_id) FROM problem_revision_tests WHERE is_sample = FALSE",
+                    Integer.class
+                )
+        ).isEqualTo(30);
+    }
+
+    @Test
     @DisplayName("설정된 S3 클라이언트로 LocalStack 객체를 저장하고 조회한다")
     void configuredS3ClientCanWriteAndReadLocalStack() {
         // given
