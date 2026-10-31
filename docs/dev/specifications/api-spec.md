@@ -3697,7 +3697,7 @@
 
 | 제공 | Method / URI | 요청 | 성공 응답 | 실패 처리 |
 | --- | --- | --- | --- | --- |
-| judge | `GET /internal/v1/judge/validations/{validationId}` | 원래 검증 ID | 진행 상태·판정·최대 시간·설명·통과 실행 환경. Judge 작업 미생성은 404 | §2.3.11에서 작업 미생성과 조회 장애를 구분 |
+| judge | `GET /internal/v1/judge/validations/{validationId}` | 원래 검증 ID | §3.3.6의 진행 상태·판정·최대 시간·설명·통과 실행 환경. Judge 작업 미생성은 404 | §2.3.11에서 작업 미생성과 조회 장애를 구분 |
 | judge | `POST /internal/v1/judge/starter-codes` | 사용 회차의 `functionSpec`, `languages`: 통과 언어 목록 | 래퍼 없는 `{starterCodes:[{language,sourceCode}]}` | 통신 오류·누락/중복 언어·잘못된 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503) |
 
 - 내부 호출 인증·성공 응답 형식은 §0.1·§0.3을 따르며 공통 타임아웃은 2초다. Judge 진행 조회 응답은 검증 ID·회차·언어와 일치해야 한다.
@@ -4438,6 +4438,72 @@
 - **외부 의존:** 없음
 - **프론트 계약:** 없음. 프론트는 Problem의 상세 응답을 사용한다.
 - **비고:** TypeSpec 상세는 §2.3.0과 TypeSpec 명세를 따른다. Problem은 응답 언어 집합이 요청과 정확히 일치하는지, 누락·중복 및 비문자열 코드가 없는지 검사한다. 통신 실패·Judge 비정상 HTTP 응답·잘못된 성공 응답은 Problem이 `COMMON_DEPENDENCY_UNAVAILABLE`(503)으로 처리하며, 다른 회차·미통과 언어·로컬 생성 코드로 대체하지 않는다. 타임아웃은 §2.7을 따른다.
+
+#### 3.3.6 검증 진행·결과 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/judge/validations/{validationId}`
+- **인증:** 내부 호출 (problem). 내부 네트워크 기준은 §0.1을 따른다.
+- **Idempotency:** 없음 (읽기 전용)
+- **Rate Limit:** 없음
+- **대응 테이블:** `judge_validation_jobs`, `judge_validation_runs`, `execution_runtimes`
+- **설명:** Judge에 저장된 검증 작업의 진행 상태와 최종 판정 요약을 반환한다. 상태·판정·측정값의 원본은 정책 및 상태 §3.5의 진행 조회 규칙을 따른다. Problem이 보유한 요청 원본·결과 반영 여부를 대신 판단하거나 조회를 계기로 재실행하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `X-Correlation-Id` | N | `problem-validation-2001` | 요청 추적 ID 전달 |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `validationId` | Path | string | Y | — | 양의 BIGINT 범위 검증 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | JSON 응답 본문 |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 공통 성공 래퍼 없이 반환하며, 아래 필드는 null인 경우에도 포함한다.
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `validationId` | string | 조회한 검증 작업 ID |
+    | `problemRevisionId` | string | 요청에 고정된 회차 ID |
+    | `language` | string | 요청 언어: `java` / `python3` / `cpp` |
+    | `status` | string | `QUEUED` / `RUNNING` / `RETRY_WAITING` / `PASSED` / `REJECTED` / `ERROR`. `REQUESTED`는 Judge가 반환하지 않음 |
+    | `verdict` | string 또는 null | `PASSED`·`REJECTED`의 최종 코드 판정: `AC` / `WA` / `TLE` / `MLE` / `RE` / `CE`. 그 외 상태는 null |
+    | `maxTimeMs` | integer 또는 null | 종결한 최종 시도의 측정 가능한 최대 CPU 시간(ms). 비종결·실행 전 종결·측정값 없음은 null |
+    | `message` | string 또는 null | `REJECTED`·`ERROR`의 정제한 설명. 그 외 상태는 null. 코드·테스트 원문·외부 응답·스택 추적은 포함하지 않음 |
+    | `runtimeKey` | string 또는 null | `PASSED`에서 실제 사용한 실행 환경 키. 그 외 상태는 null |
+    | `runnerVersion` | string 또는 null | `PASSED`의 최종 시도에 기록한 생성기 참고 식별 정보. 그 외 상태는 null |
+
+    ```json
+    {
+      "validationId": "2001",
+      "problemRevisionId": "1001",
+      "language": "java",
+      "status": "QUEUED",
+      "verdict": null,
+      "maxTimeMs": null,
+      "message": null,
+      "runtimeKey": null,
+      "runnerVersion": null
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 검증 ID가 양의 BIGINT 범위가 아님
+    - `PROBLEM_VALIDATION_NOT_FOUND`(404) / Judge에 해당 검증 작업이 없음
+    - `COMMON_INTERNAL_SERVER_ERROR`(500) / DB 조회 실패 또는 저장된 종결 결과의 무결성 오류. 작업 없음 404로 변환하지 않음
+- **동시성/멱등 보장:** 읽기 전용으로 작업·최종 시도·실행 환경을 같은 조회 스냅샷에서 읽는다. 행 잠금·상태 변경·원격 호출·재시도 지시를 하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 없음. Problem의 §2.3.11이 조회 결과를 조합한다.
+- **비고:** Problem은 요청 원본이 존재하고 이 API가 작업 없음 404를 반환한 경우만 `REQUESTED`로 표시한다. 응답의 검증 ID·회차·언어 불일치, 통신 실패와 5xx는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)으로 처리한다. 실행 환경 키와 생성기 참고 정보의 의미는 정책 및 상태 §3.2를 따르며, 이 조회로 Problem의 통과 프로필이나 `resultApplied`를 갱신하지 않는다.
 
 ---
 

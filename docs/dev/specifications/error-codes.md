@@ -48,7 +48,7 @@
 | `PROBLEM_INVALID_STATE_TRANSITION` | 409 | 허용되지 않는 공개 상태 전이, 통과 사용 회차 없는 공개, 보관 문제의 신규 회차·검증, 대회 연결 조건·기존 연결 불일치 또는 통과한 회차·언어의 코드 교체 |
 | `PROBLEM_IN_ACTIVE_EXAM` | 409 | 예정·진행 중 시험·대회에 포함된 문제의 비공개·보관 |
 | `PROBLEM_TEST_CASE_INVALID` | 400 | 테스트가 함수 명세와 불일치·중복, 공개·숨김 구성 또는 최대 50개 제한 위반 |
-| `PROBLEM_VALIDATION_NOT_FOUND` | 404 | 검증 ID를 찾을 수 없음 |
+| `PROBLEM_VALIDATION_NOT_FOUND` | 404 | Problem의 검증 요청 또는 Judge의 검증 작업을 찾을 수 없음. Judge 작업 미생성과 조회 장애의 구분은 API §3.3.6을 따름 |
 | `PROBLEM_VALIDATION_IN_PROGRESS` | 409 | 같은 회차·언어의 결과 미반영 검증 요청이 있음 |
 | `PROBLEM_TEST_CASE_TOO_LARGE` | 413 | 테스트 1건 또는 회차 합계 바이트 상한 초과 |
 | `PROBLEM_REQUEST_TOO_LARGE` | 413 | 최초·새 회차 전체 HTTP 본문 상한 초과 |
