@@ -3119,9 +3119,14 @@ judge-service/src/main/resources/db/migration/
   V8__judging_create_judge_job_runs.sql
   V9__judging_create_judge_test_results.sql
   V10__submission_release_expired_idempotency_keys.sql
+  V11__common_create_outbox_events.sql
+  V12__common_create_processed_events.sql
+  V13__judging_create_validation_jobs.sql
+  V14__judging_create_validation_runs.sql
+  V15__judging_create_validation_test_results.sql
 ```
 
-검토안 §4.3.6~§4.3.8 승인 후 `judge_validation_jobs` → `judge_validation_runs` → `judge_validation_test_results` 순서로 후속 마이그레이션을 추가한다. 파일 버전은 구현 시 이미 적용된 번호와 겹치지 않게 확정한다.
+기존 V1~V4는 공통 테이블 구축 계획 번호이며 실제 적용 이력과 구분한다. 기존 마이그레이션을 재사용하지 않고 Outbox·소비 기록은 V11·V12, 검증 작업·시도·테스트 결과는 V13~V15로 추가한다.
 
 ### 7.4 Contest (`contest-service`)
 
