@@ -189,7 +189,7 @@ flowchart LR
 | J1 | `SubmissionJudged` v1 | judge | member, problem, study, notification, integration | SNS | `PRACTICE` 회차 정상 종결 | `judgeAttempt` | 확정 |
 | J2 | `ExamSubmissionJudged` v1 | judge | contest | SNS | `EXAM` 회차 정상 종결 | `judgeAttempt` | 확정 |
 | J3 | `ContestSubmissionJudged` v1 | judge | contest | SNS | `CONTEST` 회차 정상 종결 | `judgeAttempt` | 확정 |
-| J4 | `SubmissionFailed` v1 | judge | notification, contest, member(진단) | SNS | 시도 상한 초과 `FAILED` | `judgeAttempt` | 확정 |
+| J4 | `SubmissionFailed` v1 | judge | notification, contest, member(진단) | SNS | 시도 상한 또는 전체 처리 기한 초과 `FAILED` | `judgeAttempt` | 확정 |
 | J5 | `DiagnosisSubmissionJudged` v1 | judge | member | SNS | `DIAGNOSIS` 회차 정상 종결 | `judgeAttempt` | 확정 필요 (B·E) |
 | C1 | `ExamSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 시험 직접·자동 제출 접수 | — (`examSubmissionId` 멱등) | 확정 |
 | C2 | `ContestSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 대회 제출 접수 | — (`contestSubmissionId` 멱등) | 확정 |
@@ -479,12 +479,13 @@ flowchart LR
 | `validationId` / `problemRevisionId` | string | Y | 원래 요청과 일치 |
 | `language` / `requestHash` | string | Y | 원래 요청 언어·해시와 일치 |
 | `status` | string | Y | `PASSED` / `REJECTED` / `ERROR` |
-| `runtimeKey` / `runnerVersion` | string 또는 null | Y | PASSED는 필수. 해당 검증에서 고정한 실행 환경·생성기 버전 |
+| `runtimeKey` / `runnerVersion` | string 또는 null | Y | PASSED는 null·빈 문자열 불가. 실제 검증에서 사용한 실행 환경 키·생성기 참고 식별 정보. 의미·형식은 정책 및 상태 §3.2를 따름 |
 | `finishedAt` | string (date-time) | Y | Judge가 확정한 최종 완료 시각 |
 
 - `PASSED`는 전체 테스트 AC, `REJECTED`는 코드 판정 실패, `ERROR`는 시스템 실패로 종결한 요청이다. 상세 판정·최대 실행 시간·실패 설명은 Judge 진행 조회에서 제공한다.
 - 이미 통과한 회차·언어의 코드·환경은 교체하지 않는다. 다른 언어의 실패나 늦은 전달로 기존 통과 결과·공개 상태를 취소하지 않는다.
-- 실행 환경 식별자와 요청 해시는 형식 예시다. 실제 요청에 저장된 해시와 검증에 사용한 실행 환경을 보낸다.
+- 실제 요청에 저장된 해시와 검증에 사용한 실행 환경 키·생성기 참고 식별 정보를 보낸다. Problem은 두 값을 그대로 보관하고 API §2.6.1·§2.6.2의 통과 프로필로 반환한다. 발행·해석·보관 규칙은 정책 및 상태 §3.2를 따른다.
+- JSON의 실행 환경 키는 Java 예시 환경 속성의 해시이며 배포 DB의 존재를 보장하지 않는다. 필드명·타입·필수 여부와 이벤트 버전은 유지한다.
 
 ```json
 {
@@ -499,7 +500,7 @@ flowchart LR
   "language": "java",
   "requestHash": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
   "status": "PASSED",
-  "runtimeKey": "java-runtime-v1",
+  "runtimeKey": "fbc2a5e3e4cc2495a37b2e73b4824478ee5103e910cbd21ec1e109defd598c9c",
   "runnerVersion": "java-runner-v1",
   "finishedAt": "2026-09-28T10:20:01.000000+09:00"
 }
@@ -584,7 +585,7 @@ flowchart LR
 
 #### J4 `SubmissionFailed` v1
 
-- **발행:** `try_count` 3 초과로 작업·제출이 `FAILED`가 되는 트랜잭션. aggregate = `submissionId`. 판정이 아니므로 사용자 판정으로 해석하지 않는다.
+- **발행:** `try_count` 3 초과 또는 전체 처리 기한 초과로 작업·제출이 `FAILED`가 되는 트랜잭션. 기한 초과는 실행 전 대기 상태도 포함하며, 종결 규칙은 스케줄러 §3.2를 따른다. aggregate = `submissionId`. 판정이 아니므로 사용자 판정으로 해석하지 않는다.
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |

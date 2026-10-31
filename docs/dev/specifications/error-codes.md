@@ -73,7 +73,7 @@
 | `SUBMISSION_NOT_FOUND` | 404 | 제출을 찾을 수 없거나 본인 제출이 아님 |
 | `SUBMISSION_JUDGING_IN_PROGRESS` | 409 | 진행 중 채점 회차가 있는 제출에 재채점·재처리 요청 |
 | `SUBMISSION_REJUDGE_NOT_ALLOWED` | 409 | 재채점 대상이 아님 (`PRACTICE`, 정상 판정, 결과 확정 후) |
-| `SUBMISSION_RUNTIME_UNAVAILABLE` | 409 | 원래 런타임·실행 템플릿이 없어 재채점 불가 |
+| `SUBMISSION_RUNTIME_UNAVAILABLE` | 409 | 지정된 실행 환경 스냅샷 부재·언어 불일치 또는 고정 런타임 미지원으로 신규 접수·재채점·재처리 불가 |
 | `SUBMISSION_REJUDGE_INPUT_UNAVAILABLE` | 409 | 원본 회차 데이터가 없거나 손상 |
 | `RUN_RATE_LIMITED` | 429 | 코드 실행(Run) 요청 한도 초과 |
 | `RUN_IN_PROGRESS` | 429 | 같은 회원의 Run이 실행 중 (`run:{memberId}` 락) |

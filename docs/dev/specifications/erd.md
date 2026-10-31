@@ -1324,8 +1324,8 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `idempotency_key` | VARCHAR(100) `_bin` | N | MANUAL은 필수, AUTO는 null |
 | `request_hash` | CHAR(64) `_bin` | Y | 고정 회차·언어·코드를 포함한 원래 요청 해시 |
 | `result_status` | VARCHAR(30) | N | 반영된 `PASSED` / `REJECTED` / `ERROR`. 미반영은 null |
-| `runtime_key` | VARCHAR(100) | N | 통과한 실행 환경. PASSED는 필수 |
-| `runner_version` | VARCHAR(100) | N | 통과한 생성기 버전. PASSED는 필수 |
+| `runtime_key` | VARCHAR(100) | N | Judge가 통과 검증에서 확정한 외부 실행 환경 키. PASSED는 필수. 의미·형식은 정책 및 상태 §3.2를 따름 |
+| `runner_version` | VARCHAR(100) | N | Judge가 통과 검증에 사용한 생성기 참고 식별 정보. PASSED는 필수. 원본 값을 보관하며 정책 및 상태 §3.2를 따름 |
 | `finished_at` | DATETIME(6) | N | Judge 최종 결과의 완료 시각. 미반영은 null |
 | `created_at` | DATETIME(6) | Y | 요청 접수 시각 |
 | `updated_at` | DATETIME(6) | Y | 최종 결과 반영 시각 |
@@ -1433,10 +1433,10 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `context` | VARCHAR(30) | Y | `PRACTICE` / `EXAM` / `CONTEST` / `DIAGNOSIS` |
 | `context_id` | BIGINT | N | NULL 허용: `PRACTICE`. 시험·대회·진단 응시 ID (외부 참조) |
 | `source_submission_id` | BIGINT | N | NULL 허용: `PRACTICE`. `examSubmissionId`·`contestSubmissionId`·진단 제출 ID (멱등키) |
-| `idempotency_key` | VARCHAR(100) `_bin` | N | NULL 허용: `PRACTICE` 외. `Idempotency-Key` 헤더 |
+| `idempotency_key` | VARCHAR(100) `_bin` | N | NULL 허용: `PRACTICE` 외 또는 24시간이 지나 키를 해제한 이전 제출. 신규 일반 접수는 필수 |
 | `request_hash` | CHAR(64) `_bin` | N | NULL 허용: `PRACTICE` 외. 같은 키·다른 본문 판별용 SHA-256 |
 | `language` | VARCHAR(30) | Y | 언어 (공통 모듈 Enum) |
-| `runtime_id` | BIGINT | N | NULL 허용: 최초 실행 환경 확정 전. FK → `execution_runtimes.id`. 확정 후 참조 변경·초기화 불가 |
+| `runtime_id` | BIGINT | N | NULL 허용: 실행 환경 확정 전. FK → `execution_runtimes.id`. 신규 일반 제출 접수 완료 시 필수. 확정 후 참조 변경·초기화 불가 |
 | `source_code` | MEDIUMTEXT | Y | 제출 코드 (불변) |
 | `code_size_bytes` | INT | Y | 코드 크기 (64KB 이하) |
 | `status` | VARCHAR(30) | Y | `QUEUED` / `JUDGING` / `RETRY_WAITING` / `COMPLETED` / `FAILED` |
@@ -1458,7 +1458,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- | --- |
 | `fk_submissions_runtime` | `runtime_id` → `execution_runtimes.id` | 서비스 내부 FK. 실행 환경 삭제 시 참조 중인 제출 보호 |
 | `idx_submissions_runtime_id` | `(runtime_id)` | 실행 환경 참조 및 FK 인덱스 |
-| `uk_submissions_member_idempotency_key` | `(member_id, idempotency_key)` | `PRACTICE` 멱등 (NULL은 중복 아님) |
+| `uk_submissions_member_idempotency_key` | `(member_id, idempotency_key)` | `PRACTICE`의 현재 연결 키 UNIQUE. 만료 해제한 NULL은 중복 허용 |
 | `uk_submissions_context_source_submission` | `(context, source_submission_id)` | 시험·대회·진단 채점 요청 멱등 |
 | `idx_submissions_member_created_at` | `(member_id, created_at)` | 내 제출 이력 최신순 |
 | `idx_submissions_member_problem_created_at` | `(member_id, problem_id, created_at)` | 문제별 내 제출 |
@@ -1478,7 +1478,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 **불변식**
 
 - `status = COMPLETED` ⇔ `verdict IS NOT NULL`
-- `idempotency_key` 보관 24시간: 판단은 `created_at`으로 하고 행은 삭제하지 않는다.
+- `idempotency_key` 유효기간은 `created_at` 기준 24시간이다. 만료 키를 NULL로 해제해도 제출 행·코드·요청 해시·결과는 보존한다. 키 해제·재접수의 처리 순서와 트랜잭션 규칙은 API 명세서 §3.1.2를 따른다.
 - 확정한 `runtime_id`는 변경하거나 NULL로 초기화하지 않는다.
 - `runtime_id`가 참조하는 실행 환경의 `language`는 제출의 `language`와 일치해야 한다.
 
@@ -1497,7 +1497,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `lease_token` | VARCHAR(64) | N | NULL 허용: 선점 전. 선점마다 새로 발급 |
 | `lease_until` | DATETIME(6) | N | NULL 허용: 선점 전. `now + 120초`, 30초마다 연장 |
 | `next_run_at` | DATETIME(6) | Y | 선점 가능 시각 (백오프 10→30초 반영) |
-| `deadline_at` | DATETIME(6) | Y | 전체 처리 기한 (`RUNNING` 10분 초과 회수 기준 포함) |
+| `deadline_at` | DATETIME(6) | Y | 전체 처리 기한. 일반 제출은 정책 및 상태 §2에 따라 접수 저장 시 확정하며 같은 작업의 재요청·재시도에서 변경하지 않음 |
 | `started_at` | DATETIME(6) | N | NULL 허용: 최초 선점 전 |
 | `finished_at` | DATETIME(6) | N | NULL 허용: 종결 전 |
 | `last_error` | VARCHAR(500) | N | NULL 허용: 오류 없음 |
@@ -1517,15 +1517,15 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 상태 | 의미 | 전이 |
 | --- | --- | --- |
-| `PENDING` | 선점 대기 | → `RUNNING` |
+| `PENDING` | 선점 대기 | → `RUNNING` / `FAILED` (전체 처리 기한 초과) |
 | `RUNNING` | 실행기 점유 중 | → `SUCCEEDED` / `RETRY_WAITING` / `FAILED` |
-| `RETRY_WAITING` | 백오프 대기 | → `PENDING` / `FAILED` (`try_count` 3 초과) |
+| `RETRY_WAITING` | 백오프 대기 | → `PENDING` / `FAILED` (`try_count` 3 초과 또는 전체 처리 기한 초과) |
 | `SUCCEEDED` · `FAILED` | 종단 | 재채점은 새 행 |
 
 **불변식**
 
-- 선점: `status IN ('PENDING','RETRY_WAITING') AND next_run_at <= now()`
-- 결과 저장: `WHERE status = 'RUNNING' AND lease_token = :token` (이전 실행기·이전 회차 결과 폐기)
+- 선점: `status IN ('PENDING','RETRY_WAITING') AND next_run_at <= now() AND deadline_at > now()`
+- 결과 저장: `WHERE status = 'RUNNING' AND lease_token = :token AND deadline_at > :now` (이전 실행기·이전 회차·기한 초과 결과 폐기)
 
 #### 4.3.3 실행 시도 이력 (`judge_job_runs`) `[IMMUTABLE]`
 
@@ -1576,7 +1576,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK. `submissions.runtime_id`가 참조하는 내부 식별자 |
-| `snapshot_hash` | CHAR(64) `_bin` | Y | 전체 실행 환경 속성을 정규 직렬화한 SHA-256 소문자 16진수. 계산 규칙은 정책 및 상태 §3.2를 따름 |
+| `snapshot_hash` | CHAR(64) `_bin` | Y | 외부 `runtimeKey`에 대응하는 실행 환경 속성의 SHA-256 소문자 16진수. 계산·해석 규칙은 정책 및 상태 §3.2를 따름 |
 | `language` | VARCHAR(30) | Y | 서비스 언어 코드. `java` / `python3` / `cpp` |
 | `judge0_language_id` | INT | Y | Judge0 실행 환경 ID. 외부 참조이며 DB FK 없음 |
 | `runtime_name` | VARCHAR(255) | Y | Judge0가 반환한 실행 환경 이름을 그대로 보존 |
@@ -1595,7 +1595,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 - `snapshot_hash`는 전체 속성에서 계산한 값과 일치해야 하며, 같은 해시의 행은 하나만 존재한다.
 - 생성한 스냅샷의 속성은 변경하지 않는다. `created_at`만 기록하며 `updated_at`은 두지 않는다.
-- 제출이 참조 중인 스냅샷은 삭제하지 않는다.
+- 제출 또는 Problem 통과 프로필이 참조하는 스냅샷을 보존한다. 보관·배포 규칙은 정책 및 상태 §3.2를 따른다.
 - 내부 식별자 `id`와 외부 식별자 `judge0_language_id`를 구분한다. `judge0_language_id` 하나로는 스냅샷의 유일성을 보장하지 않는다.
 
 ### 4.4 contest
@@ -3011,6 +3011,7 @@ judge-service/src/main/resources/db/migration/
   V7__judging_create_judge_jobs.sql
   V8__judging_create_judge_job_runs.sql
   V9__judging_create_judge_test_results.sql
+  V10__submission_release_expired_idempotency_keys.sql
 ```
 
 ### 7.4 Contest (`contest-service`)
