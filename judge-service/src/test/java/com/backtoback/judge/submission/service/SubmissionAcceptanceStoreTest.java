@@ -47,19 +47,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
-import com.backtoback.common.exception.BusinessException;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.judge.global.config.PersistenceConfiguration;
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
-import com.backtoback.judge.global.exception.custom.AuthTokenInvalidException;
-import com.backtoback.judge.global.exception.custom.CommonDependencyUnavailableException;
-import com.backtoback.judge.global.exception.custom.IdempotencyKeyConflictException;
-import com.backtoback.judge.global.exception.custom.LevelProblemLockedException;
-import com.backtoback.judge.global.exception.custom.MemberSuspendedException;
-import com.backtoback.judge.global.exception.custom.ProblemNotAvailableException;
-import com.backtoback.judge.global.exception.custom.SubmissionRateLimitedException;
-import com.backtoback.judge.global.exception.custom.SubmissionRuntimeUnavailableException;
-import com.backtoback.judge.global.exception.custom.UnsupportedLanguageException;
 import com.backtoback.judge.judging.domain.ExecutionRuntime;
 import com.backtoback.judge.judging.repository.ExecutionRuntimeRepository;
 import com.backtoback.judge.judging.service.JudgeLanguageService;
@@ -213,7 +204,7 @@ class SubmissionAcceptanceStoreTest {
             () -> acceptance.create(7, "key", new SubmissionCreateRequest("301", "1001", "java", "return 2;"))
         )
             .isInstanceOfSatisfying(
-                IdempotencyKeyConflictException.class,
+                JudgeException.class,
                 exception -> assertThat(exception.getErrorCode().getCode()).isEqualTo("IDEMPOTENCY_KEY_CONFLICT")
             );
     }
@@ -372,7 +363,7 @@ class SubmissionAcceptanceStoreTest {
             );
         assertThatThrownBy(() -> acceptance.create(7, "key", REQUEST))
             .isInstanceOfSatisfying(
-                LevelProblemLockedException.class,
+                JudgeException.class,
                 exception -> assertThat(exception.getErrorCode().getCode()).isEqualTo("LEVEL_PROBLEM_LOCKED")
             );
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isZero();
@@ -501,46 +492,46 @@ class SubmissionAcceptanceStoreTest {
                 );
             case "wrong-member" ->
                 given(dependencies.levels(7)).willReturn(new MemberTagLevelsResponse("999", List.of()));
-            case "level-unavailable" ->
-                given(dependencies.levels(7)).willThrow(new CommonDependencyUnavailableException());
+            case "level-unavailable" -> given(dependencies.levels(7))
+                .willThrow(new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE));
             default -> throw new IllegalArgumentException("알 수 없는 테스트 사례");
         }
         String expected = code;
-        Class<? extends BusinessException> expectedType = switch (scenario) {
-            case "withdrawn" -> AuthTokenInvalidException.class;
-            case "suspended" -> MemberSuspendedException.class;
-            case "private" -> ProblemNotAvailableException.class;
-            case "unknown-runtime" -> SubmissionRuntimeUnavailableException.class;
-            default -> CommonDependencyUnavailableException.class;
-        };
         assertThatThrownBy(() -> acceptance.create(7, "key", REQUEST))
             .isInstanceOfSatisfying(
-                expectedType,
+                JudgeException.class,
                 exception -> assertThat(exception.getErrorCode().getCode()).isEqualTo(expected)
             );
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_jobs", Long.class)).isZero();
     }
 
-    /** 기존 언어 검증의 오류도 접수 경계의 전용 예외로 전달한다. */
+    /** 기존 언어 검증의 오류도 접수 경계의 서비스 예외로 전달한다. */
     @Test
-    @DisplayName("지원하지 않는 언어는 전용 예외로 거절하고 저장하거나 요청 한도를 소비하지 않는다")
-    void rejectsUnsupportedLanguageWithDedicatedException() {
+    @DisplayName("지원하지 않는 언어는 서비스 예외로 거절하고 저장하거나 요청 한도를 소비하지 않는다")
+    void rejectsUnsupportedLanguageWithServiceException() {
         var request = new SubmissionCreateRequest("301", "1001", "unknown", "code");
         assertThatThrownBy(() -> acceptance.create(7, "unknown-language", request))
-            .isInstanceOf(UnsupportedLanguageException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.UNSUPPORTED_LANGUAGE)
+            );
         verify(rate, never()).acquire(7, 301);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isZero();
     }
 
-    /** 기존 런타임 서비스의 고정 환경 미지원 오류를 전용 예외로 전달한다. */
+    /** 기존 런타임 서비스의 고정 환경 미지원 오류를 서비스 예외로 전달한다. */
     @Test
-    @DisplayName("고정 런타임 가용성 거절은 전용 예외로 전달하고 접수를 저장하지 않는다")
-    void rejectsUnavailableRuntimeWithDedicatedException() {
+    @DisplayName("고정 런타임 가용성 거절은 서비스 예외로 전달하고 접수를 저장하지 않는다")
+    void rejectsUnavailableRuntimeWithServiceException() {
         given(languages.requireRuntime("java", JAVA))
             .willThrow(new JudgeException(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE));
         assertThatThrownBy(() -> acceptance.create(7, "unavailable-runtime", REQUEST))
-            .isInstanceOf(SubmissionRuntimeUnavailableException.class);
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode())
+                    .isEqualTo(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE)
+            );
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isZero();
     }
 
@@ -590,7 +581,7 @@ class SubmissionAcceptanceStoreTest {
         try {
             acceptance.create(7, "key", request);
             return "accepted";
-        } catch (BusinessException exception) {
+        } catch (JudgeException exception) {
             return exception.getErrorCode().getCode();
         }
     }
@@ -644,7 +635,7 @@ class SubmissionAcceptanceStoreTest {
                 var second = executor.submit(() -> {
                     try {
                         return (Object)service.create(7, "redis-race", secondRequest);
-                    } catch (BusinessException exception) {
+                    } catch (JudgeException exception) {
                         return exception.getErrorCode().getCode();
                     }
                 });
@@ -682,7 +673,7 @@ class SubmissionAcceptanceStoreTest {
             );
         realRedis.opsForValue().set("submission:{7}:problem:301", "1", Duration.ofSeconds(5));
         assertThatThrownBy(() -> service.create(7, "new-key", REQUEST))
-            .isInstanceOfSatisfying(SubmissionRateLimitedException.class, exception -> {
+            .isInstanceOfSatisfying(JudgeException.class, exception -> {
                 assertThat(exception.getErrorCode().getCode()).isEqualTo("SUBMISSION_RATE_LIMITED");
                 assertThat(Long.parseLong(exception.getResponseHeaders().getFirst("Retry-After"))).isBetween(1L, 5L);
             });

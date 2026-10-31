@@ -8,8 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import com.backtoback.judge.global.exception.custom.CodeTooLargeException;
-import com.backtoback.judge.global.exception.custom.CommonInvalidRequestException;
+import com.backtoback.judge.global.error.JudgeException;
 
 /** 요청 해시와 UTF-8·식별자·키 경계를 검증한다. */
 class SubmissionCreateRequestTest {
@@ -33,7 +32,7 @@ class SubmissionCreateRequestTest {
         new SubmissionCreateRequest("1", "2", "java", "가".repeat(21845) + "a").validate("key");
         assertThatThrownBy(() -> new SubmissionCreateRequest("1", "2", "java", "가".repeat(21846)).validate("key"))
             .isInstanceOfSatisfying(
-                CodeTooLargeException.class,
+                JudgeException.class,
                 exception -> assertThat(exception.getErrorCode().getCode()).isEqualTo("CODE_TOO_LARGE")
             );
     }
@@ -57,7 +56,7 @@ class SubmissionCreateRequestTest {
     @DisplayName("양수 64비트 정규 식별자가 아니면 공통 요청 오류다")
     void rejectsId(String id) {
         assertThatThrownBy(() -> new SubmissionCreateRequest(id, "2", "java", "code").validate("key"))
-            .isInstanceOf(CommonInvalidRequestException.class);
+            .isInstanceOf(JudgeException.class);
     }
 
     /** ASCII 키 길이와 필수 조건을 검증한다. */
@@ -66,8 +65,8 @@ class SubmissionCreateRequestTest {
     void checksKey() {
         var request = new SubmissionCreateRequest("1", "2", "java", "code");
         request.validate("x".repeat(100));
-        assertThatThrownBy(() -> request.validate("한글")).isInstanceOf(CommonInvalidRequestException.class);
-        assertThatThrownBy(() -> request.validate("x".repeat(101))).isInstanceOf(CommonInvalidRequestException.class);
-        assertThatThrownBy(() -> request.validate(" ")).isInstanceOf(CommonInvalidRequestException.class);
+        assertThatThrownBy(() -> request.validate("한글")).isInstanceOf(JudgeException.class);
+        assertThatThrownBy(() -> request.validate("x".repeat(101))).isInstanceOf(JudgeException.class);
+        assertThatThrownBy(() -> request.validate(" ")).isInstanceOf(JudgeException.class);
     }
 }

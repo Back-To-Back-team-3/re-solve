@@ -22,7 +22,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.backtoback.common.web.exception.GlobalExceptionHandler;
-import com.backtoback.judge.global.exception.custom.SubmissionRateLimitedException;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.global.security.SecurityConfiguration;
 import com.backtoback.judge.submission.dto.SubmissionCreateResponse;
 import com.backtoback.judge.submission.service.SubmissionAcceptanceService;
@@ -138,7 +139,8 @@ class SubmissionControllerTest {
     void returnsRetryAfter() throws Exception {
         var headers = new HttpHeaders();
         headers.set(HttpHeaders.RETRY_AFTER, "5");
-        given(acceptance.create(eq(7L), eq("key"), any())).willThrow(new SubmissionRateLimitedException(headers));
+        given(acceptance.create(eq(7L), eq("key"), any()))
+            .willThrow(new JudgeException(JudgeErrorCode.SUBMISSION_RATE_LIMITED, headers, null));
         mvc
             .perform(
                 post("/api/v1/submissions")

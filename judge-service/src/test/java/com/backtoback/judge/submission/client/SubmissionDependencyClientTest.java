@@ -20,10 +20,8 @@ import org.springframework.boot.restclient.RestClientCustomizer;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.web.client.RestClient;
 
-import com.backtoback.common.exception.BusinessException;
 import com.backtoback.common.web.logging.HttpClientConfiguration;
-import com.backtoback.judge.global.exception.custom.CommonDependencyUnavailableException;
-import com.backtoback.judge.global.exception.custom.ProblemNotAvailableException;
+import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.submission.config.SubmissionClientProperties;
 import com.backtoback.judge.submission.dto.ProblemJudgingDataResponse;
 import com.sun.net.httpserver.HttpServer;
@@ -104,8 +102,8 @@ class SubmissionDependencyClientTest {
     void mapsNotFound() {
         status = 404;
         body = "{\"sensitive\":\"not-public\"}";
-        assertCode(() -> client.validation(301, 1001), ProblemNotAvailableException.class, "PROBLEM_NOT_AVAILABLE");
-        assertCode(() -> client.status(7), CommonDependencyUnavailableException.class, "COMMON_DEPENDENCY_UNAVAILABLE");
+        assertCode(() -> client.validation(301, 1001), "PROBLEM_NOT_AVAILABLE");
+        assertCode(() -> client.status(7), "COMMON_DEPENDENCY_UNAVAILABLE");
     }
 
     /**
@@ -125,7 +123,7 @@ class SubmissionDependencyClientTest {
     void mapsHttpFailure(int responseStatus) {
         status = responseStatus;
         body = "{\"sensitive\":\"not-public\"}";
-        assertCode(() -> client.levels(7), CommonDependencyUnavailableException.class, "COMMON_DEPENDENCY_UNAVAILABLE");
+        assertCode(() -> client.levels(7), "COMMON_DEPENDENCY_UNAVAILABLE");
     }
 
     /**
@@ -144,18 +142,17 @@ class SubmissionDependencyClientTest {
     @DisplayName("비어 있거나 잘못된 JSON 응답은 fail-closed로 처리한다")
     void rejectsMalformedBody(String responseBody) {
         body = responseBody;
-        assertCode(() -> client.status(7), CommonDependencyUnavailableException.class, "COMMON_DEPENDENCY_UNAVAILABLE");
+        assertCode(() -> client.status(7), "COMMON_DEPENDENCY_UNAVAILABLE");
     }
 
     /**
      * 공개 오류 코드만 전달되는지 확인한다.
      *
      * @param action 실패할 클라이언트 호출
-     * @param type 기대 전용 예외 타입
      * @param code 기대 오류 코드
      */
-    private void assertCode(Runnable action, Class<? extends BusinessException> type, String code) {
-        assertThatThrownBy(action::run).isInstanceOfSatisfying(type, exception -> {
+    private void assertCode(Runnable action, String code) {
+        assertThatThrownBy(action::run).isInstanceOfSatisfying(JudgeException.class, exception -> {
             assertThat(exception.getErrorCode().getCode()).isEqualTo(code);
             assertThat(exception.getMessage()).doesNotContain("not-public");
         });

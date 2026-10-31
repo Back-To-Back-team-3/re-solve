@@ -23,7 +23,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import com.backtoback.judge.global.exception.custom.SubmissionRateLimitedException;
+import com.backtoback.judge.global.error.JudgeException;
 
 /** 실제 Redis에서 동시 요청·두 한도·TTL·회원 격리를 확인한다. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -65,12 +65,11 @@ class SubmissionRateLimiterTest {
     @DisplayName("동일 문제 5초 제한은 Retry-After를 반환하고 다른 회원·문제는 허용한다")
     void rejectsSameProblem() {
         limiter.acquire(7, 301);
-        assertThatThrownBy(() -> limiter.acquire(7, 301))
-            .isInstanceOfSatisfying(SubmissionRateLimitedException.class, exception -> {
-                assertThat(exception.getErrorCode().getCode()).isEqualTo("SUBMISSION_RATE_LIMITED");
-                assertThat(Long.parseLong(exception.getResponseHeaders().getFirst(HttpHeaders.RETRY_AFTER)))
-                    .isBetween(1L, 5L);
-            });
+        assertThatThrownBy(() -> limiter.acquire(7, 301)).isInstanceOfSatisfying(JudgeException.class, exception -> {
+            assertThat(exception.getErrorCode().getCode()).isEqualTo("SUBMISSION_RATE_LIMITED");
+            assertThat(Long.parseLong(exception.getResponseHeaders().getFirst(HttpHeaders.RETRY_AFTER)))
+                .isBetween(1L, 5L);
+        });
         limiter.acquire(8, 301);
         limiter.acquire(7, 302);
         assertThat(redis.opsForZSet().zCard("submission:{7}:minute")).isEqualTo(2);
@@ -95,7 +94,7 @@ class SubmissionRateLimiterTest {
                     try {
                         limiter.acquire(7, problem);
                         return true;
-                    } catch (SubmissionRateLimitedException exception) {
+                    } catch (JudgeException exception) {
                         assertThat(exception.getErrorCode().getCode()).isEqualTo("SUBMISSION_RATE_LIMITED");
                         assertThat(Long.parseLong(exception.getResponseHeaders().getFirst(HttpHeaders.RETRY_AFTER)))
                             .isBetween(1L, 60L);
