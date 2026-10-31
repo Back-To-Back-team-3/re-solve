@@ -120,6 +120,21 @@ NGINX_CHALLENGE_DIR=./nginx
 - 첫 실행에서 `mysql-init`이 현재 9개 서비스 DB를 만들고 개발 계정에 권한을 부여한다.
 - 실제 비밀번호·접속 주소·토큰은 GitHub에 올리면 안되고 Issue, PR에도 적지 않는다.
 
+### Judge 검증 메시지·결과 이벤트 연결
+
+| 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `JUDGE_MESSAGING_ENABLED` | `false` | 검증 SQS 리스너와 결과 SNS Outbox Relay 활성화 |
+| `JUDGE_EVENTS_TOPIC_ARN` | 빈 값 | 활성화 시 필수. 기존 `judge-events` Standard SNS 토픽 ARN |
+| `PROBLEM_VALIDATION_QUEUE_URL` | 빈 값 | 활성화 시 필수. 기존 `problem-validation-queue` Standard SQS 큐 URL |
+
+- 비활성 상태에서도 검증 저장 테이블·공통 소비기·Outbox 기록기를 등록하지만 큐를 읽거나 결과를 발행하지 않는다.
+- 활성화 전에 담당 A가 제공한 큐·토픽·구독 필터·DLQ·권한을 확인한다. 리스너는 없는 큐를 자동 생성하지 않는다.
+- 검증 요청은 DB 커밋 후 수동 ACK하며 ACK 배치를 끈다. 결과는 업무 트랜잭션의 Outbox 기록 후 공통 Relay로 발행한다.
+- AWS 리전·자격 증명·엔드포인트는 기존 설정을 사용한다. 로컬은 LocalStack, 운영은 서비스 실행 환경의 자격 증명 체인을 사용한다.
+- IDE 실행 시 환경변수를 전달한다. 현재 Compose에는 위 세 변수의 전달 설정이 없으므로 `.env`만 수정해서는 활성화되지 않는다. Compose·운영 배포의 변수 전달과 리소스 준비는 담당 A와 연결한다.
+- 메시지 연결만으로 Judge0 검증 실행이 시작되지는 않는다. 검증 작업 실행기를 배포하기 전에는 비활성 상태를 유지한다.
+
 ### Judge0 연결 설정
 
 | 환경변수 | 기본값 | 설명 |
