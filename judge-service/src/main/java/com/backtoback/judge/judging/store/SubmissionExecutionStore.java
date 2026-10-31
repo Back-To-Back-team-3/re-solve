@@ -257,7 +257,7 @@ public class SubmissionExecutionStore {
                 "SubmissionJudged",
                 "v1",
                 Long.toString(lease.submissionId()),
-                "judge-job-" + lease.jobId(),
+                lease.correlationId(),
                 payload
             );
         return true;
@@ -359,7 +359,7 @@ public class SubmissionExecutionStore {
                 "SubmissionFailed",
                 "v1",
                 Long.toString(lease.submissionId()),
-                "judge-job-" + lease.jobId(),
+                lease.correlationId(),
                 payload
             );
     }

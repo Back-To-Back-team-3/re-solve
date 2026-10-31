@@ -174,6 +174,9 @@ class SubmissionExecutionStoreTest {
         assertThat(jdbc.queryForObject("SELECT status FROM judge_jobs", String.class)).isEqualTo("SUCCEEDED");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_job_runs", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+            .isEqualTo(lease.correlationId())
+            .matches("sched-JudgeJobExecutor-[0-9a-f-]{36}");
     }
 
     @Test
@@ -185,6 +188,8 @@ class SubmissionExecutionStoreTest {
         assertThat(store.expireOne()).isFalse();
         assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("FAILED");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_job_runs", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+            .matches("sched-JudgeJobExpiry-[0-9a-f-]{36}");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
     }
 

@@ -111,7 +111,10 @@ class SubmissionWorkerTest {
     @Test
     @DisplayName("첫 테스트가 WA여도 전체 테스트를 실행한 뒤 종결한다")
     void executesAll() {
-        given(client.create(any())).willReturn(new JudgeExecutionCreateResponse("token", runtime));
+        given(client.create(any())).willAnswer(invocation -> {
+            assertThat(org.slf4j.MDC.get("correlationId")).isEqualTo(lease.correlationId());
+            return new JudgeExecutionCreateResponse("token", runtime);
+        });
         given(store.saveToken(eq(lease), anyInt(), eq("token"))).willReturn(true);
         given(store.saveResult(eq(lease), anyInt(), any())).willReturn(true);
         given(evaluator.evaluate(any(), any(), eq("1"), eq(1024), eq(64)))
