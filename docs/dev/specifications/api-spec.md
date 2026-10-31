@@ -3060,7 +3060,10 @@
     | `scope / visibility / difficulty / tagIds` | string / string / integer / string[] | 접수·레벨 검증용 상태와 회차 난이도·태그 |
     | `totalCount / testAssetIds` | integer / string[] | 전체 테스트 수와 파일 ID |
     | `supportedLanguages` | string[] | 고정 회차의 통과 언어 |
-    | `executionProfiles` | object[] | 통과 언어별 language·runtimeKey·runnerVersion |
+    | `executionProfiles` | object[] | 통과 언어별 실행 프로필. `supportedLanguages`와 일대일 대응 |
+    | `executionProfiles[].language` | string | 통과한 언어. 언어당 한 항목이며 중복 없음 |
+    | `executionProfiles[].runtimeKey` | string | 검증에서 사용한 불변 실행 환경 키. 형식·해석은 정책 및 상태 §3.2를 따름 |
+    | `executionProfiles[].runnerVersion` | string | 검증 당시 생성기 참고 식별 정보. 이전 구현 선택·일치 검사의 기준으로 사용하지 않으며 정책 및 상태 §3.2를 따름 |
 
     ```json
     {
@@ -3083,14 +3086,15 @@
       "executionProfiles": [
         {
           "language": "java",
-          "runtimeKey": "java-runtime-v1",
+          "runtimeKey": "fbc2a5e3e4cc2495a37b2e73b4824478ee5103e910cbd21ec1e109defd598c9c",
           "runnerVersion": "java-runner-v1"
         }
       ]
     }
     ```
 
-    - `supportedLanguages`는 이 고정 회차에 PASSED가 반영된 언어다. `executionProfiles`는 그 언어의 검증 당시 `runtimeKey`·`runnerVersion`이다. 환경 식별자는 형식 예시다.
+    - `supportedLanguages`는 이 고정 회차에 PASSED가 반영된 언어다. `executionProfiles`에는 각 통과 언어의 검증 당시 키·버전을 정확히 한 항목씩 반환한다. Problem은 Judge의 통과 이벤트에서 보관한 원본 값을 반환하며 직접 실행 환경을 선택하거나 키를 재발급하지 않는다. 필수 값은 null·빈 문자열로 반환하지 않는다.
+    - 키·버전의 의미와 선택·보관 규칙은 정책 및 상태 §3.2를 따른다. JSON의 키는 Java 예시 환경 속성에 대한 해시이며 배포 DB에 실제 스냅샷이 존재한다는 의미는 아니다.
     - `PRACTICE`는 Judge가 `GENERAL`·`PUBLIC`을 확인한다. 시험·대회의 참가·공개 권한은 호출 서비스가 확인한다. 모든 실행 문맥에서 고정 회차의 통과 언어·환경을 사용한다.
 
 - **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404)
@@ -3130,7 +3134,10 @@
     | --- | --- | --- |
     | `problemId / problemRevisionId` | string | 문제·고정 회차 ID |
     | `functionSpec / executionLimits` | object / object | 회차의 함수 명세·고정 실행 제한 |
-    | `supportedLanguages / executionProfiles` | string[] / object[] | 통과 언어·검증 당시 실행 환경 |
+    | `supportedLanguages / executionProfiles` | string[] / object[] | 통과 언어·검증 당시 실행 프로필. 목록 대응·원본 반환 규칙은 §2.6.1과 같음 |
+    | `executionProfiles[].language` | string | 통과한 언어. 언어당 한 항목 |
+    | `executionProfiles[].runtimeKey` | string | 검증에서 사용한 불변 실행 환경 키. 정책 및 상태 §3.2를 따름 |
+    | `executionProfiles[].runnerVersion` | string | 검증 당시 생성기 참고 식별 정보. 이전 구현 선택·일치 검사의 기준으로 사용하지 않으며 정책 및 상태 §3.2를 따름 |
     | `cases` | object[] | 공개·숨김 전체 테스트 참조 |
     | `cases[].testAssetId / testOrder / isSample` | string / integer / boolean | 테스트 파일 ID·순서·공개 여부 |
     | `cases[].asset` | object | 고정 objectKey·objectVersion·sha256. 원문은 포함하지 않음 |
@@ -3171,7 +3178,7 @@
       "executionProfiles": [
         {
           "language": "java",
-          "runtimeKey": "java-runtime-v1",
+          "runtimeKey": "fbc2a5e3e4cc2495a37b2e73b4824478ee5103e910cbd21ec1e109defd598c9c",
           "runnerVersion": "java-runner-v1"
         }
       ],
@@ -3814,7 +3821,7 @@
 - **Idempotency:** 있음 (`Idempotency-Key` 필수, 24시간 보관)
 - **Rate Limit:** 사용자당 분당 10회, 동일 문제 5초 간격
 - **대응 테이블:** `submissions`, `judge_jobs`, `judge_test_results`
-- **설명:** 사용자 코드를 제출하고 비동기 채점을 접수한다. 최신 회차와 달라도 요청한 회차로 제출할 수 있다.
+- **설명:** 사용자 코드를 제출하고 비동기 채점을 접수한다. 최신 회차와 달라도 요청한 회차로 제출할 수 있다. 해당 회차·언어의 통과 실행 프로필을 사용하며 정책 및 상태 §3.2의 식별·선택 규칙을 따른다.
 - **요청 바디:**
     
     ```json
@@ -3848,11 +3855,17 @@
     - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `SUBMISSION_RATE_LIMITED`(429)
     - `PROBLEM_NOT_AVAILABLE`(404) / `PRIVATE`·`ARCHIVED`·`EXAM_ONLY`
     - `LEVEL_PROBLEM_LOCKED`(403) / 태그 레벨보다 높은 난이도
-    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 사전 검증·레벨 조회 실패 (같은 키·본문으로 재시도 안내)
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 사전 검증·레벨 조회 실패, 필수 프로필 누락·키 형식 오류·언어 중복·통과 언어와 프로필 목록 불일치 (같은 키·본문으로 재시도 안내)
+    - `SUBMISSION_RUNTIME_UNAVAILABLE`(409) / 형식이 올바른 키의 스냅샷 부재·언어 불일치 또는 고정 런타임 미지원
+    - `JUDGE0_CONNECTION_FAILED`(503) / 고정 런타임 가용성 조회의 연결 실패·시간 초과
+    - `JUDGE0_RESPONSE_FAILED`(503) / 가용성 조회의 HTTP 오류·본문 누락·잘못된 응답
+    - `JUDGE0_CONFIGURATION_INVALID`(503) / Judge0 서버 주소 미설정
     - `IDEMPOTENCY_KEY_CONFLICT`(422), `MEMBER_SUSPENDED`(403)
 - **동시성/멱등 보장:**
-    - 같은 키의 기존 접수가 있으면 검증 없이 원래 응답을 반환한다(`uk_submissions_member_idempotency_key` + `request_hash`).
-    - 검증 통과 후 `submissions`(`QUEUED`)·`judge_jobs`(`PENDING`)·테스트별 결과 자리를 한 트랜잭션에 저장한다. 기존 초안의 `PREPARING` 선저장 단계는 정책 v1.0(검증 → 단일 트랜잭션)에 맞춰 뺐다.
+    - 24시간 내 같은 키·본문의 기존 접수가 있으면 환경·생성기를 재선택하지 않고 원래 응답을 반환한다(`uk_submissions_member_idempotency_key` + `request_hash`).
+    - 외부 검증과 고정 런타임 가용성 조회는 저장 트랜잭션 밖에서 수행한다. 프로필의 키로 복원한 고정 실행 환경을 확인한다. `runnerVersion`과 현재 생성기의 식별자 일치는 접수 조건으로 검사하지 않는다.
+    - 검증 통과 후 `submissions`(`QUEUED`)의 `runtime_id`, `judge_jobs`(`PENDING`)·테스트별 결과 자리를 한 트랜잭션에 저장한다. 실패하면 접수 전체를 롤백한다. `PREPARING` 선저장 단계는 두지 않는다.
+    - 접수 완료 후 모든 테스트·재시도는 저장한 실행 환경과 현재 언어별 생성기를 사용한다. 고정 런타임 부재를 최신 런타임 선택이나 사용자 WA로 바꾸지 않는다.
     - 일반 풀이 채점 요청은 SQS를 거치지 않는다.
 - **외부 의존:**
     - `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/validation` (problem) — 회차 검증. 실패 시 fail-closed
