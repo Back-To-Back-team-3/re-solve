@@ -24,12 +24,17 @@ public class ProblemAssetObjectReader {
      * @throws IllegalStateException 읽은 내용이 기대값과 다른 경우
      */
     public void verify(String bucket, String key, String version, ProblemAssetContent expected) {
+        if (!matches(bucket, key, version, expected)) {
+            throw new IllegalStateException("저장된 파일이 입력과 일치하지 않습니다.");
+        }
+    }
+
+    /** 객체 원문과 메타 정보가 일치하는지 확인하며 저장소 오류는 전달한다. */
+    public boolean matches(String bucket, String key, String version, ProblemAssetContent expected) {
         var request = GetObjectRequest.builder().bucket(bucket).key(key).versionId(version).build();
         var response = client.getObjectAsBytes(request);
         var actual = ProblemAssetContent.fromBytes(response.asByteArray());
-        if (actual.sizeBytes() != expected.sizeBytes() || !actual.sha256().equals(expected.sha256())
-            || !Arrays.equals(actual.bytes(), expected.bytes())) {
-            throw new IllegalStateException("저장된 파일이 입력과 일치하지 않습니다.");
-        }
+        return actual.sizeBytes() == expected.sizeBytes() && actual.sha256().equals(expected.sha256())
+            && Arrays.equals(actual.bytes(), expected.bytes());
     }
 }
