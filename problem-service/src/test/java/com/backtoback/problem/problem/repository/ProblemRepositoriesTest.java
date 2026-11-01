@@ -18,6 +18,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.mysql.MySQLContainer;
@@ -128,6 +129,7 @@ class ProblemRepositoriesTest {
     }
 
     @Test
+    @Transactional
     @DisplayName("문제와 회차 번호가 일치하는 수정 회차만 조회한다")
     void findsProblemRevisionByProblemIdAndRevisionNumber() {
         Problem problem = problems.save(Problem.create(1L, ProblemScope.GENERAL));
@@ -168,6 +170,10 @@ class ProblemRepositoriesTest {
 
         assertThat(problemRevisions.findByProblemIdAndRevisionNumber(problem.getId(), 1)).isPresent();
         assertThat(problemRevisions.findByProblemIdAndRevisionNumber(problem.getId(), 2)).isEmpty();
+        assertThat(problemRevisions.findFirstByProblemIdOrderByRevisionNumberDesc(problem.getId()))
+            .get()
+            .extracting(ProblemRevision::getRevisionNumber)
+            .isEqualTo(1);
     }
 
     @Test
@@ -303,6 +309,34 @@ class ProblemRepositoriesTest {
                     ProblemRevisionTag.create(revision.getId(), Long.MAX_VALUE, LocalDateTime.of(2026, 11, 1, 10, 0))
                 )
         ).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("같은 문제의 중복 회차 번호는 DB 제약으로 거절한다")
+    void rejectsDuplicateRevisionNumber() {
+        ProblemRevision first = createRevision();
+        ProblemRevision duplicate
+            = ProblemRevision
+                .create(
+                    first.getProblemId(),
+                    first.getRevisionNumber(),
+                    first.getBodyAssetId(),
+                    "중복 회차",
+                    1,
+                    "{}",
+                    2000,
+                    262144,
+                    7000,
+                    64,
+                    1L,
+                    "duplicate-revision-" + System.nanoTime(),
+                    "d".repeat(64),
+                    1,
+                    LocalDateTime.of(2026, 11, 1, 10, 0)
+                );
+
+        assertThatThrownBy(() -> problemRevisions.saveAndFlush(duplicate))
+            .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     private ProblemRevision createRevision() {

@@ -2,7 +2,10 @@ package com.backtoback.problem.problem.domain;
 
 import java.time.LocalDateTime;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.jpa.entity.BaseTimeEntity;
+import com.backtoback.problem.global.error.ProblemErrorCode;
+import com.backtoback.problem.global.exception.ProblemException;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -93,5 +96,19 @@ public class Problem extends BaseTimeEntity {
      */
     public static Problem create(Long authorId, ProblemScope scope) {
         return new Problem(authorId, scope);
+    }
+
+    /** 문제 행 잠금 아래 작성자와 변경 버전을 확인하고 새 회차의 응답 버전을 확정한다(정책 및 상태 §4). */
+    public void prepareNewRevision(Long requestingAdminId, int expectedVersion) {
+        if (!authorId.equals(requestingAdminId)) {
+            throw new ProblemException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        if (visibility == ProblemVisibility.ARCHIVED) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION);
+        }
+        if (rowVersion != expectedVersion) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_VERSION_CONFLICT);
+        }
+        rowVersion++;
     }
 }
