@@ -110,7 +110,8 @@ public class ProblemAssetUploadTracking {
      * 단일 쓰기 성공과 콘텐츠 확인 후 파일 상태를 기록한다.
      *
      * @param ticket 기존 추적 정보
-     * @param version 저장된 객체 버전
+     * @param version 저장된 객체 버전. 버전이 없으면 null
+     * @return 유효기간 안에 완료했다면 true, 만료 후 미참조 파일을 폐기했다면 false
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean complete(UploadTicket ticket, String version) {
@@ -136,7 +137,7 @@ public class ProblemAssetUploadTracking {
         return true;
     }
 
-    /** 파일 행 잠금 아래 모든 저장된 참조를 확인한다(ERD 4.2.3). */
+    /** 파일 종류에 해당하는 회차와 본문 이미지 참조를 잠긴 행 아래 확인한다(ERD 4.2.3). */
     private void requireUnreferenced(UploadTicket ticket) {
         String query
             = ticket.body()

@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.when;
+import static org.mockito.BDDMockito.given;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -44,7 +44,7 @@ class ProblemAssetReuseServiceTest {
                 );
         var asset = ProblemBodyAsset.create(1L, "key", null, content.sha256(), 1, LocalDateTime.now());
         ReflectionTestUtils.setField(asset, "id", 3L);
-        when(
+        given(
             bodies
                 .findByProblemIdAndOwnerIdAndStatusAndSha256AndSizeBytesOrderByIdAsc(
                     any(),
@@ -53,8 +53,8 @@ class ProblemAssetReuseServiceTest {
                     any(),
                     anyLong()
                 )
-        ).thenReturn(List.of(asset));
-        when(reader.matches("bucket", "key", null, content)).thenReturn(false);
+        ).willReturn(List.of(asset));
+        given(reader.matches("bucket", "key", null, content)).willReturn(false);
         var service = new ProblemAssetReuseService(bodies, tests, reader);
 
         // when & then
@@ -74,7 +74,7 @@ class ProblemAssetReuseServiceTest {
                     }
                 );
         var asset = ProblemBodyAsset.create(1L, "key", null, content.sha256(), 1, LocalDateTime.now());
-        when(
+        given(
             bodies
                 .findByProblemIdAndOwnerIdAndStatusAndSha256AndSizeBytesOrderByIdAsc(
                     any(),
@@ -83,8 +83,8 @@ class ProblemAssetReuseServiceTest {
                     any(),
                     anyLong()
                 )
-        ).thenReturn(List.of(asset));
-        when(reader.matches("bucket", "key", null, content)).thenThrow(new IllegalStateException("storage"));
+        ).willReturn(List.of(asset));
+        given(reader.matches("bucket", "key", null, content)).willThrow(new IllegalStateException("storage"));
         var service = new ProblemAssetReuseService(bodies, tests, reader);
 
         // when & then

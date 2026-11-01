@@ -1,6 +1,7 @@
 package com.backtoback.problem.problem.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
@@ -28,7 +29,7 @@ import com.backtoback.problem.problem.repository.ProblemTestAssetRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 
-/** 업로드 추적의 시작과 미확인 상태를 확인한다. */
+/** 추적 시작, 결과 불명과 잠금 후 만료 처리를 확인한다. */
 @ExtendWith(MockitoExtension.class)
 class ProblemAssetUploadTrackingTest {
     @Mock
@@ -181,6 +182,52 @@ class ProblemAssetUploadTrackingTest {
         assertThat(asset.getStatus()).isEqualTo(ProblemAssetStatus.DISCARDED);
         assertThat(asset.getUploadedAt()).isNull();
         assertThat(asset.getUploadFinishedAt()).isEqualTo(expiry);
+    }
+
+    /** 본문에 회차나 이미지 참조가 남아 있으면 폐기하지 않는다. */
+    @Test
+    @DisplayName("만료된 본문 파일에 참조가 있으면 폐기를 거절한다")
+    void rejectsReferencedBody() {
+        // given
+        Clock clock = Clock.fixed(Instant.parse("2026-11-02T00:00:00Z"), ZoneOffset.UTC);
+        EntityManager entityManager = mock(EntityManager.class);
+        Query query = mock(Query.class);
+        LocalDateTime expiry = LocalDateTime.of(2026, 11, 2, 0, 0);
+        var asset = ProblemBodyAsset.create(1L, "key", null, "a".repeat(64), 1L, expiry);
+        var ticket = new ProblemAssetUploadTracking.UploadTicket(1L, "key", expiry, true);
+        given(bodies.findByIdForUpdate(1L)).willReturn(Optional.of(asset));
+        given(entityManager.createNativeQuery(any(String.class))).willReturn(query);
+        given(query.setParameter("id", 1L)).willReturn(query);
+        given(query.getSingleResult()).willReturn(1L);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, entityManager);
+
+        // when & then
+        assertThatThrownBy(() -> tracking.discardBeforeWrite(ticket)).isInstanceOf(IllegalStateException.class);
+        assertThat(asset.getStatus()).isEqualTo(ProblemAssetStatus.PENDING);
+        assertThat(asset.getUploadFinishedAt()).isNull();
+    }
+
+    /** 테스트 파일에 회차 참조가 남아 있으면 폐기하지 않는다. */
+    @Test
+    @DisplayName("만료된 테스트 파일에 참조가 있으면 폐기를 거절한다")
+    void rejectsReferencedTest() {
+        // given
+        Clock clock = Clock.fixed(Instant.parse("2026-11-02T00:00:00Z"), ZoneOffset.UTC);
+        EntityManager entityManager = mock(EntityManager.class);
+        Query query = mock(Query.class);
+        LocalDateTime expiry = LocalDateTime.of(2026, 11, 2, 0, 0);
+        var asset = ProblemTestAsset.create(1L, "key", null, "a".repeat(64), 1L, expiry);
+        var ticket = new ProblemAssetUploadTracking.UploadTicket(1L, "key", expiry, false);
+        given(tests.findByIdForUpdate(1L)).willReturn(Optional.of(asset));
+        given(entityManager.createNativeQuery(any(String.class))).willReturn(query);
+        given(query.setParameter("id", 1L)).willReturn(query);
+        given(query.getSingleResult()).willReturn(1L);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, entityManager);
+
+        // when & then
+        assertThatThrownBy(() -> tracking.discardBeforeWrite(ticket)).isInstanceOf(IllegalStateException.class);
+        assertThat(asset.getStatus()).isEqualTo(ProblemAssetStatus.PENDING);
+        assertThat(asset.getUploadFinishedAt()).isNull();
     }
 
 }

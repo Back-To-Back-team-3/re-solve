@@ -89,6 +89,7 @@ class ProblemBodyAssetTest {
         assertThatThrownBy(() -> asset.linkToProblem(10L, 1L)).isInstanceOf(IllegalStateException.class);
     }
 
+    /** 갱신 경계와 변경 전 만료값의 재사용을 함께 확인한다. */
     @Test
     @DisplayName("만료 전에는 같은 업로드만 갱신하며 기존 만료 시각은 재사용할 수 없다")
     void renewsOnlyCurrentUnfinishedUploadBeforeExpiry() {
@@ -104,6 +105,7 @@ class ProblemBodyAssetTest {
             .isInstanceOf(IllegalStateException.class);
     }
 
+    /** 만료 직전 완료가 재연결에 사용되고 이후 갱신되지 않는지 확인한다. */
     @Test
     @DisplayName("만료 직전 확인한 저장과 종료는 연결할 수 있고 종료 후에는 갱신하지 않는다")
     void completesBeforeExpiryAndLinks() {
@@ -123,6 +125,7 @@ class ProblemBodyAssetTest {
         assertThatThrownBy(() -> asset.linkToProblem(11L, 1L)).isInstanceOf(IllegalStateException.class);
     }
 
+    /** 만료 경계와 그 이후에는 저장 확인이 연결 가능 상태를 만들지 않는지 확인한다. */
     @Test
     @DisplayName("만료 정각과 이후의 완료 결과는 연결 가능하게 기록하지 않는다")
     void rejectsCompletionAtAndAfterExpiry() {
@@ -137,6 +140,7 @@ class ProblemBodyAssetTest {
         assertThatThrownBy(() -> asset.linkToProblem(10L, 1L)).isInstanceOf(IllegalStateException.class);
     }
 
+    /** 종료 확인이 없는 결과를 폐기나 연결 없이 보존하는지 확인한다. */
     @Test
     @DisplayName("결과 불명은 종료 시각 없이 보존하며 종료 확인 없는 폐기를 거절한다")
     void preservesUnknownUploadUntilTerminationIsConfirmed() {
@@ -154,6 +158,7 @@ class ProblemBodyAssetTest {
         assertThatThrownBy(() -> asset.linkToProblem(10L, 1L)).isInstanceOf(IllegalStateException.class);
     }
 
+    /** 종료가 확인된 만료 파일의 폐기 상태와 재사용 거절을 확인한다. */
     @Test
     @DisplayName("만료 후 종료가 확인된 파일은 폐기하며 늦은 성공으로 되살리지 않는다")
     void discardsExpiredUploadAfterTermination() {
@@ -170,6 +175,7 @@ class ProblemBodyAssetTest {
         assertThatThrownBy(() -> asset.linkToProblem(10L, 1L)).isInstanceOf(IllegalStateException.class);
     }
 
+    /** 삭제 선점 이후 업로드와 참조 생성이 불가능한지 확인한다. */
     @Test
     @DisplayName("삭제 선점된 파일은 갱신하거나 완료하거나 연결할 수 없다")
     void rejectsDeletingAsset() {
@@ -185,6 +191,7 @@ class ProblemBodyAssetTest {
         assertThatThrownBy(() -> asset.linkToProblem(10L, 1L)).isInstanceOf(IllegalStateException.class);
     }
 
+    /** 경계 시각을 지정한 미연결 본문 파일을 만든다. */
     private ProblemBodyAsset newAsset(LocalDateTime expiry) {
         return ProblemBodyAsset.create(1L, "test/object", null, "a".repeat(64), 10L, expiry);
     }

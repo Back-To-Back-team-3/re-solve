@@ -223,6 +223,7 @@ class ProblemRepositoriesTest {
         assertThat(bodyAssets.findByObjectKey("problem/body/other")).isEmpty();
     }
 
+    /** 파일 행 잠금이 다른 트랜잭션의 삭제 선점과 직렬화되는지 확인한다. */
     @Test
     @DisplayName("테스트 파일 행 잠금은 다른 트랜잭션의 상태 변경을 막는다")
     void testAssetWriteLockBlocksConcurrentUpdate() throws Exception {
@@ -365,6 +366,38 @@ class ProblemRepositoriesTest {
             .get()
             .extracting(ProblemBodyAsset::getObjectKey)
             .isEqualTo(ticket.key());
+    }
+
+    /** 외부 쓰기 결과를 알 수 없으면 실제 DB의 종료 시각을 남기지 않는다. */
+    @Test
+    @DisplayName("쓰기 결과가 불명확하면 추적 행을 종료하지 않고 보존한다")
+    void preservesUnknownUploadInDatabase() {
+        // given
+        var content
+            = ProblemAssetContent
+                .fromBytes(
+                    new byte[] {
+                        1
+                    }
+                );
+        doAnswer(invocation -> {
+            throw new IllegalStateException("write result unknown");
+        }).when(objectWriter).put(any(), any(), any());
+
+        // when & then
+        assertThatThrownBy(() -> uploadService.upload("bucket", 71L, content, true))
+            .isInstanceOf(IllegalStateException.class);
+        var row
+            = jdbc
+                .queryForMap(
+                    "SELECT status, uploaded_at, upload_finished_at, failure_code "
+                        + "FROM problem_body_assets WHERE owner_id = ?",
+                    71L
+                );
+        assertThat(row.get("status")).isEqualTo("PENDING");
+        assertThat(row.get("uploaded_at")).isNull();
+        assertThat(row.get("upload_finished_at")).isNull();
+        assertThat(row.get("failure_code")).isEqualTo("UPLOAD_UNCONFIRMED");
     }
 
     @Test

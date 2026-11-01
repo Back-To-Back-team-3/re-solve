@@ -179,6 +179,7 @@ public class ProblemTestAsset extends BaseTimeEntity {
         status = ProblemAssetStatus.DISCARDED;
     }
 
+    /** 이전 작업이 상태나 보호 기간을 바꾼 경우 후속 처리를 막는다. */
     private void requireActiveUpload(LocalDateTime expectedExpiry) {
         if (status != ProblemAssetStatus.PENDING || uploadFinishedAt != null || expectedExpiry == null
             || !expectedExpiry.equals(uploadExpiresAt)) {
@@ -186,6 +187,7 @@ public class ProblemTestAsset extends BaseTimeEntity {
         }
     }
 
+    /** 실패 분류가 DB 컬럼의 필수 조건과 길이 제한에 맞는지 확인한다. */
     private void requireFailureCode(String code) {
         if (code == null || code.isBlank() || code.length() > 100) {
             throw new IllegalArgumentException("업로드 실패 분류가 올바르지 않습니다.");

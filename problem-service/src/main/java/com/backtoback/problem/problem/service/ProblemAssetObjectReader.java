@@ -29,7 +29,15 @@ public class ProblemAssetObjectReader {
         }
     }
 
-    /** 객체 원문과 메타 정보가 일치하는지 확인하며 저장소 오류는 전달한다. */
+    /**
+     * 객체 원문과 메타 정보를 대조하며 저장소 오류는 호출자에게 전달한다.
+     *
+     * @param bucket 조회할 버킷
+     * @param key 조회할 불변 객체 키
+     * @param version 저장된 객체 버전. 버전 지정이 없으면 null
+     * @param expected 비교할 원문과 메타 정보
+     * @return 크기·체크섬·바이트가 모두 일치하면 true
+     */
     public boolean matches(String bucket, String key, String version, ProblemAssetContent expected) {
         var request = GetObjectRequest.builder().bucket(bucket).key(key).versionId(version).build();
         var response = client.getObjectAsBytes(request);
