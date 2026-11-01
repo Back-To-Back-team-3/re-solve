@@ -23,10 +23,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.study.assignment.service.AssignmentEnrollmentService;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.membership.domain.JoinType;
+import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.Study;
 import com.backtoback.study.membership.domain.StudyMembership;
@@ -64,6 +66,8 @@ class StudyMembershipCommandServiceTest {
     private StudyMemberQuotaRepository quotaRepository;
     @Mock
     private AssignmentEnrollmentService enrollmentService;
+    @Mock
+    private OutboxEventWriter outboxEventWriter;
     @Mock
     private Clock clock;
 
@@ -222,6 +226,78 @@ class StudyMembershipCommandServiceTest {
             .isInstanceOfSatisfying(
                 StudyException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.MEMBER_SUSPENDED)
+            );
+    }
+
+    // ─── cancelOrLeave ───────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("PENDING 멤버십을 취소하면 CANCELED로 전이된다")
+    void cancelOrLeave_pending_canceled() {
+        StudyMembership pending
+            = StudyMembership
+                .apply(
+                    STUDY_ID,
+                    MEMBER_ID,
+                    MembershipRole.MEMBER,
+                    MembershipStatus.PENDING,
+                    NOW,
+                    NOW.plusDays(7),
+                    null
+                );
+        ReflectionTestUtils.setField(pending, "id", 40L);
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
+            .willReturn(Optional.of(pending));
+        given(membershipRepository.cancelIfPending(40L)).willReturn(1);
+
+        service.cancelOrLeave(STUDY_ID, MEMBER_ID, CORR_ID);
+
+        verify(historyRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("APPROVED 멤버십을 탈퇴하면 LEFT로 전이되고 S2 이벤트를 발행한다")
+    void cancelOrLeave_approved_left() {
+        StudyMembership approved
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.MEMBER, MembershipStatus.APPROVED, NOW, null, NOW);
+        ReflectionTestUtils.setField(approved, "id", 50L);
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
+            .willReturn(Optional.of(approved));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(instantStudy));
+        given(membershipRepository.leaveIfApproved(eq(50L), any())).willReturn(1);
+
+        service.cancelOrLeave(STUDY_ID, MEMBER_ID, CORR_ID);
+
+        verify(outboxEventWriter).append(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("활성 멤버십이 없으면 STUDY_MEMBERSHIP_NOT_FOUND 예외를 던진다")
+    void cancelOrLeave_notFound_throwsMembershipNotFound() {
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
+            .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.cancelOrLeave(STUDY_ID, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND)
+            );
+    }
+
+    @Test
+    @DisplayName("스터디장이 탈퇴를 시도하면 STUDY_LEADER_DELEGATION_REQUIRED 예외를 던진다")
+    void cancelOrLeave_leader_throwsLeaderDelegationRequired() {
+        StudyMembership leader
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.LEADER, MembershipStatus.APPROVED, NOW, null, NOW);
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
+            .willReturn(Optional.of(leader));
+
+        assertThatThrownBy(() -> service.cancelOrLeave(STUDY_ID, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_LEADER_DELEGATION_REQUIRED)
             );
     }
 }

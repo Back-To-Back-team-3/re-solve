@@ -41,7 +41,8 @@ public class StudyMembershipCommandController {
         String raw = MDC.get(CorrelationIdFilter.MDC_KEY);
         String correlationId = raw != null && raw.length() > 64 ? raw.substring(0, 64) : raw;
         StudyJoinResponse response = studyMembershipCommandService.join(studyId, memberId, correlationId);
-        String message = MembershipStatus.PENDING.name().equals(response.status()) ? "가입 신청되었습니다." : "스터디에 가입되었습니다.";
+        String message
+            = MembershipStatus.PENDING.name().equals(response.status()) ? "가입 신청이 완료되었습니다." : "스터디에 가입되었습니다.";
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(message, response));
     }
 
