@@ -159,7 +159,7 @@ public class Study extends BaseTimeEntity {
     }
 
     /**
-     * 모집 중 상태의 새 스터디를 만든다. 생성자의 LEADER 가입은 가입 기능 트랜잭션에서 별도로 처리한다(정책 및 상태 §7 정원 검증).
+     * 모집 중 상태의 새 스터디를 만든다. 생성자의 LEADER 가입은 같은 트랜잭션에서 {@link #addMember()}로 처리한다.
      */
     public static Study recruit(
         String name,
@@ -183,5 +183,10 @@ public class Study extends BaseTimeEntity {
             joinType,
             autoReopen
         );
+    }
+
+    /** 가입이 APPROVED가 된 회원을 memberCount에 반영한다(정책 및 상태 §7 정원 검증). */
+    public void addMember() {
+        this.memberCount++;
     }
 }
