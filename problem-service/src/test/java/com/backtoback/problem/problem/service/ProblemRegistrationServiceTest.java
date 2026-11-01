@@ -10,7 +10,10 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
@@ -40,6 +43,7 @@ import com.backtoback.problem.problem.dto.TypeSpec;
 import com.backtoback.problem.problem.dto.request.TestCaseRequest;
 import com.backtoback.problem.problem.repository.ProblemBodyAssetRepository;
 import com.backtoback.problem.problem.repository.ProblemImageRepository;
+import com.backtoback.problem.problem.repository.ProblemRepository;
 import com.backtoback.problem.problem.repository.ProblemRevisionRepository;
 import com.backtoback.problem.tag.repository.TagRepository;
 
@@ -67,6 +71,8 @@ class ProblemRegistrationServiceTest {
     private ProblemImageRepository images;
     @Autowired
     private ProblemRevisionRepository revisions;
+    @Autowired
+    private ProblemRepository problems;
     @Autowired
     private TagRepository tags;
     @Autowired
@@ -260,6 +266,86 @@ class ProblemRegistrationServiceTest {
                     problemId
                 )
         ).isEqualTo(1);
+    }
+
+    /** 이미 읽은 문제의 버전이 다른 트랜잭션에서 변경된 경우를 확인한다. */
+    @Test
+    @DisplayName("문제를 미리 조회한 트랜잭션에서도 변경된 버전의 새 회차 저장을 거절한다")
+    void rejectsStaleProblemAlreadyLoadedInCallerTransaction() throws Exception {
+        // given
+        Long problemId
+            = jdbc.queryForObject("SELECT id FROM problems WHERE author_id = 1 ORDER BY id LIMIT 1", Long.class);
+        Integer originalVersion
+            = jdbc.queryForObject("SELECT row_version FROM problems WHERE id = ?", Integer.class, problemId);
+        Long tagId = tags.findAll().getFirst().getId();
+        Assets assets = createUploadedAssets();
+        String key = "stale-" + UUID.randomUUID();
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            // when & then
+            assertThatThrownBy(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                problems.findById(problemId).orElseThrow();
+                try {
+                    executor
+                        .submit(
+                            () -> jdbc
+                                .update("UPDATE problems SET row_version = row_version + 1 WHERE id = ?", problemId)
+                        )
+                        .get(30, TimeUnit.SECONDS);
+                } catch (Exception exception) {
+                    throw new IllegalStateException(exception);
+                }
+                return service.save(command(problemId, originalVersion, assets.bodyId(), null, tagId, key, "a"));
+            }))
+                .isInstanceOfSatisfying(
+                    ProblemException.class,
+                    exception -> assertThat(exception.getErrorCode())
+                        .isEqualTo(ProblemErrorCode.PROBLEM_VERSION_CONFLICT)
+                );
+        } finally {
+            jdbc.update("UPDATE problems SET row_version = ? WHERE id = ?", originalVersion, problemId);
+        }
+        assertThat(revisions.findByAuthorIdAndIdempotencyKey(1L, key)).isEmpty();
+    }
+
+    /** 회차 연결 트랜잭션이 끝날 때까지 참조 태그를 삭제할 수 없는지 확인한다. */
+    @Test
+    @DisplayName("회차 저장 중인 태그의 삭제는 등록 트랜잭션이 끝날 때까지 대기한다")
+    void holdsTagLockUntilRegistrationCommits() throws Exception {
+        // given
+        Long tagId = tags.findAll().getFirst().getId();
+        Assets assets = createUploadedAssets();
+        String key = "tag-lock-" + UUID.randomUUID();
+        CountDownLatch deleting = new CountDownLatch(1);
+        AtomicReference<Future<?>> deletion = new AtomicReference<>();
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            // when & then
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                service.save(command(null, null, assets.bodyId(), null, tagId, key, "a"));
+                deletion
+                    .set(
+                        executor
+                            .submit(
+                                () -> new TransactionTemplate(transactionManager).executeWithoutResult(deleteStatus -> {
+                                    deleting.countDown();
+                                    jdbc.update("DELETE FROM tags WHERE id = ?", tagId);
+                                    deleteStatus.setRollbackOnly();
+                                })
+                            )
+                    );
+                try {
+                    assertThat(deleting.await(30, TimeUnit.SECONDS)).isTrue();
+                    assertThatThrownBy(() -> deletion.get().get(500, TimeUnit.MILLISECONDS))
+                        .isInstanceOf(TimeoutException.class);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+                status.setRollbackOnly();
+            });
+            deletion.get().get(30, TimeUnit.SECONDS);
+        }
     }
 
     private Callable<String> revisionWrite(

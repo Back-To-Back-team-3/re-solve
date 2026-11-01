@@ -91,6 +91,16 @@ public class ProblemRegistrationService {
             if (existing.isPresent()) {
                 return replay(command, existing.get());
             }
+            // 이미 관리 중인 엔티티는 잠금 조회로 값이 갱신되지 않을 수 있으므로 DB 버전과 대조한다.
+            Integer lockedVersion
+                = entityManager
+                    .createQuery("select p.rowVersion from Problem p where p.id = :problemId", Integer.class)
+                    .setParameter("problemId", command.problemId())
+                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                    .getSingleResult();
+            if (!lockedVersion.equals(problem.getRowVersion())) {
+                throw new ProblemException(ProblemErrorCode.PROBLEM_VERSION_CONFLICT);
+            }
             problem.prepareNewRevision(command.authorId(), command.expectedRowVersion());
             revisionNumber
                 = revisions
@@ -200,8 +210,11 @@ public class ProblemRegistrationService {
             || new HashSet<>(tagIds).size() != tagIds.size()) {
             throw new ProblemException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
-        if (tags.findAllById(tagIds).size() != tagIds.size()) {
-            throw new ProblemException(ProblemErrorCode.PROBLEM_TAG_NOT_FOUND);
+        // 여러 태그를 같은 순서로 잠가 등록 요청끼리 잠금 순서가 달라지지 않도록 한다.
+        for (Long tagId : tagIds.stream().sorted().toList()) {
+            if (tags.findByIdForShare(tagId).isEmpty()) {
+                throw new ProblemException(ProblemErrorCode.PROBLEM_TAG_NOT_FOUND);
+            }
         }
     }
 
