@@ -72,6 +72,48 @@ class ProblemAssetUploadTrackingTest {
         assertThat(asset.getFailureCode()).isEqualTo("UPLOAD_UNCONFIRMED");
     }
 
+    /** 본문과 테스트 파일 모두 잠금 뒤 갱신된 만료값을 반환한다. */
+    @Test
+    @DisplayName("진행 중인 파일의 만료값을 갱신해 이후 완료에 전달한다")
+    void renewsBothAssetTypes() {
+        // given
+        Clock clock = Clock.fixed(Instant.parse("2026-11-01T12:00:00Z"), ZoneOffset.UTC);
+        LocalDateTime expiry = LocalDateTime.of(2026, 11, 2, 0, 0);
+        LocalDateTime renewedExpiry = LocalDateTime.of(2026, 11, 2, 12, 0);
+        var body = ProblemBodyAsset.create(1L, "body", null, "a".repeat(64), 1L, expiry);
+        var test = ProblemTestAsset.create(1L, "test", null, "a".repeat(64), 1L, expiry);
+        given(bodies.findByIdForUpdate(1L)).willReturn(Optional.of(body));
+        given(tests.findByIdForUpdate(2L)).willReturn(Optional.of(test));
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, null);
+
+        // when
+        var bodyTicket = tracking.renew(new ProblemAssetUploadTracking.UploadTicket(1L, "body", expiry, true));
+        var testTicket = tracking.renew(new ProblemAssetUploadTracking.UploadTicket(2L, "test", expiry, false));
+
+        // then
+        assertThat(bodyTicket.expiry()).isEqualTo(renewedExpiry);
+        assertThat(testTicket.expiry()).isEqualTo(renewedExpiry);
+        assertThat(body.getUploadExpiresAt()).isEqualTo(renewedExpiry);
+        assertThat(test.getUploadExpiresAt()).isEqualTo(renewedExpiry);
+    }
+
+    /** 잠금을 얻은 시점에 만료된 파일은 소급 갱신하지 않는다. */
+    @Test
+    @DisplayName("잠금 이후 만료된 파일은 갱신을 거절한다")
+    void rejectsExpiredRenewal() {
+        // given
+        Clock clock = Clock.fixed(Instant.parse("2026-11-02T00:00:00Z"), ZoneOffset.UTC);
+        LocalDateTime expiry = LocalDateTime.of(2026, 11, 2, 0, 0);
+        var body = ProblemBodyAsset.create(1L, "body", null, "a".repeat(64), 1L, expiry);
+        given(bodies.findByIdForUpdate(1L)).willReturn(Optional.of(body));
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, null);
+        var ticket = new ProblemAssetUploadTracking.UploadTicket(1L, "body", expiry, true);
+
+        // when & then
+        assertThatThrownBy(() -> tracking.renew(ticket)).isInstanceOf(IllegalStateException.class);
+        assertThat(body.getUploadExpiresAt()).isEqualTo(expiry);
+    }
+
     /** 본문 행 잠금 획득 전후의 시각이 달라지는 상황을 확인한다. */
     @Test
     @DisplayName("본문 파일 잠금을 기다리는 동안 만료되면 완료 대신 폐기한다")

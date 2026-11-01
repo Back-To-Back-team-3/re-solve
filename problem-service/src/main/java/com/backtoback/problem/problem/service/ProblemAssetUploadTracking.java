@@ -18,7 +18,10 @@ import com.backtoback.problem.problem.repository.ProblemTestAssetRepository;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 
-/** 파일 업로드의 DB 추적을 외부 저장 호출과 분리한다(ERD 4.2.3). */
+/**
+ * 파일 업로드의 DB 추적을 외부 저장 호출과 분리한다.
+ * 기준 문서: 도메인 및 데이터베이스 v1.0 / §4.2.3 본문 파일: 상태와 잠금.
+ */
 @Service
 @RequiredArgsConstructor
 public class ProblemAssetUploadTracking {
@@ -58,6 +61,28 @@ public class ProblemAssetUploadTracking {
                     .getId();
         }
         return new UploadTicket(id, key, expiry, body);
+    }
+
+    /**
+     * 진행 중인 같은 업로드의 보호 기간을 파일 잠금 아래 갱신한다.
+     *
+     * @param ticket 갱신 전 파일과 만료 시각
+     * @return 같은 파일과 갱신된 만료 시각
+     * @throws IllegalStateException 만료되었거나 파일 상태가 변경된 경우
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public UploadTicket renew(UploadTicket ticket) {
+        LocalDateTime expiry;
+        if (ticket.body()) {
+            var asset = bodies.findByIdForUpdate(ticket.id()).orElseThrow();
+            asset.renewUpload(ticket.expiry(), now());
+            expiry = asset.getUploadExpiresAt();
+        } else {
+            var asset = tests.findByIdForUpdate(ticket.id()).orElseThrow();
+            asset.renewUpload(ticket.expiry(), now());
+            expiry = asset.getUploadExpiresAt();
+        }
+        return new UploadTicket(ticket.id(), ticket.key(), expiry, ticket.body());
     }
 
     /**

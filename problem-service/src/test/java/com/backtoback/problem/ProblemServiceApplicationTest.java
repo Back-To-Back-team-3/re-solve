@@ -270,6 +270,60 @@ class ProblemServiceApplicationTest {
         }
     }
 
+    /** 업로드 완료 뒤 DB 작업이 롤백되어도 추적 기록과 실제 원문이 유지되는지 확인한다. */
+    @Test
+    @DisplayName("업로드 이후 DB 작업이 실패해도 본문과 테스트 원문을 보존한다")
+    void preservesUploadedObjectsAfterDatabaseRollback() {
+        // given
+        String bucket = "problem-rollback-" + UUID.randomUUID();
+        s3.createBucket(request -> request.bucket(bucket));
+        byte[] bytes = "원문".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var content = ProblemAssetContent.fromBytes(bytes);
+        Long bodyId = assetUpload.upload(bucket, 1L, content, true);
+        Long testId = assetUpload.upload(bucket, 1L, content, false);
+        String bodyKey
+            = jdbc.queryForObject("SELECT object_key FROM problem_body_assets WHERE id = ?", String.class, bodyId);
+        String testKey
+            = jdbc.queryForObject("SELECT object_key FROM problem_test_assets WHERE id = ?", String.class, testId);
+        try {
+            // when
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                jdbc.update("UPDATE problem_body_assets SET status = 'DELETING' WHERE id = ?", bodyId);
+                jdbc.update("UPDATE problem_test_assets SET status = 'DELETING' WHERE id = ?", testId);
+                status.setRollbackOnly();
+            });
+
+            // then
+            assertThat(jdbc.queryForObject("SELECT status FROM problem_body_assets WHERE id = ?", String.class, bodyId))
+                .isEqualTo("PENDING");
+            assertThat(jdbc.queryForObject("SELECT status FROM problem_test_assets WHERE id = ?", String.class, testId))
+                .isEqualTo("PENDING");
+            assertThat(
+                jdbc
+                    .queryForObject(
+                        "SELECT upload_finished_at FROM problem_body_assets WHERE id = ?",
+                        java.time.LocalDateTime.class,
+                        bodyId
+                    )
+            ).isNotNull();
+            assertThat(
+                jdbc
+                    .queryForObject(
+                        "SELECT upload_finished_at FROM problem_test_assets WHERE id = ?",
+                        java.time.LocalDateTime.class,
+                        testId
+                    )
+            ).isNotNull();
+            assertThat(s3.getObjectAsBytes(request -> request.bucket(bucket).key(bodyKey)).asByteArray())
+                .isEqualTo(bytes);
+            assertThat(s3.getObjectAsBytes(request -> request.bucket(bucket).key(testKey)).asByteArray())
+                .isEqualTo(bytes);
+        } finally {
+            jdbc.update("DELETE FROM problem_body_assets WHERE id = ?", bodyId);
+            jdbc.update("DELETE FROM problem_test_assets WHERE id = ?", testId);
+        }
+    }
+
     @Test
     @DisplayName("인증 없이 서비스 상태를 조회한다")
     void healthIsAvailableWithoutAuthentication() throws Exception {

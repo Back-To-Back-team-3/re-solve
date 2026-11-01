@@ -8,7 +8,10 @@ import lombok.RequiredArgsConstructor;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 
-/** 고정 객체를 읽고 예상 바이트와 메타 정보를 대조한다(API 명세서 2.3.0). */
+/**
+ * 고정 객체를 읽고 예상 바이트와 메타 정보를 대조한다.
+ * 기준 문서: API 명세서 v1.1 / §2.3.0 문제·테스트 공통 데이터 형식: 저장 결과 확인.
+ */
 @Component
 @RequiredArgsConstructor
 public class ProblemAssetObjectReader {

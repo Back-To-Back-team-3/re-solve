@@ -12,7 +12,10 @@ import com.backtoback.problem.problem.repository.ProblemTestAssetRepository;
 
 import lombok.RequiredArgsConstructor;
 
-/** 같은 문제에 연결된 파일의 메타 정보와 실제 원문을 대조한다(API 명세서 2.3.0). */
+/**
+ * 같은 문제에 연결된 파일의 메타 정보와 실제 원문을 대조한다.
+ * 기준 문서: API 명세서 v1.1 / §2.3.0 문제·테스트 공통 데이터 형식: 원문과 메타 정보 재사용.
+ */
 @Service
 @RequiredArgsConstructor
 public class ProblemAssetReuseService {

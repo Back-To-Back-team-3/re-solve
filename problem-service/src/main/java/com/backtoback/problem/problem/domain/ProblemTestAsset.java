@@ -136,7 +136,13 @@ public class ProblemTestAsset extends BaseTimeEntity {
         return new ProblemTestAsset(ownerId, objectKey, objectVersion, sha256, sizeBytes, uploadExpiresAt);
     }
 
-    /** 같은 파일·객체 키를 소유한 진행 중 작업만 보호 기간을 갱신한다(정책 및 상태 §4). */
+    /**
+     * 같은 파일·객체 키를 소유한 진행 중 작업만 보호 기간을 갱신한다(정책 및 상태 §4).
+     *
+     * @param expectedExpiry 갱신 전 확인한 만료 시각
+     * @param now 파일 잠금 후 확인한 현재 시각
+     * @throws IllegalStateException 작업이 종료됐거나 기존 만료값이 바뀌었거나 만료된 경우
+     */
     public void renewUpload(LocalDateTime expectedExpiry, LocalDateTime now) {
         requireActiveUpload(expectedExpiry);
         if (now == null || !now.isBefore(uploadExpiresAt) || now.plusHours(24).isBefore(uploadExpiresAt)) {
@@ -145,7 +151,14 @@ public class ProblemTestAsset extends BaseTimeEntity {
         uploadExpiresAt = now.plusHours(24);
     }
 
-    /** 저장 결과·체크섬과 기존 쓰기·재시도 종료를 확인한 뒤 기록한다(ERD 4.2.3). */
+    /**
+     * 저장 결과·체크섬과 기존 쓰기·재시도 종료를 확인한 뒤 기록한다(ERD 4.2.3).
+     *
+     * @param expectedExpiry 쓰기 작업이 사용한 보호 만료 시각
+     * @param now 저장과 종료를 확인한 시각
+     * @param confirmedVersion 확인된 객체 버전. 버전이 없으면 null
+     * @throws IllegalStateException 작업 상태나 만료값이 바뀌었거나 만료된 경우
+     */
     public void completeUpload(LocalDateTime expectedExpiry, LocalDateTime now, String confirmedVersion) {
         requireActiveUpload(expectedExpiry);
         if (now == null || !now.isBefore(uploadExpiresAt)) {
@@ -157,7 +170,14 @@ public class ProblemTestAsset extends BaseTimeEntity {
         failureCode = null;
     }
 
-    /** 쓰기 결과가 불명확하면 종료 시각을 기록하지 않고 보호 상태를 유지한다(정책 및 상태 §4). */
+    /**
+     * 쓰기 결과가 불명확하면 종료 시각을 기록하지 않고 보호 상태를 유지한다(정책 및 상태 §4).
+     *
+     * @param expectedExpiry 쓰기 작업이 사용한 보호 만료 시각
+     * @param code 원문이나 인증 정보를 포함하지 않는 실패 분류
+     * @throws IllegalStateException 작업 상태나 기존 만료값이 바뀐 경우
+     * @throws IllegalArgumentException 실패 분류가 비었거나 100자를 초과한 경우
+     */
     public void recordUnknownUpload(LocalDateTime expectedExpiry, String code) {
         requireActiveUpload(expectedExpiry);
         requireFailureCode(code);
@@ -167,6 +187,12 @@ public class ProblemTestAsset extends BaseTimeEntity {
     /**
      * 쓰기 종료와 실제 참조가 없음을 확인한 뒤 실패 또는 만료된 업로드를 폐기한다(ERD 4.2.3).
      * 호출자는 같은 파일 행 잠금 아래 실제 참조가 없고 기존 쓰기·재시도가 종료됐음을 확인해야 한다.
+     *
+     * @param expectedExpiry 쓰기 작업이 사용한 보호 만료 시각
+     * @param finishedAt 쓰기 종료를 확인한 시각
+     * @param code 원문이나 인증 정보를 포함하지 않는 실패 분류
+     * @throws IllegalStateException 작업 상태나 만료값이 바뀌었거나 종료 시각이 없는 경우
+     * @throws IllegalArgumentException 실패 분류가 비었거나 100자를 초과한 경우
      */
     public void discardFinishedUpload(LocalDateTime expectedExpiry, LocalDateTime finishedAt, String code) {
         requireActiveUpload(expectedExpiry);
@@ -194,7 +220,13 @@ public class ProblemTestAsset extends BaseTimeEntity {
         }
     }
 
-    /** 업로드가 완료된 테스트 파일을 같은 문제의 회차에 연결한다(ERD 4.2.3). */
+    /**
+     * 업로드가 완료된 테스트 파일을 같은 문제의 회차에 연결한다(ERD 4.2.3).
+     *
+     * @param problemId 연결할 문제 ID
+     * @param requestingAdminId 파일 소유 여부를 확인할 관리자 ID
+     * @throws IllegalStateException 관리자·업로드·상태·문제 소속이 연결 조건에 맞지 않는 경우
+     */
     public void linkToProblem(Long problemId, Long requestingAdminId) {
         if (problemId == null || requestingAdminId == null || !ownerId.equals(requestingAdminId)) {
             throw new IllegalStateException("테스트 파일 소유자 또는 문제 ID가 올바르지 않습니다.");
