@@ -14,10 +14,10 @@ import jakarta.validation.constraints.Size;
 public record StudyCreateRequest(
     @NotBlank @Size(max = 200) String name,
     @Size(max = 500) String description,
-    @NotBlank String goal,
-    @NotBlank String skillLevel,
-    @NotBlank String preferredLanguage,
-    @NotBlank String activeTimeSlot,
+    @NotBlank @Size(max = 30) String goal,
+    @NotBlank @Size(max = 30) String skillLevel,
+    @NotBlank @Size(max = 30) String preferredLanguage,
+    @NotBlank @Size(max = 30) String activeTimeSlot,
     @NotNull @Min(2) @Max(10) Integer capacity,
     @NotNull JoinType joinType,
     @NotNull Boolean isAutoReopen
