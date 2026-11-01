@@ -73,7 +73,6 @@ public class StudyCommandService {
             throw new StudyException(StudyErrorCode.STUDY_JOIN_LIMIT_EXCEEDED);
         }
 
-        // ② 스터디 INSERT (member_count = 1)
         Study study
             = Study
                 .recruit(
@@ -90,7 +89,6 @@ public class StudyCommandService {
         study.addMember();
         studyRepository.save(study);
 
-        // ③ 가입 INSERT (LEADER, APPROVED)
         LocalDateTime now
             = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
         StudyMembership membership
@@ -98,7 +96,6 @@ public class StudyCommandService {
                 .apply(study.getId(), memberId, MembershipRole.LEADER, MembershipStatus.APPROVED, now, null, now);
         membershipRepository.save(membership);
 
-        // ④ 이력 INSERT
         historyRepository
             .save(
                 StudyMembershipHistory
