@@ -81,6 +81,32 @@ public class ProblemAssetUploadTracking {
     }
 
     /**
+     * 쓰기를 시작하지 않은 만료 파일을 잠그고 참조가 없을 때 폐기한다.
+     *
+     * @param ticket 기존 추적 정보
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void discardBeforeWrite(UploadTicket ticket) {
+        if (ticket.body()) {
+            var asset = bodies.findByIdForUpdate(ticket.id()).orElseThrow();
+            LocalDateTime finished = now();
+            if (finished.isBefore(ticket.expiry())) {
+                throw new IllegalStateException("업로드 보호 기간이 아직 유효합니다.");
+            }
+            requireUnreferenced(ticket);
+            asset.discardFinishedUpload(ticket.expiry(), finished, "UPLOAD_EXPIRED");
+        } else {
+            var asset = tests.findByIdForUpdate(ticket.id()).orElseThrow();
+            LocalDateTime finished = now();
+            if (finished.isBefore(ticket.expiry())) {
+                throw new IllegalStateException("업로드 보호 기간이 아직 유효합니다.");
+            }
+            requireUnreferenced(ticket);
+            asset.discardFinishedUpload(ticket.expiry(), finished, "UPLOAD_EXPIRED");
+        }
+    }
+
+    /**
      * 단일 쓰기 성공과 콘텐츠 확인 후 파일 상태를 기록한다.
      *
      * @param ticket 기존 추적 정보

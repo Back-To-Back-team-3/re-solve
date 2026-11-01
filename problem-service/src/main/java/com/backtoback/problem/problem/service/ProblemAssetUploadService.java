@@ -33,11 +33,12 @@ public class ProblemAssetUploadService {
     public Long upload(String bucket, Long ownerId, ProblemAssetContent content, boolean body) {
         Objects.requireNonNull(bucket);
         var ticket = tracking.start(ownerId, content, body);
+        if (!LocalDateTime.now(clock).isBefore(ticket.expiry())) {
+            tracking.discardBeforeWrite(ticket);
+            throw new IllegalStateException("업로드 보호 기간이 만료되었습니다.");
+        }
         String version;
         try {
-            if (!LocalDateTime.now(clock).isBefore(ticket.expiry())) {
-                throw new IllegalStateException("업로드 보호 기간이 만료되었습니다.");
-            }
             version = writer.put(bucket, ticket.key(), content);
             reader.verify(bucket, ticket.key(), version, content);
         } catch (RuntimeException failure) {

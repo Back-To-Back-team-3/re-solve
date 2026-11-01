@@ -130,4 +130,57 @@ class ProblemAssetUploadTrackingTest {
         }
     }
 
+    /** 쓰기 전 만료 파일도 파일 잠금과 참조 검사를 거쳐 폐기한다. */
+    @Test
+    @DisplayName("쓰기 전 만료된 본문 파일은 종료 시각과 함께 폐기한다")
+    void discardsExpiredBeforeWrite() {
+        // given
+        Clock clock = Clock.fixed(Instant.parse("2026-11-02T00:00:00Z"), ZoneOffset.UTC);
+        EntityManager entityManager = mock(EntityManager.class);
+        Query query = mock(Query.class);
+        LocalDateTime expiry = LocalDateTime.of(2026, 11, 2, 0, 0);
+        var asset = ProblemBodyAsset.create(1L, "key", null, "a".repeat(64), 1L, expiry);
+        var ticket = new ProblemAssetUploadTracking.UploadTicket(1L, "key", expiry, true);
+        given(bodies.findByIdForUpdate(1L)).willReturn(Optional.of(asset));
+        given(entityManager.createNativeQuery(any(String.class))).willReturn(query);
+        given(query.setParameter("id", 1L)).willReturn(query);
+        given(query.getSingleResult()).willReturn(0L);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, entityManager);
+
+        // when
+        tracking.discardBeforeWrite(ticket);
+
+        // then
+        assertThat(asset.getStatus()).isEqualTo(ProblemAssetStatus.DISCARDED);
+        assertThat(asset.getUploadedAt()).isNull();
+        assertThat(asset.getUploadFinishedAt()).isEqualTo(expiry);
+        assertThat(asset.getFailureCode()).isEqualTo("UPLOAD_EXPIRED");
+    }
+
+    /** 테스트 파일의 미시작 만료도 동일한 보호 조건을 적용한다. */
+    @Test
+    @DisplayName("쓰기 전 만료된 테스트 파일은 종료 시각과 함께 폐기한다")
+    void discardsExpiredTestBeforeWrite() {
+        // given
+        Clock clock = Clock.fixed(Instant.parse("2026-11-02T00:00:00Z"), ZoneOffset.UTC);
+        EntityManager entityManager = mock(EntityManager.class);
+        Query query = mock(Query.class);
+        LocalDateTime expiry = LocalDateTime.of(2026, 11, 2, 0, 0);
+        var asset = ProblemTestAsset.create(1L, "key", null, "a".repeat(64), 1L, expiry);
+        var ticket = new ProblemAssetUploadTracking.UploadTicket(1L, "key", expiry, false);
+        given(tests.findByIdForUpdate(1L)).willReturn(Optional.of(asset));
+        given(entityManager.createNativeQuery(any(String.class))).willReturn(query);
+        given(query.setParameter("id", 1L)).willReturn(query);
+        given(query.getSingleResult()).willReturn(0L);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, entityManager);
+
+        // when
+        tracking.discardBeforeWrite(ticket);
+
+        // then
+        assertThat(asset.getStatus()).isEqualTo(ProblemAssetStatus.DISCARDED);
+        assertThat(asset.getUploadedAt()).isNull();
+        assertThat(asset.getUploadFinishedAt()).isEqualTo(expiry);
+    }
+
 }

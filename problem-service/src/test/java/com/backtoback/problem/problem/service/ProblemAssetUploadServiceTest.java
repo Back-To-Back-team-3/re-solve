@@ -6,6 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -84,4 +85,28 @@ class ProblemAssetUploadServiceTest {
         verify(tracking).recordUnknown(ticket);
         verify(tracking, never()).complete(ticket, null);
     }
+
+    /** 쓰기 전 만료는 미확인 결과가 아니라 확정된 미시작으로 처리한다. */
+    @Test
+    @DisplayName("쓰기 전에 만료되면 S3를 호출하지 않고 추적 파일을 폐기한다")
+    void discardsBeforeWriteWhenExpired() {
+        // given
+        var content
+            = ProblemAssetContent
+                .fromBytes(
+                    new byte[] {
+                        1
+                    }
+                );
+        var ticket = new UploadTicket(1L, "key", LocalDateTime.of(2026, 11, 1, 0, 0), true);
+        given(tracking.start(2L, content, true)).willReturn(ticket);
+        var service = new ProblemAssetUploadService(tracking, writer, reader, clock);
+
+        // when & then
+        assertThatThrownBy(() -> service.upload("bucket", 2L, content, true)).isInstanceOf(IllegalStateException.class);
+        verify(tracking).discardBeforeWrite(ticket);
+        verify(tracking, never()).recordUnknown(ticket);
+        verifyNoInteractions(writer, reader);
+    }
+
 }
