@@ -2,6 +2,8 @@ package com.backtoback.problem.problem.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 
 import java.sql.SQLException;
 import java.time.LocalDateTime;
@@ -24,6 +26,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.DockerClientFactory;
@@ -39,6 +42,11 @@ import com.backtoback.problem.problem.domain.ProblemRevisionTag;
 import com.backtoback.problem.problem.domain.ProblemScope;
 import com.backtoback.problem.problem.domain.ProblemTestAsset;
 import com.backtoback.problem.problem.domain.ProblemVisibility;
+import com.backtoback.problem.problem.service.ProblemAssetContent;
+import com.backtoback.problem.problem.service.ProblemAssetObjectReader;
+import com.backtoback.problem.problem.service.ProblemAssetObjectWriter;
+import com.backtoback.problem.problem.service.ProblemAssetUploadService;
+import com.backtoback.problem.problem.service.ProblemAssetUploadTracking;
 import com.backtoback.problem.tag.repository.TagRepository;
 
 /**
@@ -72,6 +80,18 @@ class ProblemRepositoriesTest {
 
     @Autowired
     private ProblemBodyAssetRepository bodyAssets;
+
+    @Autowired
+    private ProblemAssetUploadTracking uploadTracking;
+
+    @Autowired
+    private ProblemAssetUploadService uploadService;
+
+    @MockitoBean
+    private ProblemAssetObjectWriter objectWriter;
+
+    @MockitoBean
+    private ProblemAssetObjectReader objectReader;
 
     @Autowired
     private ProblemTestAssetRepository testAssets;
@@ -257,6 +277,94 @@ class ProblemRepositoriesTest {
             }
             holder.get(10, TimeUnit.SECONDS);
         }
+    }
+
+    /** 만료 후 종료가 확인된 미참조 파일의 폐기와 종료 시각을 확인한다. */
+    @Test
+    @DisplayName("만료된 미참조 파일은 쓰기 종료 확인 후 폐기한다")
+    void discardsExpiredUnreferencedUpload() {
+        // given
+        LocalDateTime expiry = LocalDateTime.of(2020, 1, 1, 0, 0);
+        var asset
+            = bodyAssets.saveAndFlush(ProblemBodyAsset.create(1L, "expired-object", null, "a".repeat(64), 1L, expiry));
+        var ticket = new ProblemAssetUploadTracking.UploadTicket(asset.getId(), asset.getObjectKey(), expiry, true);
+
+        // when
+        boolean completed = uploadTracking.complete(ticket, null);
+
+        // then
+        assertThat(completed).isFalse();
+        var stored = bodyAssets.findById(asset.getId()).orElseThrow();
+        assertThat(stored.getStatus()).isEqualTo(com.backtoback.problem.problem.domain.ProblemAssetStatus.DISCARDED);
+        assertThat(stored.getUploadFinishedAt()).isNotNull();
+        assertThat(stored.getUploadedAt()).isNull();
+    }
+
+    /** 외부 쓰기 도중 다른 트랜잭션이 추적 행을 잠글 수 있는지 확인한다. */
+    @Test
+    @DisplayName("S3 쓰기 중 추적 행은 커밋되어 있고 다른 트랜잭션이 잠글 수 있다")
+    void uploadDoesNotHoldFileLockDuringWrite() {
+        // given
+        var content
+            = ProblemAssetContent
+                .fromBytes(
+                    new byte[] {
+                        1
+                    }
+                );
+        doAnswer(invocation -> {
+            String key = invocation.getArgument(1);
+            transactions.executeWithoutResult(status -> {
+                Long id
+                    = jdbc
+                        .queryForObject(
+                            "SELECT id FROM problem_body_assets WHERE object_key = ? FOR UPDATE NOWAIT",
+                            Long.class,
+                            key
+                        );
+                assertThat(id).isNotNull();
+            });
+            return null;
+        }).when(objectWriter).put(any(), any(), any());
+
+        // when
+        Long id = uploadService.upload("bucket", 1L, content, true);
+
+        // then
+        assertThat(bodyAssets.findById(id))
+            .isPresent()
+            .get()
+            .extracting(ProblemBodyAsset::getUploadFinishedAt)
+            .isNotNull();
+    }
+
+    /** 바깥 트랜잭션 롤백 후에도 업로드 추적 행이 남는지 확인한다. */
+    @Test
+    @DisplayName("업로드 추적 행은 호출 트랜잭션이 롤백돼도 보존된다")
+    void preservesUploadTrackingAfterCallerRollback() {
+        // given
+        var content
+            = ProblemAssetContent
+                .fromBytes(
+                    new byte[] {
+                        1
+                    }
+                );
+
+        // when
+        var ticket = transactions.execute(status -> {
+            var result = uploadTracking.start(1L, content, true);
+            status.setRollbackOnly();
+            return result;
+        });
+
+        // then
+        assertThat(ticket).isNotNull();
+        assertThat(bodyAssets.findById(ticket.id()))
+            .isPresent()
+            .get()
+            .extracting(ProblemBodyAsset::getObjectKey)
+            .isEqualTo(ticket.key());
     }
 
     @Test
