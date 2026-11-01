@@ -44,6 +44,7 @@ public class StudyMembershipCommandService {
     private static final DateTimeFormatter EVENT_TIME_FORMAT
         = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx");
     private static final String AGGREGATE_TYPE = "study_membership";
+    private static final String JOINED_EVENT_TYPE = "StudyMemberJoined";
     private static final String LEFT_EVENT_TYPE = "StudyMemberLeft";
     private static final String SCHEMA_VERSION = "v1";
 
@@ -161,6 +162,23 @@ public class StudyMembershipCommandService {
             );
 
         enrollmentService.enroll(study.getId(), memberId, membership.getId());
+
+        String joinedAt = now.atOffset(ZoneOffset.of("+09:00")).format(EVENT_TIME_FORMAT);
+        outboxEventWriter
+            .append(
+                AGGREGATE_TYPE,
+                JOINED_EVENT_TYPE,
+                SCHEMA_VERSION,
+                String.valueOf(membership.getId()),
+                correlationId,
+                new StudyMemberJoinedPayload(
+                    String.valueOf(study.getId()),
+                    String.valueOf(membership.getId()),
+                    String.valueOf(memberId),
+                    MembershipRole.MEMBER.name(),
+                    joinedAt
+                )
+            );
 
         return new StudyJoinResponse(String.valueOf(membership.getId()), MembershipStatus.APPROVED.name(), null);
     }
