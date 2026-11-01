@@ -88,9 +88,9 @@ public class ProblemAssetUploadTracking {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean complete(UploadTicket ticket, String version) {
-        LocalDateTime finished = now();
         if (ticket.body()) {
             var asset = bodies.findByIdForUpdate(ticket.id()).orElseThrow();
+            LocalDateTime finished = now();
             if (!finished.isBefore(ticket.expiry())) {
                 requireUnreferenced(ticket);
                 asset.discardFinishedUpload(ticket.expiry(), finished, "UPLOAD_EXPIRED");
@@ -99,6 +99,7 @@ public class ProblemAssetUploadTracking {
             asset.completeUpload(ticket.expiry(), finished, version);
         } else {
             var asset = tests.findByIdForUpdate(ticket.id()).orElseThrow();
+            LocalDateTime finished = now();
             if (!finished.isBefore(ticket.expiry())) {
                 requireUnreferenced(ticket);
                 asset.discardFinishedUpload(ticket.expiry(), finished, "UPLOAD_EXPIRED");
