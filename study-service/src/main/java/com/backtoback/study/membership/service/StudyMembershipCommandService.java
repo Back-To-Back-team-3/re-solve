@@ -10,6 +10,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.assignment.service.AssignmentEnrollmentService;
 import com.backtoback.study.global.error.StudyErrorCode;
@@ -40,6 +41,11 @@ public class StudyMembershipCommandService {
 
     private static final int PENDING_EXPIRE_DAYS = 7;
     private static final DateTimeFormatter EXPIRES_AT_FORMAT = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ssxxx");
+    private static final DateTimeFormatter EVENT_TIME_FORMAT
+        = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx");
+    private static final String AGGREGATE_TYPE = "study_membership";
+    private static final String LEFT_EVENT_TYPE = "StudyMemberLeft";
+    private static final String SCHEMA_VERSION = "v1";
 
     private final MemberReplicaRepository memberReplicaRepository;
     private final StudyRepository studyRepository;
@@ -47,6 +53,7 @@ public class StudyMembershipCommandService {
     private final StudyMembershipHistoryRepository historyRepository;
     private final StudyMemberQuotaRepository quotaRepository;
     private final AssignmentEnrollmentService enrollmentService;
+    private final OutboxEventWriter outboxEventWriter;
     private final Clock clock;
 
     /**
@@ -156,5 +163,117 @@ public class StudyMembershipCommandService {
         enrollmentService.enroll(study.getId(), memberId, membership.getId());
 
         return new StudyJoinResponse(String.valueOf(membership.getId()), MembershipStatus.APPROVED.name(), null);
+    }
+
+    /**
+     * 가입 신청 취소(PENDING→CANCELED) 또는 탈퇴(APPROVED→LEFT)를 처리한다(API 명세서 §5.2.3).
+     * LEFT 전이이면 quota→studies 순서로 잠금을 획득하고 S2 이벤트를 발행한다.
+     *
+     * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, STUDY_LEADER_DELEGATION_REQUIRED
+     */
+    @Transactional
+    public void cancelOrLeave(Long studyId, Long memberId, String correlationId) {
+        StudyMembership membership
+            = membershipRepository
+                .findByStudyIdAndMemberIdAndStatusIn(
+                    studyId,
+                    memberId,
+                    List.of(MembershipStatus.PENDING, MembershipStatus.APPROVED)
+                )
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+
+        if (membership.getRole() == MembershipRole.LEADER) {
+            throw new StudyException(StudyErrorCode.STUDY_LEADER_DELEGATION_REQUIRED);
+        }
+
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+
+        if (membership.getStatus() == MembershipStatus.PENDING) {
+            applyCancel(membership, memberId, now);
+        } else {
+            applyLeave(membership, studyId, memberId, correlationId, now);
+        }
+    }
+
+    private void applyCancel(StudyMembership membership, Long memberId, LocalDateTime now) {
+        if (membershipRepository.cancelIfPending(membership.getId()) == 0) {
+            membershipRepository
+                .findById(membership.getId())
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+            throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND);
+        }
+        historyRepository
+            .save(
+                StudyMembershipHistory
+                    .record(
+                        membership.getId(),
+                        MembershipStatus.PENDING,
+                        MembershipStatus.CANCELED,
+                        null,
+                        membership.getRole(),
+                        memberId,
+                        null,
+                        now
+                    )
+            );
+    }
+
+    private void applyLeave(
+        StudyMembership membership,
+        Long studyId,
+        Long memberId,
+        String correlationId,
+        LocalDateTime now
+    ) {
+        // ① quota 먼저
+        quotaRepository.decrementIfAboveZero(memberId);
+
+        // ② studies 나중 — CLOSED이면 생략
+        Study study
+            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        if (study.getStatus() != StudyStatus.CLOSED) {
+            studyRepository.leaveAndAutoReopen(studyId);
+        }
+
+        if (membershipRepository.leaveIfApproved(membership.getId(), now) == 0) {
+            membershipRepository
+                .findById(membership.getId())
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+            throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND);
+        }
+
+        historyRepository
+            .save(
+                StudyMembershipHistory
+                    .record(
+                        membership.getId(),
+                        MembershipStatus.APPROVED,
+                        MembershipStatus.LEFT,
+                        null,
+                        membership.getRole(),
+                        memberId,
+                        null,
+                        now
+                    )
+            );
+
+        String leftAt = now.atOffset(ZoneOffset.of("+09:00")).format(EVENT_TIME_FORMAT);
+        outboxEventWriter
+            .append(
+                AGGREGATE_TYPE,
+                LEFT_EVENT_TYPE,
+                SCHEMA_VERSION,
+                String.valueOf(membership.getId()),
+                correlationId,
+                new StudyMemberLeftPayload(
+                    String.valueOf(studyId),
+                    String.valueOf(membership.getId()),
+                    String.valueOf(memberId),
+                    MembershipStatus.LEFT.name(),
+                    leftAt,
+                    study.getName()
+                )
+            );
     }
 }

@@ -24,4 +24,17 @@ public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecific
         nativeQuery = true
     )
     int joinInstantIfRecruiting(@Param("studyId") Long studyId);
+
+    /**
+     * 탈퇴 시 member_count를 1 내리고 ACTIVE+is_auto_reopen=true인 경우 RECRUITING으로 복원한다.
+     * CLOSED 스터디는 이 메서드를 호출하지 않는다(호출자 책임).
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE studies SET member_count = member_count - 1, "
+            + "status = IF(status = 'ACTIVE' AND is_auto_reopen = true, 'RECRUITING', status), "
+            + "version = version + 1, updated_at = NOW(6) " + "WHERE id = :studyId",
+        nativeQuery = true
+    )
+    void leaveAndAutoReopen(@Param("studyId") Long studyId);
 }
