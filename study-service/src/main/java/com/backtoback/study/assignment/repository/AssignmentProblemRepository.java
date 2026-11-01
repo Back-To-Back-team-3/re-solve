@@ -1,10 +1,13 @@
 package com.backtoback.study.assignment.repository;
 
+import java.util.List;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.backtoback.study.assignment.domain.AssignmentProblem;
+import com.backtoback.study.assignment.domain.AssignmentProblemStatus;
 
 public interface AssignmentProblemRepository extends JpaRepository<AssignmentProblem, Long> {
 
-    // 조회 메서드는 필요한 기능 Issue에서 추가한다.
+    List<AssignmentProblem> findByAssignmentIdAndStatus(Long assignmentId, AssignmentProblemStatus status);
 }
