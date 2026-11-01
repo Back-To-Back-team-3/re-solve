@@ -121,7 +121,8 @@ class StudyCreateConcurrencyTest {
         assertThat(successCount.get()).isEqualTo(MAX_ACTIVE_STUDIES);
         assertThat(limitExceededCount.get()).isEqualTo(1);
 
-        // quota.active_count가 정확히 5인지 DB에서 확인
+        // quota 행이 존재하고 active_count가 정확히 5인지 DB에서 확인
+        assertThat(quotaRepository.findByMemberId(MEMBER_ID)).isPresent();
         quotaRepository
             .findByMemberId(MEMBER_ID)
             .ifPresent(quota -> assertThat(quota.getActiveCount()).isEqualTo(MAX_ACTIVE_STUDIES));
