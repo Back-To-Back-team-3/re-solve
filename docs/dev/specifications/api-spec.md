@@ -8119,7 +8119,7 @@
       { "title": "10월 1주차 해시", "goal": "해시 집중 풀이", "tagId": "3", "problemIds": ["101", "102", "103"], "isPreSolvedAllowed": true, "startsAt": "2026-10-06T00:00:00+09:00", "deadlineAt": "2026-10-12T23:59:59+09:00" }
     ```
     
-    - `problemIds` 1~20개, 중복 불가. `startsAt` 필수, `deadlineAt` 선택(`startsAt`보다 뒤, 지정 시 기본 시작 + 7일). 과거 `startsAt`이면 다음 스케줄러 회차에 바로 `OPEN`
+    - `problemIds` 1~20개, 중복 불가. `startsAt` 필수, `deadlineAt` 필수(`startsAt`보다 뒤). 과거 `startsAt`이면 다음 스케줄러 회차에 바로 `OPEN`
 - **응답 (201):**
     
     ```json
