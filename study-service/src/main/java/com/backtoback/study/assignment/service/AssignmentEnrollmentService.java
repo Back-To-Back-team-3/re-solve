@@ -68,7 +68,7 @@ public class AssignmentEnrollmentService {
 
     private void enrollScheduled(Long assignmentId, Long memberId, Long membershipId) {
         memberStatusRepository
-            .insertIgnore(assignmentId, memberId, membershipId, MemberProgressStatus.NOT_STARTED.name(), 0, 0);
+            .insertIgnore(assignmentId, memberId, membershipId, MemberProgressStatus.NOT_STARTED.name(), 0, 0, null);
     }
 
     private void enrollOpen(Assignment assignment, Long memberId, Long membershipId, LocalDateTime now) {
@@ -84,7 +84,8 @@ public class AssignmentEnrollmentService {
                     membershipId,
                     MemberProgressStatus.NOT_STARTED.name(),
                     0,
-                    0
+                    0,
+                    null
                 );
             return;
         }
@@ -94,10 +95,14 @@ public class AssignmentEnrollmentService {
         List<MemberAcReplica> acReplicas
             = acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(memberId, activeProblemIds);
 
-        // JPQL 쿼리가 (problemId, submittedAt) ASC로 정렬하므로 문제별 첫 번째가 earliest
+        // preSolvedAllowed=false 시 starts_at 이전 제출은 근거에서 제외한다(ERD §4.5.7 completed_at 불변식)
+        // JPQL 쿼리가 (problemId, submittedAt) ASC로 정렬하므로 필터 후 문제별 첫 번째가 earliest valid AC
         Map<Long, MemberAcReplica> earliestAcByProblem
             = acReplicas
                 .stream()
+                .filter(
+                    ac -> assignment.isPreSolvedAllowed() || !ac.getSubmittedAt().isBefore(assignment.getStartsAt())
+                )
                 .collect(Collectors.toMap(MemberAcReplica::getProblemId, r -> r, (first, second) -> first));
 
         List<AssignmentCompletion> completions = buildCompletions(assignment, memberId, earliestAcByProblem, now);
@@ -105,6 +110,7 @@ public class AssignmentEnrollmentService {
         int completedCount = completions.size();
         int onTimeCount = (int)completions.stream().filter(c -> c.getCompletionType() != CompletionType.LATE).count();
         MemberProgressStatus progressStatus = resolveProgressStatus(completedCount, activeProblems.size());
+        LocalDateTime completedAt = (progressStatus == MemberProgressStatus.COMPLETED) ? now : null;
 
         int affected
             = memberStatusRepository
@@ -114,7 +120,8 @@ public class AssignmentEnrollmentService {
                     membershipId,
                     progressStatus.name(),
                     completedCount,
-                    onTimeCount
+                    onTimeCount,
+                    completedAt
                 );
 
         if (affected == 0) {

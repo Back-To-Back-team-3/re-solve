@@ -99,7 +99,7 @@ class AssignmentEnrollmentServiceTest {
         service.enroll(STUDY_ID, MEMBER_ID, MEMBERSHIP_ID);
 
         // then
-        verify(memberStatusRepository).insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0);
+        verify(memberStatusRepository).insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0, null);
         verify(completionRepository, never())
             .insertIgnore(anyLong(), anyLong(), anyLong(), anyString(), anyLong(), any(), any(), any());
     }
@@ -116,7 +116,7 @@ class AssignmentEnrollmentServiceTest {
         service.enroll(STUDY_ID, MEMBER_ID, MEMBERSHIP_ID);
 
         // then
-        verify(memberStatusRepository).insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0);
+        verify(memberStatusRepository).insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0, null);
         verify(acReplicaRepository, never()).findAllAcceptedByMemberIdAndProblemIds(anyLong(), anyList());
     }
 
@@ -129,7 +129,7 @@ class AssignmentEnrollmentServiceTest {
             .willReturn(List.of(activeProblem));
         given(acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(MEMBER_ID, List.of(PROBLEM_ID)))
             .willReturn(List.of());
-        given(memberStatusRepository.insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0))
+        given(memberStatusRepository.insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0, null))
             .willReturn(1);
 
         // when
@@ -153,8 +153,18 @@ class AssignmentEnrollmentServiceTest {
             .willReturn(List.of(activeProblem));
         given(acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(MEMBER_ID, List.of(PROBLEM_ID)))
             .willReturn(List.of(acBefore));
-        given(memberStatusRepository.insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "COMPLETED", 1, 1))
-            .willReturn(1);
+        given(
+            memberStatusRepository
+                .insertIgnore(
+                    ASSIGNMENT_ID,
+                    MEMBER_ID,
+                    MEMBERSHIP_ID,
+                    "COMPLETED",
+                    1,
+                    1,
+                    NOW.truncatedTo(ChronoUnit.MICROS)
+                )
+        ).willReturn(1);
 
         // when
         service.enroll(STUDY_ID, MEMBER_ID, MEMBERSHIP_ID);
@@ -186,8 +196,18 @@ class AssignmentEnrollmentServiceTest {
             .willReturn(List.of(activeProblem));
         given(acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(MEMBER_ID, List.of(PROBLEM_ID)))
             .willReturn(List.of(acOnTime));
-        given(memberStatusRepository.insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "COMPLETED", 1, 1))
-            .willReturn(1);
+        given(
+            memberStatusRepository
+                .insertIgnore(
+                    ASSIGNMENT_ID,
+                    MEMBER_ID,
+                    MEMBERSHIP_ID,
+                    "COMPLETED",
+                    1,
+                    1,
+                    NOW.truncatedTo(ChronoUnit.MICROS)
+                )
+        ).willReturn(1);
 
         // when
         service.enroll(STUDY_ID, MEMBER_ID, MEMBERSHIP_ID);
@@ -219,8 +239,18 @@ class AssignmentEnrollmentServiceTest {
             .willReturn(List.of(activeProblem));
         given(acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(MEMBER_ID, List.of(PROBLEM_ID)))
             .willReturn(List.of(acLate));
-        given(memberStatusRepository.insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "COMPLETED", 1, 0))
-            .willReturn(1);
+        given(
+            memberStatusRepository
+                .insertIgnore(
+                    ASSIGNMENT_ID,
+                    MEMBER_ID,
+                    MEMBERSHIP_ID,
+                    "COMPLETED",
+                    1,
+                    0,
+                    NOW.truncatedTo(ChronoUnit.MICROS)
+                )
+        ).willReturn(1);
 
         // when
         service.enroll(STUDY_ID, MEMBER_ID, MEMBERSHIP_ID);
@@ -252,8 +282,9 @@ class AssignmentEnrollmentServiceTest {
             .willReturn(List.of(activeProblem));
         given(acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(MEMBER_ID, List.of(PROBLEM_ID)))
             .willReturn(List.of(acOnTime));
-        given(memberStatusRepository.insertIgnore(anyLong(), anyLong(), anyLong(), anyString(), anyInt(), anyInt()))
-            .willReturn(0);
+        given(
+            memberStatusRepository.insertIgnore(anyLong(), anyLong(), anyLong(), anyString(), anyInt(), anyInt(), any())
+        ).willReturn(0);
 
         // when
         service.enroll(STUDY_ID, MEMBER_ID, MEMBERSHIP_ID);
@@ -280,15 +311,66 @@ class AssignmentEnrollmentServiceTest {
             .willReturn(List.of(activeProblem));
         given(acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(MEMBER_ID, List.of(PROBLEM_ID)))
             .willReturn(List.of(acBefore));
-        given(memberStatusRepository.insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0))
+        given(memberStatusRepository.insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0, null))
             .willReturn(1);
 
         // when
         service.enroll(STUDY_ID, MEMBER_ID, MEMBERSHIP_ID);
 
         // then
-        verify(memberStatusRepository).insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0);
+        verify(memberStatusRepository).insertIgnore(ASSIGNMENT_ID, MEMBER_ID, MEMBERSHIP_ID, "NOT_STARTED", 0, 0, null);
         verify(completionRepository, never())
             .insertIgnore(anyLong(), anyLong(), anyLong(), anyString(), anyLong(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("사전 풀이 불허이고 starts_at 이전·이후 AC가 모두 있으면 starts_at 이후 가장 이른 AC로 ON_TIME 완료를 생성한다")
+    void enroll_openAssignment_preSolvedNotAllowed_preAndPostStartAc_countsPostStart() {
+        // given
+        Assignment notAllowed = Assignment.schedule(STUDY_ID, "사전 불허 문제집", null, null, false, STARTS_AT, DEADLINE_AT);
+        ReflectionTestUtils.setField(notAllowed, "id", ASSIGNMENT_ID);
+        ReflectionTestUtils.setField(notAllowed, "status", AssignmentStatus.OPEN);
+
+        Long onTimeSubmissionId = SUBMISSION_ID + 1;
+        LocalDateTime beforeStart = STARTS_AT.minusDays(1);
+        LocalDateTime onTime = STARTS_AT.plusDays(2);
+        MemberAcReplica acBefore
+            = MemberAcReplica.sync(SUBMISSION_ID, MEMBER_ID, PROBLEM_ID, beforeStart, 1, JudgeVerdict.AC, NOW);
+        MemberAcReplica acOnTime
+            = MemberAcReplica.sync(onTimeSubmissionId, MEMBER_ID, PROBLEM_ID, onTime, 2, JudgeVerdict.AC, NOW);
+
+        given(assignmentRepository.findByStudyIdAndStatusIn(eq(STUDY_ID), any())).willReturn(List.of(notAllowed));
+        given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
+            .willReturn(List.of(activeProblem));
+        given(acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(MEMBER_ID, List.of(PROBLEM_ID)))
+            .willReturn(List.of(acBefore, acOnTime));
+        given(
+            memberStatusRepository
+                .insertIgnore(
+                    ASSIGNMENT_ID,
+                    MEMBER_ID,
+                    MEMBERSHIP_ID,
+                    "COMPLETED",
+                    1,
+                    1,
+                    NOW.truncatedTo(ChronoUnit.MICROS)
+                )
+        ).willReturn(1);
+
+        // when
+        service.enroll(STUDY_ID, MEMBER_ID, MEMBERSHIP_ID);
+
+        // then
+        verify(completionRepository)
+            .insertIgnore(
+                eq(ASSIGNMENT_ID),
+                eq(MEMBER_ID),
+                eq(PROBLEM_ID),
+                eq("ON_TIME"),
+                eq(onTimeSubmissionId),
+                eq(onTime),
+                eq(2),
+                eq(NOW.truncatedTo(ChronoUnit.MICROS))
+            );
     }
 }
