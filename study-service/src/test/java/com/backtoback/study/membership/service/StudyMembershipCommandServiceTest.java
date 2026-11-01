@@ -1,0 +1,227 @@
+package com.backtoback.study.membership.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.Optional;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import com.backtoback.study.assignment.service.AssignmentEnrollmentService;
+import com.backtoback.study.global.error.StudyErrorCode;
+import com.backtoback.study.global.error.StudyException;
+import com.backtoback.study.membership.domain.JoinType;
+import com.backtoback.study.membership.domain.MembershipStatus;
+import com.backtoback.study.membership.domain.Study;
+import com.backtoback.study.membership.domain.StudyMembership;
+import com.backtoback.study.membership.domain.StudyStatus;
+import com.backtoback.study.membership.dto.StudyJoinResponse;
+import com.backtoback.study.membership.repository.StudyMemberQuotaRepository;
+import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
+import com.backtoback.study.membership.repository.StudyMembershipRepository;
+import com.backtoback.study.membership.repository.StudyRepository;
+import com.backtoback.study.replica.domain.MemberReplica;
+import com.backtoback.study.replica.domain.MemberStatus;
+import com.backtoback.study.replica.repository.MemberReplicaRepository;
+
+/**
+ * 스터디 가입 신청·즉시 가입 정상·예외 시나리오를 검증한다(API 명세서 §5.2.2).
+ */
+@ExtendWith(MockitoExtension.class)
+class StudyMembershipCommandServiceTest {
+
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 11, 1, 10, 0);
+    private static final Instant NOW_INSTANT = NOW.toInstant(ZoneOffset.of("+09:00"));
+    private static final Long STUDY_ID = 1L;
+    private static final Long MEMBER_ID = 10L;
+    private static final String CORR_ID = "corr-1";
+
+    @Mock
+    private MemberReplicaRepository memberReplicaRepository;
+    @Mock
+    private StudyRepository studyRepository;
+    @Mock
+    private StudyMembershipRepository membershipRepository;
+    @Mock
+    private StudyMembershipHistoryRepository historyRepository;
+    @Mock
+    private StudyMemberQuotaRepository quotaRepository;
+    @Mock
+    private AssignmentEnrollmentService enrollmentService;
+    @Mock
+    private Clock clock;
+
+    @InjectMocks
+    private StudyMembershipCommandService service;
+
+    private Study approvalStudy;
+    private Study instantStudy;
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(clock.instant()).thenReturn(NOW_INSTANT);
+        lenient().when(memberReplicaRepository.findByMemberId(MEMBER_ID)).thenReturn(Optional.empty());
+        lenient()
+            .when(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
+            .thenReturn(Optional.empty());
+
+        approvalStudy = Study.recruit("스터디", "설명", "EMPLOYMENT", "LV2", "java", "EVENING", 5, JoinType.APPROVAL, false);
+        ReflectionTestUtils.setField(approvalStudy, "id", STUDY_ID);
+        ReflectionTestUtils.setField(approvalStudy, "status", StudyStatus.RECRUITING);
+
+        instantStudy = Study.recruit("스터디", "설명", "EMPLOYMENT", "LV2", "java", "EVENING", 5, JoinType.INSTANT, false);
+        ReflectionTestUtils.setField(instantStudy, "id", STUDY_ID);
+        ReflectionTestUtils.setField(instantStudy, "status", StudyStatus.RECRUITING);
+        ReflectionTestUtils.setField(instantStudy, "memberCount", 0);
+        ReflectionTestUtils.setField(instantStudy, "capacity", 5);
+    }
+
+    @Test
+    @DisplayName("APPROVAL 스터디에 가입 신청하면 PENDING 상태로 응답한다")
+    void join_approval_returnsPending() {
+        // given
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(approvalStudy));
+        given(membershipRepository.save(any(StudyMembership.class))).willAnswer(inv -> {
+            ReflectionTestUtils.setField((StudyMembership)inv.getArgument(0), "id", 20L);
+            return inv.getArgument(0);
+        });
+
+        // when
+        StudyJoinResponse response = service.join(STUDY_ID, MEMBER_ID, CORR_ID);
+
+        // then
+        assertThat(response.membershipId()).isEqualTo("20");
+        assertThat(response.status()).isEqualTo(MembershipStatus.PENDING.name());
+        assertThat(response.expiresAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("INSTANT 스터디에 즉시 가입하면 APPROVED 상태로 응답한다")
+    void join_instant_returnsApproved() {
+        // given
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(instantStudy));
+        given(quotaRepository.incrementIfBelowLimit(MEMBER_ID)).willReturn(1);
+        given(studyRepository.joinInstantIfRecruiting(STUDY_ID)).willReturn(1);
+        given(membershipRepository.save(any(StudyMembership.class))).willAnswer(inv -> {
+            ReflectionTestUtils.setField((StudyMembership)inv.getArgument(0), "id", 30L);
+            return inv.getArgument(0);
+        });
+
+        // when
+        StudyJoinResponse response = service.join(STUDY_ID, MEMBER_ID, CORR_ID);
+
+        // then
+        assertThat(response.membershipId()).isEqualTo("30");
+        assertThat(response.status()).isEqualTo(MembershipStatus.APPROVED.name());
+        assertThat(response.expiresAt()).isNull();
+        verify(enrollmentService).enroll(eq(STUDY_ID), eq(MEMBER_ID), eq(30L));
+    }
+
+    @Test
+    @DisplayName("스터디를 찾을 수 없으면 STUDY_NOT_FOUND 예외를 던진다")
+    void join_studyNotFound_throwsStudyNotFound() {
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.join(STUDY_ID, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_NOT_FOUND)
+            );
+    }
+
+    @Test
+    @DisplayName("모집 중이 아닌 스터디에 가입 신청하면 STUDY_NOT_RECRUITING 예외를 던진다")
+    void join_notRecruiting_throwsStudyNotRecruiting() {
+        ReflectionTestUtils.setField(approvalStudy, "status", StudyStatus.ACTIVE);
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(approvalStudy));
+
+        assertThatThrownBy(() -> service.join(STUDY_ID, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_NOT_RECRUITING)
+            );
+    }
+
+    @Test
+    @DisplayName("이미 가입 신청 중인 스터디에 재신청하면 STUDY_ALREADY_APPLIED 예외를 던진다")
+    void join_duplicateApply_throwsAlreadyApplied() {
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(approvalStudy));
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
+            .willReturn(
+                Optional
+                    .of(
+                        StudyMembership
+                            .apply(STUDY_ID, MEMBER_ID, null, MembershipStatus.PENDING, NOW, NOW.plusDays(7), null)
+                    )
+            );
+
+        assertThatThrownBy(() -> service.join(STUDY_ID, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_ALREADY_APPLIED)
+            );
+    }
+
+    @Test
+    @DisplayName("회원 참여 상한 초과이면 STUDY_JOIN_LIMIT_EXCEEDED 예외를 던진다")
+    void join_instant_quotaExceeded_throwsLimitExceeded() {
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(instantStudy));
+        given(quotaRepository.incrementIfBelowLimit(MEMBER_ID)).willReturn(0);
+
+        assertThatThrownBy(() -> service.join(STUDY_ID, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_JOIN_LIMIT_EXCEEDED)
+            );
+    }
+
+    @Test
+    @DisplayName("정원 초과로 studies UPDATE가 0행이면 STUDY_FULL 예외를 던진다")
+    void join_instant_studyFull_throwsStudyFull() {
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(instantStudy));
+        given(quotaRepository.incrementIfBelowLimit(MEMBER_ID)).willReturn(1);
+        given(studyRepository.joinInstantIfRecruiting(STUDY_ID)).willReturn(0);
+
+        Study recruitingFull
+            = Study.recruit("스터디", null, "EMPLOYMENT", "LV2", "java", "EVENING", 5, JoinType.INSTANT, false);
+        ReflectionTestUtils.setField(recruitingFull, "id", STUDY_ID);
+        ReflectionTestUtils.setField(recruitingFull, "status", StudyStatus.RECRUITING);
+        ReflectionTestUtils.setField(recruitingFull, "memberCount", 5);
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(recruitingFull));
+
+        assertThatThrownBy(() -> service.join(STUDY_ID, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_FULL)
+            );
+    }
+
+    @Test
+    @DisplayName("정지된 회원이 가입하면 MEMBER_SUSPENDED 예외를 던진다")
+    void join_suspended_throwsMemberSuspended() {
+        MemberReplica replica = MemberReplica.sync(MEMBER_ID, "user1", null, MemberStatus.SUSPENDED, 1L, NOW);
+        given(memberReplicaRepository.findByMemberId(MEMBER_ID)).willReturn(Optional.of(replica));
+
+        assertThatThrownBy(() -> service.join(STUDY_ID, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.MEMBER_SUSPENDED)
+            );
+    }
+}

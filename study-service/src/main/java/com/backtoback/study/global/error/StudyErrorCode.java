@@ -18,7 +18,12 @@ public enum StudyErrorCode implements ErrorCode {
 
     // 생성·가입 (membership)
     STUDY_JOIN_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "참여할 수 있는 스터디 수(최대 5개)를 초과했습니다."),
-    MEMBER_SUSPENDED(HttpStatus.FORBIDDEN, "정지된 회원은 스터디를 생성할 수 없습니다.");
+    MEMBER_SUSPENDED(HttpStatus.FORBIDDEN, "정지된 회원은 스터디를 생성할 수 없습니다."),
+    STUDY_NOT_RECRUITING(HttpStatus.CONFLICT, "모집 중인 스터디가 아닙니다."),
+    STUDY_FULL(HttpStatus.CONFLICT, "스터디 정원이 초과되었습니다."),
+    STUDY_ALREADY_APPLIED(HttpStatus.CONFLICT, "이미 가입 신청 또는 가입된 스터디입니다."),
+    STUDY_MEMBERSHIP_NOT_FOUND(HttpStatus.NOT_FOUND, "가입 신청 또는 구성원을 찾을 수 없습니다."),
+    STUDY_LEADER_DELEGATION_REQUIRED(HttpStatus.CONFLICT, "스터디장은 위임 후에만 탈퇴할 수 있습니다.");
 
     private final HttpStatus status;
     private final String message;
