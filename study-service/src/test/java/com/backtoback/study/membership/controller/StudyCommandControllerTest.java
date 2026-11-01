@@ -13,6 +13,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -21,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.backtoback.common.web.exception.GlobalExceptionHandler;
+import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.common.web.security.user.UserRole;
 import com.backtoback.study.membership.service.StudyCommandService;
@@ -48,11 +50,13 @@ class StudyCommandControllerTest {
         SecurityContextHolder
             .getContext()
             .setAuthentication(new TestingAuthenticationToken(new GatewayUser("7", UserRole.USER), null));
+        MDC.put(CorrelationIdFilter.MDC_KEY, "corr-1");
     }
 
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        MDC.remove(CorrelationIdFilter.MDC_KEY);
     }
 
     @Test
@@ -63,23 +67,18 @@ class StudyCommandControllerTest {
 
         // when & then
         mockMvc
-            .perform(
-                post("/api/v1/studies")
-                    .header("X-Correlation-Id", "corr-1")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""
-                        {
-                            "name": "코딩테스트 스터디",
-                            "description": "설명",
-                            "goal": "EMPLOYMENT",
-                            "skillLevel": "LV2",
-                            "preferredLanguage": "java",
-                            "activeTimeSlot": "EVENING",
-                            "capacity": 5,
-                            "joinType": "INSTANT",
-                            "isAutoReopen": false
-                        }""")
-            )
+            .perform(post("/api/v1/studies").contentType(MediaType.APPLICATION_JSON).content("""
+                {
+                    "name": "코딩테스트 스터디",
+                    "description": "설명",
+                    "goal": "EMPLOYMENT",
+                    "skillLevel": "LV2",
+                    "preferredLanguage": "java",
+                    "activeTimeSlot": "EVENING",
+                    "capacity": 5,
+                    "joinType": "INSTANT",
+                    "isAutoReopen": false
+                }"""))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.studyId").value("10"));
@@ -89,23 +88,16 @@ class StudyCommandControllerTest {
     @DisplayName("5.2.1 name이 없으면 400을 반환한다")
     void createStudy_missingName_returns400() throws Exception {
         // when & then
-        mockMvc
-            .perform(
-                post("/api/v1/studies")
-                    .header("X-Correlation-Id", "corr-1")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""
-                        {
-                            "description": "설명",
-                            "goal": "EMPLOYMENT",
-                            "skillLevel": "LV2",
-                            "preferredLanguage": "java",
-                            "activeTimeSlot": "EVENING",
-                            "capacity": 5,
-                            "joinType": "INSTANT",
-                            "isAutoReopen": false
-                        }""")
-            )
-            .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/v1/studies").contentType(MediaType.APPLICATION_JSON).content("""
+            {
+                "description": "설명",
+                "goal": "EMPLOYMENT",
+                "skillLevel": "LV2",
+                "preferredLanguage": "java",
+                "activeTimeSlot": "EVENING",
+                "capacity": 5,
+                "joinType": "INSTANT",
+                "isAutoReopen": false
+            }""")).andExpect(status().isBadRequest());
     }
 }

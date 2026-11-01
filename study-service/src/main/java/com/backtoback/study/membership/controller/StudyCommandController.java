@@ -1,11 +1,11 @@
 package com.backtoback.study.membership.controller;
 
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -35,10 +35,11 @@ public class StudyCommandController {
     @PostMapping
     public ResponseEntity<ApiResponse<StudyCreateResponse>> createStudy(
         @Valid @RequestBody StudyCreateRequest request,
-        @AuthenticationPrincipal GatewayUser user,
-        @RequestHeader(CorrelationIdFilter.HEADER) String correlationId
+        @AuthenticationPrincipal GatewayUser user
     ) {
         Long memberId = Long.parseLong(user.userId());
+        // 필터가 형식 검증 후 MDC에 저장한 값 사용 — outbox_events.correlation_id(VARCHAR 64)와 길이를 맞춘다
+        String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
         Long studyId = studyCommandService.createStudy(memberId, request, correlationId);
         return ResponseEntity
             .status(HttpStatus.CREATED)
