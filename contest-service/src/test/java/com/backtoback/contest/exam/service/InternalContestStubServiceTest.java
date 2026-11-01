@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.backtoback.contest.exam.dto.ContextValidateRequest;
@@ -50,6 +51,53 @@ class InternalContestStubServiceTest {
         assertThat(response.resultVisibility()).isEqualTo(visibility);
         assertThat(response.personalEndsAt()).isNotNull();
         assertThat(response.serverNow()).isEqualTo(InternalContestStubFixtures.NOW);
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "READ_BODY",
+            "READ_IMAGE"
+        }
+    )
+    @DisplayName("개인 종료한 시험 참가자의 열람 응답은 확정된 개인 마감을 반환한다")
+    void returnsFinishedExamParticipantDeadline(String action) {
+        // given
+        var request = contextRequest("EXAM", "55", "9", "1001", action, null);
+
+        // when
+        var response = service.validateContext(request);
+
+        // then
+        assertThat(response.allowed()).isTrue();
+        assertThat(response.participantId()).isEqualTo("559");
+        assertThat(response.personalEndsAt()).isEqualTo(InternalContestStubFixtures.NOW.minusMinutes(1));
+        assertThat(response.personalEndsAt()).isBeforeOrEqualTo(response.serverNow());
+        assertThat(response.resultVisibility()).isEqualTo("SAMPLES_ONLY");
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "EXAM,55,7,RUN",
+            "EXAM,55,7,READ_BODY",
+            "EXAM,55,7,READ_IMAGE",
+            "CONTEST,75,9,READ_BODY",
+            "CONTEST,75,9,READ_IMAGE"
+        }
+    )
+    @DisplayName("진행 중 시험 참가자와 개인 종료한 대회 참가자는 전체 마감을 반환한다")
+    void preservesContextDeadline(String context, String id, String memberId, String action) {
+        // given
+        var request = contextRequest(context, id, memberId, "1001", action, null);
+
+        // when
+        var response = service.validateContext(request);
+
+        // then
+        assertThat(response.allowed()).isTrue();
+        assertThat(response.personalEndsAt()).isEqualTo(InternalContestStubFixtures.END);
+        assertThat(response.personalEndsAt()).isAfter(response.serverNow());
     }
 
     @ParameterizedTest

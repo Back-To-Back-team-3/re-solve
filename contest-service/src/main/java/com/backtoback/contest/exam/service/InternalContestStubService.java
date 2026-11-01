@@ -99,7 +99,7 @@ public class InternalContestStubService implements InternalContestService {
             publicRead ? null : participant.id(),
             problem.revisionId(),
             context.visibility(),
-            publicRead ? null : context.endsAt(),
+            publicRead ? null : participant.personalEndsAt(),
             NOW
         );
     }

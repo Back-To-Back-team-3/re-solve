@@ -107,13 +107,20 @@ final class InternalContestStubFixtures {
             );
     }
 
+    /**
+     * 시험의 진행 중 개인 종료는 고정 서버 시각 직전 마감으로 재현한다.
+     * 대회는 참가 상태와 관계없이 전체 마감을 유지한다. (API 명세서 §4.2.6·§4.7.1)
+     */
     private static ParticipantFixture participant(
         ContextFixture context,
         String memberId,
         String status,
         OffsetDateTime enteredAt
     ) {
-        return new ParticipantFixture(memberId, context.id() + memberId, status, enteredAt);
+        OffsetDateTime personalEndsAt
+            = "EXAM".equals(context.type()) && context.isRunning() && "FINISHED".equals(status) ? NOW.minusMinutes(1)
+                : context.endsAt();
+        return new ParticipantFixture(memberId, context.id() + memberId, status, enteredAt, personalEndsAt);
     }
 
     /**
@@ -167,9 +174,15 @@ final class InternalContestStubFixtures {
     }
 
     /**
-     * 실제 입장과 단순 등록·개인 종료를 구분하는 참가 데이터.
+     * 실제 입장과 단순 등록·개인 종료를 구분하며 개인 마감을 보존하는 참가 데이터.
      */
-    record ParticipantFixture(String memberId, String id, String status, OffsetDateTime enteredAt) {
+    record ParticipantFixture(
+        String memberId,
+        String id,
+        String status,
+        OffsetDateTime enteredAt,
+        OffsetDateTime personalEndsAt
+    ) {
     }
 
     /**
