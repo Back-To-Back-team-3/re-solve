@@ -14,17 +14,26 @@ public interface StudyMemberQuotaRepository extends JpaRepository<StudyMemberQuo
     Optional<StudyMemberQuota> findByMemberId(Long memberId);
 
     /**
-     * 회원의 참여 카운터를 1 올리거나 행이 없으면 새로 만든다.
-     * MySQL affected rows: 1=신규 INSERT, 2=갱신, 0=상한(5) 초과로 변경 없음.
+     * 행이 없으면 active_count=0으로 생성한다. 이미 있으면 무시한다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "INSERT IGNORE INTO study_member_quotas (member_id, active_count, created_at, updated_at) "
+            + "VALUES (:memberId, 0, NOW(6), NOW(6))",
+        nativeQuery = true
+    )
+    void insertQuotaIfAbsent(@Param("memberId") Long memberId);
+
+    /**
+     * active_count < 5인 경우에만 카운터를 1 올린다.
+     * WHERE 조건 불충족 시 0을 반환하며, 드라이버의 CLIENT_FOUND_ROWS 설정과 무관하게 동작한다.
      * 0이면 호출자가 STUDY_JOIN_LIMIT_EXCEEDED를 던져야 한다.
      */
     @Modifying(clearAutomatically = true)
     @Query(
-        value = "INSERT INTO study_member_quotas (member_id, active_count, created_at, updated_at) "
-            + "VALUES (:memberId, 1, NOW(6), NOW(6)) " + "ON DUPLICATE KEY UPDATE "
-            + "active_count = IF(active_count < 5, active_count + 1, active_count), "
-            + "updated_at = IF(active_count < 5, NOW(6), updated_at)",
+        value = "UPDATE study_member_quotas " + "SET active_count = active_count + 1, updated_at = NOW(6) "
+            + "WHERE member_id = :memberId AND active_count < 5",
         nativeQuery = true
     )
-    int upsertActiveCount(@Param("memberId") Long memberId);
+    int incrementIfBelowLimit(@Param("memberId") Long memberId);
 }

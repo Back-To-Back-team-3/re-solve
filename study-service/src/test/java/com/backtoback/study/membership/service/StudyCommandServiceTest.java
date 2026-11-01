@@ -88,7 +88,7 @@ class StudyCommandServiceTest {
     void createStudy_success() {
         // given
         given(memberReplicaRepository.findByMemberId(1L)).willReturn(Optional.empty());
-        given(quotaRepository.upsertActiveCount(1L)).willReturn(1);
+        given(quotaRepository.incrementIfBelowLimit(1L)).willReturn(1);
         given(clock.instant()).willReturn(NOW_INSTANT);
 
         given(studyRepository.save(any(Study.class))).willAnswer(inv -> {
@@ -130,7 +130,7 @@ class StudyCommandServiceTest {
     void createStudy_quotaExceeded_throwsLimitExceeded() {
         // given
         given(memberReplicaRepository.findByMemberId(1L)).willReturn(Optional.empty());
-        given(quotaRepository.upsertActiveCount(1L)).willReturn(0);
+        given(quotaRepository.incrementIfBelowLimit(1L)).willReturn(0);
 
         // when & then
         assertThatThrownBy(() -> studyCommandService.createStudy(1L, request, "corr-1"))

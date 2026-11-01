@@ -67,9 +67,10 @@ public class StudyCommandService {
             }
         });
 
-        // ① 참여 상한 카운터 upsert: 신규→1, 갱신→2, 상한 초과(변경 없음)→0
-        int affected = quotaRepository.upsertActiveCount(memberId);
-        if (affected == 0) {
+        // ① 참여 상한 카운터: 행 없으면 0으로 생성 → active_count < 5인 경우만 +1
+        // WHERE 조건 불충족(active_count >= 5) 시 UPDATE affected_rows=0 — 드라이버 CLIENT_FOUND_ROWS 설정과 무관
+        quotaRepository.insertQuotaIfAbsent(memberId);
+        if (quotaRepository.incrementIfBelowLimit(memberId) == 0) {
             throw new StudyException(StudyErrorCode.STUDY_JOIN_LIMIT_EXCEEDED);
         }
 
