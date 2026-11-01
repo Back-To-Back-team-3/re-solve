@@ -1,0 +1,6 @@
+problem:
+  internal-api:
+    enabled: true
+    implementation: stub
+  internal-stub:
+    enabled: true
