@@ -8,6 +8,9 @@ import com.backtoback.problem.problem.domain.ProblemRevision;
 
 /** 문제 수정 회차를 저장하고, 문제·회차 번호로 조회한다. */
 public interface ProblemRevisionRepository extends JpaRepository<ProblemRevision, Long> {
+    /** 작성자 멱등키로 기존 회차 등록 결과를 조회한다. */
+    Optional<ProblemRevision> findByAuthorIdAndIdempotencyKey(Long authorId, String idempotencyKey);
+
     /**
      * 문제와 회차 번호가 일치하는 수정 회차를 조회한다.
      *

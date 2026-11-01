@@ -21,7 +21,7 @@ import lombok.NoArgsConstructor;
 /**
  * 문제 본문에 쓰이는 이미지 파일 메타 정보 엔티티(ERD 4.2.4 problem_images). 이미지 내용은 S3에 두고 객체 키·체크섬 등
  * 메타 정보만 관리한다. 동시 수정 충돌은 낙관적 락이 아니라 파일 행 잠금으로 관리하므로 {@code BaseTimeEntity}만
- * 상속한다. 본문 연결(링크) 전환, 업로드 결과·멱등 응답 기록은 해당 기능 Issue에서 엔티티 메서드로 추가한다.
+ * 상속한다. 업로드 결과·멱등 응답은 업로드 기능이 기록하고, 본문 연결은 저장 서비스가 파일 잠금 아래 전이한다.
  */
 @Entity
 @Table(
@@ -162,8 +162,7 @@ public class ProblemImage extends BaseTimeEntity {
 
     /**
      * 문제 본문에 아직 연결되지 않은({@code PENDING}) 이미지를 만든다. {@code uploadExpiresAt}은 업로드 보호 만료
-     * 시각(시작·유효한 갱신 시각 + 24시간)이며 호출자가 전달한다. 본문 연결, 업로드 결과·멱등 응답 기록은 해당 기능
-     * Issue에서 추가한다.
+     * 시각(시작·유효한 갱신 시각 + 24시간)이며 호출자가 전달한다.
      */
     public static ProblemImage create(
         Long ownerId,
@@ -176,4 +175,31 @@ public class ProblemImage extends BaseTimeEntity {
     ) {
         return new ProblemImage(ownerId, objectKey, objectVersion, sha256, contentType, sizeBytes, uploadExpiresAt);
     }
+
+    /**
+     * 업로드가 완료된 이미지를 문제에 연결한다. 같은 문제에서 이미 연결한 이미지는 새 본문에서도 재사용할 수 있다
+     * (ERD 4.2.3).
+     *
+     * @param problemId 연결할 문제 ID
+     * @param requestingAdminId 요청 관리자 ID
+     * @throws IllegalStateException 소유자·문제·파일 상태 또는 업로드 완료 조건이 맞지 않는 경우
+     */
+    public void linkToProblem(Long problemId, Long requestingAdminId) {
+        if (problemId == null || requestingAdminId == null || !ownerId.equals(requestingAdminId)) {
+            throw new IllegalStateException("이미지 소유자 또는 문제 ID가 올바르지 않습니다.");
+        }
+        if (uploadedAt == null || uploadFinishedAt == null || uploadExpiresAt == null
+            || !uploadedAt.isBefore(uploadExpiresAt) || !uploadFinishedAt.isBefore(uploadExpiresAt)) {
+            throw new IllegalStateException("이미지의 업로드 완료 상태가 올바르지 않습니다.");
+        }
+        if (status == ProblemAssetStatus.PENDING && this.problemId == null) {
+            this.problemId = problemId;
+            this.status = ProblemAssetStatus.LINKED;
+            return;
+        }
+        if (status != ProblemAssetStatus.LINKED || !problemId.equals(this.problemId)) {
+            throw new IllegalStateException("이미지를 이 문제에 연결할 수 없습니다.");
+        }
+    }
+
 }
