@@ -24,6 +24,14 @@ public class SubmissionHistoryReader {
     private final JudgeJobRepository jobs;
     private final JudgeTestResultRepository tests;
 
+    /**
+     * 본인 일반 제출의 상태·회차·테스트 결과를 같은 읽기 스냅샷에서 조회한다.
+     *
+     * @param memberId 인증 회원 식별자
+     * @param submissionId 조회할 제출 식별자
+     * @return 회차 내림차순·테스트 순서 오름차순으로 구성한 제출 이력
+     * @throws JudgeException 타인 제출·다른 문맥·미존재 제출인 경우 SUBMISSION_NOT_FOUND
+     */
     @Transactional(
         readOnly = true,
         isolation = Isolation.REPEATABLE_READ

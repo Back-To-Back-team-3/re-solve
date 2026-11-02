@@ -8,6 +8,7 @@ import com.backtoback.judge.submission.domain.Submission;
 
 /** 하나의 읽기 트랜잭션에서 확보한 제출·회차·테스트 결과. 외부 응답에는 DTO로 변환한다. */
 public record SubmissionHistory(Submission submission, List<Attempt> attempts) {
+    /** 한 채점 회차와 고정 테스트 순서의 결과. */
     public record Attempt(JudgeJob job, List<JudgeTestResult> tests) {
     }
 }

@@ -27,6 +27,12 @@ public record SubmissionResultResponse(
     String failureCode
 ) {
 
+    /**
+     * 현재 상태와 최신 정상 완료 회차를 분리한 공개 응답으로 변환한다.
+     *
+     * @param history 회차 내림차순으로 조회한 본인 제출 이력
+     * @return 시스템 실패를 코드 판정과 분리한 제출 결과
+     */
     public static SubmissionResultResponse from(SubmissionHistory history) {
         var submission = history.submission();
         var effective
@@ -85,6 +91,13 @@ public record SubmissionResultResponse(
         Integer maxMemoryKb,
         OffsetDateTime judgedAt
     ) {
+        /**
+         * 정상 완료 회차의 테스트 결과를 대표 판정과 실행 지표로 집계한다.
+         *
+         * @param attempt 테스트 순서로 정렬한 정상 완료 회차
+         * @return 대표 판정과 통과 수·최대 실행 지표
+         * @throws IllegalArgumentException 테스트 결과가 없거나 미완료·시스템 오류 판정이 포함된 경우
+         */
         public static EffectiveResult from(SubmissionHistory.Attempt attempt) {
             var results = attempt.tests();
             var verdict = SubmissionVerdict.summarize(results.stream().map(JudgeTestResult::getVerdict).toList());
