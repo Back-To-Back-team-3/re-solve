@@ -43,8 +43,7 @@ public class StudyMembershipCommandController {
         @AuthenticationPrincipal GatewayUser user
     ) {
         Long memberId = Long.parseLong(user.userId());
-        String raw = MDC.get(CorrelationIdFilter.MDC_KEY);
-        String correlationId = raw != null && raw.length() > 64 ? raw.substring(0, 64) : raw;
+        String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
         StudyJoinResponse response = studyMembershipCommandService.join(studyId, memberId, correlationId);
         String message
             = MembershipStatus.PENDING.name().equals(response.status()) ? "가입 신청이 완료되었습니다." : "스터디에 가입되었습니다.";
@@ -57,8 +56,7 @@ public class StudyMembershipCommandController {
     @DeleteMapping("/me")
     public ResponseEntity<Void> cancelOrLeave(@PathVariable Long studyId, @AuthenticationPrincipal GatewayUser user) {
         Long memberId = Long.parseLong(user.userId());
-        String raw = MDC.get(CorrelationIdFilter.MDC_KEY);
-        String correlationId = raw != null && raw.length() > 64 ? raw.substring(0, 64) : raw;
+        String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
         studyMembershipCommandService.cancelOrLeave(studyId, memberId, correlationId);
         return ResponseEntity.noContent().build();
     }
@@ -74,8 +72,7 @@ public class StudyMembershipCommandController {
         @AuthenticationPrincipal GatewayUser user
     ) {
         Long requestMemberId = Long.parseLong(user.userId());
-        String raw = MDC.get(CorrelationIdFilter.MDC_KEY);
-        String correlationId = raw != null && raw.length() > 64 ? raw.substring(0, 64) : raw;
+        String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
 
         String message;
         if (request.status() == MembershipStatus.APPROVED) {
