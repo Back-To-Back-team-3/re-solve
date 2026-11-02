@@ -1,6 +1,5 @@
 package com.backtoback.study.membership.service;
 
-import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -26,10 +25,10 @@ import com.backtoback.study.replica.domain.MemberLearningProfileReplica;
 import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.repository.MemberLearningProfileReplicaRepository;
 import com.backtoback.study.replica.repository.MemberReplicaRepository;
-import com.fasterxml.jackson.databind.JavaType;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.JavaType;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 스터디 구성원·대기 신청 목록 조회 서비스(API 명세서 §5.2.4).
@@ -128,7 +127,7 @@ public class StudyMembershipQueryService {
                 = replica.getActiveTimeSlotsJson() != null
                     ? objectMapper.readValue(replica.getActiveTimeSlotsJson(), Object.class) : null;
             return new LearningProfileSnapshot(replica.getGoal(), tagLevels, preferredLanguages, activeTimeSlot);
-        } catch (IOException e) {
+        } catch (tools.jackson.core.JacksonException e) {
             // JSON 파싱 실패 시 null 처리해 조회 자체를 막지 않는다(ERD §4.5.10 값 체계 미확정 주석).
             return new LearningProfileSnapshot(replica.getGoal(), null, null, null);
         }

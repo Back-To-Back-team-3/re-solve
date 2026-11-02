@@ -132,11 +132,6 @@ class SecurityConfigurationTest {
             return "recommendations";
         }
 
-        @GetMapping("/api/v1/studies/{studyId}/memberships")
-        String memberships() {
-            return "memberships";
-        }
-
         @GetMapping("/api/v1/admin/studies/probe")
         String admin() {
             return "admin";

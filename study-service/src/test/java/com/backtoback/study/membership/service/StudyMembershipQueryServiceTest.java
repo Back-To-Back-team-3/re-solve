@@ -35,7 +35,8 @@ import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.domain.MemberStatus;
 import com.backtoback.study.replica.repository.MemberLearningProfileReplicaRepository;
 import com.backtoback.study.replica.repository.MemberReplicaRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 구성원·대기 신청 목록 조회 서비스 정상·예외 시나리오를 검증한다(API 명세서 §5.2.4).
