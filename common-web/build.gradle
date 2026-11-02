@@ -61,6 +61,7 @@ dependencies {
     testImplementation 'org.hibernate.validator:hibernate-validator'
 
     // 테스트 실행·검증과 서버 오류 로그 수집
+    testImplementation project(':common-event')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.assertj:assertj-core'
     testImplementation 'ch.qos.logback:logback-classic'
