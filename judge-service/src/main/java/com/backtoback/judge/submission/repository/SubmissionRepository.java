@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -14,7 +15,9 @@ import com.backtoback.judge.submission.domain.Submission;
 import jakarta.persistence.LockModeType;
 
 /** {@code Submission} 저장과 식별자 조회를 제공한다. */
-public interface SubmissionRepository extends JpaRepository<Submission, Long> {
+public interface SubmissionRepository extends JpaRepository<Submission, Long>, JpaSpecificationExecutor<Submission> {
+    Optional<Submission> findByIdAndMemberIdAndContext(long id, long memberId, Submission.Context context);
+
     /**
      * 회원에게 현재 연결된 멱등 키의 제출을 조회한다.
      *
