@@ -249,7 +249,7 @@ public class StudyMembershipCommandService {
     }
 
     /**
-     * 가입 신청을 승인한다(PENDING→APPROVED, API 명세서 §5.2.4 승인 4단계).
+     * 가입 신청을 승인한다(PENDING→APPROVED, API 명세서 §5.2.5 승인 4단계).
      *
      * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, AUTH_ACCESS_DENIED,
      *     STUDY_APPLICATION_EXPIRED, STUDY_MEMBERSHIP_STATUS_CONFLICT,
@@ -275,7 +275,7 @@ public class StudyMembershipCommandService {
     }
 
     /**
-     * 가입 신청을 거절한다(PENDING→REJECTED, API 명세서 §5.2.4 거절).
+     * 가입 신청을 거절한다(PENDING→REJECTED, API 명세서 §5.2.5 거절).
      *
      * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, AUTH_ACCESS_DENIED,
      *     STUDY_APPLICATION_EXPIRED, STUDY_MEMBERSHIP_STATUS_CONFLICT
@@ -300,7 +300,7 @@ public class StudyMembershipCommandService {
     }
 
     /**
-     * 구성원을 강제탈퇴한다(APPROVED→REMOVED, API 명세서 §5.2.4 강제탈퇴).
+     * 구성원을 강제탈퇴한다(APPROVED→REMOVED, API 명세서 §5.2.5 강제탈퇴).
      * MANAGER는 LEADER·MANAGER를 대상으로 삼을 수 없다.
      *
      * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, AUTH_ACCESS_DENIED, STUDY_NOT_FOUND

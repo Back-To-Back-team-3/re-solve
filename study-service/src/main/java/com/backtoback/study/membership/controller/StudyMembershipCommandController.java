@@ -64,7 +64,7 @@ public class StudyMembershipCommandController {
     }
 
     /**
-     * 5.2.4 가입 신청 승인·거절·강제탈퇴.
+     * 5.2.5 가입 신청 승인·거절·강제탈퇴.
      */
     @PatchMapping("/{membershipId}")
     public ResponseEntity<ApiResponse<MembershipDecisionResponse>> decide(
