@@ -1,6 +1,7 @@
 package com.backtoback.problem.problem.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDateTime;
 
@@ -12,10 +13,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.mysql.MySQLContainer;
@@ -25,11 +28,13 @@ import com.backtoback.problem.problem.domain.ProblemBodyAsset;
 import com.backtoback.problem.problem.domain.ProblemBodyImage;
 import com.backtoback.problem.problem.domain.ProblemImage;
 import com.backtoback.problem.problem.domain.ProblemRevision;
+import com.backtoback.problem.problem.domain.ProblemRevisionTag;
 import com.backtoback.problem.problem.domain.ProblemScope;
 import com.backtoback.problem.problem.domain.ProblemVisibility;
+import com.backtoback.problem.tag.repository.TagRepository;
 
 /**
- * 문제 패키지 Repository 5개가 추가한 조회 메서드를 실제 MySQL에 대해 저장·조회로 확인한다.
+ * 문제 패키지 Repository의 저장·조회와 DB 제약을 실제 MySQL에 대해 확인한다.
  * Redis는 Redisson 클라이언트 빈 기동에 필요해 함께 띄우며, 이 테스트에서 락은 직접 쓰지 않는다.
  */
 @SpringBootTest(
@@ -66,6 +71,12 @@ class ProblemRepositoriesTest {
     @Autowired
     private ProblemBodyImageRepository bodyImages;
 
+    @Autowired
+    private ProblemRevisionTagRepository problemRevisionTags;
+
+    @Autowired
+    private TagRepository tags;
+
     @BeforeAll
     static void startInfrastructure() {
         Assumptions
@@ -95,6 +106,7 @@ class ProblemRepositoriesTest {
         // 시드 데이터(problem_test_assets·problem_revision_tests)가 problems·problem_revisions를 참조하므로
         // 먼저 지워야 FK 위반 없이 정리된다.
         jdbc.update("DELETE FROM problem_revision_tests");
+        jdbc.update("DELETE FROM problem_revision_tags");
         jdbc.update("DELETE FROM problem_body_images");
         jdbc.update("DELETE FROM problem_revisions");
         jdbc.update("DELETE FROM problem_images");
@@ -117,6 +129,7 @@ class ProblemRepositoriesTest {
     }
 
     @Test
+    @Transactional
     @DisplayName("문제와 회차 번호가 일치하는 수정 회차만 조회한다")
     void findsProblemRevisionByProblemIdAndRevisionNumber() {
         Problem problem = problems.save(Problem.create(1L, ProblemScope.GENERAL));
@@ -157,6 +170,10 @@ class ProblemRepositoriesTest {
 
         assertThat(problemRevisions.findByProblemIdAndRevisionNumber(problem.getId(), 1)).isPresent();
         assertThat(problemRevisions.findByProblemIdAndRevisionNumber(problem.getId(), 2)).isEmpty();
+        assertThat(problemRevisions.findFirstByProblemIdOrderByRevisionNumberDesc(problem.getId()))
+            .get()
+            .extracting(ProblemRevision::getRevisionNumber)
+            .isEqualTo(1);
     }
 
     @Test
@@ -241,5 +258,123 @@ class ProblemRepositoriesTest {
 
         assertThat(bodyImages.findByBodyAssetId(bodyAsset.getId())).hasSize(1);
         assertThat(bodyImages.findByBodyAssetId(otherBodyAsset.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("문제 회차에 태그를 연결해 저장하고 회차 ID로 조회한다")
+    void savesAndFindsProblemRevisionTags() {
+        ProblemRevision revision = createRevision();
+        Long tagId = tags.findAll().get(0).getId();
+        LocalDateTime createdAt = LocalDateTime.of(2026, 11, 1, 10, 0);
+
+        problemRevisionTags.save(ProblemRevisionTag.create(revision.getId(), tagId, createdAt));
+
+        assertThat(problemRevisionTags.findByProblemRevisionIdOrderByTagId(revision.getId()))
+            .extracting(ProblemRevisionTag::getTagId)
+            .containsExactly(tagId);
+    }
+
+    @Test
+    @DisplayName("같은 문제 회차와 태그의 중복 연결은 DB 제약으로 거절한다")
+    void rejectsDuplicateProblemRevisionTag() {
+        ProblemRevision revision = createRevision();
+        Long tagId = tags.findAll().get(0).getId();
+        LocalDateTime createdAt = LocalDateTime.of(2026, 11, 1, 10, 0);
+        problemRevisionTags.saveAndFlush(ProblemRevisionTag.create(revision.getId(), tagId, createdAt));
+
+        assertThatThrownBy(
+            () -> problemRevisionTags.saveAndFlush(ProblemRevisionTag.create(revision.getId(), tagId, createdAt))
+        ).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 문제 회차를 참조한 태그 연결은 DB 외래 키로 거절한다")
+    void rejectsProblemRevisionTagWithMissingRevision() {
+        Long tagId = tags.findAll().get(0).getId();
+
+        assertThatThrownBy(
+            () -> problemRevisionTags
+                .saveAndFlush(ProblemRevisionTag.create(Long.MAX_VALUE, tagId, LocalDateTime.of(2026, 11, 1, 10, 0)))
+        ).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 태그를 참조한 연결은 DB 외래 키로 거절한다")
+    void rejectsProblemRevisionTagWithMissingTag() {
+        ProblemRevision revision = createRevision();
+
+        assertThatThrownBy(
+            () -> problemRevisionTags
+                .saveAndFlush(
+                    ProblemRevisionTag.create(revision.getId(), Long.MAX_VALUE, LocalDateTime.of(2026, 11, 1, 10, 0))
+                )
+        ).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("같은 문제의 중복 회차 번호는 DB 제약으로 거절한다")
+    void rejectsDuplicateRevisionNumber() {
+        ProblemRevision first = createRevision();
+        ProblemRevision duplicate
+            = ProblemRevision
+                .create(
+                    first.getProblemId(),
+                    first.getRevisionNumber(),
+                    first.getBodyAssetId(),
+                    "중복 회차",
+                    1,
+                    "{}",
+                    2000,
+                    262144,
+                    7000,
+                    64,
+                    1L,
+                    "duplicate-revision-" + System.nanoTime(),
+                    "d".repeat(64),
+                    1,
+                    LocalDateTime.of(2026, 11, 1, 10, 0)
+                );
+
+        assertThatThrownBy(() -> problemRevisions.saveAndFlush(duplicate))
+            .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private ProblemRevision createRevision() {
+        Problem problem = problems.save(Problem.create(1L, ProblemScope.GENERAL));
+        ProblemBodyAsset bodyAsset
+            = bodyAssets
+                .save(
+                    ProblemBodyAsset
+                        .create(
+                            1L,
+                            "problem/body/revision-tag-" + System.nanoTime(),
+                            null,
+                            "b".repeat(64),
+                            1024L,
+                            LocalDateTime.of(2026, 11, 2, 0, 0)
+                        )
+                );
+
+        return problemRevisions
+            .save(
+                ProblemRevision
+                    .create(
+                        problem.getId(),
+                        1,
+                        bodyAsset.getId(),
+                        "회차 태그 테스트 문제",
+                        1,
+                        "{}",
+                        2000,
+                        262144,
+                        2500,
+                        64,
+                        1L,
+                        "revision-tag-" + System.nanoTime(),
+                        "c".repeat(64),
+                        1,
+                        LocalDateTime.of(2026, 11, 1, 9, 0)
+                    )
+            );
     }
 }
