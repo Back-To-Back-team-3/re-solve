@@ -17,7 +17,7 @@ public class ValidationProgressController {
     private final ValidationProgressService service;
 
     /**
-     * 3.3.6 검증 진행·결과 조회 — 내부 성공 응답은 공통 래퍼 없이 제공한다.
+     * 3.3.9 검증 진행·결과 조회 — 내부 성공 응답은 공통 래퍼 없이 제공한다.
      *
      * @param validationId 검증 작업 ID
      * @return 진행 및 최종 판정 요약

@@ -5,7 +5,7 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * 원문이나 내부 실행 이력을 포함하지 않는 검증 진행 응답이다. (API §3.3.6)
+ * 원문이나 내부 실행 이력을 포함하지 않는 검증 진행 응답이다. (API §3.3.9)
  *
  * @param validationId 검증 ID
  * @param problemRevisionId 회차 ID

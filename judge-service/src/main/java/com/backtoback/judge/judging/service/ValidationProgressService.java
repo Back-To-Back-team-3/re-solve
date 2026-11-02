@@ -14,7 +14,7 @@ import com.backtoback.judge.judging.dto.ValidationProgressResponse;
 
 import lombok.RequiredArgsConstructor;
 
-/** 하나의 조회 스냅샷에서 작업과 최종 시도를 조합한다. (API §3.3.6) */
+/** 하나의 조회 스냅샷에서 작업과 최종 시도를 조합한다. (API §3.3.9) */
 @Service
 @RequiredArgsConstructor
 public class ValidationProgressService {
