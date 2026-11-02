@@ -11,11 +11,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import com.backtoback.common.api.ApiErrorResponse;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.exception.ErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * 문제 서비스의 DB 제약 위반과 잠금 경합을 오류 응답으로 변환한다.
@@ -25,6 +28,18 @@ import com.backtoback.problem.global.error.ProblemErrorCode;
 @RestControllerAdvice
 public class ProblemExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(ProblemExceptionHandler.class);
+
+    /** 이미지 파일 크기 제한 초과는 이미지 전용 오류로 반환한다(API 명세서 2.4.1). */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiErrorResponse> handleUploadSize(
+        MaxUploadSizeExceededException exception,
+        HttpServletRequest request
+    ) {
+        ErrorCode code
+            = "/api/v1/admin/problems/images".equals(request.getRequestURI()) ? ProblemErrorCode.PROBLEM_IMAGE_TOO_LARGE
+                : CommonErrorCode.COMMON_INVALID_REQUEST;
+        return ResponseEntity.status(exception.getStatusCode()).body(ApiErrorResponse.of(code));
+    }
 
     /**
      * DB 제약 이름과 MySQL 오류 코드로 태그 중복·순번 충돌·사용 중 오류를 구분한다.
