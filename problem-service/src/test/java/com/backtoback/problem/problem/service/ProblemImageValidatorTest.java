@@ -6,17 +6,79 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.Base64;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import javax.imageio.ImageIO;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 
 class ProblemImageValidatorTest {
     private final ProblemImageValidator validator = new ProblemImageValidator();
+
+    @Test
+    @DisplayName("복호화 두 건이 진행 중이면 추가 요청을 기다리지 않고 거절한다")
+    void rejectsWhenBothDecodePermitsAreInUse() throws Exception {
+        CountDownLatch started = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> {
+                validator.decode(() -> awaitRelease(started, release));
+                return null;
+            });
+            var second = executor.submit(() -> {
+                validator.decode(() -> awaitRelease(started, release));
+                return null;
+            });
+            try {
+                assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
+                assertThatThrownBy(() -> validator.decode(this::noOp))
+                    .isInstanceOfSatisfying(
+                        ProblemException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                            .isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+                    );
+            } finally {
+                release.countDown();
+            }
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+            validator.decode(this::noOp);
+        }
+    }
+
+    @Test
+    @DisplayName("복호화 중 예외가 발생해도 허가를 반환한다")
+    void releasesPermitAfterDecodeFailure() throws Exception {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            assertThatThrownBy(() -> validator.decode(() -> {
+                throw new java.io.IOException();
+            })).isInstanceOf(java.io.IOException.class);
+        }
+        validator.decode(this::noOp);
+    }
+
+    private void noOp() {
+
+    }
+
+    private void awaitRelease(CountDownLatch started, CountDownLatch release) throws java.io.IOException {
+        started.countDown();
+        try {
+            if (!release.await(10, TimeUnit.SECONDS)) {
+                throw new java.io.IOException("복호화 대기 시간 초과");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new java.io.IOException(exception);
+        }
+    }
 
     @Test
     @DisplayName("정적 WebP를 복호화하고 동적 WebP는 거절한다")

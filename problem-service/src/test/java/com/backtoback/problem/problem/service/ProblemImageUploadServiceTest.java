@@ -18,12 +18,16 @@ import java.time.ZoneOffset;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.service.ProblemImageUploadTracking.Completion;
 import com.backtoback.problem.problem.service.ProblemImageUploadTracking.Receipt;
+
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 @ExtendWith(MockitoExtension.class)
 class ProblemImageUploadServiceTest {
@@ -78,6 +82,28 @@ class ProblemImageUploadServiceTest {
         given(writer.put(eq("bucket"), eq("object"), any(), eq("image/png"))).willThrow(new IllegalStateException());
         assertThatThrownBy(() -> service().upload("bucket", 1L, "key", bytes)).isInstanceOf(ProblemException.class);
         verify(tracking).unknown(receipt);
+        verify(tracking, never()).complete(any(), any());
+        verifyNoInteractions(reader);
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        ints = {
+            408,
+            429
+        }
+    )
+    @DisplayName("S3 시간 초과 또는 제한 응답은 결과 불명으로 남긴다")
+    void retainsUnknownS3Response(int statusCode) {
+        Receipt receipt = new Receipt(7L, "object", LocalDateTime.of(2026, 11, 2, 0, 0), null, null);
+        given(validator.validate(bytes)).willReturn("image/png");
+        given(tracking.start(eq(1L), eq("key"), any(), eq("image/png"))).willReturn(receipt);
+        given(writer.put(eq("bucket"), eq("object"), any(), eq("image/png")))
+            .willThrow(S3Exception.builder().statusCode(statusCode).build());
+
+        assertThatThrownBy(() -> service().upload("bucket", 1L, "key", bytes)).isInstanceOf(ProblemException.class);
+        verify(tracking).unknown(receipt);
+        verify(tracking, never()).failed(any());
         verify(tracking, never()).complete(any(), any());
         verifyNoInteractions(reader);
     }

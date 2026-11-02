@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.concurrent.Semaphore;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -14,6 +15,7 @@ import javax.imageio.stream.ImageInputStream;
 import org.glavo.webp.WebPImageReader;
 import org.springframework.stereotype.Component;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 
@@ -22,6 +24,7 @@ import com.backtoback.problem.global.exception.ProblemException;
 public class ProblemImageValidator {
     private static final long MAX_PIXELS = 20_000_000L;
     private static final int MAX_BYTES = 5 * 1024 * 1024;
+    private final Semaphore decodePermits = new Semaphore(2);
     private static final byte[] PNG
         = {
             (byte)137,
@@ -42,9 +45,14 @@ public class ProblemImageValidator {
             if (bytes.length >= 12 && ascii(bytes, 0, 4).equals("RIFF") && ascii(bytes, 8, 4).equals("WEBP")) {
                 try (WebPImageReader reader = WebPImageReader.open(new ByteArrayInputStream(bytes))) {
                     requireDimensions(reader.getSourceWidth(), reader.getSourceHeight());
-                    if (reader.isAnimated() || reader.getFrameCount() != 1 || reader.readNextFrame() == null) {
+                    if (reader.isAnimated() || reader.getFrameCount() != 1) {
                         throw invalid();
                     }
+                    decode(() -> {
+                        if (reader.readNextFrame() == null) {
+                            throw invalid();
+                        }
+                    });
                 }
                 return "image/webp";
             }
@@ -66,9 +74,11 @@ public class ProblemImageValidator {
                 try {
                     reader.setInput(input);
                     requireDimensions(reader.getWidth(0), reader.getHeight(0));
-                    if (reader.read(0) == null) {
-                        throw invalid();
-                    }
+                    decode(() -> {
+                        if (reader.read(0) == null) {
+                            throw invalid();
+                        }
+                    });
                 } finally {
                     reader.dispose();
                 }
@@ -79,6 +89,23 @@ public class ProblemImageValidator {
         } catch (IOException | RuntimeException exception) {
             throw invalid();
         }
+    }
+
+    /** 픽셀 복호화의 동시 메모리 사용을 제한하고 모든 종료에서 허가를 반환한다. */
+    void decode(DecodeOperation operation) throws IOException {
+        if (!decodePermits.tryAcquire()) {
+            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+        }
+        try {
+            operation.run();
+        } finally {
+            decodePermits.release();
+        }
+    }
+
+    @FunctionalInterface
+    interface DecodeOperation {
+        void run() throws IOException;
     }
 
     private void rejectAnimatedPng(byte[] bytes) {

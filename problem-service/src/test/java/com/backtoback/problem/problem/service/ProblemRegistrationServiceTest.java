@@ -405,6 +405,8 @@ class ProblemRegistrationServiceTest {
         String key = "image-claim-" + UUID.randomUUID();
         CountDownLatch claimed = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch registrationStarted = new CountDownLatch(1);
+        AtomicReference<Long> registrationConnection = new AtomicReference<>();
         try (var executor = Executors.newFixedThreadPool(2)) {
             Future<?> deletion
                 = executor.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
@@ -421,17 +423,37 @@ class ProblemRegistrationServiceTest {
                 }));
             assertThat(claimed.await(30, TimeUnit.SECONDS)).isTrue();
             Future<?> registration
-                = executor
-                    .submit(
-                        () -> new TransactionTemplate(transactionManager)
-                            .execute(
-                                status -> service
-                                    .save(command(null, null, assets.bodyId(), assets.imageId(), tagId, key, "a"))
-                            )
-                    );
+                = executor.submit(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                    registrationConnection.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                    registrationStarted.countDown();
+                    return service.save(command(null, null, assets.bodyId(), assets.imageId(), tagId, key, "a"));
+                }));
             try {
-                assertThatThrownBy(() -> registration.get(500, TimeUnit.MILLISECONDS))
-                    .isInstanceOf(TimeoutException.class);
+                assertThat(registrationStarted.await(30, TimeUnit.SECONDS)).isTrue();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+                boolean waiting = false;
+                while (System.nanoTime() < deadline && !registration.isDone()) {
+                    Integer count
+                        = jdbc
+                            .queryForObject(
+                                "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
+                                    + "JOIN performance_schema.data_locks l "
+                                    + "ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID AND l.ENGINE = w.ENGINE "
+                                    + "JOIN performance_schema.threads t ON t.THREAD_ID = l.THREAD_ID "
+                                    + "WHERE t.PROCESSLIST_ID = ? AND l.OBJECT_SCHEMA = DATABASE() "
+                                    + "AND l.OBJECT_NAME = 'problem_images' AND l.INDEX_NAME = 'PRIMARY' "
+                                    + "AND l.LOCK_TYPE = 'RECORD' AND l.LOCK_DATA = ?",
+                                Integer.class,
+                                registrationConnection.get(),
+                                assets.imageId().toString()
+                            );
+                    if (count != null && count > 0) {
+                        waiting = true;
+                        break;
+                    }
+                    Thread.sleep(50);
+                }
+                assertThat(waiting).as("등록 트랜잭션이 이미지 행 잠금을 기다린다").isTrue();
             } finally {
                 release.countDown();
             }
