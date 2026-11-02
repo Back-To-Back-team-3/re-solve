@@ -40,12 +40,12 @@ public class StudyMembershipQueryController {
     private final StudyMembershipQueryService studyMembershipQueryService;
 
     /**
-     * 5.2.1 구성원·대기 신청 목록 조회.
+     * 5.2.4 구성원·대기 신청 목록 조회.
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<MembershipListItem>>> findMemberships(
         @PathVariable Long studyId,
-        @RequestParam MembershipStatus status,
+        @RequestParam(defaultValue = "APPROVED") MembershipStatus status,
         @PageableDefault(size = 20) Pageable pageable,
         @AuthenticationPrincipal GatewayUser user
     ) {
@@ -53,7 +53,7 @@ public class StudyMembershipQueryController {
         Pageable safePageable = clampPageSize(resolveSort(pageable, status));
         Page<MembershipListItem> result
             = studyMembershipQueryService.findMemberships(studyId, memberId, status, safePageable);
-        return ResponseEntity.ok(ApiResponse.success("구성원 목록 조회가 완료되었습니다.", PageResponse.from(result)));
+        return ResponseEntity.ok(ApiResponse.success(PageResponse.from(result)));
     }
 
     private Pageable resolveSort(Pageable pageable, MembershipStatus status) {
