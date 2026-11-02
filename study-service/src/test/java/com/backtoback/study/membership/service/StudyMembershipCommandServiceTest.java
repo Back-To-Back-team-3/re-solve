@@ -330,6 +330,7 @@ class StudyMembershipCommandServiceTest {
         given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
             .willReturn(Optional.of(leaderMembership));
         given(membershipRepository.findById(membershipId)).willReturn(Optional.of(pending));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(approvalStudy));
         given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(1);
         given(quotaRepository.incrementIfBelowLimit(targetMemberId)).willReturn(1);
         given(studyRepository.approveIfNotFull(STUDY_ID)).willReturn(1);
@@ -360,6 +361,7 @@ class StudyMembershipCommandServiceTest {
         given(membershipRepository.findById(membershipId))
             .willReturn(Optional.of(pending))
             .willReturn(Optional.of(alreadyApproved));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(approvalStudy));
         given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(0);
 
         assertThatThrownBy(() -> service.approve(STUDY_ID, membershipId, MEMBER_ID, CORR_ID))
@@ -390,6 +392,7 @@ class StudyMembershipCommandServiceTest {
         given(membershipRepository.findById(membershipId))
             .willReturn(Optional.of(pending))
             .willReturn(Optional.of(expiredPending));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(approvalStudy));
         given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(0);
 
         assertThatThrownBy(() -> service.approve(STUDY_ID, membershipId, MEMBER_ID, CORR_ID))
@@ -457,6 +460,7 @@ class StudyMembershipCommandServiceTest {
         given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
             .willReturn(Optional.of(leaderMembership));
         given(membershipRepository.findById(membershipId)).willReturn(Optional.of(pending));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(approvalStudy));
         given(membershipRepository.rejectIfPending(membershipId)).willReturn(1);
 
         service.reject(STUDY_ID, membershipId, MEMBER_ID, CORR_ID);
