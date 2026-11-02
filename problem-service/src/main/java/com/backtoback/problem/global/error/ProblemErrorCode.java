@@ -17,6 +17,8 @@ public enum ProblemErrorCode implements ErrorCode {
     PROBLEM_INVALID_STATE_TRANSITION(HttpStatus.CONFLICT, "요청한 문제 상태 변경을 적용할 수 없습니다."),
     PROBLEM_TEST_CASE_INVALID(HttpStatus.BAD_REQUEST, "테스트 데이터의 타입·구성 또는 중복 여부를 확인해 주세요."),
     PROBLEM_IMAGE_INVALID(HttpStatus.BAD_REQUEST, "문제 이미지를 확인해 주세요."),
+    PROBLEM_IMAGE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "이미지는 5MiB 이하여야 합니다."),
+    PROBLEM_IMAGE_UPLOAD_IN_PROGRESS(HttpStatus.CONFLICT, "이미지 업로드가 진행 중이거나 결과를 확인할 수 없습니다."),
     PROBLEM_TAG_NOT_FOUND(HttpStatus.NOT_FOUND, "태그를 찾을 수 없습니다."),
     PROBLEM_TAG_DUPLICATED(HttpStatus.CONFLICT, "같은 이름의 태그가 이미 존재합니다."),
     PROBLEM_TAG_IN_USE(HttpStatus.CONFLICT, "문제 회차에서 사용 중인 태그입니다."),

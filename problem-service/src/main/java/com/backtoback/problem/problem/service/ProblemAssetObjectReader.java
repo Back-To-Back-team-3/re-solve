@@ -48,4 +48,10 @@ public class ProblemAssetObjectReader {
         return actual.sizeBytes() == expected.sizeBytes() && actual.sha256().equals(expected.sha256())
             && Arrays.equals(actual.bytes(), expected.bytes());
     }
+
+    /** 지정된 불변 객체의 원문을 읽는다. */
+    public byte[] read(String bucket, String key, String version) {
+        var request = GetObjectRequest.builder().bucket(bucket).key(key).versionId(version).build();
+        return client.getObjectAsBytes(request).asByteArray();
+    }
 }
