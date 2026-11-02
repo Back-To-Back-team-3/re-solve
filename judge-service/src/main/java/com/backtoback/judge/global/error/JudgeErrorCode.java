@@ -18,6 +18,7 @@ public enum JudgeErrorCode implements ErrorCode {
     UNSUPPORTED_LANGUAGE(HttpStatus.BAD_REQUEST, "지원하지 않거나 사용할 수 없는 언어입니다."),
     CODE_TOO_LARGE(HttpStatus.CONTENT_TOO_LARGE, "제출 코드는 UTF-8 64KiB 이하여야 합니다."),
     SUBMISSION_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "제출 요청 한도를 초과했습니다."),
+    SUBMISSION_NOT_FOUND(HttpStatus.NOT_FOUND, "제출을 찾을 수 없습니다."),
     PROBLEM_VALIDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "검증 작업을 찾을 수 없습니다."),
     PROBLEM_NOT_AVAILABLE(HttpStatus.NOT_FOUND, "제출할 수 없는 문제입니다."),
     LEVEL_PROBLEM_LOCKED(HttpStatus.FORBIDDEN, "현재 태그 레벨에서 제출할 수 없는 문제입니다."),
