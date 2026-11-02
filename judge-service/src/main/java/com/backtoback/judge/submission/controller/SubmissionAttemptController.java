@@ -24,7 +24,13 @@ public class SubmissionAttemptController {
     private final SubmissionHistoryReader history;
     private final SubmissionTestResultService tests;
 
-    /** API §3.1.6 — 과거 회차 결과를 현재 제출 요약으로 대체하지 않는다. */
+    /**
+     * 본인 일반 제출의 보존된 채점 회차를 조회한다. (API 명세서 §3.1.6)
+     *
+     * @param user Gateway에서 인증한 회원
+     * @param submissionId 조회할 제출 식별자
+     * @return 회차별 상태와 완료 결과 목록
+     */
     @GetMapping("/api/v1/submissions/{submissionId}/judge-attempts")
     public ResponseEntity<ApiResponse<SubmissionAttemptsResponse>> attempts(
         @AuthenticationPrincipal GatewayUser user,
@@ -46,7 +52,14 @@ public class SubmissionAttemptController {
             );
     }
 
-    /** API §3.1.7 — 숨김 테스트는 번호·통과 여부만 응답한다. */
+    /**
+     * 회차별 테스트 결과를 공개 범위에 맞게 조회한다. (API 명세서 §3.1.7)
+     *
+     * @param user Gateway에서 인증한 회원
+     * @param submissionId 조회할 제출 식별자
+     * @param judgeAttempt 조회할 채점 회차
+     * @return 숨김 테스트의 번호·통과 여부만 포함하는 테스트 결과 목록
+     */
     @GetMapping("/api/v1/submissions/{submissionId}/judge-attempts/{judgeAttempt}/test-results")
     public ResponseEntity<ApiResponse<SubmissionTestResultsResponse>> results(
         @AuthenticationPrincipal GatewayUser user,
