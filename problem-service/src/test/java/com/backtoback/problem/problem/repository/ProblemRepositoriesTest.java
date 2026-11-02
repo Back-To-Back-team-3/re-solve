@@ -2,8 +2,14 @@ package com.backtoback.problem.problem.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 
+import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
@@ -13,12 +19,16 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.NestedExceptionUtils;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.mysql.MySQLContainer;
@@ -30,7 +40,13 @@ import com.backtoback.problem.problem.domain.ProblemImage;
 import com.backtoback.problem.problem.domain.ProblemRevision;
 import com.backtoback.problem.problem.domain.ProblemRevisionTag;
 import com.backtoback.problem.problem.domain.ProblemScope;
+import com.backtoback.problem.problem.domain.ProblemTestAsset;
 import com.backtoback.problem.problem.domain.ProblemVisibility;
+import com.backtoback.problem.problem.service.ProblemAssetContent;
+import com.backtoback.problem.problem.service.ProblemAssetObjectReader;
+import com.backtoback.problem.problem.service.ProblemAssetObjectWriter;
+import com.backtoback.problem.problem.service.ProblemAssetUploadService;
+import com.backtoback.problem.problem.service.ProblemAssetUploadTracking;
 import com.backtoback.problem.tag.repository.TagRepository;
 
 /**
@@ -64,6 +80,24 @@ class ProblemRepositoriesTest {
 
     @Autowired
     private ProblemBodyAssetRepository bodyAssets;
+
+    @Autowired
+    private ProblemAssetUploadTracking uploadTracking;
+
+    @Autowired
+    private ProblemAssetUploadService uploadService;
+
+    @MockitoBean
+    private ProblemAssetObjectWriter objectWriter;
+
+    @MockitoBean
+    private ProblemAssetObjectReader objectReader;
+
+    @Autowired
+    private ProblemTestAssetRepository testAssets;
+
+    @Autowired
+    private TransactionTemplate transactions;
 
     @Autowired
     private ProblemImageRepository images;
@@ -187,6 +221,183 @@ class ProblemRepositoriesTest {
 
         assertThat(bodyAssets.findByObjectKey("problem/body/key")).isPresent();
         assertThat(bodyAssets.findByObjectKey("problem/body/other")).isEmpty();
+    }
+
+    /** 파일 행 잠금이 다른 트랜잭션의 삭제 선점과 직렬화되는지 확인한다. */
+    @Test
+    @DisplayName("테스트 파일 행 잠금은 다른 트랜잭션의 상태 변경을 막는다")
+    void testAssetWriteLockBlocksConcurrentUpdate() throws Exception {
+        ProblemTestAsset asset
+            = testAssets
+                .saveAndFlush(
+                    ProblemTestAsset
+                        .create(
+                            1L,
+                            "problem/test/locked",
+                            null,
+                            "a".repeat(64),
+                            10L,
+                            LocalDateTime.of(2026, 11, 2, 0, 0)
+                        )
+                );
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var holder = executor.submit(() -> transactions.executeWithoutResult(status -> {
+                testAssets.findByIdForUpdate(asset.getId()).orElseThrow();
+                locked.countDown();
+                try {
+                    if (!release.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("잠금 해제 신호를 받지 못했습니다.");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+            }));
+            try {
+                assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+                assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+                    jdbc
+                        .queryForObject(
+                            "SELECT id FROM problem_test_assets WHERE id = ? FOR UPDATE NOWAIT",
+                            Long.class,
+                            asset.getId()
+                        );
+                    jdbc.update("UPDATE problem_test_assets SET status = 'DELETING' WHERE id = ?", asset.getId());
+                }))
+                    .isInstanceOf(DataAccessException.class)
+                    .hasRootCauseInstanceOf(SQLException.class)
+                    .satisfies(
+                        exception -> assertThat(
+                            ((SQLException)NestedExceptionUtils.getMostSpecificCause(exception)).getErrorCode()
+                        ).isEqualTo(3572)
+                    );
+            } finally {
+                release.countDown();
+            }
+            holder.get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    /** 만료 후 종료가 확인된 미참조 파일의 폐기와 종료 시각을 확인한다. */
+    @Test
+    @DisplayName("만료된 미참조 파일은 쓰기 종료 확인 후 폐기한다")
+    void discardsExpiredUnreferencedUpload() {
+        // given
+        LocalDateTime expiry = LocalDateTime.of(2020, 1, 1, 0, 0);
+        var asset
+            = bodyAssets.saveAndFlush(ProblemBodyAsset.create(1L, "expired-object", null, "a".repeat(64), 1L, expiry));
+        var ticket = new ProblemAssetUploadTracking.UploadTicket(asset.getId(), asset.getObjectKey(), expiry, true);
+
+        // when
+        boolean completed = uploadTracking.complete(ticket, null);
+
+        // then
+        assertThat(completed).isFalse();
+        var stored = bodyAssets.findById(asset.getId()).orElseThrow();
+        assertThat(stored.getStatus()).isEqualTo(com.backtoback.problem.problem.domain.ProblemAssetStatus.DISCARDED);
+        assertThat(stored.getUploadFinishedAt()).isNotNull();
+        assertThat(stored.getUploadedAt()).isNull();
+    }
+
+    /** 외부 쓰기 도중 다른 트랜잭션이 추적 행을 잠글 수 있는지 확인한다. */
+    @Test
+    @DisplayName("S3 쓰기 중 추적 행은 커밋되어 있고 다른 트랜잭션이 잠글 수 있다")
+    void uploadDoesNotHoldFileLockDuringWrite() {
+        // given
+        var content
+            = ProblemAssetContent
+                .fromBytes(
+                    new byte[] {
+                        1
+                    }
+                );
+        doAnswer(invocation -> {
+            String key = invocation.getArgument(1);
+            transactions.executeWithoutResult(status -> {
+                Long id
+                    = jdbc
+                        .queryForObject(
+                            "SELECT id FROM problem_body_assets WHERE object_key = ? FOR UPDATE NOWAIT",
+                            Long.class,
+                            key
+                        );
+                assertThat(id).isNotNull();
+            });
+            return null;
+        }).when(objectWriter).put(any(), any(), any());
+
+        // when
+        Long id = uploadService.upload("bucket", 1L, content, true);
+
+        // then
+        assertThat(bodyAssets.findById(id))
+            .isPresent()
+            .get()
+            .extracting(ProblemBodyAsset::getUploadFinishedAt)
+            .isNotNull();
+    }
+
+    /** 바깥 트랜잭션 롤백 후에도 업로드 추적 행이 남는지 확인한다. */
+    @Test
+    @DisplayName("업로드 추적 행은 호출 트랜잭션이 롤백돼도 보존된다")
+    void preservesUploadTrackingAfterCallerRollback() {
+        // given
+        var content
+            = ProblemAssetContent
+                .fromBytes(
+                    new byte[] {
+                        1
+                    }
+                );
+
+        // when
+        var ticket = transactions.execute(status -> {
+            var result = uploadTracking.start(1L, content, true);
+            status.setRollbackOnly();
+            return result;
+        });
+
+        // then
+        assertThat(ticket).isNotNull();
+        assertThat(bodyAssets.findById(ticket.id()))
+            .isPresent()
+            .get()
+            .extracting(ProblemBodyAsset::getObjectKey)
+            .isEqualTo(ticket.key());
+    }
+
+    /** 외부 쓰기 결과를 알 수 없으면 실제 DB의 종료 시각을 남기지 않는다. */
+    @Test
+    @DisplayName("쓰기 결과가 불명확하면 추적 행을 종료하지 않고 보존한다")
+    void preservesUnknownUploadInDatabase() {
+        // given
+        var content
+            = ProblemAssetContent
+                .fromBytes(
+                    new byte[] {
+                        1
+                    }
+                );
+        doAnswer(invocation -> {
+            throw new IllegalStateException("write result unknown");
+        }).when(objectWriter).put(any(), any(), any());
+
+        // when & then
+        assertThatThrownBy(() -> uploadService.upload("bucket", 71L, content, true))
+            .isInstanceOf(IllegalStateException.class);
+        var row
+            = jdbc
+                .queryForMap(
+                    "SELECT status, uploaded_at, upload_finished_at, failure_code "
+                        + "FROM problem_body_assets WHERE owner_id = ?",
+                    71L
+                );
+        assertThat(row.get("status")).isEqualTo("PENDING");
+        assertThat(row.get("uploaded_at")).isNull();
+        assertThat(row.get("upload_finished_at")).isNull();
+        assertThat(row.get("failure_code")).isEqualTo("UPLOAD_UNCONFIRMED");
     }
 
     @Test
