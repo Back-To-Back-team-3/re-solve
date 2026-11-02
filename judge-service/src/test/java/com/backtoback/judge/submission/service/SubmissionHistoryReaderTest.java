@@ -114,4 +114,15 @@ class SubmissionHistoryReaderTest {
         assertThatThrownBy(() -> history.read(2, 1)).isInstanceOf(JudgeException.class);
         assertThatThrownBy(() -> history.read(1, 99)).isInstanceOf(JudgeException.class);
     }
+
+    @Test
+    @DisplayName("회차 목록은 과거 완료 결과를 현재 진행 회차의 결과로 대체하지 않는다")
+    void preservesPastAttempt() {
+        var response = com.backtoback.judge.submission.dto.SubmissionAttemptsResponse.from(history.read(1, 1));
+        assertThat(response.content()).hasSize(2);
+        assertThat(response.content().getFirst().judgeAttempt()).isEqualTo(2);
+        assertThat(response.content().getFirst().verdict()).isNull();
+        assertThat(response.content().get(1).judgeAttempt()).isEqualTo(1);
+        assertThat(response.content().get(1).verdict()).isEqualTo(JudgeVerdict.AC);
+    }
 }
