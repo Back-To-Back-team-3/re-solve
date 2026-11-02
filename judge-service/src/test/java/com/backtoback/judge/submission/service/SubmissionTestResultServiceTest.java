@@ -15,9 +15,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.client.SubmissionJudgingDataClient;
@@ -91,9 +93,21 @@ class SubmissionTestResultServiceTest {
             .isTrue();
     }
 
-    @Test
-    @DisplayName("공개 테스트만 고정 회차의 원문과 실제 출력을 연결한다")
-    void loadsPublicSource() {
+    /**
+     * 공개 원문 조회 결과와 조회 중단 시 기존 실패 응답을 확인한다.
+     *
+     * @param interrupted 원문 조회가 중단되는지 여부
+     * @throws InterruptedException 테스트 원문 대역 설정 중 중단된 경우
+     */
+    @ParameterizedTest
+    @ValueSource(
+        booleans = {
+            false,
+            true
+        }
+    )
+    @DisplayName("공개 원문을 연결하고 조회 중단 시 인터럽트를 보존한 실패를 반환한다")
+    void loadsPublicSource(boolean interrupted) throws InterruptedException {
         var submission = mock(Submission.class);
         given(submission.getProblemId()).willReturn(10L);
         given(submission.getProblemRevisionId()).willReturn(20L);
@@ -104,7 +118,9 @@ class SubmissionTestResultServiceTest {
         given(test.getCreatedTryCount()).willReturn(1);
         given(test.getTokenStatus()).willReturn(JudgeTestResult.TokenStatus.DONE);
         given(test.getVerdict()).willReturn(JudgeVerdict.AC);
-        given(test.getActualOutput()).willReturn("3");
+        if (!interrupted) {
+            given(test.getActualOutput()).willReturn("3");
+        }
         var job = job();
         given(job.getTryCount()).willReturn(1);
         given(history.read(7, 1))
@@ -124,8 +140,24 @@ class SubmissionTestResultServiceTest {
                     List.of(new SubmissionJudgingDataResponse.TestCase("30", 1, true, asset))
                 )
             );
+        var service = new SubmissionTestResultService(history, dataClient, assets);
+        if (interrupted) {
+            given(assets.read(asset)).willThrow(new InterruptedException());
+            try {
+                assertThatThrownBy(() -> service.read(7, 1, 1))
+                    .isInstanceOfSatisfying(
+                        JudgeException.class,
+                        failure -> assertThat(failure.getErrorCode())
+                            .isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+                    );
+                assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            } finally {
+                Thread.interrupted();
+            }
+            return;
+        }
         given(assets.read(asset)).willReturn(new SubmissionJudgingDataResponse.TestContent(Map.of("a", "1"), "3"));
-        var response = new SubmissionTestResultService(history, dataClient, assets).read(7, 1, 1);
+        var response = service.read(7, 1, 1);
         var node = JsonMapper.builder().build().valueToTree(response).get("content").get(0);
         assertThat(node.get("argumentTexts").get("a").asString()).isEqualTo("1");
         assertThat(node.get("actualReturnText").asString()).isEqualTo("3");

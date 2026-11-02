@@ -33,8 +33,12 @@ public class SubmissionTestResultService {
     /**
      * 소유권과 회차를 확인한 뒤 공개 테스트 원문만 조회한다. 원격 조회 중 DB 잠금을 유지하지 않는다.
      *
+     * @param memberId 조회 회원 ID
+     * @param submissionId 제출 ID
+     * @param judgeAttempt 채점 회차
+     * @return 공개 범위에 맞춘 테스트별 결과
      * @throws JudgeException {@code SUBMISSION_NOT_FOUND}: 본인 일반 제출 또는 회차가 없는 경우;
-     *     {@code COMMON_DEPENDENCY_UNAVAILABLE}: 고정 채점 자료·원문을 조회하거나 검증할 수 없는 경우
+     *     {@code COMMON_DEPENDENCY_UNAVAILABLE}: 고정 채점 자료·원문을 조회하거나 검증할 수 없거나 조회가 중단된 경우
      */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public SubmissionTestResultsResponse read(long memberId, long submissionId, int judgeAttempt) {
@@ -74,8 +78,13 @@ public class SubmissionTestResultService {
             if (fixed == null || !Boolean.TRUE.equals(fixed.isSample()) || fixed.testOrder() != test.getTestOrder()) {
                 throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
             }
-            var source = assets.read(fixed.asset());
-            content.add(SubmissionTestResultsResponse.PublicTest.from(test, verdict, source));
+            try {
+                var source = assets.read(fixed.asset());
+                content.add(SubmissionTestResultsResponse.PublicTest.from(test, verdict, source));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            }
         }
         return SubmissionTestResultsResponse.from(content);
     }
