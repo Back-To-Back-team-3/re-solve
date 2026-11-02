@@ -1,12 +1,14 @@
 package com.backtoback.problem.tag.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.backtoback.problem.tag.domain.Tag;
 
@@ -14,6 +16,16 @@ import jakarta.persistence.LockModeType;
 
 /** 태그를 저장·검색하고, 순번 변경에 필요한 전체 태그의 비관적 락 조회를 제공한다. */
 public interface TagRepository extends JpaRepository<Tag, Long> {
+    /**
+     * 회차 연결이 완료될 때까지 태그 삭제와 경합하지 않도록 공유 잠금을 획득한다.
+     *
+     * @param tagId 잠글 태그 ID
+     * @return 존재하면 잠근 태그
+     */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select t from Tag t where t.id = :tagId")
+    Optional<Tag> findByIdForShare(@Param("tagId") Long tagId);
+
     /**
      * 이름에 검색어가 포함된 태그를 대소문자 구분 없이 조회한다.
      *

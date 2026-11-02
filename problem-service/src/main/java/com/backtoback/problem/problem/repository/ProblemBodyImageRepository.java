@@ -15,4 +15,12 @@ public interface ProblemBodyImageRepository extends JpaRepository<ProblemBodyIma
      * @return 연결된 이미지 목록
      */
     List<ProblemBodyImage> findByBodyAssetId(Long bodyAssetId);
+
+    /**
+     * 본문 파일에 연결된 이미지 목록을 ID 순서로 조회한다.
+     *
+     * @param bodyAssetId 조회할 본문 파일 ID
+     * @return ID 순서로 정렬된 이미지 연결
+     */
+    List<ProblemBodyImage> findByBodyAssetIdOrderByImageIdAsc(Long bodyAssetId);
 }

@@ -202,15 +202,7 @@ class TagApiTest {
     void clearData() {
         when(clock.getZone()).thenReturn(ZoneId.of("Asia/Seoul"));
         when(clock.instant()).thenReturn(Instant.parse("2026-10-13T00:00:00Z"));
-        // 테스트 전용 참조 테이블로 FK 삭제 제약을 검증한다.
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS tag_usage_probe (
-                id BIGINT PRIMARY KEY,
-                tag_id BIGINT NOT NULL,
-                CONSTRAINT fk_problem_revision_tags_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE RESTRICT
-            )
-            """);
-        jdbc.update("DELETE FROM tag_usage_probe");
+        jdbc.update("DELETE FROM problem_revision_tags");
         jdbc.update("DELETE FROM tags");
         jdbc.update("DELETE FROM lock_transaction_probe");
         jdbc.update("DELETE FROM tag_creation_records");
@@ -1541,7 +1533,14 @@ class TagApiTest {
     void referencedTagCannotBeDeletedButCanBeRenamed() throws Exception {
         String id = create("used", "해시", 0);
         String following = create("following", "뒤 태그", 1);
-        jdbc.update("INSERT INTO tag_usage_probe (id, tag_id) VALUES (1, ?)", id);
+        Long revisionId = jdbc.queryForObject("SELECT id FROM problem_revisions ORDER BY id LIMIT 1", Long.class);
+        jdbc
+            .update(
+                "INSERT INTO problem_revision_tags (problem_revision_id, tag_id, created_at) VALUES (?, ?, ?)",
+                revisionId,
+                id,
+                LocalDateTime.of(2026, 10, 13, 9, 0)
+            );
         mvc
             .perform(admin(delete(ADMIN_PATH + "/" + id)))
             .andExpect(status().isConflict())
@@ -1549,8 +1548,10 @@ class TagApiTest {
         assertThat(displayOrder(following)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT version FROM tags WHERE id = ?", Long.class, following)).isZero();
         mvc.perform(admin(patch(ADMIN_PATH + "/" + id)).content("{\"name\":\"이름 변경\"}")).andExpect(status().isOk());
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tag_usage_probe", Integer.class)).isEqualTo(1);
-        jdbc.update("DELETE FROM tag_usage_probe");
+        assertThat(
+            jdbc.queryForObject("SELECT COUNT(*) FROM problem_revision_tags WHERE tag_id = ?", Integer.class, id)
+        ).isEqualTo(1);
+        jdbc.update("DELETE FROM problem_revision_tags WHERE problem_revision_id = ? AND tag_id = ?", revisionId, id);
         mvc.perform(admin(delete(ADMIN_PATH + "/" + id))).andExpect(status().isNoContent());
         assertThat(displayOrder(following)).isZero();
     }
