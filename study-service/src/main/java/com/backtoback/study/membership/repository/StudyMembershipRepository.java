@@ -31,6 +31,8 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
         Pageable pageable
     );
 
+    Page<StudyMembership> findByStudyIdAndStatus(Long studyId, MembershipStatus status, Pageable pageable);
+
     /**
      * PENDING 상태인 경우에만 CANCELED로 전이하고 expires_at을 null로 초기화한다.
      * 0이면 이미 상태가 변경된 것이므로 호출자가 재조회해 STUDY_MEMBERSHIP_NOT_FOUND를 던져야 한다.
