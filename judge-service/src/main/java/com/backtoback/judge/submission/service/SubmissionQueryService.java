@@ -23,6 +23,13 @@ import lombok.RequiredArgsConstructor;
 public class SubmissionQueryService {
     private final SubmissionRepository submissions;
 
+    /**
+     * 본인 일반 제출의 요약 필드만 조회하고 안정적인 정렬로 페이지를 반환한다.
+     *
+     * @param memberId 인증 회원 ID
+     * @param request 검증된 목록 필터와 페이지 조건
+     * @return 원본 코드를 제외한 제출 요약 페이지
+     */
     @Transactional(readOnly = true)
     public PageResponse<SubmissionListResponse> list(long memberId, SubmissionListRequest request) {
         Specification<Submission> filter = (root, query, builder) -> {
@@ -55,7 +62,12 @@ public class SubmissionQueryService {
         };
         var direction = request.sort().endsWith(",asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
         var page = PageRequest.of(request.page(), request.size(), Sort.by(direction, "submittedAt", "id"));
-        return PageResponse.from(submissions.findAll(filter, page).map(SubmissionListResponse::from));
+        return PageResponse
+            .from(
+                submissions
+                    .findBy(filter, query -> query.as(SubmissionSummary.class).page(page))
+                    .map(SubmissionListResponse::from)
+            );
     }
 
     @Transactional(readOnly = true)

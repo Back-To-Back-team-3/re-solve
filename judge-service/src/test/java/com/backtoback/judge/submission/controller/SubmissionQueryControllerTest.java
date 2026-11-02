@@ -45,6 +45,13 @@ class SubmissionQueryControllerTest {
             .andExpect(jsonPath("$.data.sourceCode").value("code"));
     }
 
+    /**
+     * 허용 범위를 벗어난 목록 조건과 시스템 내부 판정 필터를 거절하는지 확인한다.
+     *
+     * @param key 조회 조건 이름
+     * @param value 유효하지 않은 값
+     * @throws Exception MockMvc 요청 실패
+     */
     @ParameterizedTest
     @CsvSource(
         {
@@ -52,7 +59,8 @@ class SubmissionQueryControllerTest {
             "size,0",
             "size,101",
             "sort,sourceCode",
-            "problemId,0"
+            "problemId,0",
+            "verdict,SYSTEM_ERROR"
         }
     )
     @DisplayName("페이지 범위와 허용하지 않는 정렬·식별자를 거절한다")
