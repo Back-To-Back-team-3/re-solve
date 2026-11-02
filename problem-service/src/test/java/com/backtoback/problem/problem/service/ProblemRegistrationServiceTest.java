@@ -24,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.IllegalTransactionStateException;
@@ -58,7 +59,8 @@ import com.backtoback.problem.tag.repository.TagRepository;
     }
 )
 class ProblemRegistrationServiceTest {
-    private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db");
+    private static final MySQLContainer MYSQL
+        = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db").withEnv("MYSQL_ROOT_HOST", "%");
     private static final GenericContainer<?> REDIS
         = new GenericContainer<>("redis:7.4-alpine")
             .withExposedPorts(6379)
@@ -430,11 +432,13 @@ class ProblemRegistrationServiceTest {
                 }));
             try {
                 assertThat(registrationStarted.await(30, TimeUnit.SECONDS)).isTrue();
+                JdbcTemplate observer
+                    = new JdbcTemplate(new DriverManagerDataSource(MYSQL.getJdbcUrl(), "root", MYSQL.getPassword()));
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
                 boolean waiting = false;
                 while (System.nanoTime() < deadline && !registration.isDone()) {
                     Integer count
-                        = jdbc
+                        = observer
                             .queryForObject(
                                 "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
                                     + "JOIN performance_schema.data_locks l "
