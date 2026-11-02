@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.assignment.service.AssignmentEnrollmentService;
 import com.backtoback.study.global.error.StudyErrorCode;
@@ -47,6 +48,7 @@ public class StudyMembershipCommandService {
     private static final String AGGREGATE_TYPE = "study_membership";
     private static final String JOINED_EVENT_TYPE = "StudyMemberJoined";
     private static final String LEFT_EVENT_TYPE = "StudyMemberLeft";
+    private static final String DECIDED_EVENT_TYPE = "StudyApplicationDecided";
     private static final String SCHEMA_VERSION = "v1";
 
     private final MemberReplicaRepository memberReplicaRepository;
@@ -243,6 +245,299 @@ public class StudyMembershipCommandService {
                         null,
                         now
                     )
+            );
+    }
+
+    /**
+     * 가입 신청을 승인한다(PENDING→APPROVED, API 명세서 §5.2.5 승인 4단계).
+     *
+     * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, AUTH_ACCESS_DENIED,
+     *     STUDY_APPLICATION_EXPIRED, STUDY_MEMBERSHIP_STATUS_CONFLICT,
+     *     STUDY_JOIN_LIMIT_EXCEEDED, STUDY_ALREADY_CLOSED, STUDY_FULL
+     */
+    @Transactional
+    public void approve(Long studyId, Long membershipId, Long requestMemberId, String correlationId) {
+        verifyLeaderOrManager(studyId, requestMemberId);
+
+        StudyMembership target
+            = membershipRepository
+                .findById(membershipId)
+                .filter(m -> m.getStudyId().equals(studyId))
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+
+        Study study
+            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+
+        applyApprove(study, target, requestMemberId, correlationId, now);
+    }
+
+    /**
+     * 가입 신청을 거절한다(PENDING→REJECTED, API 명세서 §5.2.5 거절).
+     *
+     * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, AUTH_ACCESS_DENIED,
+     *     STUDY_APPLICATION_EXPIRED, STUDY_MEMBERSHIP_STATUS_CONFLICT
+     */
+    @Transactional
+    public void reject(Long studyId, Long membershipId, Long requestMemberId, String correlationId) {
+        verifyLeaderOrManager(studyId, requestMemberId);
+
+        StudyMembership target
+            = membershipRepository
+                .findById(membershipId)
+                .filter(m -> m.getStudyId().equals(studyId))
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+
+        Study study
+            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+
+        applyReject(study, target, requestMemberId, correlationId, now);
+    }
+
+    /**
+     * 구성원을 강제탈퇴한다(APPROVED→REMOVED, API 명세서 §5.2.5 강제탈퇴).
+     * MANAGER는 LEADER·MANAGER를 대상으로 삼을 수 없다.
+     *
+     * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, AUTH_ACCESS_DENIED, STUDY_NOT_FOUND
+     */
+    @Transactional
+    public void remove(Long studyId, Long membershipId, Long requestMemberId, String reason, String correlationId) {
+        // reason 1~500자 필수 (API 명세서 §5.2.5)
+        if (reason == null || reason.isBlank() || reason.length() > 500) {
+            throw new StudyException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        }
+        StudyMembership requester = verifyLeaderOrManager(studyId, requestMemberId);
+
+        StudyMembership target
+            = membershipRepository
+                .findById(membershipId)
+                .filter(m -> m.getStudyId().equals(studyId))
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+
+        if (requester.getRole() == MembershipRole.MANAGER
+            && (target.getRole() == MembershipRole.LEADER || target.getRole() == MembershipRole.MANAGER)) {
+            throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+
+        applyRemove(studyId, target, requestMemberId, reason, correlationId, now);
+    }
+
+    private StudyMembership verifyLeaderOrManager(Long studyId, Long requestMemberId) {
+        StudyMembership requester
+            = membershipRepository
+                .findByStudyIdAndMemberIdAndStatusIn(studyId, requestMemberId, List.of(MembershipStatus.APPROVED))
+                .orElseThrow(() -> new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED));
+        if (requester.getRole() != MembershipRole.LEADER && requester.getRole() != MembershipRole.MANAGER) {
+            throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        return requester;
+    }
+
+    private void applyApprove(
+        Study study,
+        StudyMembership target,
+        Long requestMemberId,
+        String correlationId,
+        LocalDateTime now
+    ) {
+        // ① membership: PENDING + 만료 안 됨 조건부 UPDATE
+        if (membershipRepository.approveIfPending(target.getId(), now) == 0) {
+            StudyMembership refreshed
+                = membershipRepository
+                    .findById(target.getId())
+                    .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+            if (refreshed.getStatus() != MembershipStatus.PENDING) {
+                throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_STATUS_CONFLICT);
+            }
+            throw new StudyException(StudyErrorCode.STUDY_APPLICATION_EXPIRED);
+        }
+
+        // ② quota
+        quotaRepository.insertQuotaIfAbsent(target.getMemberId());
+        if (quotaRepository.incrementIfBelowLimit(target.getMemberId()) == 0) {
+            throw new StudyException(StudyErrorCode.STUDY_JOIN_LIMIT_EXCEEDED);
+        }
+
+        // ③ study: CLOSED 아니고 정원 남은 경우 증가
+        if (studyRepository.approveIfNotFull(study.getId()) == 0) {
+            Study refreshed
+                = studyRepository
+                    .findById(study.getId())
+                    .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+            if (refreshed.getStatus() == StudyStatus.CLOSED) {
+                throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
+            }
+            throw new StudyException(StudyErrorCode.STUDY_FULL);
+        }
+
+        // ④ 문제집 편입
+        enrollmentService.enroll(study.getId(), target.getMemberId(), target.getId());
+
+        historyRepository
+            .save(
+                StudyMembershipHistory
+                    .record(
+                        target.getId(),
+                        MembershipStatus.PENDING,
+                        MembershipStatus.APPROVED,
+                        target.getRole(),
+                        target.getRole(),
+                        requestMemberId,
+                        null,
+                        now
+                    )
+            );
+
+        String decidedAt = now.atOffset(ZoneOffset.of("+09:00")).format(EVENT_TIME_FORMAT);
+        outboxEventWriter
+            .append(
+                AGGREGATE_TYPE,
+                JOINED_EVENT_TYPE,
+                SCHEMA_VERSION,
+                String.valueOf(target.getId()),
+                correlationId,
+                new StudyMemberJoinedPayload(
+                    String.valueOf(study.getId()),
+                    String.valueOf(target.getId()),
+                    String.valueOf(target.getMemberId()),
+                    target.getRole().name(),
+                    decidedAt
+                )
+            );
+        outboxEventWriter
+            .append(
+                AGGREGATE_TYPE,
+                DECIDED_EVENT_TYPE,
+                SCHEMA_VERSION,
+                String.valueOf(target.getId()),
+                correlationId,
+                new StudyApplicationDecidedPayload(
+                    String.valueOf(study.getId()),
+                    study.getName(),
+                    String.valueOf(target.getId()),
+                    String.valueOf(target.getMemberId()),
+                    MembershipStatus.APPROVED.name(),
+                    decidedAt
+                )
+            );
+    }
+
+    private void applyReject(
+        Study study,
+        StudyMembership target,
+        Long requestMemberId,
+        String correlationId,
+        LocalDateTime now
+    ) {
+        if (membershipRepository.rejectIfPending(target.getId()) == 0) {
+            StudyMembership refreshed
+                = membershipRepository
+                    .findById(target.getId())
+                    .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+            if (refreshed.getStatus() != MembershipStatus.PENDING) {
+                throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_STATUS_CONFLICT);
+            }
+            throw new StudyException(StudyErrorCode.STUDY_APPLICATION_EXPIRED);
+        }
+        historyRepository
+            .save(
+                StudyMembershipHistory
+                    .record(
+                        target.getId(),
+                        MembershipStatus.PENDING,
+                        MembershipStatus.REJECTED,
+                        target.getRole(),
+                        target.getRole(),
+                        requestMemberId,
+                        null,
+                        now
+                    )
+            );
+
+        String decidedAt = now.atOffset(ZoneOffset.of("+09:00")).format(EVENT_TIME_FORMAT);
+        outboxEventWriter
+            .append(
+                AGGREGATE_TYPE,
+                DECIDED_EVENT_TYPE,
+                SCHEMA_VERSION,
+                String.valueOf(target.getId()),
+                correlationId,
+                new StudyApplicationDecidedPayload(
+                    String.valueOf(study.getId()),
+                    study.getName(),
+                    String.valueOf(target.getId()),
+                    String.valueOf(target.getMemberId()),
+                    MembershipStatus.REJECTED.name(),
+                    decidedAt
+                )
+            );
+    }
+
+    private void applyRemove(
+        Long studyId,
+        StudyMembership target,
+        Long requestMemberId,
+        String reason,
+        String correlationId,
+        LocalDateTime now
+    ) {
+        // ① quota 먼저
+        quotaRepository.decrementIfAboveZero(target.getMemberId());
+
+        // ② study: CLOSED이면 생략
+        Study study
+            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        if (study.getStatus() != StudyStatus.CLOSED) {
+            studyRepository.leaveAndAutoReopen(studyId);
+        }
+
+        // ③ membership
+        if (membershipRepository.removeIfApproved(target.getId(), reason, now) == 0) {
+            membershipRepository
+                .findById(target.getId())
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+            throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND);
+        }
+
+        historyRepository
+            .save(
+                StudyMembershipHistory
+                    .record(
+                        target.getId(),
+                        MembershipStatus.APPROVED,
+                        MembershipStatus.REMOVED,
+                        target.getRole(),
+                        target.getRole(),
+                        requestMemberId,
+                        reason,
+                        now
+                    )
+            );
+
+        String leftAt = now.atOffset(ZoneOffset.of("+09:00")).format(EVENT_TIME_FORMAT);
+        outboxEventWriter
+            .append(
+                AGGREGATE_TYPE,
+                LEFT_EVENT_TYPE,
+                SCHEMA_VERSION,
+                String.valueOf(target.getId()),
+                correlationId,
+                new StudyMemberLeftPayload(
+                    String.valueOf(studyId),
+                    String.valueOf(target.getId()),
+                    String.valueOf(target.getMemberId()),
+                    MembershipStatus.REMOVED.name(),
+                    leftAt,
+                    study.getName()
+                )
             );
     }
 
