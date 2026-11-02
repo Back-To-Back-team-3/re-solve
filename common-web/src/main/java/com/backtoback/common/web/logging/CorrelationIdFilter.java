@@ -19,7 +19,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Servlet 요청의 추적 ID를 MDC와 응답 헤더에 연결하고 요청 종료 후 이전 MDC 값을 복원한다.
- * 영문·숫자·점·밑줄·콜론·하이픈으로 구성된 1~128자 ID를 허용하며, 없거나 잘못된 값은 UUID로 대체한다.
+ * 영문·숫자·점·밑줄·콜론·하이픈으로 구성된 1~64자 ID를 허용하며, 없거나 잘못된 값은 UUID로 대체한다.
  * 사용하는 서비스에서 컴포넌트 스캔 또는 명시적 import로 등록해야 한다.
  * 로그 패턴에 %X{correlationId}를 사용하면 요청 처리 중의 로그에 같은 ID를 표시할 수 있다.
  * MDC는 현재 처리 스레드에 적용하며 다른 스레드로 자동 전파하지 않는다.
@@ -38,7 +38,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
     // 현재 스레드의 로그와 나가는 HTTP 요청이 조회할 MDC 키
     public static final String MDC_KEY = "correlationId";
 
-    private static final Pattern VALID_ID = Pattern.compile("[A-Za-z0-9._:-]{1,128}");
+    private static final Pattern VALID_ID = Pattern.compile("[A-Za-z0-9._:-]{1,64}");
     private static final Logger LOG = LoggerFactory.getLogger(CorrelationIdFilter.class);
 
     /**
