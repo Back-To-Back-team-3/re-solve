@@ -38,9 +38,7 @@ public class StudyCommandController {
         @AuthenticationPrincipal GatewayUser user
     ) {
         Long memberId = Long.parseLong(user.userId());
-        // 필터는 최대 128자를 허용하지만 outbox_events.correlation_id는 VARCHAR(64) — 초과분은 잘라낸다
-        String raw = MDC.get(CorrelationIdFilter.MDC_KEY);
-        String correlationId = raw != null && raw.length() > 64 ? raw.substring(0, 64) : raw;
+        String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
         Long studyId = studyCommandService.createStudy(memberId, request, correlationId);
         return ResponseEntity
             .status(HttpStatus.CREATED)
