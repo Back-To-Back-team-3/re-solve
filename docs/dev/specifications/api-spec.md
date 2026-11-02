@@ -7888,7 +7888,7 @@
 
 - **Method / URI:** `POST /api/v1/studies`
 - **인증:** 로그인 필요 (`SUSPENDED` 차단)
-- **대응 테이블:** `studies`, `study_memberships`, `study_member_quotas`, `study_membership_histories`
+- **대응 테이블:** `studies`, `study_memberships`, `study_member_quotas`, `study_membership_histories`, `outbox_events`
 - **설명:** 스터디를 만들고 생성자를 `LEADER`(`APPROVED`)로 등록한다. 생성자의 참여 상한 카운터를 같은 트랜잭션에서 확보한다.
 - **요청 바디:**
     
@@ -7906,7 +7906,9 @@
 - **에러:**
     - `COMMON_INVALID_REQUEST`(400), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403)
 - **동시성/멱등 보장:**
-    - 트랜잭션 순서 = ① `study_member_quotas` 조건부 UPDATE(`active_count < 5`) ② `studies` INSERT(`member_count = 1`) ③ `study_memberships` INSERT(`LEADER`, `APPROVED`) ④ 이력 INSERT. ①이 0행이면 전체 롤백.
+    - 트랜잭션 순서 = ① `study_member_quotas` 조건부 UPDATE(`active_count < 5`) ② `studies` INSERT(`member_count = 1`) ③ `study_memberships` INSERT(`LEADER`, `APPROVED`) ④ 이력 INSERT ⑤ `outbox_events` INSERT. ①이 0행이면 전체 롤백.
+- **발행:**
+    - `StudyMemberJoined` — 스터디 생성 시 LEADER 등록
 
 #### 5.2.2 스터디 가입 신청·즉시 가입
 
@@ -8117,7 +8119,7 @@
       { "title": "10월 1주차 해시", "goal": "해시 집중 풀이", "tagId": "3", "problemIds": ["101", "102", "103"], "isPreSolvedAllowed": true, "startsAt": "2026-10-06T00:00:00+09:00", "deadlineAt": "2026-10-12T23:59:59+09:00" }
     ```
     
-    - `problemIds` 1~20개, 중복 불가. `startsAt` 필수, `deadlineAt` 선택(`startsAt`보다 뒤, 지정 시 기본 시작 + 7일). 과거 `startsAt`이면 다음 스케줄러 회차에 바로 `OPEN`
+    - `problemIds` 1~20개, 중복 불가. `startsAt` 필수, `deadlineAt` 필수(`startsAt`보다 뒤). 과거 `startsAt`이면 다음 스케줄러 회차에 바로 `OPEN`
 - **응답 (201):**
     
     ```json

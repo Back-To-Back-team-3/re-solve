@@ -14,7 +14,11 @@ import lombok.Getter;
 public enum StudyErrorCode implements ErrorCode {
 
     // 탐색 (discovery)
-    STUDY_NOT_FOUND(HttpStatus.NOT_FOUND, "스터디를 찾을 수 없습니다.");
+    STUDY_NOT_FOUND(HttpStatus.NOT_FOUND, "스터디를 찾을 수 없습니다."),
+
+    // 생성·가입 (membership)
+    STUDY_JOIN_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "참여할 수 있는 스터디 수(최대 5개)를 초과했습니다."),
+    MEMBER_SUSPENDED(HttpStatus.FORBIDDEN, "정지된 회원은 스터디를 생성할 수 없습니다.");
 
     private final HttpStatus status;
     private final String message;

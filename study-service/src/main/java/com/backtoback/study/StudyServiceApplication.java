@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
 import org.springframework.context.annotation.Import;
 
+import com.backtoback.common.event.config.OutboxStorageConfiguration;
 import com.backtoback.common.jpa.config.JpaAuditingConfiguration;
 import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
@@ -15,7 +16,8 @@ import com.backtoback.common.web.logging.CorrelationIdFilter;
     {
         GlobalExceptionHandler.class,
         JpaAuditingConfiguration.class,
-        CorrelationIdFilter.class
+        CorrelationIdFilter.class,
+        OutboxStorageConfiguration.class
     }
 )
 public class StudyServiceApplication {
