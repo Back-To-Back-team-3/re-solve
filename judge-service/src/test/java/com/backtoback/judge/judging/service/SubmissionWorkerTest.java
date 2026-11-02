@@ -67,9 +67,13 @@ class SubmissionWorkerTest {
     private final SubmissionLease lease
         = new SubmissionLease(1, 1, 1, 1, "lease", LocalDateTime.of(2026, 10, 31, 9, 10));
 
-    /** 실행기와 공통 선점·자료 조회 조건을 준비한다. */
+    /**
+     * 실행기와 공통 선점·자료 조회 조건을 준비한다.
+     *
+     * @throws InterruptedException 테스트 자료 대역 설정 중 중단된 경우
+     */
     @BeforeEach
-    void prepare() {
+    void prepare() throws InterruptedException {
         worker
             = new SubmissionWorker(
                 store,
@@ -93,8 +97,18 @@ class SubmissionWorkerTest {
                 new ProblemValidationDataResponse.Limits(1000, 6000, 1024, 64),
                 List
                     .of(
-                        new SubmissionJudgingDataResponse.TestCase("1", 1, true, null),
-                        new SubmissionJudgingDataResponse.TestCase("2", 2, false, null)
+                        new SubmissionJudgingDataResponse.TestCase(
+                            "1",
+                            1,
+                            true,
+                            new SubmissionJudgingDataResponse.Asset("first", "v1", "a".repeat(64))
+                        ),
+                        new SubmissionJudgingDataResponse.TestCase(
+                            "2",
+                            2,
+                            false,
+                            new SubmissionJudgingDataResponse.Asset("second", "v1", "b".repeat(64))
+                        )
                     )
             );
         given(store.claim()).willReturn(Optional.of(lease));
@@ -103,13 +117,17 @@ class SubmissionWorkerTest {
         given(dataClient.find(1, 1)).willReturn(data);
         given(store.prepare(lease)).willReturn(true);
         given(generator.language()).willReturn(JudgeLanguage.JAVA);
-        given(assets.read(null)).willReturn(new SubmissionJudgingDataResponse.TestContent(Map.of(), "1"));
+        given(assets.read(any())).willReturn(new SubmissionJudgingDataResponse.TestContent(Map.of(), "1"));
     }
 
-    /** 코드 오답 이후에도 나머지 테스트를 실행하고 종결하는지 확인한다. */
+    /**
+     * 코드 오답 이후에도 나머지 테스트의 고정 자료로 실행하고 종결하는지 확인한다.
+     *
+     * @throws InterruptedException 테스트 자료 대역 검증 중 중단된 경우
+     */
     @Test
     @DisplayName("첫 테스트가 WA여도 전체 테스트를 실행한 뒤 종결한다")
-    void executesAll() {
+    void executesAll() throws InterruptedException {
         given(generator.generate(any(), eq("code"), any()))
             .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
 
@@ -126,6 +144,8 @@ class SubmissionWorkerTest {
                 new JudgeTestResult(State.COMPLETED, JudgeVerdict.AC, 1, null, "1", null, null)
             );
         assertThat(worker.runOnce()).isTrue();
+        verify(assets).read(data.cases().get(0).asset());
+        verify(assets).read(data.cases().get(1).asset());
         verify(client, times(2)).create(any());
         verify(store).complete(lease, data, null);
     }
@@ -153,5 +173,24 @@ class SubmissionWorkerTest {
         verify(client, times(1)).create(any());
         verify(store, never()).complete(any(), any(), any());
         verify(store, never()).fail(any(), any());
+    }
+
+    /**
+     * 중단을 자료 장애로 기록하거나 외부 실행으로 이어가지 않는지 확인한다.
+     *
+     * @throws InterruptedException 테스트 자료 대역 설정 중 중단된 경우
+     */
+    @Test
+    @DisplayName("자료 읽기 중 인터럽트는 실패 기록 없이 실행을 중단한다")
+    void stopsOnInterrupt() throws InterruptedException {
+        given(assets.read(any())).willThrow(new InterruptedException());
+        try {
+            assertThat(worker.runOnce()).isTrue();
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            verify(store, never()).fail(any(), any());
+            verify(client, never()).create(any());
+        } finally {
+            Thread.interrupted();
+        }
     }
 }

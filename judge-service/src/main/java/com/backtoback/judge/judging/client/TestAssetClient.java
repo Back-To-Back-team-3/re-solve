@@ -12,6 +12,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -67,9 +68,10 @@ public class TestAssetClient {
      *
      * @param asset 고정 객체 버전과 체크섬
      * @return 검증한 테스트 원문
-     * @throws JudgeException {@code COMMON_DEPENDENCY_UNAVAILABLE}: 읽기 시간 초과·중단·조회·검증 실패
+     * @throws JudgeException {@code COMMON_DEPENDENCY_UNAVAILABLE}: 읽기 시간 초과·조회·검증 실패
+     * @throws InterruptedException 호출 스레드가 중단된 경우
      */
-    public TestContent read(Asset asset) {
+    public TestContent read(Asset asset) throws InterruptedException {
         asset.validate();
         var stopped = new AtomicBoolean();
         var stream = new AtomicReference<ResponseInputStream<GetObjectResponse>>();
@@ -94,12 +96,22 @@ public class TestAssetClient {
                 response.abort();
             }
         });
-        Thread.startVirtualThread(task);
+        var context = MDC.getCopyOfContextMap();
+        Thread.startVirtualThread(() -> {
+            try {
+                if (context != null) {
+                    MDC.setContextMap(context);
+                }
+                task.run();
+            } finally {
+                MDC.clear();
+            }
+        });
         try {
             return task.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
-            throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw failure;
         } catch (ExecutionException | TimeoutException failure) {
             throw new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         } finally {

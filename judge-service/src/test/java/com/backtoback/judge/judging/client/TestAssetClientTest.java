@@ -62,7 +62,8 @@ class TestAssetClientTest {
     @Test
     @DisplayName("체크섬이 다른 원문은 실행 자료로 사용하지 않는다")
     void rejectsChangedContent() {
-        given(s3.getObject(any(GetObjectRequest.class))).willReturn(stream("{}".getBytes(StandardCharsets.UTF_8)));
+        given(s3.getObject(any(GetObjectRequest.class)))
+            .willReturn(stream("{\"argumentTexts\":{},\"expectedReturnText\":\"1\"}".getBytes(StandardCharsets.UTF_8)));
         var client = new TestAssetClient(s3, new TestDataProperties("bucket"), JsonMapper.builder().build());
         assertThatThrownBy(() -> client.read(new Asset("key", "v1", "a".repeat(64))))
             .isInstanceOf(JudgeException.class);
@@ -110,7 +111,9 @@ class TestAssetClientTest {
             assertThatThrownBy(() -> client.read(new Asset("key", "v1", "a".repeat(64))))
                 .isInstanceOf(JudgeException.class);
             assertThat(started.getCount()).isZero();
-            assertThat(Duration.ofNanos(System.nanoTime() - before)).isLessThan(Duration.ofSeconds(4));
+            assertThat(Duration.ofNanos(System.nanoTime() - before))
+                .isGreaterThanOrEqualTo(Duration.ofSeconds(1))
+                .isLessThan(Duration.ofSeconds(4));
         } finally {
             release.countDown();
             server.stop(0);
