@@ -510,6 +510,10 @@ flowchart LR
 
 #### J1 `SubmissionJudged` v1 (`PRACTICE` 전용)
 
+- **문제 정보 출처:** `problemTitle`·`problemDifficulty`·`problemTags`·`problemTagIds`는 실행기가 API §2.6.2에서 조회한 고정 회차의 같은 응답을 사용한다. 제목·난이도·태그 소속은 요청 회차 기준이며 태그 이름은 조회 시점 값이다. 두 태그 배열은 같은 인덱스끼리 대응한다. 정상 결과와 함께 Outbox에 저장한 이후에는 Relay 재발행을 위해 Problem을 다시 조회하거나 payload를 변경하지 않는다.
+
+- **판정 기준:** 결과 이벤트의 제출 전체 `verdict`는 정책 및 상태 §3.3을 따른다(CE 우선, 그 외 고정 테스트 순서의 첫 비AC, 모두 AC이면 AC). J2·J3에도 같은 기준을 적용하며, 미완료·시스템 실패를 코드 판정으로 발행하지 않는다.
+
 - **발행:** 실행기가 결과를 `submissions`에 반영하는 트랜잭션(`job.status = RUNNING AND lease_token = :token` 조건 성공 시). aggregate = `submissionId`. 판정과 무관하게 정상 종결이면 발행한다. 문맥 필드는 두지 않는다(이벤트명이 문맥).
 
 | 필드 | 타입 | 필수 | 설명 |

@@ -1478,6 +1478,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 **불변식**
 
 - `status = COMPLETED` ⇔ `verdict IS NOT NULL`
+- 제출 전체 `verdict`는 정책 및 상태 §3.3의 대표 판정 규칙을 따른다. 테스트별 `judge_test_results.verdict`는 별도로 보존하며 대표 판정으로 덮어쓰지 않는다.
 - `idempotency_key` 유효기간은 `created_at` 기준 24시간이다. 만료 키를 NULL로 해제해도 제출 행·코드·요청 해시·결과는 보존한다. 키 해제·재접수의 처리 순서와 트랜잭션 규칙은 API 명세서 §3.1.2를 따른다.
 - 확정한 `runtime_id`는 변경하거나 NULL로 초기화하지 않는다.
 - `runtime_id`가 참조하는 실행 환경의 `language`는 제출의 `language`와 일치해야 한다.
