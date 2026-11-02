@@ -7,9 +7,14 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
 import java.io.ByteArrayInputStream;
+import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.HexFormat;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,9 +26,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.config.TestDataProperties;
 import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse.Asset;
+import com.sun.net.httpserver.HttpServer;
 
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.http.AbortableInputStream;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
@@ -59,6 +68,61 @@ class TestAssetClientTest {
             .isInstanceOf(JudgeException.class);
     }
 
+    /** 실제 HTTP 본문이 멈춰도 제한 시간 안에 호출자가 실패를 받고 연결을 정리하는지 확인한다. */
+    @Test
+    @DisplayName("S3 본문 읽기가 멈추면 전체 읽기 기한 안에 실패한다")
+    void timesOutWhileReadingBody() throws Exception {
+        var release = new CountDownLatch(1);
+        var started = new CountDownLatch(1);
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            try {
+                exchange.sendResponseHeaders(200, 10000);
+                exchange.getResponseBody().write('{');
+                exchange.getResponseBody().flush();
+                started.countDown();
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        try (
+            var actual
+                = S3Client
+                    .builder()
+                    .region(Region.US_EAST_1)
+                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                    .endpointOverride(URI.create("http://127.0.0.1:" + server.getAddress().getPort()))
+                    .forcePathStyle(true)
+                    .build()
+        ) {
+            var client
+                = new TestAssetClient(
+                    actual,
+                    new TestDataProperties("bucket"),
+                    JsonMapper.builder().build(),
+                    Duration.ofSeconds(1)
+                );
+            long before = System.nanoTime();
+            assertThatThrownBy(() -> client.read(new Asset("key", "v1", "a".repeat(64))))
+                .isInstanceOf(JudgeException.class);
+            assertThat(started.getCount()).isZero();
+            assertThat(Duration.ofNanos(System.nanoTime() - before)).isLessThan(Duration.ofSeconds(4));
+        } finally {
+            release.countDown();
+            server.stop(0);
+        }
+    }
+
+    /**
+     * 테스트 원문을 담은 응답 스트림을 만든다.
+     *
+     * @param bytes 응답 본문
+     * @return S3 응답 스트림
+     */
     private ResponseInputStream<GetObjectResponse> stream(byte[] bytes) {
         return new ResponseInputStream<>(
             GetObjectResponse.builder().build(),
