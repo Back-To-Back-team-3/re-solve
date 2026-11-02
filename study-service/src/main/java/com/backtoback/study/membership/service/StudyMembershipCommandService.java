@@ -307,6 +307,10 @@ public class StudyMembershipCommandService {
      */
     @Transactional
     public void remove(Long studyId, Long membershipId, Long requestMemberId, String reason, String correlationId) {
+        // reason 1~500자 필수 (API 명세서 §5.2.5)
+        if (reason == null || reason.isBlank() || reason.length() > 500) {
+            throw new StudyException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        }
         StudyMembership requester = verifyLeaderOrManager(studyId, requestMemberId);
 
         StudyMembership target
