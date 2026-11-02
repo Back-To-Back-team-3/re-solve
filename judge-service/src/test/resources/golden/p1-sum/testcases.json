@@ -1,0 +1,6 @@
+[
+  {"label": "양수 두 개", "arguments": {"a": "1", "b": "2"}, "expected": "3"},
+  {"label": "음수와 양수", "arguments": {"a": "-5", "b": "3"}, "expected": "-2"},
+  {"label": "둘 다 0", "arguments": {"a": "0", "b": "0"}, "expected": "0"},
+  {"label": "INT32 경계", "arguments": {"a": "2147483647", "b": "-2147483647"}, "expected": "0"}
+]

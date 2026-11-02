@@ -376,7 +376,7 @@ sequenceDiagram
     participant DB as member DB
     U->>M: DELETE /api/v1/members/me
     par 차단 조건 확인 (2초, 실패 시 503)
-        M->>C: GET /internal/v1/participations/active?memberId
+        M->>C: GET /internal/v1/contest/members/{memberId}/active-participations
     and
         M->>S: GET /internal/v1/studies/memberships?role=LEADER&activeOnly=true
     end
@@ -778,9 +778,9 @@ sequenceDiagram
     participant J as judge-service
     participant DB as judge DB
     participant CON as 소비자 (contest·member·study…)
-    O->>C: 시험 FAILED 제출 재처리 (4.5.1)
+    O->>C: 시험 FAILED 제출 재처리 (API §4.6.3)
     C->>C: 권한·FINALIZED 전 확인, 관리자 작업 PENDING(operationId)
-    C->>J: POST /internal/v1/submissions/{id}/reprocesses {operationId, expectedJudgeAttempt}
+    C->>J: POST /internal/v1/judge/submissions/{submissionId}/retry {operationId, expectedJudgeAttempt}
     alt 같은 operationId 재요청
         J-->>C: 기존 결과 반환
     else EXAM·FAILED·attempt 일치
@@ -1871,7 +1871,7 @@ sequenceDiagram
     U->>C: 마감 직전 직접 제출 (접수 시각 <= personal_ends_at)
     C->>C: exam_submissions(ACCEPTED, MANUAL) + Outbox
     Note over C: ends_at 경과 → ExamLifecycleScheduler CLOSED + ExamClosed
-    C->>C: +3초 ExamAutoSubmissionScheduler<br/>최신 Draft seq > 마지막 접수 seq 이면 AUTO (received_at = ends_at)
+    C->>C: 개인 마감+3초 ExamAutoSubmissionScheduler<br/>전체 언어 최대 seq의 비어 있지 않은 Draft가 마지막 접수 seq보다 크면 AUTO<br/>(received_at = personal_ends_at)
     R->>Q: ExamSubmissionRequested (MANUAL·AUTO)
     R->>C: ACCEPTED → REQUESTED
     R->>SNS: ExamClosed
@@ -1887,7 +1887,7 @@ sequenceDiagram
         SNS->>N: SUBMISSION_FAILED 알림
         Note over C,J: 운영자 재처리(3.6) 또는 0점 확정 후 진행
     end
-    C->>C: ExamResultFinalizationScheduler (10초)<br/>미종결 0건 → 점수·순위 재계산 · FINALIZED · 스냅샷
+    C->>C: ExamResultFinalizationScheduler (10초)<br/>CLOSED·활성 참가 종결·자동 제출 완료<br/>미종결 접수·미해결 FAILED·미확인 관리자 작업 0건<br/>→ 점수·순위 재계산 · FINALIZED · 스냅샷
     R->>SNS: ExamFinalized (resultRevision)
     SNS->>N: EXAM_FINALIZED → 참가자 SSE
 ```
