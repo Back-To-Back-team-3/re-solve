@@ -311,7 +311,7 @@ class ProblemRegistrationServiceTest {
     /** 회차 연결 트랜잭션이 끝날 때까지 참조 태그를 삭제할 수 없는지 확인한다. */
     @Test
     @DisplayName("회차 저장 중인 태그의 삭제는 등록 트랜잭션이 끝날 때까지 대기한다")
-    void holdsTagLockUntilRegistrationCommits() throws Exception {
+    void holdsTagLockUntilRegistrationTransactionEnds() throws Exception {
         // given
         Long tagId = tags.findAll().getFirst().getId();
         Assets assets = createUploadedAssets();
