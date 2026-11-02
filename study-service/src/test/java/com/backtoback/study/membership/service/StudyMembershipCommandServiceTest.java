@@ -135,6 +135,8 @@ class StudyMembershipCommandServiceTest {
         assertThat(response.status()).isEqualTo(MembershipStatus.APPROVED.name());
         assertThat(response.expiresAt()).isNull();
         verify(enrollmentService).enroll(eq(STUDY_ID), eq(MEMBER_ID), eq(30L));
+        verify(outboxEventWriter)
+            .append(eq("study_membership"), eq("StudyMemberJoined"), eq("v1"), eq("30"), eq(CORR_ID), any());
     }
 
     @Test
@@ -269,7 +271,7 @@ class StudyMembershipCommandServiceTest {
 
         service.cancelOrLeave(STUDY_ID, MEMBER_ID, CORR_ID);
 
-        verify(outboxEventWriter).append(any(), any(), any(), any(), any(), any());
+        verify(outboxEventWriter).append(any(), eq("StudyMemberLeft"), any(), eq("50"), eq(CORR_ID), any());
     }
 
     @Test

@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -104,7 +105,11 @@ public class StudyMembershipCommandService {
         StudyMembership membership
             = StudyMembership
                 .apply(study.getId(), memberId, MembershipRole.MEMBER, MembershipStatus.PENDING, now, expiresAt, null);
-        membershipRepository.save(membership);
+        try {
+            membershipRepository.save(membership);
+        } catch (DataIntegrityViolationException e) {
+            throw new StudyException(StudyErrorCode.STUDY_ALREADY_APPLIED);
+        }
         historyRepository
             .save(
                 StudyMembershipHistory
@@ -145,7 +150,11 @@ public class StudyMembershipCommandService {
         StudyMembership membership
             = StudyMembership
                 .apply(study.getId(), memberId, MembershipRole.MEMBER, MembershipStatus.APPROVED, now, null, now);
-        membershipRepository.save(membership);
+        try {
+            membershipRepository.save(membership);
+        } catch (DataIntegrityViolationException e) {
+            throw new StudyException(StudyErrorCode.STUDY_ALREADY_APPLIED);
+        }
         historyRepository
             .save(
                 StudyMembershipHistory
