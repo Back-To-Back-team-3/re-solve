@@ -27,6 +27,10 @@ spring:
         static: ${AWS_REGION:ap-northeast-2}
   mvc:
     log-request-details: false
+  servlet:
+    multipart:
+      max-file-size: 5242880B
+      max-request-size: -1
 
 management:
   endpoints:
@@ -48,6 +52,8 @@ logging:
     org.hibernate.orm.jdbc.bind: INFO
 
 problem:
+  image-storage:
+    bucket: ${PROBLEM_S3_BUCKET:}
   tag-idempotency:
     cleanup:
       enabled: true

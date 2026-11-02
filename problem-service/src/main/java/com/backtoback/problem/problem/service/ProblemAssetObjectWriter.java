@@ -22,11 +22,17 @@ public class ProblemAssetObjectWriter {
      * @return S3가 반환한 객체 버전. 버전이 없는 버킷에서는 null
      */
     public String put(String bucket, String key, ProblemAssetContent content) {
+        return put(bucket, key, content, null);
+    }
+
+    /** 이미지의 실제 MIME을 객체 메타데이터에 함께 기록한다. */
+    public String put(String bucket, String key, ProblemAssetContent content, String contentType) {
         var request
             = PutObjectRequest
                 .builder()
                 .bucket(bucket)
                 .key(key)
+                .contentType(contentType)
                 .ifNoneMatch("*")
                 .overrideConfiguration(
                     config -> config

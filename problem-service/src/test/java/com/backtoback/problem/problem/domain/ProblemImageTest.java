@@ -12,6 +12,47 @@ import org.springframework.test.util.ReflectionTestUtils;
 class ProblemImageTest {
 
     @Test
+    @DisplayName("만료된 멱등키를 해제해도 저장된 이미지와 최초 응답은 유지한다")
+    void releaseExpiredKeyPreservesUpload() {
+        LocalDateTime start = LocalDateTime.of(2026, 11, 1, 10, 0);
+        ProblemImage image = ProblemImage.beginUpload(1L, "key", "a".repeat(64), "image/png", 10, "Key", start);
+        image.completeUpload(start.plusHours(24), start.plusMinutes(1), "version", "{\"success\":true}");
+
+        assertThatThrownBy(() -> image.releaseExpiredKey(start.plusHours(24).minusNanos(1)))
+            .isInstanceOf(IllegalStateException.class);
+        image.releaseExpiredKey(start.plusHours(24));
+        assertThat(image.getIdempotencyKey()).isNull();
+        assertThat(image.getUploadedAt()).isEqualTo(start.plusMinutes(1));
+        assertThat(image.getObjectVersion()).isEqualTo("version");
+        assertThat(image.getResponseStatus()).isEqualTo(201);
+    }
+
+    @Test
+    @DisplayName("결과 불명인 업로드는 종료와 최초 응답을 기록하지 않는다")
+    void unknownUploadRemainsUnfinished() {
+        LocalDateTime start = LocalDateTime.of(2026, 11, 1, 10, 0);
+        ProblemImage image = ProblemImage.beginUpload(1L, "key", "a".repeat(64), "image/png", 10, "key", start);
+        image.recordUnknownUpload(start.plusHours(24));
+        assertThat(image.getUploadFinishedAt()).isNull();
+        assertThat(image.getResponseStatus()).isNull();
+        assertThat(image.getFailureCode()).isEqualTo("UPLOAD_UNCONFIRMED");
+    }
+
+    @Test
+    @DisplayName("만료 전 업로드만 보호 기간을 갱신하고 이전 만료값으로 완료하지 않는다")
+    void renewalRequiresCurrentUnexpiredLease() {
+        LocalDateTime start = LocalDateTime.of(2026, 11, 1, 10, 0);
+        ProblemImage image = ProblemImage.beginUpload(1L, "key", "a".repeat(64), "image/png", 10, "key", start);
+        LocalDateTime expiry = start.plusHours(24);
+        image.renewUpload(expiry, start.plusHours(12));
+        assertThat(image.getUploadExpiresAt()).isEqualTo(start.plusHours(36));
+        assertThatThrownBy(() -> image.completeUpload(expiry, start.plusHours(13), null, "{}"))
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> image.renewUpload(start.plusHours(36), start.plusHours(36)))
+            .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     @DisplayName("이미지를 생성하면 연결 상태는 PENDING이고 문제 연결·업로드 결과·멱등 응답은 비어 있다")
     void createInitialState() {
         LocalDateTime uploadExpiresAt = LocalDateTime.of(2026, 10, 30, 10, 0);

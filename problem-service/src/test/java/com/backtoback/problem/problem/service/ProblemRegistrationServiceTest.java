@@ -22,6 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -66,6 +67,8 @@ class ProblemRegistrationServiceTest {
     @Autowired
     private ProblemRegistrationService service;
     @Autowired
+    private ProblemImageUploadTracking imageUploadTracking;
+    @Autowired
     private ProblemBodyAssetRepository bodyAssets;
     @Autowired
     private ProblemImageRepository images;
@@ -101,6 +104,52 @@ class ProblemRegistrationServiceTest {
         registry.add("spring.data.redis.host", REDIS::getHost);
         registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
         registry.add("spring.data.redis.password", () -> "test-password");
+    }
+
+    @Test
+    @DisplayName("같은 관리자와 멱등키의 동시 접수는 하나의 추적 행만 생성한다")
+    void concurrentImageReceiptsCreateOneRow() throws Exception {
+        String key = "image-race-" + UUID.randomUUID();
+        ProblemAssetContent content
+            = ProblemAssetContent
+                .fromBytes(
+                    new byte[] {
+                        1,
+                        2,
+                        3
+                    }
+                );
+        CountDownLatch start = new CountDownLatch(1);
+        Callable<String> receive = () -> {
+            start.await(30, TimeUnit.SECONDS);
+            try {
+                try {
+                    imageUploadTracking.start(1L, key, content, "image/png");
+                    return "created";
+                } catch (DataIntegrityViolationException exception) {
+                    imageUploadTracking.start(1L, key, content, "image/png");
+                    return "created";
+                }
+            } catch (ProblemException exception) {
+                return exception.getErrorCode().getCode();
+            }
+        };
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<String> first = executor.submit(receive);
+            Future<String> second = executor.submit(receive);
+            start.countDown();
+            assertThat(List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS)))
+                .containsExactlyInAnyOrder("created", "PROBLEM_IMAGE_UPLOAD_IN_PROGRESS");
+        }
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM problem_images WHERE owner_id = ? AND idempotency_key = ?",
+                    Integer.class,
+                    1L,
+                    key
+                )
+        ).isEqualTo(1);
     }
 
     @Test
@@ -346,6 +395,62 @@ class ProblemRegistrationServiceTest {
             });
             deletion.get().get(30, TimeUnit.SECONDS);
         }
+    }
+
+    @Test
+    @DisplayName("삭제 선점이 먼저 커밋되면 대기한 등록은 이미지를 연결하지 않는다")
+    void rejectsImageWhenDeletionClaimsFirst() throws Exception {
+        Assets assets = createUploadedAssets();
+        Long tagId = tags.findAll().getFirst().getId();
+        String key = "image-claim-" + UUID.randomUUID();
+        CountDownLatch claimed = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<?> deletion
+                = executor.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    jdbc.update("UPDATE problem_images SET status = 'DELETING' WHERE id = ?", assets.imageId());
+                    claimed.countDown();
+                    try {
+                        if (!release.await(30, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("삭제 선점 대기 시간 초과");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(exception);
+                    }
+                }));
+            assertThat(claimed.await(30, TimeUnit.SECONDS)).isTrue();
+            Future<?> registration
+                = executor
+                    .submit(
+                        () -> new TransactionTemplate(transactionManager)
+                            .execute(
+                                status -> service
+                                    .save(command(null, null, assets.bodyId(), assets.imageId(), tagId, key, "a"))
+                            )
+                    );
+            try {
+                assertThatThrownBy(() -> registration.get(500, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            } finally {
+                release.countDown();
+            }
+            deletion.get(30, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> registration.get(30, TimeUnit.SECONDS))
+                .hasCauseInstanceOf(ProblemException.class)
+                .satisfies(
+                    exception -> assertThat(((ProblemException)exception.getCause()).getErrorCode())
+                        .isEqualTo(ProblemErrorCode.PROBLEM_IMAGE_INVALID)
+                );
+        }
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM problem_body_images WHERE image_id = ?",
+                    Integer.class,
+                    assets.imageId()
+                )
+        ).isZero();
     }
 
     private Callable<String> revisionWrite(

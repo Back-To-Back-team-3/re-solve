@@ -176,6 +176,80 @@ public class ProblemImage extends BaseTimeEntity {
         return new ProblemImage(ownerId, objectKey, objectVersion, sha256, contentType, sizeBytes, uploadExpiresAt);
     }
 
+    /** 멱등 접수와 업로드 보호를 같은 시작 시각으로 기록한다(API 명세서 2.4.1). */
+    public static ProblemImage beginUpload(
+        Long ownerId,
+        String objectKey,
+        String sha256,
+        String contentType,
+        long sizeBytes,
+        String idempotencyKey,
+        LocalDateTime startedAt
+    ) {
+        ProblemImage image = create(ownerId, objectKey, null, sha256, contentType, sizeBytes, startedAt.plusHours(24));
+        image.idempotencyKey = idempotencyKey;
+        image.idempotencyExpiresAt = startedAt.plusHours(24);
+        return image;
+    }
+
+    /** 만료된 키만 해제하며 파일과 최초 응답은 유지한다(API 명세서 2.4.1). */
+    public void releaseExpiredKey(LocalDateTime now) {
+        if (idempotencyKey == null || idempotencyExpiresAt == null || now.isBefore(idempotencyExpiresAt)) {
+            throw new IllegalStateException("유효한 멱등키는 해제할 수 없습니다.");
+        }
+        idempotencyKey = null;
+        idempotencyExpiresAt = null;
+    }
+
+    /** 파일 잠금 아래 진행 중인 업로드의 보호 기간을 갱신한다(정책 및 상태 §4). */
+    public void renewUpload(LocalDateTime expectedExpiry, LocalDateTime now) {
+        requireActiveUpload(expectedExpiry);
+        if (now == null || !now.isBefore(uploadExpiresAt) || now.plusHours(24).isBefore(uploadExpiresAt)) {
+            throw new IllegalStateException("업로드 보호 기간을 갱신할 수 없습니다.");
+        }
+        uploadExpiresAt = now.plusHours(24);
+    }
+
+    /** 저장과 쓰기 종료를 확인한 뒤 최초 응답을 함께 기록한다(ERD 4.2.3, API 명세서 2.4.1). */
+    public void completeUpload(LocalDateTime expectedExpiry, LocalDateTime now, String version, String response) {
+        requireActiveUpload(expectedExpiry);
+        if (now == null || !now.isBefore(uploadExpiresAt) || response == null) {
+            throw new IllegalStateException("업로드 완료를 기록할 수 없습니다.");
+        }
+        objectVersion = version;
+        uploadedAt = now;
+        uploadFinishedAt = now;
+        failureCode = null;
+        responseStatus = 201;
+        responseJson = response;
+    }
+
+    /** 결과 불명은 종료 시각과 종결 응답을 기록하지 않는다(정책 및 상태 §4). */
+    public void recordUnknownUpload(LocalDateTime expectedExpiry) {
+        requireActiveUpload(expectedExpiry);
+        failureCode = "UPLOAD_UNCONFIRMED";
+    }
+
+    /** 쓰기 종료가 확인된 실패만 최초 응답과 함께 보관한다(ERD 4.2.3). */
+    public void failFinishedUpload(LocalDateTime expectedExpiry, LocalDateTime now, String code, String response) {
+        requireActiveUpload(expectedExpiry);
+        if (now == null || code == null || code.isBlank() || code.length() > 100 || response == null) {
+            throw new IllegalArgumentException("업로드 실패 정보가 올바르지 않습니다.");
+        }
+        uploadFinishedAt = now;
+        failureCode = code;
+        responseStatus = 503;
+        responseJson = response;
+        status = ProblemAssetStatus.DISCARDED;
+    }
+
+    private void requireActiveUpload(LocalDateTime expectedExpiry) {
+        if (status != ProblemAssetStatus.PENDING || uploadFinishedAt != null || expectedExpiry == null
+            || !expectedExpiry.equals(uploadExpiresAt)) {
+            throw new IllegalStateException("업로드 상태 또는 보호 만료 시각이 변경되었습니다.");
+        }
+    }
+
     /**
      * 업로드가 완료된 이미지를 문제에 연결한다. 같은 문제에서 이미 연결한 이미지는 새 본문에서도 재사용할 수 있다
      * (ERD 4.2.3).
