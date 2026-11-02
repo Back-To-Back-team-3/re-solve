@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.io.IOException;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -20,6 +21,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+
+import com.backtoback.common.event.dto.EventMetadata;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -85,6 +88,40 @@ class CorrelationIdTest {
             assertThat(event.getLevel()).isEqualTo(Level.INFO);
             assertThat(event.getFormattedMessage()).contains("요청 처리 종료", "method=GET", "status=204");
         });
+    }
+
+    /**
+     * 길이 경계에서 선택한 ID가 응답과 이벤트 메타데이터까지 일치하는지 확인한다.
+     *
+     * @param length 수신할 추적 ID의 길이
+     * @throws Exception 필터 체인의 요청 처리 또는 UUID 변환에 실패한 경우
+     */
+    @ParameterizedTest
+    @ValueSource(
+        ints = {
+            64,
+            65
+        }
+    )
+    @DisplayName("길이 경계의 추적 ID를 유지하거나 UUID로 대체하고 이벤트 메타데이터에 연결한다")
+    void connectsLengthBoundedIdToEventMetadata(int length) throws Exception {
+        String received = "a".repeat(length);
+        var response = new MockHttpServletResponse();
+
+        filter.doFilter(request(received), response, (servletRequest, servletResponse) -> {
+            String id = MDC.get(CorrelationIdFilter.MDC_KEY);
+            assertThat(response.getHeader(CorrelationIdFilter.HEADER)).isEqualTo(id);
+            if (length == 64) {
+                assertThat(id).isEqualTo(received);
+            } else {
+                assertThat(id).isNotEqualTo(received);
+                assertThat(UUID.fromString(id).toString()).isEqualTo(id);
+            }
+            var metadata = new EventMetadata(UUID.randomUUID(), "TestEvent", "v1", OffsetDateTime.now(), "1", id);
+            assertThat(metadata.correlationId()).isEqualTo(id);
+        });
+
+        assertThat(MDC.get(CorrelationIdFilter.MDC_KEY)).isNull();
     }
 
     /**
