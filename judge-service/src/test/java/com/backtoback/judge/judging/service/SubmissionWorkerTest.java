@@ -21,6 +21,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -193,4 +195,58 @@ class SubmissionWorkerTest {
             Thread.interrupted();
         }
     }
+
+    /**
+     * 확정 거부만 재시도 처리로 넘기는지 확인한다.
+     *
+     * @param status 확정 거부 HTTP 상태
+     */
+    @ParameterizedTest
+    @ValueSource(
+        ints = {
+            400,
+            401,
+            403,
+            422,
+            429
+        }
+    )
+    @DisplayName("Judge0의 확정 4xx 거부는 현재 요청의 실패 처리로 넘긴다")
+    void retriesRejectedCreate(int status) {
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        given(store.beginCreate(eq(lease), anyInt())).willReturn(true);
+        given(client.create(any())).willThrow(new JudgeException(JudgeErrorCode.JUDGE0_RESPONSE_FAILED, status));
+        assertThat(worker.runOnce()).isTrue();
+        verify(store).rejectCreate(lease, 1);
+        verify(client, times(1)).create(any());
+        verify(store, never()).saveToken(any(), anyInt(), any());
+    }
+
+    /**
+     * 서버 오류와 요청 시간 초과를 확정 거부로 해석하지 않는지 확인한다.
+     *
+     * @param status 생성 여부가 불명확한 HTTP 상태
+     */
+    @ParameterizedTest
+    @ValueSource(
+        ints = {
+            408,
+            500,
+            502,
+            503,
+            504
+        }
+    )
+    @DisplayName("타임아웃과 서버 오류는 생성 여부가 불명확하므로 재시도하지 않는다")
+    void keepsAmbiguousResponse(int status) {
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        given(store.beginCreate(eq(lease), anyInt())).willReturn(true);
+        given(client.create(any())).willThrow(new JudgeException(JudgeErrorCode.JUDGE0_RESPONSE_FAILED, status));
+        assertThat(worker.runOnce()).isTrue();
+        verify(store, never()).rejectCreate(any(), anyInt());
+        verify(store, never()).fail(any(), any());
+    }
+
 }

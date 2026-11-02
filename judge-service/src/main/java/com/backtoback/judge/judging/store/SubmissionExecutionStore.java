@@ -161,6 +161,24 @@ public class SubmissionExecutionStore {
             """, lease.tryCount(), now(), lease.jobId(), order) == 1;
     }
 
+    /**
+     * 확정 거부된 현재 생성 요청을 되돌리고 시스템 실패 재시도를 함께 기록한다.
+     *
+     * @param lease 현재 작업 소유권과 실행 시도
+     * @param order 거부된 테스트 순서
+     * @return 현재 요청을 되돌리고 실패 처리를 완료했는지 여부
+     */
+    @Transactional
+    public boolean rejectCreate(SubmissionLease lease, int order) {
+        if (!owns(lease) || jdbc.update("""
+            UPDATE judge_test_results SET token_status='NOT_CREATED',created_try_count=NULL,updated_at=?
+            WHERE judge_job_id=? AND test_order=? AND created_try_count=? AND token_status='UNKNOWN'
+            """, now(), lease.jobId(), order, lease.tryCount()) != 1) {
+            return false;
+        }
+        return fail(lease, "JUDGE0_UNAVAILABLE");
+    }
+
     /** 이전 임대·시도의 늦은 생성 응답은 폐기한다. */
     @Transactional
     public boolean saveToken(SubmissionLease lease, int order, String token) {

@@ -151,7 +151,11 @@ public class SubmissionWorker {
                 = client
                     .create(source.toRequest(input.runtime(), limits.timeMs(), limits.wallTimeMs(), limits.memoryKb()));
         } catch (JudgeException failure) {
-            // 생성 응답 유실은 UNKNOWN을 보존한다. 새 토큰을 만들지 않는다.
+            Integer status = failure.getUpstreamStatus();
+            if (status != null && status >= 400 && status < 500 && status != 408) {
+                store.rejectCreate(lease, test.testOrder());
+            }
+            // 타임아웃·서버 오류·응답 유실은 생성 여부가 불명확하므로 UNKNOWN을 보존한다.
             return Optional.empty();
         }
         if (created == null || !input.runtime().equals(created.runtime()) || created.token() == null

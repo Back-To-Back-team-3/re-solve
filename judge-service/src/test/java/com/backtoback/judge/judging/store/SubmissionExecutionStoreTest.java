@@ -207,6 +207,29 @@ class SubmissionExecutionStoreTest {
         assertThat(jdbc.queryForObject("SELECT status FROM judge_jobs", String.class)).isEqualTo("RUNNING");
     }
 
+    /** 확정 거부는 원자적으로 재시도하고 이전 임대의 거부 응답은 현재 요청을 변경하지 않는지 확인한다. */
+    @Test
+    @DisplayName("확정 생성 거부는 백오프 재시도로 전환하고 늦은 거부는 무시한다")
+    void retriesRejectedCreate() {
+        var first = store.claim().orElseThrow();
+        assertThat(store.beginCreate(first, 1)).isTrue();
+        assertThat(store.rejectCreate(first, 1)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT status FROM judge_jobs", String.class)).isEqualTo("RETRY_WAITING");
+        assertThat(jdbc.queryForObject("SELECT token_status FROM judge_test_results", String.class))
+            .isEqualTo("NOT_CREATED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_job_runs", Integer.class)).isEqualTo(1);
+        given(clock.instant()).willReturn(START.plusSeconds(10));
+        var second = store.claim().orElseThrow();
+        assertThat(second.tryCount()).isEqualTo(2);
+        assertThat(store.prepare(second)).isTrue();
+        assertThat(store.beginCreate(second, 1)).isTrue();
+        assertThat(store.rejectCreate(first, 1)).isFalse();
+        assertThat(store.saveToken(second, 1, "token")).isTrue();
+        assertThat(store.rejectCreate(second, 1)).isFalse();
+        assertThat(jdbc.queryForObject("SELECT token_status FROM judge_test_results", String.class))
+            .isEqualTo("CREATED");
+    }
+
     @TestConfiguration
     static class Beans {
         @Bean
