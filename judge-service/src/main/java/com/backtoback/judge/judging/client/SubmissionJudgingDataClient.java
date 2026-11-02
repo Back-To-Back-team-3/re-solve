@@ -35,7 +35,14 @@ public class SubmissionJudgingDataClient {
         client = builder.clone().baseUrl(properties.problemBaseUrl().toString()).requestFactory(factory).build();
     }
 
-    /** 고정 회차와 결과 이벤트 필수값을 검증하며 원문을 오류에 노출하지 않는다. */
+    /**
+     * 고정 회차의 채점 자료와 이벤트 필수값을 조회·검증한다.
+     *
+     * @param problemId 문제 식별자
+     * @param revisionId 접수 시 고정한 문제 회차 식별자
+     * @return 검증한 고정 회차 채점 자료
+     * @throws JudgeException 조회 또는 응답 검증에 실패한 경우 COMMON_DEPENDENCY_UNAVAILABLE
+     */
     public SubmissionJudgingDataResponse find(long problemId, long revisionId) {
         try {
             var response

@@ -10,7 +10,13 @@ import com.backtoback.judge.judging.domain.JudgeVerdict;
 public final class SubmissionVerdict {
     private SubmissionVerdict() {}
 
-    /** 전체 코드 판정이 확정된 경우에만 CE 우선·첫 비AC 규칙을 적용한다. */
+    /**
+     * 전체 코드 판정이 확정된 경우 CE 우선·첫 비AC 규칙으로 대표 판정을 집계한다.
+     *
+     * @param orderedVerdicts 고정 테스트 순서로 정렬한 완료 판정
+     * @return 제출 대표 판정
+     * @throws IllegalArgumentException 결과가 없거나 미완료·시스템 오류 판정이 포함된 경우
+     */
     public static JudgeVerdict summarize(List<JudgeVerdict> orderedVerdicts) {
         Assert.notEmpty(orderedVerdicts, "테스트 결과가 필요합니다.");
         Assert

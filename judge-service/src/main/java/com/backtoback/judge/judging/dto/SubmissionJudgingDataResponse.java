@@ -19,7 +19,13 @@ public record SubmissionJudgingDataResponse(
     List<TestCase> cases
 ) {
 
-    /** 자료를 최신 회차로 바꾸거나 불완전한 이벤트를 발행하지 않도록 연결을 검증한다. */
+    /**
+     * 자료의 회차 연결과 실행·이벤트 필수값을 검증한다.
+     *
+     * @param requestedProblem 요청한 문제 식별자
+     * @param requestedRevision 요청한 고정 회차 식별자
+     * @throws IllegalArgumentException 회차가 다르거나 필수값·범위·테스트 구성이 올바르지 않은 경우
+     */
     public void validate(long requestedProblem, long requestedRevision) {
         Assert
             .isTrue(
@@ -57,11 +63,17 @@ public record SubmissionJudgingDataResponse(
         }
     }
 
+    /** 접수 시 고정한 테스트 식별자·순서·공개 여부와 원문 참조. */
     public record TestCase(String testAssetId, int testOrder, Boolean isSample, Asset asset) {
     }
 
     /** 객체 버전을 고정해 같은 키의 새 업로드를 읽지 않는다. */
     public record Asset(String objectKey, String objectVersion, String sha256) {
+        /**
+         * 고정 객체 버전과 SHA-256 체크섬의 필수 형식을 검증한다.
+         *
+         * @throws IllegalArgumentException 객체 키·버전 또는 체크섬이 올바르지 않은 경우
+         */
         public void validate() {
             Assert.hasText(objectKey, "객체 키가 필요합니다.");
             Assert.hasText(objectVersion, "객체 버전이 필요합니다.");

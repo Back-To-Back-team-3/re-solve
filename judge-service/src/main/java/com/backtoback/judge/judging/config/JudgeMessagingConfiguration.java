@@ -144,6 +144,11 @@ public class JudgeMessagingConfiguration {
         return new ValidationScheduler(worker, store, executor, clock);
     }
 
+    /**
+     * 일반 제출을 동시에 두 건 실행하는 전용 스레드 풀을 등록한다.
+     *
+     * @return 대기열 없이 두 작업만 수행하는 실행기
+     */
     @Bean
     public ThreadPoolTaskExecutor judgeSubmissionExecutor() {
         var executor = new ThreadPoolTaskExecutor();
@@ -154,6 +159,15 @@ public class JudgeMessagingConfiguration {
         return executor;
     }
 
+    /**
+     * 메시징이 활성화된 환경에서 일반 제출 선점과 기한 초과 정리를 예약한다.
+     *
+     * @param worker 일반 제출 실행기
+     * @param store 일반 제출 실행 저장소
+     * @param executor 일반 제출 전용 실행 스레드 풀
+     * @param clock 공통 시각
+     * @return 일반 제출 예약 작업
+     */
     @Bean
     public JudgeWorkScheduler submissionScheduler(
         SubmissionWorker worker,
