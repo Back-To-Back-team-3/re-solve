@@ -1661,7 +1661,6 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `lease_token` | VARCHAR(64) | Y | 해당 시도의 소유권 토큰 |
 | `runner_version` | VARCHAR(100) | N | 실제 사용한 생성기 참고 식별 정보. 생성 전 실패면 NULL |
 | `result` | VARCHAR(30) | Y | `SUCCEEDED` / `SYSTEM_ERROR` / `LEASE_EXPIRED`. 코드 정답 여부와 구분 |
-| `verdict` | VARCHAR(30) | N | 정상 판정된 시도의 대표 `AC` / `WA` / `TLE` / `MLE` / `RE` / `CE`. 시스템 실패는 NULL |
 | `max_time_ms` | INT | N | 해당 시도에서 측정한 최대 CPU 시간. 측정값 없음은 NULL |
 | `error_message` | VARCHAR(500) | N | 원문·자격 정보가 없는 실패 설명. 설명 없음은 NULL |
 | `started_at` | DATETIME(6) | Y | 실제 시도 시작 시각 |
@@ -1673,8 +1672,8 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `fk_judge_validation_runs_job` | `validation_id` → `judge_validation_jobs.validation_id` | 서비스 내부 FK |
 | `uk_judge_validation_runs_try` | `(validation_id, try_count)` | 시도당 종결 이력 1건 |
 
-- 기록 이후 수정·삭제하지 않는다. 대표 판정·최대 시간·생성기 정보는 이 시도 요약을 사용하며 작업 행에 다시 저장하지 않는다.
-- `result = SUCCEEDED`이면 `verdict`·`runner_version`이 존재한다. 실행 전 기한 초과는 시도 이력을 만들지 않는다.
+- 기록 이후 수정·삭제하지 않는다. 시도 종료 사유·최대 시간·생성기 정보·오류 설명만 보관하며 대표 판정 컬럼은 두지 않는다. 테스트별 최신 판정은 §4.3.8에 보관하고, 과거 시도의 테스트 전체 사본은 만들지 않는다.
+- `result = SUCCEEDED`이면 `runner_version`이 존재한다. `SUCCEEDED`는 테스트 실행·판정 처리의 정상 완료이며 코드 전체 정답을 의미하지 않는다. 검증 통과 여부는 작업의 `PASSED`·`REJECTED` 상태로 구분한다. 실행 전 기한 초과는 시도 이력을 만들지 않는다.
 
 #### 4.3.8 검증 테스트 결과 (`judge_validation_test_results`) — 검토안
 
@@ -3127,6 +3126,8 @@ judge-service/src/main/resources/db/migration/
 ```
 
 기존 V1~V4는 공통 테이블 구축 계획 번호이며 실제 적용 이력과 구분한다. 기존 마이그레이션을 재사용하지 않고 Outbox·소비 기록은 V11·V12, 검증 작업·시도·테스트 결과는 V13~V15로 추가한다.
+
+§4.3.7의 대표 판정 제거는 후속 마이그레이션으로 반영한다(미구현). 이미 적용한 V14를 수정하지 않고 `judge_validation_runs.verdict` 및 해당 컬럼을 참조하는 CHECK를 제거하며, `SUCCEEDED`의 생성기 정보 필수 조건은 유지한다. 기존 시도 행과 나머지 요약은 보존한다. 파일 번호는 구현 시 실제 적용 이력과 대조해 확정한다.
 
 ### 7.4 Contest (`contest-service`)
 
