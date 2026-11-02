@@ -25,7 +25,13 @@ import lombok.RequiredArgsConstructor;
 public class SubmissionQueryController {
     private final SubmissionQueryService queries;
 
-    /** API §3.1.4 — 일반 풀이만 제공하며 시험·대회 결과 공개 조건을 우회하지 않는다. */
+    /**
+     * 본인 일반 제출 목록을 조회한다. (API 명세서 §3.1.4)
+     *
+     * @param user Gateway에서 인증한 회원
+     * @param request 검증할 목록 필터와 페이지 조건
+     * @return 일반 제출 요약 페이지
+     */
     @GetMapping("/api/v1/me/submissions")
     public ResponseEntity<ApiResponse<PageResponse<SubmissionListResponse>>> list(
         @AuthenticationPrincipal GatewayUser user,
@@ -35,7 +41,13 @@ public class SubmissionQueryController {
             .ok(ApiResponse.success(null, queries.list(SubmissionCreateRequest.parseId(user.userId()), request)));
     }
 
-    /** API §3.1.5 — 원본 코드 응답은 브라우저·중간 캐시에 보관하지 않는다. */
+    /**
+     * 본인 원본 코드를 조회하며 응답 캐시를 금지한다. (API 명세서 §3.1.5)
+     *
+     * @param user Gateway에서 인증한 회원
+     * @param submissionId 조회할 제출 식별자
+     * @return 캐시 금지 헤더를 포함한 원본 코드 응답
+     */
     @GetMapping("/api/v1/submissions/{submissionId}/source")
     public ResponseEntity<ApiResponse<SubmissionSourceResponse>> source(
         @AuthenticationPrincipal GatewayUser user,

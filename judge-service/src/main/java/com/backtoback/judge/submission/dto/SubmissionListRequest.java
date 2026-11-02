@@ -38,6 +38,11 @@ public record SubmissionListRequest(
         sort = sort == null ? "submittedAt,desc" : sort;
     }
 
+    /**
+     * 사용자에게 공개하지 않는 시스템 오류 판정의 필터 사용을 차단한다.
+     *
+     * @return 사용자 판정이거나 판정 필터가 없는지 여부
+     */
     @jakarta.validation.constraints.AssertTrue(message = "사용자 판정만 필터로 사용할 수 있습니다.")
     public boolean isUserVerdict() {
         return verdict != JudgeVerdict.SYSTEM_ERROR;

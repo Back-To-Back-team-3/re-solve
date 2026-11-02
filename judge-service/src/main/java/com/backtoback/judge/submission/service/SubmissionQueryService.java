@@ -70,6 +70,14 @@ public class SubmissionQueryService {
             );
     }
 
+    /**
+     * 본인 일반 제출의 원본 코드를 조회한다.
+     *
+     * @param memberId 인증 회원 식별자
+     * @param submissionId 조회할 제출 식별자
+     * @return 언어와 원본 코드
+     * @throws JudgeException 타인 제출·다른 문맥·미존재 제출인 경우 SUBMISSION_NOT_FOUND
+     */
     @Transactional(readOnly = true)
     public SubmissionSourceResponse source(long memberId, long submissionId) {
         return SubmissionSourceResponse
