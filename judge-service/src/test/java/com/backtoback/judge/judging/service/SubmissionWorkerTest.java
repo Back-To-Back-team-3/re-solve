@@ -67,6 +67,7 @@ class SubmissionWorkerTest {
     private final SubmissionLease lease
         = new SubmissionLease(1, 1, 1, 1, "lease", LocalDateTime.of(2026, 10, 31, 9, 10));
 
+    /** 실행기와 공통 선점·자료 조회 조건을 준비한다. */
     @BeforeEach
     void prepare() {
         worker
@@ -103,14 +104,16 @@ class SubmissionWorkerTest {
         given(store.prepare(lease)).willReturn(true);
         given(generator.language()).willReturn(JudgeLanguage.JAVA);
         given(assets.read(null)).willReturn(new SubmissionJudgingDataResponse.TestContent(Map.of(), "1"));
-        given(generator.generate(any(), eq("code"), any()))
-            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
-        given(store.beginCreate(eq(lease), anyInt())).willReturn(true);
     }
 
+    /** 코드 오답 이후에도 나머지 테스트를 실행하고 종결하는지 확인한다. */
     @Test
     @DisplayName("첫 테스트가 WA여도 전체 테스트를 실행한 뒤 종결한다")
     void executesAll() {
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+
+        given(store.beginCreate(eq(lease), anyInt())).willReturn(true);
         given(client.create(any())).willAnswer(invocation -> {
             assertThat(org.slf4j.MDC.get("correlationId")).isEqualTo(lease.correlationId());
             return new JudgeExecutionCreateResponse("token", runtime);
@@ -127,9 +130,24 @@ class SubmissionWorkerTest {
         verify(store).complete(lease, data, null);
     }
 
+    /** 생성기 오류가 Judge0 장애로 기록되거나 외부 실행을 생성하지 않는지 확인한다. */
+    @Test
+    @DisplayName("코드 생성 실패는 자료 오류로 기록하고 Judge0를 호출하지 않는다")
+    void classifiesGenerationFailure() {
+        given(generator.generate(any(), eq("code"), any())).willThrow(new IllegalArgumentException("invalid input"));
+        assertThat(worker.runOnce()).isTrue();
+        verify(store).fail(lease, "TEST_DATA_UNAVAILABLE");
+        verify(client, never()).create(any());
+    }
+
+    /** 생성 응답 유실 시 중복 실행이나 확정 실패 처리를 하지 않는지 확인한다. */
     @Test
     @DisplayName("생성 응답을 잃으면 새 실행이나 실패 재시도를 만들지 않는다")
     void keepsUnknown() {
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+
+        given(store.beginCreate(eq(lease), anyInt())).willReturn(true);
         given(client.create(any())).willThrow(new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED));
         assertThat(worker.runOnce()).isTrue();
         verify(client, times(1)).create(any());

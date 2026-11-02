@@ -18,6 +18,7 @@ import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse;
 import com.backtoback.judge.judging.service.dto.SubmissionExecutionInput;
 import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
 import com.backtoback.judge.judging.service.execution.JudgeResultEvaluator;
+import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionCreateResponse;
 import com.backtoback.judge.judging.service.execution.dto.JudgeTestResult;
 import com.backtoback.judge.judging.store.SubmissionExecutionStore;
@@ -87,8 +88,9 @@ public class SubmissionWorker {
                     return true;
                 }
                 var content = assets.read(test.asset());
+                var source = generator.generate(data.functionSpec(), input.sourceCode(), content.argumentTexts());
                 errorCode = "JUDGE0_UNAVAILABLE";
-                var result = execute(heartbeat, input, data, test, content, generator);
+                var result = execute(heartbeat, input, data, test, content, source);
                 if (result.isEmpty()) {
                     return true;
                 }
@@ -117,16 +119,27 @@ public class SubmissionWorker {
         return true;
     }
 
+    /**
+     * 생성된 코드를 실행하고 현재 임대의 테스트 결과만 저장한다.
+     *
+     * @param heartbeat 작업 전체의 임대 갱신기
+     * @param input 고정 실행 환경과 제출 정보
+     * @param data 고정 회차의 명세와 제한
+     * @param test 실행할 테스트 메타데이터
+     * @param content 비교할 테스트 원문
+     * @param source 생성이 완료된 실행 코드
+     * @return 저장한 결과, 소유권 상실 또는 생성 응답 불명이면 빈 값
+     * @throws InterruptedException 결과 대기 중 실행 스레드가 중단된 경우
+     */
     private Optional<JudgeTestResult> execute(
         SubmissionHeartbeat heartbeat,
         SubmissionExecutionInput input,
         SubmissionJudgingDataResponse data,
         SubmissionJudgingDataResponse.TestCase test,
         SubmissionJudgingDataResponse.TestContent content,
-        ExecutionCodeGenerator generator
+        ExecutionSource source
     )
         throws InterruptedException {
-        var source = generator.generate(data.functionSpec(), input.sourceCode(), content.argumentTexts());
         var limits = data.executionLimits();
         var lease = heartbeat.lease();
         if (!heartbeat.active() || !store.beginCreate(lease, test.testOrder())) {
