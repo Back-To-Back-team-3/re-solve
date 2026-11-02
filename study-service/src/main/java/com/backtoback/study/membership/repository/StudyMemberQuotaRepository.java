@@ -36,4 +36,16 @@ public interface StudyMemberQuotaRepository extends JpaRepository<StudyMemberQuo
         nativeQuery = true
     )
     int incrementIfBelowLimit(@Param("memberId") Long memberId);
+
+    /**
+     * active_count > 0인 경우에만 카운터를 1 내린다(탈퇴·취소 시 호출).
+     * CLOSED 스터디 탈퇴에도 호출하며, CLOSED 여부 확인은 호출자 책임이다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE study_member_quotas SET active_count = active_count - 1, updated_at = NOW(6) "
+            + "WHERE member_id = :memberId AND active_count > 0",
+        nativeQuery = true
+    )
+    void decrementIfAboveZero(@Param("memberId") Long memberId);
 }
