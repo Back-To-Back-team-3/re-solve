@@ -43,6 +43,9 @@ import org.testcontainers.mysql.MySQLContainer;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.global.lock.RedisTransactionLock;
+import com.backtoback.problem.problem.service.ProblemAssetContent;
+import com.backtoback.problem.problem.service.ProblemAssetReuseService;
+import com.backtoback.problem.problem.service.ProblemAssetUploadService;
 import com.backtoback.problem.testfixture.lock.LockTransactionProbe;
 import com.backtoback.problem.testfixture.lock.LockTransactionProbeRepository;
 
@@ -70,6 +73,12 @@ class ProblemServiceApplicationTest {
 
     @Autowired
     private S3Client s3;
+
+    @Autowired
+    private ProblemAssetUploadService assetUpload;
+
+    @Autowired
+    private ProblemAssetReuseService assetReuse;
 
     @Autowired
     private MockMvc mvc;
@@ -224,6 +233,95 @@ class ProblemServiceApplicationTest {
         // then
         assertThat(s3.getObjectAsBytes(request -> request.bucket(bucket).key("probe")).asUtf8String())
             .isEqualTo("connected");
+    }
+
+    /** 실제 S3와 DB에서 불변 저장 및 같은 문제의 재사용 후보 조회를 확인한다. */
+    @Test
+    @DisplayName("버전 없는 버킷에 본문과 테스트를 저장하고 같은 문제에서 재사용한다")
+    void uploadsAndReusesAssets() {
+        // given
+        String bucket = "problem-assets-" + UUID.randomUUID();
+        s3.createBucket(request -> request.bucket(bucket));
+        var content = ProblemAssetContent.fromBytes("원문".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Long bodyId = null;
+        Long testId = null;
+        try {
+            // when
+            bodyId = assetUpload.upload(bucket, 1L, content, true);
+            testId = assetUpload.upload(bucket, 1L, content, false);
+            jdbc.update("UPDATE problem_body_assets SET problem_id = 1, status = 'LINKED' WHERE id = ?", bodyId);
+            jdbc.update("UPDATE problem_test_assets SET problem_id = 1, status = 'LINKED' WHERE id = ?", testId);
+
+            // then
+            assertThat(assetReuse.find(bucket, 1L, 1L, content, true)).contains(bodyId);
+            assertThat(assetReuse.find(bucket, 1L, 1L, content, false)).contains(testId);
+            assertThat(assetReuse.find(bucket, 2L, 1L, content, true)).isEmpty();
+            assertThat(assetReuse.find(bucket, 1L, 2L, content, false)).isEmpty();
+            assertThat(
+                jdbc.queryForObject("SELECT object_version FROM problem_test_assets WHERE id = ?", String.class, testId)
+            ).isNull();
+        } finally {
+            if (bodyId != null) {
+                jdbc.update("DELETE FROM problem_body_assets WHERE id = ?", bodyId);
+            }
+            if (testId != null) {
+                jdbc.update("DELETE FROM problem_test_assets WHERE id = ?", testId);
+            }
+        }
+    }
+
+    /** 업로드 완료 뒤 DB 작업이 롤백되어도 추적 기록과 실제 원문이 유지되는지 확인한다. */
+    @Test
+    @DisplayName("업로드 이후 DB 작업이 실패해도 본문과 테스트 원문을 보존한다")
+    void preservesUploadedObjectsAfterDatabaseRollback() {
+        // given
+        String bucket = "problem-rollback-" + UUID.randomUUID();
+        s3.createBucket(request -> request.bucket(bucket));
+        byte[] bytes = "원문".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var content = ProblemAssetContent.fromBytes(bytes);
+        Long bodyId = assetUpload.upload(bucket, 1L, content, true);
+        Long testId = assetUpload.upload(bucket, 1L, content, false);
+        String bodyKey
+            = jdbc.queryForObject("SELECT object_key FROM problem_body_assets WHERE id = ?", String.class, bodyId);
+        String testKey
+            = jdbc.queryForObject("SELECT object_key FROM problem_test_assets WHERE id = ?", String.class, testId);
+        try {
+            // when
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                jdbc.update("UPDATE problem_body_assets SET status = 'DELETING' WHERE id = ?", bodyId);
+                jdbc.update("UPDATE problem_test_assets SET status = 'DELETING' WHERE id = ?", testId);
+                status.setRollbackOnly();
+            });
+
+            // then
+            assertThat(jdbc.queryForObject("SELECT status FROM problem_body_assets WHERE id = ?", String.class, bodyId))
+                .isEqualTo("PENDING");
+            assertThat(jdbc.queryForObject("SELECT status FROM problem_test_assets WHERE id = ?", String.class, testId))
+                .isEqualTo("PENDING");
+            assertThat(
+                jdbc
+                    .queryForObject(
+                        "SELECT upload_finished_at FROM problem_body_assets WHERE id = ?",
+                        java.time.LocalDateTime.class,
+                        bodyId
+                    )
+            ).isNotNull();
+            assertThat(
+                jdbc
+                    .queryForObject(
+                        "SELECT upload_finished_at FROM problem_test_assets WHERE id = ?",
+                        java.time.LocalDateTime.class,
+                        testId
+                    )
+            ).isNotNull();
+            assertThat(s3.getObjectAsBytes(request -> request.bucket(bucket).key(bodyKey)).asByteArray())
+                .isEqualTo(bytes);
+            assertThat(s3.getObjectAsBytes(request -> request.bucket(bucket).key(testKey)).asByteArray())
+                .isEqualTo(bytes);
+        } finally {
+            jdbc.update("DELETE FROM problem_body_assets WHERE id = ?", bodyId);
+            jdbc.update("DELETE FROM problem_test_assets WHERE id = ?", testId);
+        }
     }
 
     @Test
