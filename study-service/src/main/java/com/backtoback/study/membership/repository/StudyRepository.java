@@ -26,6 +26,20 @@ public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecific
     int joinInstantIfRecruiting(@Param("studyId") Long studyId);
 
     /**
+     * 승인 정원 확보: CLOSED가 아니고 정원이 남은 경우에만 member_count를 1 올린다(API 명세서 §5.2.4 승인 ③단계).
+     * 0이면 재조회 후 status='CLOSED'이면 STUDY_ALREADY_CLOSED, member_count >= capacity이면 STUDY_FULL.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE studies SET member_count = member_count + 1, "
+            + "status = IF(member_count >= capacity, 'ACTIVE', status), "
+            + "version = version + 1, updated_at = NOW(6) "
+            + "WHERE id = :studyId AND status != 'CLOSED' AND member_count < capacity",
+        nativeQuery = true
+    )
+    int approveIfNotFull(@Param("studyId") Long studyId);
+
+    /**
      * 탈퇴 시 member_count를 1 내리고 ACTIVE+is_auto_reopen=true인 경우 RECRUITING으로 복원한다.
      * CLOSED 스터디는 이 메서드를 호출하지 않는다(호출자 책임).
      */

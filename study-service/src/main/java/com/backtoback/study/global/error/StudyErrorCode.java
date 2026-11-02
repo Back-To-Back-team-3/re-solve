@@ -23,7 +23,10 @@ public enum StudyErrorCode implements ErrorCode {
     STUDY_FULL(HttpStatus.CONFLICT, "스터디 정원이 초과되었습니다."),
     STUDY_ALREADY_APPLIED(HttpStatus.CONFLICT, "이미 가입 신청 또는 가입된 스터디입니다."),
     STUDY_MEMBERSHIP_NOT_FOUND(HttpStatus.NOT_FOUND, "가입 신청 또는 구성원을 찾을 수 없습니다."),
-    STUDY_LEADER_DELEGATION_REQUIRED(HttpStatus.CONFLICT, "스터디장은 위임 후에만 탈퇴할 수 있습니다.");
+    STUDY_LEADER_DELEGATION_REQUIRED(HttpStatus.CONFLICT, "스터디장은 위임 후에만 탈퇴할 수 있습니다."),
+    STUDY_MEMBERSHIP_STATUS_CONFLICT(HttpStatus.CONFLICT, "이미 처리된 가입 신청입니다."),
+    STUDY_APPLICATION_EXPIRED(HttpStatus.CONFLICT, "만료된 가입 신청입니다."),
+    STUDY_ALREADY_CLOSED(HttpStatus.CONFLICT, "종료된 스터디입니다.");
 
     private final HttpStatus status;
     private final String message;

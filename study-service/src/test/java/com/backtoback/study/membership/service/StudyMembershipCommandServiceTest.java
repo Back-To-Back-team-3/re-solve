@@ -24,6 +24,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.study.assignment.service.AssignmentEnrollmentService;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
@@ -300,6 +301,232 @@ class StudyMembershipCommandServiceTest {
             .isInstanceOfSatisfying(
                 StudyException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_LEADER_DELEGATION_REQUIRED)
+            );
+    }
+
+    // ─── approve ──────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("LEADER가 PENDING 신청을 승인하면 4단계를 거쳐 문제집 편입을 수행한다")
+    void approve_success_enrollsCalled() {
+        Long membershipId = 60L;
+        Long targetMemberId = 20L;
+        StudyMembership leaderMembership
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.LEADER, MembershipStatus.APPROVED, NOW, null, NOW);
+        StudyMembership pending
+            = StudyMembership
+                .apply(
+                    STUDY_ID,
+                    targetMemberId,
+                    MembershipRole.MEMBER,
+                    MembershipStatus.PENDING,
+                    NOW,
+                    NOW.plusDays(7),
+                    null
+                );
+        ReflectionTestUtils.setField(pending, "id", membershipId);
+
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
+            .willReturn(Optional.of(leaderMembership));
+        given(membershipRepository.findById(membershipId)).willReturn(Optional.of(pending));
+        given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(1);
+        given(quotaRepository.incrementIfBelowLimit(targetMemberId)).willReturn(1);
+        given(studyRepository.approveIfNotFull(STUDY_ID)).willReturn(1);
+
+        service.approve(STUDY_ID, membershipId, MEMBER_ID, CORR_ID);
+
+        verify(enrollmentService).enroll(eq(STUDY_ID), eq(targetMemberId), eq(membershipId));
+        verify(historyRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("이미 처리된 신청을 승인하면 STUDY_MEMBERSHIP_STATUS_CONFLICT 예외를 던진다")
+    void approve_alreadyProcessed_throwsStatusConflict() {
+        Long membershipId = 61L;
+        StudyMembership leaderMembership
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.LEADER, MembershipStatus.APPROVED, NOW, null, NOW);
+        StudyMembership pending
+            = StudyMembership
+                .apply(STUDY_ID, 20L, MembershipRole.MEMBER, MembershipStatus.PENDING, NOW, NOW.plusDays(7), null);
+        ReflectionTestUtils.setField(pending, "id", membershipId);
+        StudyMembership alreadyApproved
+            = StudyMembership.apply(STUDY_ID, 20L, MembershipRole.MEMBER, MembershipStatus.APPROVED, NOW, null, NOW);
+        ReflectionTestUtils.setField(alreadyApproved, "id", membershipId);
+
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
+            .willReturn(Optional.of(leaderMembership));
+        given(membershipRepository.findById(membershipId))
+            .willReturn(Optional.of(pending))
+            .willReturn(Optional.of(alreadyApproved));
+        given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(0);
+
+        assertThatThrownBy(() -> service.approve(STUDY_ID, membershipId, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_MEMBERSHIP_STATUS_CONFLICT)
+            );
+    }
+
+    @Test
+    @DisplayName("만료된 신청을 승인하면 STUDY_APPLICATION_EXPIRED 예외를 던진다")
+    void approve_expired_throwsApplicationExpired() {
+        Long membershipId = 62L;
+        StudyMembership leaderMembership
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.LEADER, MembershipStatus.APPROVED, NOW, null, NOW);
+        StudyMembership pending
+            = StudyMembership
+                .apply(STUDY_ID, 20L, MembershipRole.MEMBER, MembershipStatus.PENDING, NOW, NOW.plusDays(7), null);
+        ReflectionTestUtils.setField(pending, "id", membershipId);
+        StudyMembership expiredPending
+            = StudyMembership
+                .apply(STUDY_ID, 20L, MembershipRole.MEMBER, MembershipStatus.PENDING, NOW, NOW.minusDays(1), null);
+        ReflectionTestUtils.setField(expiredPending, "id", membershipId);
+
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
+            .willReturn(Optional.of(leaderMembership));
+        given(membershipRepository.findById(membershipId))
+            .willReturn(Optional.of(pending))
+            .willReturn(Optional.of(expiredPending));
+        given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(0);
+
+        assertThatThrownBy(() -> service.approve(STUDY_ID, membershipId, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_APPLICATION_EXPIRED)
+            );
+    }
+
+    @Test
+    @DisplayName("승인 시 정원 초과이면 STUDY_FULL 예외를 던진다")
+    void approve_studyFull_throwsStudyFull() {
+        Long membershipId = 63L;
+        Long targetMemberId = 20L;
+        StudyMembership leaderMembership
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.LEADER, MembershipStatus.APPROVED, NOW, null, NOW);
+        StudyMembership pending
+            = StudyMembership
+                .apply(
+                    STUDY_ID,
+                    targetMemberId,
+                    MembershipRole.MEMBER,
+                    MembershipStatus.PENDING,
+                    NOW,
+                    NOW.plusDays(7),
+                    null
+                );
+        ReflectionTestUtils.setField(pending, "id", membershipId);
+
+        Study full = Study.recruit("스터디", null, "EMPLOYMENT", "LV2", "java", "EVENING", 5, JoinType.APPROVAL, false);
+        ReflectionTestUtils.setField(full, "id", STUDY_ID);
+        ReflectionTestUtils.setField(full, "status", StudyStatus.ACTIVE);
+        ReflectionTestUtils.setField(full, "memberCount", 5);
+
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
+            .willReturn(Optional.of(leaderMembership));
+        given(membershipRepository.findById(membershipId)).willReturn(Optional.of(pending));
+        given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(1);
+        given(quotaRepository.incrementIfBelowLimit(targetMemberId)).willReturn(1);
+        given(studyRepository.approveIfNotFull(STUDY_ID)).willReturn(0);
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(full));
+
+        assertThatThrownBy(() -> service.approve(STUDY_ID, membershipId, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_FULL)
+            );
+    }
+
+    // ─── reject ───────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("LEADER가 PENDING 신청을 거절하면 REJECTED로 전이된다")
+    void reject_success_historyRecorded() {
+        Long membershipId = 70L;
+        StudyMembership leaderMembership
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.LEADER, MembershipStatus.APPROVED, NOW, null, NOW);
+        StudyMembership pending
+            = StudyMembership
+                .apply(STUDY_ID, 20L, MembershipRole.MEMBER, MembershipStatus.PENDING, NOW, NOW.plusDays(7), null);
+        ReflectionTestUtils.setField(pending, "id", membershipId);
+
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
+            .willReturn(Optional.of(leaderMembership));
+        given(membershipRepository.findById(membershipId)).willReturn(Optional.of(pending));
+        given(membershipRepository.rejectIfPending(membershipId)).willReturn(1);
+
+        service.reject(STUDY_ID, membershipId, MEMBER_ID, CORR_ID);
+
+        verify(historyRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("MEMBER가 거절을 시도하면 AUTH_ACCESS_DENIED 예외를 던진다")
+    void reject_member_throwsAccessDenied() {
+        StudyMembership member
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.MEMBER, MembershipStatus.APPROVED, NOW, null, NOW);
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
+            .willReturn(Optional.of(member));
+
+        assertThatThrownBy(() -> service.reject(STUDY_ID, 70L, MEMBER_ID, CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
+            );
+    }
+
+    // ─── remove ───────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("LEADER가 MEMBER를 강제탈퇴하면 REMOVED로 전이된다")
+    void remove_success_historyRecorded() {
+        Long membershipId = 80L;
+        Long targetMemberId = 30L;
+        StudyMembership leaderMembership
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.LEADER, MembershipStatus.APPROVED, NOW, null, NOW);
+        StudyMembership targetMember
+            = StudyMembership
+                .apply(STUDY_ID, targetMemberId, MembershipRole.MEMBER, MembershipStatus.APPROVED, NOW, null, NOW);
+        ReflectionTestUtils.setField(targetMember, "id", membershipId);
+
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
+            .willReturn(Optional.of(leaderMembership));
+        given(membershipRepository.findById(membershipId)).willReturn(Optional.of(targetMember));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(instantStudy));
+        given(membershipRepository.removeIfApproved(eq(membershipId), any(), any())).willReturn(1);
+
+        service.remove(STUDY_ID, membershipId, MEMBER_ID, "규칙 위반", CORR_ID);
+
+        verify(historyRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("MANAGER가 LEADER를 강제탈퇴하려 하면 AUTH_ACCESS_DENIED 예외를 던진다")
+    void remove_managerTargetsLeader_throwsAccessDenied() {
+        Long membershipId = 81L;
+        Long targetMemberId = 30L;
+        StudyMembership managerMembership
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.MANAGER, MembershipStatus.APPROVED, NOW, null, NOW);
+        StudyMembership targetLeader
+            = StudyMembership
+                .apply(STUDY_ID, targetMemberId, MembershipRole.LEADER, MembershipStatus.APPROVED, NOW, null, NOW);
+        ReflectionTestUtils.setField(targetLeader, "id", membershipId);
+
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
+            .willReturn(Optional.of(managerMembership));
+        given(membershipRepository.findById(membershipId)).willReturn(Optional.of(targetLeader));
+
+        assertThatThrownBy(() -> service.remove(STUDY_ID, membershipId, MEMBER_ID, "사유", CORR_ID))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
             );
     }
 }

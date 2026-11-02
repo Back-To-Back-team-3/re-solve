@@ -34,6 +34,44 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
     Page<StudyMembership> findByStudyIdAndStatus(Long studyId, MembershipStatus status, Pageable pageable);
 
     /**
+     * PENDING이고 만료되지 않은 경우에만 APPROVED로 전이하고 joined_at을 기록한다.
+     * 0이면 재조회 후 상태가 PENDING이 아니면 STUDY_MEMBERSHIP_STATUS_CONFLICT, 만료이면 STUDY_APPLICATION_EXPIRED.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE study_memberships "
+            + "SET status = 'APPROVED', joined_at = :joinedAt, expires_at = NULL, updated_at = NOW(6) "
+            + "WHERE id = :id AND status = 'PENDING' AND expires_at > NOW(6)",
+        nativeQuery = true
+    )
+    int approveIfPending(@Param("id") Long id, @Param("joinedAt") LocalDateTime joinedAt);
+
+    /**
+     * PENDING이고 만료되지 않은 경우에만 REJECTED로 전이하고 expires_at을 null로 초기화한다.
+     * 0이면 재조회 후 상태가 PENDING이 아니면 STUDY_MEMBERSHIP_STATUS_CONFLICT, 만료이면 STUDY_APPLICATION_EXPIRED.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE study_memberships " + "SET status = 'REJECTED', expires_at = NULL, updated_at = NOW(6) "
+            + "WHERE id = :id AND status = 'PENDING' AND expires_at > NOW(6)",
+        nativeQuery = true
+    )
+    int rejectIfPending(@Param("id") Long id);
+
+    /**
+     * APPROVED 상태인 경우에만 REMOVED로 전이하고 removed_reason·left_at을 기록한다.
+     * 0이면 이미 상태가 변경된 것이므로 호출자가 STUDY_MEMBERSHIP_NOT_FOUND를 던져야 한다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE study_memberships "
+            + "SET status = 'REMOVED', removed_reason = :reason, left_at = :leftAt, updated_at = NOW(6) "
+            + "WHERE id = :id AND status = 'APPROVED'",
+        nativeQuery = true
+    )
+    int removeIfApproved(@Param("id") Long id, @Param("reason") String reason, @Param("leftAt") LocalDateTime leftAt);
+
+    /**
      * PENDING 상태인 경우에만 CANCELED로 전이하고 expires_at을 null로 초기화한다.
      * 0이면 이미 상태가 변경된 것이므로 호출자가 재조회해 STUDY_MEMBERSHIP_NOT_FOUND를 던져야 한다.
      */

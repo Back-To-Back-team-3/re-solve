@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.assignment.service.AssignmentEnrollmentService;
 import com.backtoback.study.global.error.StudyErrorCode;
@@ -241,6 +242,214 @@ public class StudyMembershipCommandService {
                         membership.getRole(),
                         memberId,
                         null,
+                        now
+                    )
+            );
+    }
+
+    /**
+     * 가입 신청을 승인한다(PENDING→APPROVED, API 명세서 §5.2.4 승인 4단계).
+     *
+     * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, AUTH_ACCESS_DENIED,
+     *     STUDY_APPLICATION_EXPIRED, STUDY_MEMBERSHIP_STATUS_CONFLICT,
+     *     STUDY_JOIN_LIMIT_EXCEEDED, STUDY_ALREADY_CLOSED, STUDY_FULL
+     */
+    @Transactional
+    public void approve(Long studyId, Long membershipId, Long requestMemberId, String correlationId) {
+        verifyLeaderOrManager(studyId, requestMemberId);
+
+        StudyMembership target
+            = membershipRepository
+                .findById(membershipId)
+                .filter(m -> m.getStudyId().equals(studyId))
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+
+        applyApprove(studyId, target, requestMemberId, correlationId, now);
+    }
+
+    /**
+     * 가입 신청을 거절한다(PENDING→REJECTED, API 명세서 §5.2.4 거절).
+     *
+     * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, AUTH_ACCESS_DENIED,
+     *     STUDY_APPLICATION_EXPIRED, STUDY_MEMBERSHIP_STATUS_CONFLICT
+     */
+    @Transactional
+    public void reject(Long studyId, Long membershipId, Long requestMemberId, String correlationId) {
+        verifyLeaderOrManager(studyId, requestMemberId);
+
+        StudyMembership target
+            = membershipRepository
+                .findById(membershipId)
+                .filter(m -> m.getStudyId().equals(studyId))
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+
+        applyReject(target, requestMemberId, correlationId, now);
+    }
+
+    /**
+     * 구성원을 강제탈퇴한다(APPROVED→REMOVED, API 명세서 §5.2.4 강제탈퇴).
+     * MANAGER는 LEADER·MANAGER를 대상으로 삼을 수 없다.
+     *
+     * @throws StudyException STUDY_MEMBERSHIP_NOT_FOUND, AUTH_ACCESS_DENIED, STUDY_NOT_FOUND
+     */
+    @Transactional
+    public void remove(Long studyId, Long membershipId, Long requestMemberId, String reason, String correlationId) {
+        StudyMembership requester = verifyLeaderOrManager(studyId, requestMemberId);
+
+        StudyMembership target
+            = membershipRepository
+                .findById(membershipId)
+                .filter(m -> m.getStudyId().equals(studyId))
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+
+        if (requester.getRole() == MembershipRole.MANAGER
+            && (target.getRole() == MembershipRole.LEADER || target.getRole() == MembershipRole.MANAGER)) {
+            throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+
+        applyRemove(studyId, target, requestMemberId, reason, correlationId, now);
+    }
+
+    private StudyMembership verifyLeaderOrManager(Long studyId, Long requestMemberId) {
+        StudyMembership requester
+            = membershipRepository
+                .findByStudyIdAndMemberIdAndStatusIn(studyId, requestMemberId, List.of(MembershipStatus.APPROVED))
+                .orElseThrow(() -> new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED));
+        if (requester.getRole() != MembershipRole.LEADER && requester.getRole() != MembershipRole.MANAGER) {
+            throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        return requester;
+    }
+
+    private void applyApprove(
+        Long studyId,
+        StudyMembership target,
+        Long requestMemberId,
+        String correlationId,
+        LocalDateTime now
+    ) {
+        // ① membership: PENDING + 만료 안 됨 조건부 UPDATE
+        if (membershipRepository.approveIfPending(target.getId(), now) == 0) {
+            StudyMembership refreshed
+                = membershipRepository
+                    .findById(target.getId())
+                    .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+            if (refreshed.getStatus() != MembershipStatus.PENDING) {
+                throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_STATUS_CONFLICT);
+            }
+            throw new StudyException(StudyErrorCode.STUDY_APPLICATION_EXPIRED);
+        }
+
+        // ② quota
+        quotaRepository.insertQuotaIfAbsent(target.getMemberId());
+        if (quotaRepository.incrementIfBelowLimit(target.getMemberId()) == 0) {
+            throw new StudyException(StudyErrorCode.STUDY_JOIN_LIMIT_EXCEEDED);
+        }
+
+        // ③ study: CLOSED 아니고 정원 남은 경우 증가
+        if (studyRepository.approveIfNotFull(studyId) == 0) {
+            Study refreshed
+                = studyRepository
+                    .findById(studyId)
+                    .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+            if (refreshed.getStatus() == StudyStatus.CLOSED) {
+                throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
+            }
+            throw new StudyException(StudyErrorCode.STUDY_FULL);
+        }
+
+        // ④ 문제집 편입
+        enrollmentService.enroll(studyId, target.getMemberId(), target.getId());
+
+        historyRepository
+            .save(
+                StudyMembershipHistory
+                    .record(
+                        target.getId(),
+                        MembershipStatus.PENDING,
+                        MembershipStatus.APPROVED,
+                        target.getRole(),
+                        target.getRole(),
+                        requestMemberId,
+                        null,
+                        now
+                    )
+            );
+    }
+
+    private void applyReject(StudyMembership target, Long requestMemberId, String correlationId, LocalDateTime now) {
+        if (membershipRepository.rejectIfPending(target.getId()) == 0) {
+            StudyMembership refreshed
+                = membershipRepository
+                    .findById(target.getId())
+                    .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+            if (refreshed.getStatus() != MembershipStatus.PENDING) {
+                throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_STATUS_CONFLICT);
+            }
+            throw new StudyException(StudyErrorCode.STUDY_APPLICATION_EXPIRED);
+        }
+        historyRepository
+            .save(
+                StudyMembershipHistory
+                    .record(
+                        target.getId(),
+                        MembershipStatus.PENDING,
+                        MembershipStatus.REJECTED,
+                        target.getRole(),
+                        target.getRole(),
+                        requestMemberId,
+                        null,
+                        now
+                    )
+            );
+    }
+
+    private void applyRemove(
+        Long studyId,
+        StudyMembership target,
+        Long requestMemberId,
+        String reason,
+        String correlationId,
+        LocalDateTime now
+    ) {
+        // ① quota 먼저
+        quotaRepository.decrementIfAboveZero(target.getMemberId());
+
+        // ② study: CLOSED이면 생략
+        Study study
+            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        if (study.getStatus() != StudyStatus.CLOSED) {
+            studyRepository.leaveAndAutoReopen(studyId);
+        }
+
+        // ③ membership
+        if (membershipRepository.removeIfApproved(target.getId(), reason, now) == 0) {
+            membershipRepository
+                .findById(target.getId())
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+            throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND);
+        }
+
+        historyRepository
+            .save(
+                StudyMembershipHistory
+                    .record(
+                        target.getId(),
+                        MembershipStatus.APPROVED,
+                        MembershipStatus.REMOVED,
+                        target.getRole(),
+                        target.getRole(),
+                        requestMemberId,
+                        reason,
                         now
                     )
             );
