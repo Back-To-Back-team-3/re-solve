@@ -38,6 +38,8 @@ integration:
     private-key: ${GITHUB_APP_PRIVATE_KEY:}
     api-base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
     state-ttl-seconds: 600
+  judge:
+    base-url: ${JUDGE_SERVICE_URL:http://judge-service:8080}
 
 logging:
   pattern:
