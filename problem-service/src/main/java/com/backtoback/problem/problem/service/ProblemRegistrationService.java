@@ -37,6 +37,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class ProblemRegistrationService {
+    private final com.backtoback.problem.problem.repository.ProblemTestAssetRepository testAssets;
     private final ProblemRepository problems;
     private final ProblemRevisionRepository revisions;
     private final ProblemBodyAssetRepository bodyAssets;
@@ -58,9 +59,26 @@ public class ProblemRegistrationService {
      * 멱등키 UNIQUE 경합의 패배는 호출자가 트랜잭션을 롤백한 뒤 최초 결과를 다시 조회한다.
      * 테스트 파일을 함께 연결하는 흐름은 본문 → 테스트 → 이미지 순서로 잠그도록 이 메서드의 잠금 경계를 구성해야 한다
      * (ERD 4.2.3).
+     *
+     * @param command 업로드 완료된 회차 입력
+     * @return 최초 저장 또는 멱등 재응답 정보
+     * @throws ProblemException 입력·참조·멱등 조건을 위반한 경우
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public SaveResult save(ProblemRegistrationCommand command) {
+        return save(command, List.of());
+    }
+
+    /**
+     * 본문 다음에 테스트 파일을 잠그고 이미지까지 연결한다.
+     *
+     * @param command 검증과 업로드를 마친 등록 입력
+     * @param testAssetIds 호출 트랜잭션에서 연결할 테스트 파일 ID
+     * @return 최초 저장 또는 멱등 재응답 정보
+     * @throws ProblemException 입력·참조·멱등 조건을 위반한 경우
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public SaveResult save(ProblemRegistrationCommand command, List<Long> testAssetIds) {
         validateIdentity(command);
         var existing = revisions.findByAuthorIdAndIdempotencyKey(command.authorId(), command.idempotencyKey());
         if (existing.isPresent()) {
@@ -136,6 +154,11 @@ public class ProblemRegistrationService {
             body.linkToProblem(problem.getId(), command.authorId());
         } catch (IllegalStateException exception) {
             throw new ProblemException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        }
+        for (Long testId : testAssetIds.stream().distinct().sorted().toList()) {
+            testAssets
+                .findByIdForUpdate(testId)
+                .orElseThrow(() -> new ProblemException(CommonErrorCode.COMMON_INVALID_REQUEST));
         }
         for (Long imageId : imageIds) {
             List<ProblemImage> lockedImages = images.findAllByIdForUpdate(List.of(imageId));
