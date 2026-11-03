@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.util.UUID;
@@ -118,6 +119,37 @@ class ReplicaEventConsumerTest {
         assertThat(((Number)row.get("source_version")).longValue()).isEqualTo(12L);
         assertThat(processed(eventId)).isEqualTo(1);
         verify(ack).acknowledge();
+    }
+
+    @Test
+    @DisplayName("정지 해제 이벤트가 활성 상태로 갱신되고 중복 수신은 회원을 다시 조회하지 않는다")
+    void resumeAndDuplicate() {
+        consumer
+            .consume(
+                event(
+                    UUID.randomUUID().toString(),
+                    "MemberUpdated",
+                    "410",
+                    "\"memberId\":\"410\",\"sourceVersion\":1,\"status\":\"SUSPENDED\"," + "\"nickname\":\"이름\""
+                ),
+                mock(Runnable.class)
+            );
+        given(members.fetch(410L)).willReturn(new MemberStatusResponse("410", "ACTIVE", "USER", 2L, "이름", null));
+        var listener = new ReplicaEventListener(decoder, consumer, members, processedEvents, transactions);
+        var ack = mock(Acknowledgement.class);
+        var message
+            = event(
+                UUID.randomUUID().toString(),
+                "MemberSuspended",
+                "410",
+                "\"memberId\":\"410\"," + "\"sourceVersion\":2,\"suspended\":false"
+            );
+        listener.receive(message, ack);
+        listener.receive(message, ack);
+        assertThat(jdbc.queryForObject("SELECT member_status FROM member_replicas WHERE member_id=410", String.class))
+            .isEqualTo("ACTIVE");
+        verify(members, times(1)).fetch(410L);
+        verify(ack, times(2)).acknowledge();
     }
 
     @Test
