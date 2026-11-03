@@ -8,6 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -24,12 +25,15 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.admin.service.AdminMemberService;
 import com.backtoback.member.global.config.SecurityConfig;
+import com.backtoback.member.global.error.MemberException;
 import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.domain.MemberRole;
 import com.backtoback.member.member.domain.MemberStatus;
@@ -122,5 +126,93 @@ class AdminMemberControllerTest {
             .andExpect(status().isBadRequest());
 
         verify(adminMemberService, never()).searchMembers(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("1.6.2 정지는 메시지와 바뀐 상태를 주고, 집행자 ID와 X-Forwarded-For 첫 주소를 서비스에 넘긴다")
+    void changeStatusReturnsStatus() throws Exception {
+        given(adminMemberService.changeStatus(1L, 7L, MemberStatus.SUSPENDED, "부정 행위 신고 확인", "203.0.113.7"))
+            .willReturn(member(7L, MemberStatus.SUSPENDED, MemberRole.USER));
+
+        mockMvc
+            .perform(
+                patch("/api/v1/admin/members/7/status")
+                    .header("X-User-Id", "1")
+                    .header("X-User-Role", "ADMIN")
+                    .header("X-Forwarded-For", "203.0.113.7, 10.0.0.5")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"status\":\"SUSPENDED\",\"reason\":\"부정 행위 신고 확인\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.message").value("회원 상태가 변경되었습니다."))
+            .andExpect(jsonPath("$.data.memberId").value("7"))
+            .andExpect(jsonPath("$.data.status").value("SUSPENDED"));
+    }
+
+    @Test
+    @DisplayName("1.6.3 권한 변경은 메시지와 바뀐 권한을 주고, 본인 권한 변경은 403 AUTH_ACCESS_DENIED")
+    void changeRoleReturnsRole() throws Exception {
+        given(adminMemberService.changeRole(eq(1L), eq(7L), eq(MemberRole.ADMIN), eq("운영진 합류"), eq("203.0.113.7")))
+            .willReturn(member(7L, MemberStatus.ACTIVE, MemberRole.ADMIN));
+        given(adminMemberService.changeRole(eq(1L), eq(1L), eq(MemberRole.USER), eq("사유"), any()))
+            .willThrow(new MemberException(CommonErrorCode.AUTH_ACCESS_DENIED));
+
+        mockMvc
+            .perform(
+                patch("/api/v1/admin/members/7/role")
+                    .header("X-User-Id", "1")
+                    .header("X-User-Role", "ADMIN")
+                    .header("X-Forwarded-For", "203.0.113.7")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"role\":\"ADMIN\",\"reason\":\"운영진 합류\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.message").value("권한이 변경되었습니다."))
+            .andExpect(jsonPath("$.data.role").value("ADMIN"));
+        mockMvc
+            .perform(
+                patch("/api/v1/admin/members/1/role")
+                    .header("X-User-Id", "1")
+                    .header("X-User-Role", "ADMIN")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"role\":\"USER\",\"reason\":\"사유\"}")
+            )
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
+    }
+
+    @Test
+    @DisplayName("1.6.2·1.6.3 USER는 403, 사유가 없으면 400이고 서비스를 호출하지 않는다")
+    void changeRequiresAdminAndReason() throws Exception {
+        mockMvc
+            .perform(
+                patch("/api/v1/admin/members/7/status")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"status\":\"SUSPENDED\",\"reason\":\"사유\"}")
+            )
+            .andExpect(status().isForbidden());
+        mockMvc
+            .perform(
+                patch("/api/v1/admin/members/7/role")
+                    .header("X-User-Id", "1")
+                    .header("X-User-Role", "ADMIN")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"role\":\"ADMIN\",\"reason\":\" \"}")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.details[0].field").value("reason"));
+
+        verify(adminMemberService, never()).changeStatus(any(), any(), any(), any(), any());
+        verify(adminMemberService, never()).changeRole(any(), any(), any(), any(), any());
+    }
+
+    private Member member(Long id, MemberStatus status, MemberRole role) {
+        Member member = Member.registerWithGitHub(1000L + id, "kim-dev", null, null);
+        ReflectionTestUtils.setField(member, "id", id);
+        ReflectionTestUtils.setField(member, "status", status);
+        ReflectionTestUtils.setField(member, "role", role);
+        return member;
     }
 }
