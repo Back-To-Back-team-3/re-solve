@@ -73,10 +73,7 @@ class AssignmentCommandServiceTest {
     @BeforeEach
     void setUp() {
         study = mock(Study.class);
-        given(study.getStatus()).willReturn(StudyStatus.ACTIVE);
-
         leaderMembership = mock(StudyMembership.class);
-        given(leaderMembership.getRole()).willReturn(MembershipRole.LEADER);
 
         request
             = new AssignmentCreateRequest(
@@ -126,6 +123,8 @@ class AssignmentCommandServiceTest {
     @DisplayName("정상 요청이면 assignmentId와 SCHEDULED 상태를 반환한다")
     void createAssignment_success() {
         // given
+        given(study.getStatus()).willReturn(StudyStatus.ACTIVE);
+        given(leaderMembership.getRole()).willReturn(MembershipRole.LEADER);
         ProblemSummariesResponse summaries = new ProblemSummariesResponse(List.of(availableItem(PROBLEM_ID)));
 
         given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
@@ -175,6 +174,7 @@ class AssignmentCommandServiceTest {
     @DisplayName("LEADER·MANAGER가 아니면 AUTH_ACCESS_DENIED 예외를 던진다")
     void createAssignment_notLeaderOrManager() {
         // given
+        given(study.getStatus()).willReturn(StudyStatus.ACTIVE);
         StudyMembership participant = mock(StudyMembership.class);
         given(participant.getRole()).willReturn(MembershipRole.MEMBER);
 
@@ -195,6 +195,8 @@ class AssignmentCommandServiceTest {
     @DisplayName("isAvailable=false인 문제가 있으면 STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE 예외를 던진다")
     void createAssignment_problemNotAvailable() {
         // given
+        given(study.getStatus()).willReturn(StudyStatus.ACTIVE);
+        given(leaderMembership.getRole()).willReturn(MembershipRole.LEADER);
         ProblemSummariesResponse summaries = new ProblemSummariesResponse(List.of(unavailableItem(PROBLEM_ID)));
 
         given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
@@ -216,6 +218,8 @@ class AssignmentCommandServiceTest {
     @DisplayName("summaries 응답에 요청한 문제가 없으면 STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE 예외를 던진다")
     void createAssignment_problemMissingFromResponse() {
         // given
+        given(study.getStatus()).willReturn(StudyStatus.ACTIVE);
+        given(leaderMembership.getRole()).willReturn(MembershipRole.LEADER);
         ProblemSummariesResponse summaries = new ProblemSummariesResponse(List.of());
 
         given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
