@@ -136,4 +136,18 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
         @Param("studyId") Long studyId,
         @Param("status") MembershipStatus status
     );
+
+    /**
+     * 지정 스터디에서 주어진 역할 목록에 해당하는 APPROVED 멤버의 memberId 목록을 반환한다(스케줄러 §5.2 CLOSE 동작 3단계).
+     * AssignmentIncompleteRepeated 이벤트의 recipientMemberIds 구성에 사용한다.
+     */
+    @Query(
+        "SELECT m.memberId FROM StudyMembership m "
+            + "WHERE m.studyId = :studyId AND m.role IN :roles AND m.status = :status"
+    )
+    List<Long> findMemberIdsByStudyIdAndRolesAndStatus(
+        @Param("studyId") Long studyId,
+        @Param("roles") Collection<MembershipRole> roles,
+        @Param("status") MembershipStatus status
+    );
 }

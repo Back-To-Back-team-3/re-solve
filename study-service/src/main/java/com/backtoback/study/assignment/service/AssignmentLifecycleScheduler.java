@@ -38,11 +38,13 @@ public class AssignmentLifecycleScheduler {
     private final MeterRegistry meterRegistry;
 
     private Counter openedCounter;
+    private Counter closedCounter;
     private Counter failedCounter;
 
     @PostConstruct
     void initMetrics() {
         this.openedCounter = Counter.builder("scheduler.items").tag("result", "opened").register(meterRegistry);
+        this.closedCounter = Counter.builder("scheduler.items").tag("result", "closed").register(meterRegistry);
         this.failedCounter = Counter.builder("scheduler.items").tag("result", "failed").register(meterRegistry);
     }
 
@@ -62,7 +64,7 @@ public class AssignmentLifecycleScheduler {
         for (Long id : openIds) {
             if (clock.instant().toEpochMilli() > cutoffAt) {
                 log.warn("OPEN 전이 실행 시간 초과. 나머지 건은 다음 회차에 처리됩니다.");
-                break;
+                return;
             }
             String correlationId = CORRELATION_PREFIX + UUID.randomUUID();
             try {
@@ -70,6 +72,22 @@ public class AssignmentLifecycleScheduler {
                 openedCounter.increment();
             } catch (Exception e) {
                 log.error("OPEN 전이 실패. assignmentId={}, correlationId={}", id, correlationId, e);
+                failedCounter.increment();
+            }
+        }
+
+        List<Long> closeIds = assignmentRepository.findScheduledToCloseIds(now, BATCH_SIZE);
+        for (Long id : closeIds) {
+            if (clock.instant().toEpochMilli() > cutoffAt) {
+                log.warn("CLOSE 전이 실행 시간 초과. 나머지 건은 다음 회차에 처리됩니다.");
+                break;
+            }
+            String correlationId = CORRELATION_PREFIX + UUID.randomUUID();
+            try {
+                lifecycleService.closeTransition(id, correlationId);
+                closedCounter.increment();
+            } catch (Exception e) {
+                log.error("CLOSE 전이 실패. assignmentId={}, correlationId={}", id, correlationId, e);
                 failedCounter.increment();
             }
         }
