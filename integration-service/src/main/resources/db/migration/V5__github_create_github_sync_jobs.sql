@@ -4,6 +4,8 @@ CREATE TABLE github_sync_jobs
     connection_id BIGINT       NOT NULL COMMENT 'github_connections.id 참조',
     submission_id BIGINT       NOT NULL COMMENT '제출 ID (외부 참조)',
     problem_id    BIGINT       NOT NULL COMMENT '문제 ID (외부 참조)',
+    problem_title VARCHAR(200) NOT NULL COMMENT '문제명 스냅샷 (SubmissionJudged 이벤트, 커밋 경로·알림용)',
+    problem_difficulty INT     NOT NULL COMMENT '문제 난이도 스냅샷 1~3 (SubmissionJudged 이벤트, 커밋 경로용)',
     commit_sha    VARCHAR(64)  NULL COMMENT 'NULL 허용: 커밋 성공 시 SHA',
     status        VARCHAR(30)  NOT NULL COMMENT 'PENDING / RUNNING / RETRY_WAITING / RATE_LIMITED / SUCCEEDED / FAILED / CANCELED',
     retry_count   INT          NOT NULL COMMENT '재시도 횟수 (최대 5, 1분 -> 5분 -> 30분)',

@@ -33,7 +33,7 @@ class GithubSyncJobTest {
     @DisplayName("작업 생성 시 초기 상태는 PENDING이고 재시도 횟수는 0이며 에러 메시지와 재시도 시각은 null이다")
     void createPendingJobInitialState() {
         GithubConnection connection = createTestConnection();
-        GithubSyncJob job = GithubSyncJob.createPending(connection, 100L, 200L);
+        GithubSyncJob job = GithubSyncJob.createPending(connection, 100L, 200L, "두 수의 합", 1);
 
         assertThat(job.getConnection()).isEqualTo(connection);
         assertThat(job.getSubmissionId()).isEqualTo(100L);
@@ -50,18 +50,18 @@ class GithubSyncJobTest {
     void createPendingValidationFails() {
         GithubConnection connection = createTestConnection();
 
-        assertThatThrownBy(() -> GithubSyncJob.createPending(null, 100L, 200L))
+        assertThatThrownBy(() -> GithubSyncJob.createPending(null, 100L, 200L, "두 수의 합", 1))
             .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> GithubSyncJob.createPending(connection, null, 200L))
+        assertThatThrownBy(() -> GithubSyncJob.createPending(connection, null, 200L, "두 수의 합", 1))
             .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> GithubSyncJob.createPending(connection, 100L, null))
+        assertThatThrownBy(() -> GithubSyncJob.createPending(connection, 100L, null, "두 수의 합", 1))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     @DisplayName("markRunning 호출 시 상태가 RUNNING으로 변경되고 nextRetryAt은 null이 된다")
     void markRunning() {
-        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L);
+        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L, "두 수의 합", 1);
         job.markRunning();
 
         assertThat(job.getStatus()).isEqualTo(GithubSyncJobStatus.RUNNING);
@@ -71,7 +71,7 @@ class GithubSyncJobTest {
     @Test
     @DisplayName("markSucceeded 호출 시 상태가 SUCCEEDED로 변경되고 커밋 SHA가 저장된다")
     void markSucceeded() {
-        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L);
+        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L, "두 수의 합", 1);
         job.markRunning();
         job.markSucceeded("abc1234def5678");
 
@@ -84,7 +84,7 @@ class GithubSyncJobTest {
     @Test
     @DisplayName("markRateLimited 호출 시 상태가 RATE_LIMITED로 변경되고 재시도 시각이 설정된다")
     void markRateLimited() {
-        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L);
+        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L, "두 수의 합", 1);
         job.markRunning();
         LocalDateTime resetAt = LocalDateTime.now().plusMinutes(15);
         job.markRateLimited(resetAt);
@@ -97,7 +97,7 @@ class GithubSyncJobTest {
     @Test
     @DisplayName("markRetryWaiting 호출 시 상태가 RETRY_WAITING으로 변경되고 재시도 횟수가 증가하며 500자 초과 에러는 잘린다")
     void markRetryWaiting() {
-        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L);
+        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L, "두 수의 합", 1);
         job.markRunning();
         LocalDateTime nextRetryAt = LocalDateTime.now().plusMinutes(1);
         String longMessage = "E".repeat(600);
@@ -112,7 +112,7 @@ class GithubSyncJobTest {
     @Test
     @DisplayName("markFailed 호출 시 상태가 FAILED로 변경된다")
     void markFailed() {
-        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L);
+        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L, "두 수의 합", 1);
         job.markRunning();
         job.markFailed("Permanent failure");
 
@@ -124,7 +124,7 @@ class GithubSyncJobTest {
     @Test
     @DisplayName("cancel 호출 시 상태가 CANCELED로 변경된다")
     void cancel() {
-        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L);
+        GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L, "두 수의 합", 1);
         job.cancel("User disconnected");
 
         assertThat(job.getStatus()).isEqualTo(GithubSyncJobStatus.CANCELED);

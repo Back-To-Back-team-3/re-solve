@@ -74,7 +74,7 @@ class GithubSyncJobRepositoryTest {
     @Test
     @DisplayName("신규 작업을 저장하고 submissionId로 단일 조회할 수 있다")
     void saveAndFindBySubmissionId() {
-        GithubSyncJob job = GithubSyncJob.createPending(connection, 1001L, 201L);
+        GithubSyncJob job = GithubSyncJob.createPending(connection, 1001L, 201L, "두 수의 합", 1);
         GithubSyncJob saved = githubSyncJobRepository.save(job);
 
         assertThat(saved.getId()).isNotNull();
@@ -87,10 +87,10 @@ class GithubSyncJobRepositoryTest {
     @Test
     @DisplayName("동일한 submissionId로 중복 저장 시 uk_github_sync_jobs_submission 제약 위반 예외가 발생한다")
     void duplicateSubmissionIdThrowsException() {
-        GithubSyncJob job1 = GithubSyncJob.createPending(connection, 1001L, 201L);
+        GithubSyncJob job1 = GithubSyncJob.createPending(connection, 1001L, 201L, "두 수의 합", 1);
         githubSyncJobRepository.saveAndFlush(job1);
 
-        GithubSyncJob job2 = GithubSyncJob.createPending(connection, 1001L, 202L);
+        GithubSyncJob job2 = GithubSyncJob.createPending(connection, 1001L, 202L, "두 수의 합", 1);
         assertThatThrownBy(() -> githubSyncJobRepository.saveAndFlush(job2))
             .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -101,22 +101,22 @@ class GithubSyncJobRepositoryTest {
         LocalDateTime now = LocalDateTime.now();
 
         // 1. PENDING (즉시 실행 대상)
-        GithubSyncJob job1 = GithubSyncJob.createPending(connection, 1001L, 201L);
+        GithubSyncJob job1 = GithubSyncJob.createPending(connection, 1001L, 201L, "두 수의 합", 1);
 
         // 2. RETRY_WAITING (재시도 시각 도래)
-        GithubSyncJob job2 = GithubSyncJob.createPending(connection, 1002L, 202L);
+        GithubSyncJob job2 = GithubSyncJob.createPending(connection, 1002L, 202L, "두 수의 합", 1);
         job2.markRetryWaiting(now.minusSeconds(10), "Temporary error");
 
         // 3. RETRY_WAITING (미래 재시도 - 제외되어야 함)
-        GithubSyncJob job3 = GithubSyncJob.createPending(connection, 1003L, 203L);
+        GithubSyncJob job3 = GithubSyncJob.createPending(connection, 1003L, 203L, "두 수의 합", 1);
         job3.markRetryWaiting(now.plusMinutes(5), "Temporary error");
 
         // 4. RATE_LIMITED (해제 시각 도래)
-        GithubSyncJob job4 = GithubSyncJob.createPending(connection, 1004L, 204L);
+        GithubSyncJob job4 = GithubSyncJob.createPending(connection, 1004L, 204L, "두 수의 합", 1);
         job4.markRateLimited(now.minusSeconds(5));
 
         // 5. SUCCEEDED (완료됨 - 제외)
-        GithubSyncJob job5 = GithubSyncJob.createPending(connection, 1005L, 205L);
+        GithubSyncJob job5 = GithubSyncJob.createPending(connection, 1005L, 205L, "두 수의 합", 1);
         job5.markSucceeded("sha-12345");
 
         githubSyncJobRepository.saveAllAndFlush(List.of(job1, job2, job3, job4, job5));
@@ -129,10 +129,10 @@ class GithubSyncJobRepositoryTest {
     @Test
     @DisplayName("연동 ID와 상태 목록으로 작업을 조회할 수 있다")
     void findByConnectionIdAndStatusIn() {
-        GithubSyncJob job1 = GithubSyncJob.createPending(connection, 1001L, 201L);
-        GithubSyncJob job2 = GithubSyncJob.createPending(connection, 1002L, 202L);
+        GithubSyncJob job1 = GithubSyncJob.createPending(connection, 1001L, 201L, "두 수의 합", 1);
+        GithubSyncJob job2 = GithubSyncJob.createPending(connection, 1002L, 202L, "두 수의 합", 1);
         job2.markRunning();
-        GithubSyncJob job3 = GithubSyncJob.createPending(connection, 1003L, 203L);
+        GithubSyncJob job3 = GithubSyncJob.createPending(connection, 1003L, 203L, "두 수의 합", 1);
         job3.markSucceeded("sha");
 
         githubSyncJobRepository.saveAllAndFlush(List.of(job1, job2, job3));

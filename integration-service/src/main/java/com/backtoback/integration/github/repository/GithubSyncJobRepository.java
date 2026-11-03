@@ -19,6 +19,8 @@ public interface GithubSyncJobRepository extends JpaRepository<GithubSyncJob, Lo
 
     Optional<GithubSyncJob> findBySubmissionId(Long submissionId);
 
+    boolean existsBySubmissionId(Long submissionId);
+
     List<GithubSyncJob> findByConnectionIdAndStatusIn(Long connectionId, Collection<GithubSyncJobStatus> statuses);
 
     /**

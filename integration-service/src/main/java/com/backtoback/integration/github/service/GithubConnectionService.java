@@ -38,6 +38,7 @@ public class GithubConnectionService {
     private static final String DEFAULT_COMMIT_PATH_RULE = "{난이도}/{문제번호}-{문제명}/풀이.java";
 
     private final GithubConnectionRepository githubConnectionRepository;
+    private final GithubSyncJobService githubSyncJobService;
     private final GithubAppClient githubAppClient;
     private final GithubStateStore githubStateStore;
     private final TokenEncryptor tokenEncryptor;
@@ -252,5 +253,6 @@ public class GithubConnectionService {
                 .orElseThrow(() -> new IntegrationException(IntegrationErrorCode.GITHUB_NOT_CONNECTED));
 
         connection.disconnect(GithubDisconnectedReason.USER_REQUEST);
+        githubSyncJobService.cancelPendingJobs(connection.getId(), "사용자 요청에 의한 연동 해제");
     }
 }

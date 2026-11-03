@@ -30,6 +30,7 @@ import lombok.NoArgsConstructor;
 public class GithubSyncJob extends BaseTimeEntity {
 
     private static final int MAX_ERROR_MESSAGE_LENGTH = 500;
+    private static final int MAX_PROBLEM_TITLE_LENGTH = 200;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -54,6 +55,19 @@ public class GithubSyncJob extends BaseTimeEntity {
         nullable = false
     )
     private Long problemId;
+
+    @Column(
+        name = "problem_title",
+        nullable = false,
+        length = MAX_PROBLEM_TITLE_LENGTH
+    )
+    private String problemTitle;
+
+    @Column(
+        name = "problem_difficulty",
+        nullable = false
+    )
+    private int problemDifficulty;
 
     @Column(
         name = "commit_sha",
@@ -84,7 +98,13 @@ public class GithubSyncJob extends BaseTimeEntity {
     )
     private String errorMessage;
 
-    private GithubSyncJob(GithubConnection connection, Long submissionId, Long problemId) {
+    private GithubSyncJob(
+        GithubConnection connection,
+        Long submissionId,
+        Long problemId,
+        String problemTitle,
+        int problemDifficulty
+    ) {
         if (connection == null) {
             throw new IllegalArgumentException("connection은 필수입니다.");
         }
@@ -94,10 +114,20 @@ public class GithubSyncJob extends BaseTimeEntity {
         if (problemId == null) {
             throw new IllegalArgumentException("problemId는 필수입니다.");
         }
+        if (problemTitle == null || problemTitle.isBlank()) {
+            throw new IllegalArgumentException("problemTitle은 필수입니다.");
+        }
+        if (problemDifficulty < 1 || problemDifficulty > 3) {
+            throw new IllegalArgumentException("problemDifficulty는 1~3이어야 합니다.");
+        }
 
         this.connection = connection;
         this.submissionId = submissionId;
         this.problemId = problemId;
+        this.problemTitle
+            = problemTitle.length() > MAX_PROBLEM_TITLE_LENGTH ? problemTitle.substring(0, MAX_PROBLEM_TITLE_LENGTH)
+                : problemTitle;
+        this.problemDifficulty = problemDifficulty;
         this.status = GithubSyncJobStatus.PENDING;
         this.retryCount = 0;
         this.nextRetryAt = null;
@@ -110,10 +140,18 @@ public class GithubSyncJob extends BaseTimeEntity {
      * @param connection 연동 정보
      * @param submissionId 제출 ID
      * @param problemId 문제 ID
+     * @param problemTitle 문제명 (커밋 경로·알림용 이벤트 스냅샷)
+     * @param problemDifficulty 문제 난이도 (1~3, 이벤트 스냅샷)
      * @return 생성된 작업 엔티티
      */
-    public static GithubSyncJob createPending(GithubConnection connection, Long submissionId, Long problemId) {
-        return new GithubSyncJob(connection, submissionId, problemId);
+    public static GithubSyncJob createPending(
+        GithubConnection connection,
+        Long submissionId,
+        Long problemId,
+        String problemTitle,
+        int problemDifficulty
+    ) {
+        return new GithubSyncJob(connection, submissionId, problemId, problemTitle, problemDifficulty);
     }
 
     /**
