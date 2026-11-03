@@ -144,8 +144,16 @@ public class AssignmentEnrollmentService {
                 );
 
         if (affected == 0) {
-            // 이미 편입된 멤버 — 완료 기록 중복 삽입 생략
-            return;
+            // SCHEDULED 편입 후 OPEN 전이 시 기존 행 갱신(스케줄러 §5.2 OPEN upsert)
+            memberStatusRepository
+                .updateStatusAndCounts(
+                    assignment.getId(),
+                    memberId,
+                    progressStatus.name(),
+                    completedCount,
+                    onTimeCount,
+                    completedAt
+                );
         }
 
         for (AssignmentCompletion completion : completions) {

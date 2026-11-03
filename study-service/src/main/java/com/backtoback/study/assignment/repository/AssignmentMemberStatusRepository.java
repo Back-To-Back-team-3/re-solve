@@ -50,6 +50,27 @@ public interface AssignmentMemberStatusRepository extends JpaRepository<Assignme
     int updateToIncompleteExcludingLeft(@Param("assignmentId") Long assignmentId);
 
     /**
+     * 이미 편입된 멤버의 진행 상태·완료 수·완료 시각을 재계산 값으로 갱신한다(스케줄러 §5.2 OPEN 동작 upsert).
+     * INSERT IGNORE가 0행이면 호출해 기존 NOT_STARTED 행을 갱신한다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE assignment_member_statuses "
+            + "SET status = :status, completed_count = :completedCount, on_time_count = :onTimeCount, "
+            + "completed_at = :completedAt, updated_at = NOW(6) "
+            + "WHERE assignment_id = :assignmentId AND member_id = :memberId",
+        nativeQuery = true
+    )
+    int updateStatusAndCounts(
+        @Param("assignmentId") Long assignmentId,
+        @Param("memberId") Long memberId,
+        @Param("status") String status,
+        @Param("completedCount") int completedCount,
+        @Param("onTimeCount") int onTimeCount,
+        @Param("completedAt") LocalDateTime completedAt
+    );
+
+    /**
      * 지정 문제집에서 주어진 상태인 멤버 ID 목록을 반환한다(스케줄러 §5.2 CLOSE 동작 2·3단계).
      */
     @Query(
