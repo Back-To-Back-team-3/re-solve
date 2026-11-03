@@ -50,13 +50,13 @@ public class AssignmentLifecycleService {
 
     /**
      * SCHEDULED 문제집 1건을 OPEN으로 전이하고 AssignmentPublished 이벤트를 기록한다.
-     * openIfScheduled가 0행이면 다른 인스턴스가 먼저 처리한 것이므로 종료한다.
+     * openIfScheduled가 0행이면 다른 인스턴스가 먼저 처리한 것이므로 false를 반환한다.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void openTransition(Long assignmentId, String correlationId) {
+    public boolean openTransition(Long assignmentId, String correlationId) {
         int updated = assignmentRepository.openIfScheduled(assignmentId);
         if (updated == 0) {
-            return;
+            return false;
         }
 
         Assignment assignment = assignmentRepository.findById(assignmentId).orElseThrow();
@@ -95,20 +95,21 @@ public class AssignmentLifecycleService {
                 correlationId,
                 payload
             );
+        return true;
     }
 
     /**
      * OPEN 문제집 1건을 CLOSED로 전이하고 미완료 멤버를 INCOMPLETE 처리한다.
      * 연속 2회 INCOMPLETE 멤버가 있으면 AssignmentIncompleteRepeated 이벤트를 기록한다.
-     * closeIfOpen이 0행이면 다른 인스턴스가 먼저 처리한 것이므로 종료한다.
+     * closeIfOpen이 0행이면 다른 인스턴스가 먼저 처리한 것이므로 false를 반환한다.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void closeTransition(Long assignmentId, String correlationId) {
+    public boolean closeTransition(Long assignmentId, String correlationId) {
         LocalDateTime now
             = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
         int updated = assignmentRepository.closeIfOpen(assignmentId, now);
         if (updated == 0) {
-            return;
+            return false;
         }
 
         Assignment assignment = assignmentRepository.findById(assignmentId).orElseThrow();
@@ -119,14 +120,14 @@ public class AssignmentLifecycleService {
             = memberStatusRepository
                 .findMemberIdsByAssignmentIdAndStatus(assignmentId, MemberProgressStatus.INCOMPLETE);
         if (incompleteMemberIds.isEmpty()) {
-            return;
+            return true;
         }
 
         Optional<Long> previousClosedId
             = assignmentRepository
                 .findPreviousClosedId(assignment.getStudyId(), assignment.getDeadlineAt(), assignmentId);
         if (previousClosedId.isEmpty()) {
-            return;
+            return true;
         }
 
         List<Long> repeatedMemberIds
@@ -137,7 +138,7 @@ public class AssignmentLifecycleService {
                     MemberProgressStatus.INCOMPLETE
                 );
         if (repeatedMemberIds.isEmpty()) {
-            return;
+            return true;
         }
 
         List<Long> recipientMemberIds
@@ -165,5 +166,6 @@ public class AssignmentLifecycleService {
                 correlationId,
                 payload
             );
+        return true;
     }
 }

@@ -73,8 +73,9 @@ public class AssignmentLifecycleScheduler {
             }
             String correlationId = CORRELATION_PREFIX + UUID.randomUUID();
             try {
-                lifecycleService.openTransition(id, correlationId);
-                openedCounter.increment();
+                if (lifecycleService.openTransition(id, correlationId)) {
+                    openedCounter.increment();
+                }
             } catch (Exception e) {
                 log.error("OPEN 전이 실패. assignmentId={}, correlationId={}", id, correlationId, e);
                 failedCounter.increment();
@@ -90,8 +91,9 @@ public class AssignmentLifecycleScheduler {
             }
             String correlationId = CORRELATION_PREFIX + UUID.randomUUID();
             try {
-                lifecycleService.closeTransition(id, correlationId);
-                closedCounter.increment();
+                if (lifecycleService.closeTransition(id, correlationId)) {
+                    closedCounter.increment();
+                }
             } catch (Exception e) {
                 log.error("CLOSE 전이 실패. assignmentId={}, correlationId={}", id, correlationId, e);
                 failedCounter.increment();
