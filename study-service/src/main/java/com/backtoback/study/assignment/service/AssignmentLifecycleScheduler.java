@@ -48,6 +48,10 @@ public class AssignmentLifecycleScheduler {
         this.failedCounter = Counter.builder("scheduler.items").tag("result", "failed").register(meterRegistry);
     }
 
+    /**
+     * 1분마다 OPEN·CLOSE 전이 대상을 각 최대 100건 처리한다.
+     * 각 건은 독립 트랜잭션으로 처리하므로 1건 실패가 나머지 건을 롤백하지 않는다.
+     */
     @Scheduled(
         fixedDelay = 60_000,
         initialDelay = 30_000
