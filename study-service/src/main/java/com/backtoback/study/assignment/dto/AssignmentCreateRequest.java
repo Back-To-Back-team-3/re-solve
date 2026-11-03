@@ -1,6 +1,6 @@
 package com.backtoback.study.assignment.dto;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import jakarta.validation.constraints.AssertTrue;
@@ -18,8 +18,8 @@ public record AssignmentCreateRequest(
     Long tagId,
     @NotEmpty @Size(max = 20) List<Long> problemIds,
     Boolean isPreSolvedAllowed,
-    @NotNull LocalDateTime startsAt,
-    @NotNull LocalDateTime deadlineAt
+    @NotNull OffsetDateTime startsAt,
+    @NotNull OffsetDateTime deadlineAt
 ) {
 
     @AssertTrue(message = "problemIds에 중복이 있습니다")

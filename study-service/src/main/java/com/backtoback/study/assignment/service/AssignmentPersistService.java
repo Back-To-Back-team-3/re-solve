@@ -1,5 +1,6 @@
 package com.backtoback.study.assignment.service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -8,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.assignment.client.ProblemSummaryItem;
 import com.backtoback.study.assignment.domain.Assignment;
 import com.backtoback.study.assignment.domain.AssignmentProblem;
@@ -37,8 +39,12 @@ class AssignmentPersistService {
      * @return 생성된 assignmentId
      */
     @Transactional
-    Long persist(Long studyId, AssignmentCreateRequest request, Map<Long, ProblemSummaryItem> summaryMap) {
+    public Long persist(Long studyId, AssignmentCreateRequest request, Map<Long, ProblemSummaryItem> summaryMap) {
         boolean preSolvedAllowed = Boolean.TRUE.equals(request.isPreSolvedAllowed());
+        LocalDateTime startsAt
+            = request.startsAt().atZoneSameInstant(ClockConfiguration.SERVICE_ZONE).toLocalDateTime();
+        LocalDateTime deadlineAt
+            = request.deadlineAt().atZoneSameInstant(ClockConfiguration.SERVICE_ZONE).toLocalDateTime();
         Assignment assignment
             = Assignment
                 .schedule(
@@ -47,8 +53,8 @@ class AssignmentPersistService {
                     request.tagId(),
                     request.goal(),
                     preSolvedAllowed,
-                    request.startsAt(),
-                    request.deadlineAt()
+                    startsAt,
+                    deadlineAt
                 );
         assignmentRepository.save(assignment);
 
