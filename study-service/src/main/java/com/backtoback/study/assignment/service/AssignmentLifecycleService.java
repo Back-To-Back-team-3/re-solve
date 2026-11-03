@@ -70,7 +70,7 @@ public class AssignmentLifecycleService {
             enrollmentService.enrollOpenForScheduler(assignment, membership.getMemberId(), membership.getId(), now);
         }
 
-        List<Long> targetMemberIds = memberships.stream().map(StudyMembership::getMemberId).toList();
+        List<String> targetMemberIds = memberships.stream().map(m -> String.valueOf(m.getMemberId())).toList();
 
         String deadlineAtStr
             = assignment.getDeadlineAt() != null
@@ -153,8 +153,8 @@ public class AssignmentLifecycleService {
             = new AssignmentIncompleteRepeatedPayload(
                 String.valueOf(assignment.getStudyId()),
                 String.valueOf(assignmentId),
-                repeatedMemberIds,
-                recipientMemberIds
+                repeatedMemberIds.stream().map(String::valueOf).toList(),
+                recipientMemberIds.stream().map(String::valueOf).toList()
             );
 
         outboxEventWriter

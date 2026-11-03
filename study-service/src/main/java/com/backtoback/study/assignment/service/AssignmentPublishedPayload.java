@@ -12,6 +12,6 @@ record AssignmentPublishedPayload(
     String title,
     String startsAt,
     String deadlineAt,
-    List<Long> targetMemberIds
+    List<String> targetMemberIds
 ) {
 }

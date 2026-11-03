@@ -9,7 +9,7 @@ import java.util.List;
 record AssignmentIncompleteRepeatedPayload(
     String studyId,
     String assignmentId,
-    List<Long> memberIds,
-    List<Long> recipientMemberIds
+    List<String> memberIds,
+    List<String> recipientMemberIds
 ) {
 }
