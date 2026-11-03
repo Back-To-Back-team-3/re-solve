@@ -2,6 +2,7 @@ package com.backtoback.study.membership.repository;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -94,4 +95,31 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
         nativeQuery = true
     )
     int leaveIfApproved(@Param("id") Long id, @Param("leftAt") LocalDateTime leftAt);
+
+    /**
+     * PENDING 상태인 경우에만 EXPIRED로 전이하고 expires_at을 null로 초기화한다(스케줄러 명세서 §5.1 동시성 설계).
+     * 0이면 다른 인스턴스가 먼저 처리했거나 상태가 변경된 것이므로 호출자가 건너뛰어야 한다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE study_memberships SET status = 'EXPIRED', expires_at = NULL, updated_at = NOW(6) "
+            + "WHERE id = :id AND status = 'PENDING'",
+        nativeQuery = true
+    )
+    int expireIfPending(@Param("id") Long id);
+
+    /**
+     * 만료 시각이 지난 PENDING 신청의 ID를 오래된 순으로 최대 {@code limit}건 조회한다(스케줄러 명세서 §5.1).
+     * 잠금 없이 대상 목록을 선정하고 각 건은 expireIfPending으로 조건부 UPDATE한다.
+     *
+     * @param now 기준 시각 (스케줄러가 주입한 Clock 기반)
+     * @param limit 최대 조회 건수
+     * @return 만료 처리 대상 membership ID 목록
+     */
+    @Query(
+        value = "SELECT id FROM study_memberships " + "WHERE status = 'PENDING' AND expires_at <= :now "
+            + "ORDER BY expires_at ASC " + "LIMIT :limit",
+        nativeQuery = true
+    )
+    List<Long> findExpiredPendingIds(@Param("now") LocalDateTime now, @Param("limit") int limit);
 }
