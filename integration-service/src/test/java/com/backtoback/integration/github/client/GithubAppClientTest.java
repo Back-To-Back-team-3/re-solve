@@ -2,6 +2,9 @@ package com.backtoback.integration.github.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -11,6 +14,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.time.Instant;
 import java.util.Base64;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +27,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.integration.github.client.dto.GithubCommitResultResponse;
 import com.backtoback.integration.github.client.dto.GithubInstallationResponse;
 import com.backtoback.integration.github.client.dto.GithubInstallationTokenResponse;
 import com.backtoback.integration.github.client.dto.GithubRepositoriesResponse;
@@ -188,5 +193,115 @@ class GithubAppClientTest {
         assertThat(response.repositories().get(0).name()).isEqualTo("algorithm-solutions");
         assertThat(response.repositories().get(0).owner().login()).isEqualTo("kim-dev");
         server.verify();
+    }
+
+    @Test
+    @DisplayName("기존 파일이 있으면 Contents API 조회로 sha를 반환한다")
+    void findContentShaWhenExists() {
+        server
+            .expect(requestTo("https://api.github.com/repos/kim-dev/solutions/contents/Lv1/1-two-sum/solution.py"))
+            .andExpect(method(HttpMethod.GET))
+            .andExpect(header("Authorization", "Bearer ghs_token"))
+            .andRespond(withSuccess("{\"sha\": \"abc123\"}", MediaType.APPLICATION_JSON));
+
+        assertThat(client.findContentSha("ghs_token", "kim-dev", "solutions", "Lv1/1-two-sum/solution.py"))
+            .contains("abc123");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("파일이 없어 404가 오면 빈 값을 반환한다")
+    void findContentShaWhenNotFound() {
+        server
+            .expect(requestTo("https://api.github.com/repos/kim-dev/solutions/contents/new.py"))
+            .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThat(client.findContentSha("ghs_token", "kim-dev", "solutions", "new.py")).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("파일 sha 조회에서 401이 오면 GithubApiException(401)으로 변환한다")
+    void findContentShaUnauthorized() {
+        server
+            .expect(requestTo("https://api.github.com/repos/kim-dev/solutions/contents/a.py"))
+            .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+
+        assertThatThrownBy(() -> client.findContentSha("ghs_token", "kim-dev", "solutions", "a.py"))
+            .isInstanceOfSatisfying(GithubApiException.class, e -> assertThat(e.isUnauthorized()).isTrue());
+    }
+
+    @Test
+    @DisplayName("파일 커밋 시 Base64 내용과 기존 sha를 담아 PUT하고 커밋 sha를 반환한다")
+    void putContentSuccess() {
+        String expectedContent = Base64.getEncoder().encodeToString("print(1)".getBytes());
+        server
+            .expect(requestTo("https://api.github.com/repos/kim-dev/solutions/contents/a.py"))
+            .andExpect(method(HttpMethod.PUT))
+            .andExpect(header("Authorization", "Bearer ghs_token"))
+            .andExpect(content().string(containsString("\"content\":\"" + expectedContent + "\"")))
+            .andExpect(content().string(containsString("\"sha\":\"old-sha\"")))
+            .andRespond(
+                withStatus(HttpStatus.OK)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"commit\": {\"sha\": \"new-commit-sha\"}}")
+            );
+
+        GithubCommitResultResponse response
+            = client.putContent("ghs_token", "kim-dev", "solutions", "a.py", "msg", "print(1)", "old-sha");
+
+        assertThat(response.commitSha()).isEqualTo("new-commit-sha");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("신규 파일 커밋은 sha 필드를 보내지 않는다")
+    void putContentWithoutShaOmitsShaField() {
+        server
+            .expect(requestTo("https://api.github.com/repos/kim-dev/solutions/contents/a.py"))
+            .andExpect(content().string(not(containsString("\"sha\""))))
+            .andRespond(
+                withStatus(HttpStatus.CREATED)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"commit\": {\"sha\": \"c1\"}}")
+            );
+
+        assertThat(client.putContent("ghs_token", "kim-dev", "solutions", "a.py", "msg", "x", null).commitSha())
+            .isEqualTo("c1");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("Rate Limit 응답(403)은 x-ratelimit-reset 헤더의 초기화 시각을 담아 변환한다")
+    void putContentRateLimited() {
+        server
+            .expect(requestTo("https://api.github.com/repos/kim-dev/solutions/contents/a.py"))
+            .andRespond(withStatus(HttpStatus.FORBIDDEN).header("x-ratelimit-reset", "1893456000"));
+
+        assertThatThrownBy(() -> client.putContent("ghs_token", "kim-dev", "solutions", "a.py", "m", "x", null))
+            .isInstanceOfSatisfying(GithubApiException.class, e -> {
+                assertThat(e.isRateLimited()).isTrue();
+                assertThat(e.getRateLimitResetAt()).isEqualTo(Instant.ofEpochSecond(1893456000L));
+            });
+    }
+
+    @Test
+    @DisplayName("sha 불일치(409)는 상태 코드를 보존해 변환한다")
+    void putContentConflict() {
+        server
+            .expect(requestTo("https://api.github.com/repos/kim-dev/solutions/contents/a.py"))
+            .andRespond(withStatus(HttpStatus.CONFLICT));
+        assertThatThrownBy(() -> client.putContent("t", "kim-dev", "solutions", "a.py", "m", "x", "s"))
+            .isInstanceOfSatisfying(GithubApiException.class, e -> assertThat(e.isConflict()).isTrue());
+    }
+
+    @Test
+    @DisplayName("서버 오류(5xx)는 상태 코드를 보존해 변환한다")
+    void putContentServerError() {
+        server
+            .expect(requestTo("https://api.github.com/repos/kim-dev/solutions/contents/a.py"))
+            .andRespond(withServerError());
+        assertThatThrownBy(() -> client.putContent("t", "kim-dev", "solutions", "a.py", "m", "x", "s"))
+            .isInstanceOfSatisfying(GithubApiException.class, e -> assertThat(e.getStatusCode()).isEqualTo(500));
     }
 }

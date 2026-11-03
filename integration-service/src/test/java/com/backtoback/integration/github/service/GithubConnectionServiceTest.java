@@ -44,6 +44,9 @@ class GithubConnectionServiceTest {
     private GithubConnectionRepository githubConnectionRepository;
 
     @Mock
+    private GithubSyncJobService githubSyncJobService;
+
+    @Mock
     private GithubAppClient githubAppClient;
 
     @Mock
@@ -359,5 +362,6 @@ class GithubConnectionServiceTest {
 
         assertThat(connection.getStatus()).isEqualTo(GithubConnectionStatus.DISCONNECTED);
         assertThat(connection.getDisconnectedReason()).isEqualTo(GithubDisconnectedReason.USER_REQUEST);
+        verify(githubSyncJobService).cancelPendingJobs(eq(connection.getId()), anyString());
     }
 }

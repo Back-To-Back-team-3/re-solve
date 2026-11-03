@@ -67,4 +67,14 @@ public class ProcessedEvent {
         this.processedAt = (processedAt != null) ? processedAt : LocalDateTime.now();
         this.createdAt = (createdAt != null) ? createdAt : LocalDateTime.now();
     }
+
+    public static ProcessedEvent create(String eventId, String eventType, LocalDateTime processedAt) {
+        return ProcessedEvent
+            .builder()
+            .eventId(eventId)
+            .eventType(eventType)
+            .processedAt(processedAt)
+            .createdAt(processedAt)
+            .build();
+    }
 }
