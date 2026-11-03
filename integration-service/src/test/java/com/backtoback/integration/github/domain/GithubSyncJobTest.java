@@ -59,6 +59,24 @@ class GithubSyncJobTest {
     }
 
     @Test
+    @DisplayName("문제명이 200 코드 포인트를 초과하면 서로게이트 쌍(이모지 등)이 손상되지 않고 200 코드 포인트 기준으로 잘린다")
+    void createPendingTruncatesProblemTitleByCodePoints() {
+        GithubConnection connection = createTestConnection();
+        // 199개의 'a' 문자 + 2개의 이모지 (각 이모지는 1 코드 포인트, 2 chars)
+        // 총 201 코드 포인트, 203 chars
+        String emoji1 = "😀";
+        String emoji2 = "🚀";
+        String longTitle = "a".repeat(199) + emoji1 + emoji2;
+
+        GithubSyncJob job = GithubSyncJob.createPending(connection, 100L, 200L, longTitle, 1);
+
+        // 200 코드 포인트: 199개 'a' + 1개 emoji1
+        String expected = "a".repeat(199) + emoji1;
+        assertThat(job.getProblemTitle()).isEqualTo(expected);
+        assertThat(job.getProblemTitle().codePointCount(0, job.getProblemTitle().length())).isEqualTo(200);
+    }
+
+    @Test
     @DisplayName("markRunning 호출 시 상태가 RUNNING으로 변경되고 nextRetryAt은 null이 된다")
     void markRunning() {
         GithubSyncJob job = GithubSyncJob.createPending(createTestConnection(), 100L, 200L, "두 수의 합", 1);

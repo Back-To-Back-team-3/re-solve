@@ -24,6 +24,30 @@ public interface ProcessedEventRepository extends JpaRepository<ProcessedEvent, 
      */
     boolean existsByEventId(String eventId);
 
+    /**
+     * 처리된 이벤트를 조건부 삽입한다 (동일 event_id 존재 시 무시).
+     * 중복 시 유니크 제약 예외를 발생시키지 않아 상위 트랜잭션이 rollback-only로 오염되는 것을 방지한다.
+     *
+     * @param eventId 이벤트 식별자
+     * @param eventType 이벤트 타입
+     * @param processedAt 처리 시각
+     * @return 영향받은 행 수
+     */
+    @Modifying
+    @Query(
+        value = """
+            INSERT INTO processed_events (event_id, event_type, processed_at)
+            VALUES (:eventId, :eventType, :processedAt)
+            ON DUPLICATE KEY UPDATE event_id = event_id
+            """,
+        nativeQuery = true
+    )
+    int insertIfAbsent(
+        @Param("eventId") String eventId,
+        @Param("eventType") String eventType,
+        @Param("processedAt") LocalDateTime processedAt
+    );
+
     Optional<ProcessedEvent> findByEventId(String eventId);
 
     /**

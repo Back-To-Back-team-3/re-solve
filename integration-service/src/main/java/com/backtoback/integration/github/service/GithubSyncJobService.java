@@ -1,9 +1,10 @@
 package com.backtoback.integration.github.service;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +31,7 @@ public class GithubSyncJobService {
 
     private final GithubConnectionRepository connectionRepository;
     private final GithubSyncJobRepository syncJobRepository;
+    private final Clock clock;
 
     /**
      * AC 판정된 제출 건에 대해 회원의 연동 상태 및 자동 커밋 설정을 확인한 후 신규 Sync Job을 등록한다 (policy-and-state.md > 9.3).
@@ -71,23 +73,34 @@ public class GithubSyncJobService {
             return Optional.empty();
         }
 
-        try {
-            GithubSyncJob syncJob
-                = GithubSyncJob.createPending(connection, submissionId, problemId, problemTitle, problemDifficulty);
-            GithubSyncJob savedJob = syncJobRepository.save(syncJob);
-            log
-                .info(
-                    "GitHub Sync Job 등록 완료: jobId={}, memberId={}, submissionId={}, problemId={}",
-                    savedJob.getId(),
-                    memberId,
-                    submissionId,
-                    problemId
-                );
-            return Optional.of(savedJob);
-        } catch (DataIntegrityViolationException e) {
-            log.warn("동일 제출 식별자로 동시 등록 발생 - 중복 작업 생략: submissionId={}", submissionId);
-            return Optional.empty();
-        }
+        // 코드 포인트 단위 자르기 및 유효성 검증을 거친 후 조건부 삽입
+        GithubSyncJob pendingJob
+            = GithubSyncJob.createPending(connection, submissionId, problemId, problemTitle, problemDifficulty);
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        syncJobRepository
+            .insertPendingJobIfAbsent(
+                connection.getId(),
+                submissionId,
+                problemId,
+                pendingJob.getProblemTitle(),
+                problemDifficulty,
+                now
+            );
+
+        Optional<GithubSyncJob> savedJob = syncJobRepository.findBySubmissionId(submissionId);
+        savedJob
+            .ifPresent(
+                job -> log
+                    .info(
+                        "GitHub Sync Job 등록 확인: jobId={}, memberId={}, submissionId={}, problemId={}",
+                        job.getId(),
+                        memberId,
+                        submissionId,
+                        problemId
+                    )
+            );
+        return savedJob;
     }
 
     /**

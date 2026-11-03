@@ -124,14 +124,24 @@ public class GithubSyncJob extends BaseTimeEntity {
         this.connection = connection;
         this.submissionId = submissionId;
         this.problemId = problemId;
-        this.problemTitle
-            = problemTitle.length() > MAX_PROBLEM_TITLE_LENGTH ? problemTitle.substring(0, MAX_PROBLEM_TITLE_LENGTH)
-                : problemTitle;
+        this.problemTitle = truncateByCodePoints(problemTitle, MAX_PROBLEM_TITLE_LENGTH);
         this.problemDifficulty = problemDifficulty;
         this.status = GithubSyncJobStatus.PENDING;
         this.retryCount = 0;
         this.nextRetryAt = null;
         this.errorMessage = null;
+    }
+
+    private static String truncateByCodePoints(String str, int maxCodePoints) {
+        if (str == null) {
+            return null;
+        }
+        int codePointCount = str.codePointCount(0, str.length());
+        if (codePointCount <= maxCodePoints) {
+            return str;
+        }
+        int endOffset = str.offsetByCodePoints(0, maxCodePoints);
+        return str.substring(0, endOffset);
     }
 
     /**

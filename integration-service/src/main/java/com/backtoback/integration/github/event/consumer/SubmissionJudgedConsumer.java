@@ -10,7 +10,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.integration.github.event.dto.SubmissionJudgedEvent;
 import com.backtoback.integration.github.service.GithubSyncJobService;
-import com.backtoback.integration.infra.event.domain.ProcessedEvent;
 import com.backtoback.integration.infra.event.repository.ProcessedEventRepository;
 
 import io.awspring.cloud.sqs.annotation.SqsListener;
@@ -62,7 +61,8 @@ public class SubmissionJudgedConsumer {
                 return;
             }
 
-            processedEventRepository.saveAndFlush(ProcessedEvent.create(eventId, eventType, LocalDateTime.now(clock)));
+            LocalDateTime now = LocalDateTime.now(clock);
+            processedEventRepository.insertIfAbsent(eventId, eventType, now);
 
             if (!SUPPORTED_EVENT_TYPE.equals(eventType)) {
                 log.debug("처리 대상이 아닌 도메인 이벤트 수신 기록 완료: eventId={}, eventType={}", eventId, eventType);

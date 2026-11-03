@@ -2,20 +2,26 @@ package com.backtoback.integration.github.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.integration.github.domain.GithubConnection;
 import com.backtoback.integration.github.domain.GithubDisconnectedReason;
@@ -33,27 +39,36 @@ class GithubSyncJobServiceTest {
     @Mock
     private GithubSyncJobRepository syncJobRepository;
 
-    @InjectMocks
+    private Clock fixedClock;
     private GithubSyncJobService syncJobService;
 
+    @BeforeEach
+    void setUp() {
+        fixedClock = Clock.fixed(Instant.parse("2026-10-29T10:00:00Z"), ZoneId.of("Asia/Seoul"));
+        syncJobService = new GithubSyncJobService(connectionRepository, syncJobRepository, fixedClock);
+    }
+
     private GithubConnection createConnection(boolean autoCommitEnabled) {
-        return GithubConnection
-            .builder()
-            .memberId(1L)
-            .installationId(12345L)
-            .encryptedToken(
-                new byte[] {
-                    1,
-                    2,
-                    3
-                }
-            )
-            .githubLogin("kim-dev")
-            .repositoryOwner("kim-dev")
-            .repositoryName("algorithm-solutions")
-            .autoCommitEnabled(autoCommitEnabled)
-            .commitPathRule("{난이도}/{문제번호}-{문제명}/풀이.java")
-            .build();
+        GithubConnection connection
+            = GithubConnection
+                .builder()
+                .memberId(1L)
+                .installationId(12345L)
+                .encryptedToken(
+                    new byte[] {
+                        1,
+                        2,
+                        3
+                    }
+                )
+                .githubLogin("kim-dev")
+                .repositoryOwner("kim-dev")
+                .repositoryName("algorithm-solutions")
+                .autoCommitEnabled(autoCommitEnabled)
+                .commitPathRule("{난이도}/{문제번호}-{문제명}/풀이.java")
+                .build();
+        ReflectionTestUtils.setField(connection, "id", 10L);
+        return connection;
     }
 
     @Test
@@ -64,7 +79,7 @@ class GithubSyncJobServiceTest {
         Optional<GithubSyncJob> result = syncJobService.registerSyncJob(1L, 100L, 200L, "두 수의 합", 1);
 
         assertThat(result).isEmpty();
-        verify(syncJobRepository, never()).save(any());
+        verify(syncJobRepository, never()).insertPendingJobIfAbsent(any(), any(), any(), any(), anyInt(), any());
     }
 
     @Test
@@ -77,7 +92,7 @@ class GithubSyncJobServiceTest {
         Optional<GithubSyncJob> result = syncJobService.registerSyncJob(1L, 100L, 200L, "두 수의 합", 1);
 
         assertThat(result).isEmpty();
-        verify(syncJobRepository, never()).save(any());
+        verify(syncJobRepository, never()).insertPendingJobIfAbsent(any(), any(), any(), any(), anyInt(), any());
     }
 
     @Test
@@ -89,7 +104,7 @@ class GithubSyncJobServiceTest {
         Optional<GithubSyncJob> result = syncJobService.registerSyncJob(1L, 100L, 200L, "두 수의 합", 1);
 
         assertThat(result).isEmpty();
-        verify(syncJobRepository, never()).save(any());
+        verify(syncJobRepository, never()).insertPendingJobIfAbsent(any(), any(), any(), any(), anyInt(), any());
     }
 
     @Test
@@ -102,41 +117,36 @@ class GithubSyncJobServiceTest {
         Optional<GithubSyncJob> result = syncJobService.registerSyncJob(1L, 100L, 200L, "두 수의 합", 1);
 
         assertThat(result).isEmpty();
-        verify(syncJobRepository, never()).save(any());
+        verify(syncJobRepository, never()).insertPendingJobIfAbsent(any(), any(), any(), any(), anyInt(), any());
     }
 
     @Test
-    @DisplayName("정상 조건이면 PENDING 상태의 Sync Job을 생성하여 저장한다")
+    @DisplayName("정상 조건이면 insertPendingJobIfAbsent를 호출하고 생성된 작업을 반환한다")
     void registerSyncJobSuccess() {
         GithubConnection connection = createConnection(true);
+        GithubSyncJob expectedJob = GithubSyncJob.createPending(connection, 100L, 200L, "두 수의 합", 1);
+        ReflectionTestUtils.setField(expectedJob, "id", 1L);
+
         given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
         given(syncJobRepository.existsBySubmissionId(100L)).willReturn(false);
-        given(syncJobRepository.save(any(GithubSyncJob.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(
+            syncJobRepository
+                .insertPendingJobIfAbsent(eq(10L), eq(100L), eq(200L), eq("두 수의 합"), eq(1), any(LocalDateTime.class))
+        ).willReturn(1);
+        given(syncJobRepository.findBySubmissionId(100L)).willReturn(Optional.of(expectedJob));
 
         Optional<GithubSyncJob> result = syncJobService.registerSyncJob(1L, 100L, 200L, "두 수의 합", 1);
 
         assertThat(result).isPresent();
         GithubSyncJob job = result.get();
+        assertThat(job.getId()).isEqualTo(1L);
         assertThat(job.getStatus()).isEqualTo(GithubSyncJobStatus.PENDING);
         assertThat(job.getSubmissionId()).isEqualTo(100L);
         assertThat(job.getProblemId()).isEqualTo(200L);
         assertThat(job.getProblemTitle()).isEqualTo("두 수의 합");
         assertThat(job.getProblemDifficulty()).isEqualTo(1);
-        verify(syncJobRepository).save(any(GithubSyncJob.class));
-    }
-
-    @Test
-    @DisplayName("동시 저장으로 유니크 제약 위반 발생 시 empty를 반환한다")
-    void registerSyncJobDataIntegrityViolationHandled() {
-        GithubConnection connection = createConnection(true);
-        given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
-        given(syncJobRepository.existsBySubmissionId(100L)).willReturn(false);
-        given(syncJobRepository.save(any(GithubSyncJob.class)))
-            .willThrow(new DataIntegrityViolationException("unique"));
-
-        Optional<GithubSyncJob> result = syncJobService.registerSyncJob(1L, 100L, 200L, "두 수의 합", 1);
-
-        assertThat(result).isEmpty();
+        verify(syncJobRepository)
+            .insertPendingJobIfAbsent(eq(10L), eq(100L), eq(200L), eq("두 수의 합"), eq(1), any(LocalDateTime.class));
     }
 
     @Test

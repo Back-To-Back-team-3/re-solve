@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -17,10 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
 
 import com.backtoback.integration.github.service.GithubSyncJobService;
-import com.backtoback.integration.infra.event.domain.ProcessedEvent;
 import com.backtoback.integration.infra.event.repository.ProcessedEventRepository;
 
 import tools.jackson.databind.ObjectMapper;
@@ -74,7 +73,7 @@ class SubmissionJudgedConsumerTest {
 
         consumer.consume(json);
 
-        verify(processedEventRepository, never()).saveAndFlush(any());
+        verify(processedEventRepository, never()).insertIfAbsent(any(), any(), any());
         verify(githubSyncJobService, never()).registerSyncJob(any(), any(), any(), any(), eq(1));
     }
 
@@ -86,7 +85,7 @@ class SubmissionJudgedConsumerTest {
 
         consumer.consume(json);
 
-        verify(processedEventRepository).saveAndFlush(any(ProcessedEvent.class));
+        verify(processedEventRepository).insertIfAbsent(eq("evt-2"), eq("SubmissionJudged"), any(LocalDateTime.class));
         verify(githubSyncJobService).registerSyncJob(1L, 100L, 200L, "두 수의 합", 1);
     }
 
@@ -98,7 +97,7 @@ class SubmissionJudgedConsumerTest {
 
         consumer.consume(json);
 
-        verify(processedEventRepository).saveAndFlush(any(ProcessedEvent.class));
+        verify(processedEventRepository).insertIfAbsent(eq("evt-3"), eq("SubmissionJudged"), any(LocalDateTime.class));
         verify(githubSyncJobService, never()).registerSyncJob(any(), any(), any(), any(), eq(1));
     }
 
@@ -118,20 +117,8 @@ class SubmissionJudgedConsumerTest {
 
         consumer.consume(enveloped);
 
-        verify(processedEventRepository).saveAndFlush(any(ProcessedEvent.class));
+        verify(processedEventRepository).insertIfAbsent(eq("evt-4"), eq("SubmissionJudged"), any(LocalDateTime.class));
         verify(githubSyncJobService).registerSyncJob(1L, 100L, 200L, "두 수의 합", 1);
-    }
-
-    @Test
-    @DisplayName("동시 수신으로 유니크 제약 위반 시 예외를 삼키고 정상 완료한다")
-    void consumeDataIntegrityViolationHandledGracefully() {
-        String json = createEventJson("evt-5", "SubmissionJudged", "AC");
-        given(processedEventRepository.existsByEventId("evt-5")).willReturn(false);
-        given(processedEventRepository.saveAndFlush(any())).willThrow(new DataIntegrityViolationException("unique"));
-
-        consumer.consume(json);
-
-        verify(githubSyncJobService, never()).registerSyncJob(any(), any(), any(), any(), eq(1));
     }
 
     @Test
