@@ -34,7 +34,7 @@ public class SecurityConfiguration {
                 context -> context.securityContextRepository(new RequestAttributeSecurityContextRepository())
             )
             .authorizeHttpRequests(authorize -> {
-                authorize.requestMatchers("/actuator/health", "/actuator/health/**").permitAll();
+                authorize.requestMatchers("/actuator/**").permitAll();
                 authorize.requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll();
                 // 내부 API는 신뢰된 내부 네트워크에서 호출하므로 사용자 토큰 인증을 생략한다.
                 authorize.requestMatchers("/internal", "/internal/**").permitAll();

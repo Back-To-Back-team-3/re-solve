@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.backtoback.integration.infra.event.domain.OutboxEvent;
+import com.backtoback.integration.infra.event.domain.OutboxEventStatus;
 
 /**
  * OutboxEvent JPA 리포지토리 (erd.md > 3.1, scheduler.md > 0.2.1, 0.2.2).
@@ -17,6 +18,15 @@ import com.backtoback.integration.infra.event.domain.OutboxEvent;
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
 
     Optional<OutboxEvent> findByEventId(String eventId);
+
+    /**
+     * 특정 발행 상태를 갖는 Outbox 이벤트 건수를 조회한다.
+     * 관측성 메트릭(outbox.pending.count) 수집에 활용된다.
+     *
+     * @param status 조회할 이벤트 상태
+     * @return 해당 상태의 이벤트 건수
+     */
+    long countByStatus(OutboxEventStatus status);
 
     /**
      * PENDING 상태의 이벤트를 다중 인스턴스 경합 없이 선점하기 위해 SKIP LOCKED로 조회한다 (scheduler.md > 0.2.1).

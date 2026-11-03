@@ -33,6 +33,7 @@ import com.backtoback.integration.github.client.dto.GithubRepositoriesResponse;
 import com.backtoback.integration.github.config.GithubProperties;
 import com.backtoback.integration.global.error.IntegrationErrorCode;
 import com.backtoback.integration.global.error.IntegrationException;
+import com.backtoback.integration.infra.metrics.GithubRateLimitTracker;
 
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.ObjectMapper;
@@ -79,16 +80,46 @@ public class GithubAppClient {
     private final GithubProperties properties;
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
+    private final GithubRateLimitTracker rateLimitTracker;
 
     @Autowired
-    public GithubAppClient(GithubProperties properties, ObjectMapper objectMapper) {
-        this(properties, RestClient.builder().requestFactory(timeoutRequestFactory()).build(), objectMapper);
+    public GithubAppClient(
+        GithubProperties properties,
+        ObjectMapper objectMapper,
+        @Autowired(required = false) GithubRateLimitTracker rateLimitTracker
+    ) {
+        this(
+            properties,
+            RestClient
+                .builder()
+                .requestFactory(timeoutRequestFactory())
+                .requestInterceptor((request, body, execution) -> {
+                    var response = execution.execute(request, body);
+                    if (rateLimitTracker != null) {
+                        rateLimitTracker.updateFromHeaders(response.getHeaders());
+                    }
+                    return response;
+                })
+                .build(),
+            objectMapper,
+            rateLimitTracker
+        );
     }
 
     GithubAppClient(GithubProperties properties, RestClient restClient, ObjectMapper objectMapper) {
+        this(properties, restClient, objectMapper, null);
+    }
+
+    GithubAppClient(
+        GithubProperties properties,
+        RestClient restClient,
+        ObjectMapper objectMapper,
+        GithubRateLimitTracker rateLimitTracker
+    ) {
         this.properties = properties;
         this.restClient = restClient;
         this.objectMapper = objectMapper;
+        this.rateLimitTracker = rateLimitTracker;
     }
 
     private static SimpleClientHttpRequestFactory timeoutRequestFactory() {
@@ -271,6 +302,9 @@ public class GithubAppClient {
     private GithubApiException toGithubApiException(String action, RestClientException exception) {
         log.warn("{}: error={}", action, exception.getMessage());
         if (exception instanceof RestClientResponseException responseException) {
+            if (rateLimitTracker != null) {
+                rateLimitTracker.updateFromHeaders(responseException.getResponseHeaders());
+            }
             Instant resetAt = null;
             String reset
                 = responseException.getResponseHeaders() == null ? null

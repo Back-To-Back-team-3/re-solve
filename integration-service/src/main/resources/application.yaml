@@ -43,6 +43,20 @@ integration:
   sqs:
     queue-name: ${INTEGRATION_SQS_QUEUE_NAME:integration-queue}
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus, metrics
+  endpoint:
+    health:
+      show-details: always
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
 logging:
   pattern:
     level: "%5p [correlationId=%X{correlationId:-}]"
