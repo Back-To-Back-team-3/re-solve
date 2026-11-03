@@ -16,12 +16,15 @@ import com.backtoback.study.membership.repository.StudyMembershipRepository;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 
 /**
  * 만료된 PENDING 신청을 EXPIRED로 전이하는 스케줄러(스케줄러 명세서 §5.1).
  * ShedLock으로 다중 인스턴스 중복 실행을 방지하고, 건당 독립 트랜잭션으로 1건 실패가 회차 전체를 롤백하지 않는다.
  */
 @Component
+@RequiredArgsConstructor
 public class StudyApplicationExpiryScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(StudyApplicationExpiryScheduler.class);
@@ -31,26 +34,13 @@ public class StudyApplicationExpiryScheduler {
     private final StudyMembershipExpiryService expiryService;
     private final StudyMembershipRepository membershipRepository;
     private final Clock clock;
-    private final Counter expiredCounter;
-    private final Counter failedCounter;
+    private final MeterRegistry meterRegistry;
 
-    /**
-     * Micrometer Counter를 생성자에서 등록한다.
-     *
-     * @param expiryService 만료 1건 처리 서비스
-     * @param membershipRepository 대상 ID 조회 리포지토리
-     * @param clock 현재 시각 공급자
-     * @param meterRegistry 메트릭 레지스트리
-     */
-    public StudyApplicationExpiryScheduler(
-        StudyMembershipExpiryService expiryService,
-        StudyMembershipRepository membershipRepository,
-        Clock clock,
-        MeterRegistry meterRegistry
-    ) {
-        this.expiryService = expiryService;
-        this.membershipRepository = membershipRepository;
-        this.clock = clock;
+    private Counter expiredCounter;
+    private Counter failedCounter;
+
+    @PostConstruct
+    void initMetrics() {
         this.expiredCounter = Counter.builder("scheduler.items").tag("result", "expired").register(meterRegistry);
         this.failedCounter = Counter.builder("scheduler.items").tag("result", "failed").register(meterRegistry);
     }

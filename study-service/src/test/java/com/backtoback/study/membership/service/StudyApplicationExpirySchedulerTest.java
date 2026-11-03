@@ -56,6 +56,7 @@ class StudyApplicationExpirySchedulerTest {
                 clock,
                 new SimpleMeterRegistry()
             );
+        scheduler.initMetrics();
     }
 
     @Test
