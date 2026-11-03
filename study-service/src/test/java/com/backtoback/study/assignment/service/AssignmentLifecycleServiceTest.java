@@ -162,7 +162,8 @@ class AssignmentLifecycleServiceTest {
         given(
             memberStatusRepository.findMemberIdsByAssignmentIdAndStatus(ASSIGNMENT_ID, MemberProgressStatus.INCOMPLETE)
         ).willReturn(List.of(MEMBER_ID_1));
-        given(assignmentRepository.findPreviousClosedId(STUDY_ID, deadline)).willReturn(Optional.empty());
+        given(assignmentRepository.findPreviousClosedId(STUDY_ID, deadline, ASSIGNMENT_ID))
+            .willReturn(Optional.empty());
 
         lifecycleService.closeTransition(ASSIGNMENT_ID, CORRELATION_ID);
 
@@ -182,7 +183,7 @@ class AssignmentLifecycleServiceTest {
         given(
             memberStatusRepository.findMemberIdsByAssignmentIdAndStatus(ASSIGNMENT_ID, MemberProgressStatus.INCOMPLETE)
         ).willReturn(List.of(MEMBER_ID_1));
-        given(assignmentRepository.findPreviousClosedId(STUDY_ID, deadline))
+        given(assignmentRepository.findPreviousClosedId(STUDY_ID, deadline, ASSIGNMENT_ID))
             .willReturn(Optional.of(PREV_ASSIGNMENT_ID));
         given(
             memberStatusRepository
@@ -211,7 +212,7 @@ class AssignmentLifecycleServiceTest {
         given(
             memberStatusRepository.findMemberIdsByAssignmentIdAndStatus(ASSIGNMENT_ID, MemberProgressStatus.INCOMPLETE)
         ).willReturn(List.of(MEMBER_ID_1, MEMBER_ID_2));
-        given(assignmentRepository.findPreviousClosedId(STUDY_ID, deadline))
+        given(assignmentRepository.findPreviousClosedId(STUDY_ID, deadline, ASSIGNMENT_ID))
             .willReturn(Optional.of(PREV_ASSIGNMENT_ID));
         given(
             memberStatusRepository

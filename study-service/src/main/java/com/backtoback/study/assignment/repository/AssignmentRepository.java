@@ -38,11 +38,11 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
     int openIfScheduled(@Param("id") Long id);
 
     /**
-     * OPEN이고 deadline_at이 기준 시각 이하인 문제집 ID를 오래된 순으로 최대 limit건 조회한다(스케줄러 §5.2).
+     * OPEN이고 deadline_at이 기준 시각 이하인 문제집 ID를 오래된 순(deadline_at ASC, id ASC)으로 최대 limit건 조회한다(스케줄러 §5.2).
      */
     @Query(
         value = "SELECT id FROM assignments WHERE status = 'OPEN' AND deadline_at IS NOT NULL AND deadline_at <= :now "
-            + "ORDER BY deadline_at ASC LIMIT :limit",
+            + "ORDER BY deadline_at ASC, id ASC LIMIT :limit",
         nativeQuery = true
     )
     List<Long> findScheduledToCloseIds(@Param("now") LocalDateTime now, @Param("limit") int limit);
@@ -60,12 +60,18 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
     int closeIfOpen(@Param("id") Long id, @Param("now") LocalDateTime now);
 
     /**
-     * 동일 스터디에서 지정 deadline_at 이전에 마감된 문제집 중 가장 최근 것의 ID를 반환한다(스케줄러 §5.2 연속 INCOMPLETE 판정).
+     * 동일 스터디에서 현재 문제집보다 먼저 마감된 문제집 중 가장 최근 것의 ID를 반환한다(스케줄러 §5.2 연속 INCOMPLETE 판정).
+     * deadline_at이 같으면 id 오름차순 기준으로 앞선 문제집을 직전으로 간주한다(findScheduledToCloseIds 처리 순서와 동일).
      */
     @Query(
         value = "SELECT id FROM assignments WHERE study_id = :studyId AND status = 'CLOSED' "
-            + "AND deadline_at < :deadlineAt ORDER BY deadline_at DESC LIMIT 1",
+            + "AND (deadline_at < :deadlineAt OR (deadline_at = :deadlineAt AND id < :assignmentId)) "
+            + "ORDER BY deadline_at DESC, id DESC LIMIT 1",
         nativeQuery = true
     )
-    Optional<Long> findPreviousClosedId(@Param("studyId") Long studyId, @Param("deadlineAt") LocalDateTime deadlineAt);
+    Optional<Long> findPreviousClosedId(
+        @Param("studyId") Long studyId,
+        @Param("deadlineAt") LocalDateTime deadlineAt,
+        @Param("assignmentId") Long assignmentId
+    );
 }

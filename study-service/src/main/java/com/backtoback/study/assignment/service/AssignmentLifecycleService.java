@@ -123,7 +123,8 @@ public class AssignmentLifecycleService {
         }
 
         Optional<Long> previousClosedId
-            = assignmentRepository.findPreviousClosedId(assignment.getStudyId(), assignment.getDeadlineAt());
+            = assignmentRepository
+                .findPreviousClosedId(assignment.getStudyId(), assignment.getDeadlineAt(), assignmentId);
         if (previousClosedId.isEmpty()) {
             return;
         }
