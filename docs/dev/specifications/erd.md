@@ -2795,6 +2795,8 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `connection_id` | BIGINT | Y | FK → `github_connections.id` |
 | `submission_id` | BIGINT | Y | 대상 제출 (외부 참조) |
 | `problem_id` | BIGINT | Y | 문제 (외부 참조) |
+| `problem_title` | VARCHAR(200) | Y | 문제명 스냅샷 (`SubmissionJudged.problemTitle`, 커밋 경로·`GitHubSyncFailed`용) |
+| `problem_difficulty` | INT | Y | 문제 난이도 스냅샷 1~3 (`SubmissionJudged.problemDifficulty`, 커밋 경로 `{난이도}`용) |
 | `commit_sha` | VARCHAR(64) | N | NULL 허용: 커밋 전 |
 | `status` | VARCHAR(30) | Y | `PENDING` / `RUNNING` / `RETRY_WAITING` / `RATE_LIMITED` / `SUCCEEDED` / `FAILED` / `CANCELED` |
 | `retry_count` | INT | Y | 재시도 횟수 (상한 5, 1분 → 5분 → 30분) |

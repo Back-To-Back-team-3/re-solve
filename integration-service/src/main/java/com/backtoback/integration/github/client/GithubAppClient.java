@@ -1,5 +1,6 @@
 package com.backtoback.integration.github.client;
 
+import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
@@ -9,7 +10,9 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -22,6 +25,8 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.integration.github.client.dto.GithubCommitResultResponse;
+import com.backtoback.integration.github.client.dto.GithubContentResponse;
 import com.backtoback.integration.github.client.dto.GithubInstallationResponse;
 import com.backtoback.integration.github.client.dto.GithubInstallationTokenResponse;
 import com.backtoback.integration.github.client.dto.GithubRepositoriesResponse;
@@ -172,6 +177,119 @@ public class GithubAppClient {
         } catch (RestClientException e) {
             throw handleRestClientException("GitHub App 저장소 목록 조회", e);
         }
+    }
+
+    /**
+     * 저장소 경로의 기존 파일 sha를 조회한다 (GET /repos/{owner}/{repo}/contents/{path}).
+     * 같은 문제 재AC는 같은 경로를 갱신해야 하므로 PUT 전에 호출한다 (scheduler.md &gt; 8.1 커밋 경로).
+     *
+     * @param installationToken 설치 Access Token
+     * @param owner 저장소 소유자
+     * @param repository 저장소명
+     * @param path 저장소 내 파일 경로
+     * @return 파일이 있으면 sha, 없으면(404) 빈 값
+     * @throws GithubApiException 404 이외의 GitHub 오류 응답 또는 네트워크 오류
+     */
+    public Optional<String> findContentSha(String installationToken, String owner, String repository, String path) {
+        try {
+            GithubContentResponse response
+                = restClient
+                    .get()
+                    .uri(contentsUri(owner, repository, path))
+                    .header("Authorization", "Bearer " + installationToken)
+                    .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+                    .accept(MediaType.parseMediaType(GITHUB_MEDIA_TYPE))
+                    .retrieve()
+                    .body(GithubContentResponse.class);
+            return Optional.ofNullable(response).map(GithubContentResponse::sha);
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw toGithubApiException("GitHub 파일 sha 조회", e);
+        } catch (RestClientException e) {
+            throw toGithubApiException("GitHub 파일 sha 조회", e);
+        }
+    }
+
+    /**
+     * 저장소 경로에 단일 파일을 커밋한다 (PUT /repos/{owner}/{repo}/contents/{path}).
+     * 기존 파일을 덮어쓰는 경우 {@code sha}가 필요하다.
+     *
+     * @param installationToken 설치 Access Token
+     * @param owner 저장소 소유자
+     * @param repository 저장소명
+     * @param path 저장소 내 파일 경로
+     * @param commitMessage 커밋 메시지
+     * @param content 파일 내용 (UTF-8 텍스트, Base64 인코딩은 이 메서드가 수행)
+     * @param existingSha 기존 파일 sha (신규 파일이면 null)
+     * @return 커밋 결과
+     * @throws GithubApiException 오류 응답(401·403·409·429·5xx 등) 또는 네트워크 오류
+     */
+    public GithubCommitResultResponse putContent(
+        String installationToken,
+        String owner,
+        String repository,
+        String path,
+        String commitMessage,
+        String content,
+        String existingSha
+    ) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("message", commitMessage);
+        body.put("content", Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8)));
+        if (existingSha != null) {
+            body.put("sha", existingSha);
+        }
+
+        try {
+            return restClient
+                .put()
+                .uri(contentsUri(owner, repository, path))
+                .header("Authorization", "Bearer " + installationToken)
+                .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+                .accept(MediaType.parseMediaType(GITHUB_MEDIA_TYPE))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .body(GithubCommitResultResponse.class);
+        } catch (RestClientException e) {
+            throw toGithubApiException("GitHub 파일 커밋", e);
+        }
+    }
+
+    private URI contentsUri(String owner, String repository, String path) {
+        return UriComponentsBuilder
+            .fromUriString(properties.getApiBaseUrl())
+            .pathSegment("repos", owner, repository, "contents")
+            .pathSegment(path.split("/"))
+            .build()
+            .encode()
+            .toUri();
+    }
+
+    private GithubApiException toGithubApiException(String action, RestClientException exception) {
+        log.warn("{}: error={}", action, exception.getMessage());
+        if (exception instanceof RestClientResponseException responseException) {
+            Instant resetAt = null;
+            String reset
+                = responseException.getResponseHeaders() == null ? null
+                    : responseException.getResponseHeaders().getFirst("x-ratelimit-reset");
+            if (reset != null) {
+                try {
+                    resetAt = Instant.ofEpochSecond(Long.parseLong(reset.trim()));
+                } catch (NumberFormatException ignored) {
+                    resetAt = null;
+                }
+            }
+            return new GithubApiException(
+                action + " 실패",
+                responseException.getStatusCode().value(),
+                resetAt,
+                exception
+            );
+        }
+        return new GithubApiException(action + " 실패", 0, null, exception);
     }
 
     /**
