@@ -100,6 +100,32 @@ public class Member extends BaseTimeEntity {
     }
 
     /**
+     * 정지한다 (API 명세서 1.6.2). 상태 변경도 {@code MemberUpdated}·{@code MemberSuspended}와 같은 순서를 쓰므로
+     * {@code profileVersion}을 올린다(이벤트 계약 M1).
+     */
+    public void suspend(LocalDateTime now) {
+        this.status = MemberStatus.SUSPENDED;
+        this.suspendedAt = now;
+        this.profileVersion++;
+    }
+
+    /**
+     * 정지를 해제한다 (API 명세서 1.6.2).
+     */
+    public void unsuspend() {
+        this.status = MemberStatus.ACTIVE;
+        this.suspendedAt = null;
+        this.profileVersion++;
+    }
+
+    /**
+     * 권한을 바꾼다 (API 명세서 1.6.3). 권한은 복제본에 없으므로 {@code profileVersion}을 올리지 않는다.
+     */
+    public void changeRole(MemberRole role) {
+        this.role = role;
+    }
+
+    /**
      * 닉네임을 바꾸고 표시 정보 변경 순번({@code profileVersion})을 올린다. 같은 닉네임이면 아무것도 바꾸지 않는다.
      */
     public void changeNickname(String nickname) {
