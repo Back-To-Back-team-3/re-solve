@@ -32,20 +32,23 @@ class InternalMemberControllerTest {
     private MemberService memberService;
 
     @Test
-    @DisplayName("1.7.1 Gateway 인증 정보 없이 호출하고, 공통 응답 없이 회원 ID·상태·권한을 준다")
+    @DisplayName("1.7.1 Gateway 인증 정보 없이 호출하고, 공통 응답 없이 회원 ID·상태(ACTIVE·SUSPENDED)·권한을 그대로 준다")
     void returnsMemberStatus() throws Exception {
-        Member member = Member.registerWithGitHub(1001L, "kim-dev", null, null);
-        ReflectionTestUtils.setField(member, "id", 7L);
-        ReflectionTestUtils.setField(member, "status", MemberStatus.SUSPENDED);
-        given(memberService.getMember(7L)).willReturn(member);
+        given(memberService.getMember(7L)).willReturn(member(7L, MemberStatus.ACTIVE));
+        given(memberService.getMember(8L)).willReturn(member(8L, MemberStatus.SUSPENDED));
 
         mockMvc
             .perform(get("/internal/v1/members/7/status"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.success").doesNotExist())
             .andExpect(jsonPath("$.memberId").value("7"))
-            .andExpect(jsonPath("$.status").value("SUSPENDED"))
+            .andExpect(jsonPath("$.status").value("ACTIVE"))
             .andExpect(jsonPath("$.role").value("USER"));
+        mockMvc
+            .perform(get("/internal/v1/members/8/status"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.memberId").value("8"))
+            .andExpect(jsonPath("$.status").value("SUSPENDED"));
     }
 
     @Test
@@ -61,5 +64,12 @@ class InternalMemberControllerTest {
             .perform(get("/internal/v1/members/abc/status"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
+
+    private Member member(Long id, MemberStatus status) {
+        Member member = Member.registerWithGitHub(1000L + id, "kim-dev", null, null);
+        ReflectionTestUtils.setField(member, "id", id);
+        ReflectionTestUtils.setField(member, "status", status);
+        return member;
     }
 }
