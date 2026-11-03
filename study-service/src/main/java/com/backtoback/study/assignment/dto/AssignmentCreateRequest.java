@@ -16,7 +16,7 @@ public record AssignmentCreateRequest(
     @NotBlank @Size(max = 200) String title,
     @Size(max = 500) String goal,
     Long tagId,
-    @NotEmpty @Size(max = 20) List<Long> problemIds,
+    @NotEmpty @Size(max = 20) List<@NotNull Long> problemIds,
     Boolean isPreSolvedAllowed,
     @NotNull OffsetDateTime startsAt,
     @NotNull OffsetDateTime deadlineAt
