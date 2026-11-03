@@ -67,6 +67,19 @@ class AdminMemberServiceTest {
         assertThat(ids(adminMemberService.searchMembers(null, null, MemberRole.ADMIN, NEWEST_FIRST).getContent()))
             .contains(park.getId())
             .doesNotContain(kim.getId(), lee.getId());
+        // 두 조건을 함께 주면 교집합만 남는다(한쪽 조건을 무시하면 kim 또는 lee가 섞인다).
+        assertThat(
+            ids(
+                adminMemberService.searchMembers(null, MemberStatus.ACTIVE, MemberRole.ADMIN, NEWEST_FIRST).getContent()
+            )
+        ).contains(park.getId()).doesNotContain(kim.getId(), lee.getId());
+        assertThat(
+            ids(
+                adminMemberService
+                    .searchMembers("kim", MemberStatus.SUSPENDED, MemberRole.USER, NEWEST_FIRST)
+                    .getContent()
+            )
+        ).containsExactly(lee.getId());
         assertThat(ids(adminMemberService.searchMembers("100%", null, null, NEWEST_FIRST).getContent()))
             .containsExactly(park.getId());
         assertThat(ids(adminMemberService.searchMembers("m_f", null, null, NEWEST_FIRST).getContent()))
