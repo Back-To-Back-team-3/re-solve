@@ -382,7 +382,10 @@ public class GithubSyncExecutionService {
         }
     }
 
-    private void publishSyncFailedOutboxEvent(
+    /**
+     * GitHubSyncFailed Outbox 이벤트를 생성하여 저장한다 (event-contract.md > 4.5 I1).
+     */
+    public void publishSyncFailedOutboxEvent(
         Long jobId,
         Long memberId,
         Long submissionId,

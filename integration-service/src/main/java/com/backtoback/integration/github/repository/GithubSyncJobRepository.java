@@ -215,6 +215,8 @@ public interface GithubSyncJobRepository extends JpaRepository<GithubSyncJob, Lo
         nativeQuery = true
     )
     int updateStatusToCanceled(@Param("id") Long id, @Param("reason") String reason, @Param("now") LocalDateTime now);
+
+    /**
      * 실행 대기(PENDING, RETRY_WAITING, RATE_LIMITED) 상태의 작업을 다중 워커 간 경합 없이 선점하기 위해
      * SKIP LOCKED로 조회한다 (scheduler.md > 8.1).
      *
@@ -239,11 +241,80 @@ public interface GithubSyncJobRepository extends JpaRepository<GithubSyncJob, Lo
     );
 
     /**
-     * 실행 중(RUNNING) 상태에서 임계 시각을 초과한 정체 작업 목록을 조회한다 (scheduler.md > 8.2).
+     * 실행 중(RUNNING) 상태에서 임계 시각을 초과한 정체 작업 목록을 연동 정보와 함께 Fetch Join 조회한다 (scheduler.md > 8.2).
      *
      * @param status 작업 상태 (RUNNING)
      * @param cutoff 기준 시각
      * @return 정체된 GithubSyncJob 목록
      */
-    List<GithubSyncJob> findByStatusAndUpdatedAtBefore(GithubSyncJobStatus status, LocalDateTime cutoff);
+    @Query("SELECT j FROM GithubSyncJob j JOIN FETCH j.connection WHERE j.status = :status AND j.updatedAt < :cutoff")
+    List<GithubSyncJob> findByStatusAndUpdatedAtBeforeWithConnection(
+        @Param("status") GithubSyncJobStatus status,
+        @Param("cutoff") LocalDateTime cutoff
+    );
+
+    /**
+     * 정체된 작업을 조건부(observedUpdatedAt 일치)로 RETRY_WAITING으로 복구한다 (scheduler.md > 8.2).
+     *
+     * @param id 작업 ID
+     * @param observedUpdatedAt 조회 시점의 updatedAt
+     * @param nextRetryAt 다음 재시도 시각
+     * @param errorMessage 오류 메시지
+     * @param now 갱신 시각
+     * @return 반영된 행 수 (1이면 성공, 0이면 경합으로 다른 곳에서 이미 갱신됨)
+     */
+    @Modifying(
+        clearAutomatically = true,
+        flushAutomatically = true
+    )
+    @Query(
+        value = """
+            UPDATE github_sync_jobs
+            SET status = 'RETRY_WAITING',
+                retry_count = retry_count + 1,
+                next_retry_at = :nextRetryAt,
+                error_message = :errorMessage,
+                updated_at = :now
+            WHERE id = :id AND status = 'RUNNING' AND updated_at = :observedUpdatedAt
+            """,
+        nativeQuery = true
+    )
+    int recoverStuckJobToRetryWaiting(
+        @Param("id") Long id,
+        @Param("observedUpdatedAt") LocalDateTime observedUpdatedAt,
+        @Param("nextRetryAt") LocalDateTime nextRetryAt,
+        @Param("errorMessage") String errorMessage,
+        @Param("now") LocalDateTime now
+    );
+
+    /**
+     * 정체된 작업을 조건부(observedUpdatedAt 일치)로 FAILED로 복구/종결한다 (scheduler.md > 8.2).
+     *
+     * @param id 작업 ID
+     * @param observedUpdatedAt 조회 시점의 updatedAt
+     * @param errorMessage 오류 메시지
+     * @param now 갱신 시각
+     * @return 반영된 행 수
+     */
+    @Modifying(
+        clearAutomatically = true,
+        flushAutomatically = true
+    )
+    @Query(
+        value = """
+            UPDATE github_sync_jobs
+            SET status = 'FAILED',
+                next_retry_at = NULL,
+                error_message = :errorMessage,
+                updated_at = :now
+            WHERE id = :id AND status = 'RUNNING' AND updated_at = :observedUpdatedAt
+            """,
+        nativeQuery = true
+    )
+    int recoverStuckJobToFailed(
+        @Param("id") Long id,
+        @Param("observedUpdatedAt") LocalDateTime observedUpdatedAt,
+        @Param("errorMessage") String errorMessage,
+        @Param("now") LocalDateTime now
+    );
 }
