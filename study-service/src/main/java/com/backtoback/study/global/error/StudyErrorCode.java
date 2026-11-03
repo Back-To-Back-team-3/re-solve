@@ -26,7 +26,10 @@ public enum StudyErrorCode implements ErrorCode {
     STUDY_LEADER_DELEGATION_REQUIRED(HttpStatus.CONFLICT, "스터디장은 위임 후에만 탈퇴할 수 있습니다."),
     STUDY_MEMBERSHIP_STATUS_CONFLICT(HttpStatus.CONFLICT, "이미 처리된 가입 신청입니다."),
     STUDY_APPLICATION_EXPIRED(HttpStatus.CONFLICT, "만료된 가입 신청입니다."),
-    STUDY_ALREADY_CLOSED(HttpStatus.CONFLICT, "종료된 스터디입니다.");
+    STUDY_ALREADY_CLOSED(HttpStatus.CONFLICT, "종료된 스터디입니다."),
+
+    // 문제집 (assignment)
+    STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE(HttpStatus.CONFLICT, "문제집에 넣을 문제가 GENERAL·PUBLIC이 아님");
 
     private final HttpStatus status;
     private final String message;
