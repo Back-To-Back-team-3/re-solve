@@ -51,6 +51,7 @@ public class AssignmentLifecycleScheduler {
     /**
      * 1분마다 OPEN·CLOSE 전이 대상을 각 최대 100건 처리한다.
      * 각 건은 독립 트랜잭션으로 처리하므로 1건 실패가 나머지 건을 롤백하지 않는다.
+     * OPEN·CLOSE 각 단계는 20초 제한을 독립적으로 가지며, OPEN 초과 시 CLOSE 단계는 계속 실행된다.
      */
     @Scheduled(
         fixedDelay = 60_000,
@@ -61,14 +62,14 @@ public class AssignmentLifecycleScheduler {
         lockAtMostFor = "PT50S"
     )
     public void runBatch() {
-        long cutoffAt = clock.instant().toEpochMilli() + CUTOFF_MILLIS;
         LocalDateTime now = LocalDateTime.now(clock);
 
+        long openCutoffAt = clock.instant().toEpochMilli() + CUTOFF_MILLIS;
         List<Long> openIds = assignmentRepository.findScheduledToOpenIds(now, BATCH_SIZE);
         for (Long id : openIds) {
-            if (clock.instant().toEpochMilli() > cutoffAt) {
+            if (clock.instant().toEpochMilli() > openCutoffAt) {
                 log.warn("OPEN 전이 실행 시간 초과. 나머지 건은 다음 회차에 처리됩니다.");
-                return;
+                break;
             }
             String correlationId = CORRELATION_PREFIX + UUID.randomUUID();
             try {
@@ -80,9 +81,10 @@ public class AssignmentLifecycleScheduler {
             }
         }
 
+        long closeCutoffAt = clock.instant().toEpochMilli() + CUTOFF_MILLIS;
         List<Long> closeIds = assignmentRepository.findScheduledToCloseIds(now, BATCH_SIZE);
         for (Long id : closeIds) {
-            if (clock.instant().toEpochMilli() > cutoffAt) {
+            if (clock.instant().toEpochMilli() > closeCutoffAt) {
                 log.warn("CLOSE 전이 실행 시간 초과. 나머지 건은 다음 회차에 처리됩니다.");
                 break;
             }
