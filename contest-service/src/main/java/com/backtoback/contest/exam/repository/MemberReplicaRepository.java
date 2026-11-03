@@ -1,6 +1,7 @@
 package com.backtoback.contest.exam.repository;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -47,5 +48,16 @@ public class MemberReplicaRepository {
                 updated_at = IF(VALUES(source_version) > source_version, VALUES(updated_at), updated_at),
                 source_version = GREATEST(source_version, VALUES(source_version))
             """, memberId, displayName, displayImage, status, sourceVersion, syncedAt, syncedAt, syncedAt);
+    }
+
+    public Optional<String> findStatus(long memberId) {
+        return jdbcTemplate
+            .query(
+                "SELECT member_status FROM member_replicas WHERE member_id = ?",
+                (result, row) -> result.getString(1),
+                memberId
+            )
+            .stream()
+            .findFirst();
     }
 }
