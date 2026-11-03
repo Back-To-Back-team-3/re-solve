@@ -126,6 +126,12 @@ class AdminMemberServiceTest {
         assertThat(audits.get(0).getClientIp()).isEqualTo("203.0.113.7");
         assertThat(audits.get(0).getCreatedAt()).isNotNull();
         assertThat(audits.get(1).getAction()).isEqualTo("MEMBER_UNSUSPEND");
+        assertThat(audits.get(1).getActorId()).isEqualTo(1L);
+        assertThat(audits.get(1).getTargetId()).isEqualTo(String.valueOf(member.getId()));
+        assertThat(audits.get(1).getBeforeState()).contains("\"status\"", "SUSPENDED");
+        assertThat(audits.get(1).getAfterState()).contains("\"status\"", "ACTIVE");
+        assertThat(audits.get(1).getReason()).isEqualTo("소명 확인");
+        assertThat(audits.get(1).getClientIp()).isNull();
     }
 
     @Test

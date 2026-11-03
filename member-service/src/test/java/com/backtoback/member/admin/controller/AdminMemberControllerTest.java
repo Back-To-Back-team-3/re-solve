@@ -152,7 +152,7 @@ class AdminMemberControllerTest {
     @Test
     @DisplayName("1.6.3 권한 변경은 메시지와 바뀐 권한을 주고, 본인 권한 변경은 403 AUTH_ACCESS_DENIED")
     void changeRoleReturnsRole() throws Exception {
-        given(adminMemberService.changeRole(eq(1L), eq(7L), eq(MemberRole.ADMIN), eq("운영진 합류"), any()))
+        given(adminMemberService.changeRole(eq(1L), eq(7L), eq(MemberRole.ADMIN), eq("운영진 합류"), eq("203.0.113.7")))
             .willReturn(member(7L, MemberStatus.ACTIVE, MemberRole.ADMIN));
         given(adminMemberService.changeRole(eq(1L), eq(1L), eq(MemberRole.USER), eq("사유"), any()))
             .willThrow(new MemberException(CommonErrorCode.AUTH_ACCESS_DENIED));
@@ -162,6 +162,7 @@ class AdminMemberControllerTest {
                 patch("/api/v1/admin/members/7/role")
                     .header("X-User-Id", "1")
                     .header("X-User-Role", "ADMIN")
+                    .header("X-Forwarded-For", "203.0.113.7")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"role\":\"ADMIN\",\"reason\":\"운영진 합류\"}")
             )
