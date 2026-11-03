@@ -8,6 +8,9 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -67,6 +70,9 @@ class ExamStorageTest {
     private ExamProblemRepository problems;
 
     @Autowired
+    private StudyMembershipReplicaRepository memberships;
+
+    @Autowired
     private EntityManager entityManager;
 
     @Autowired
@@ -119,6 +125,47 @@ class ExamStorageTest {
                 .isInstanceOf(com.backtoback.contest.global.error.ContestException.class);
             status.setRollbackOnly();
         });
+    }
+
+    @Test
+    @DisplayName("가입 순서가 역전되어도 탈퇴를 보존하고 새 가입만 활성화한다")
+    void preservesMembershipOrder() {
+        var now = LocalDateTime.of(2026, 1, 1, 0, 0);
+        memberships.sync(98701L, 98702L, 20L, false, now);
+        memberships.sync(98701L, 98702L, 20L, true, now.plusSeconds(1));
+        memberships.sync(98701L, 98702L, 19L, true, now.plusSeconds(2));
+        assertThat(memberships.isActive(98701L, 98702L)).isFalse();
+
+        memberships.sync(98701L, 98702L, 21L, true, now.plusSeconds(3));
+        memberships.sync(98701L, 98702L, 20L, false, now.plusSeconds(4));
+        assertThat(memberships.isActive(98701L, 98702L)).isTrue();
+
+        memberships.sync(98701L, 98702L, 21L, false, now.plusSeconds(5));
+        memberships.sync(98701L, 98702L, 21L, true, now.plusSeconds(6));
+        assertThat(memberships.isActive(98701L, 98702L)).isFalse();
+    }
+
+    @Test
+    @DisplayName("동시에 처음 수신한 가입과 탈퇴 중 같은 가입의 탈퇴가 유지된다")
+    void concurrentFirstMembershipEvents() throws Exception {
+        var now = LocalDateTime.of(2026, 1, 1, 0, 0);
+        var start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var joined = executor.submit(() -> {
+                start.await();
+                memberships.sync(98703L, 98704L, 22L, true, now);
+                return null;
+            });
+            var left = executor.submit(() -> {
+                start.await();
+                memberships.sync(98703L, 98704L, 22L, false, now);
+                return null;
+            });
+            start.countDown();
+            joined.get(10, TimeUnit.SECONDS);
+            left.get(10, TimeUnit.SECONDS);
+        }
+        assertThat(memberships.isActive(98703L, 98704L)).isFalse();
     }
 
     @Test
