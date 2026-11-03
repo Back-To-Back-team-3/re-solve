@@ -2,8 +2,6 @@ package com.backtoback.integration.github.worker;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
@@ -14,8 +12,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.Collections;
-import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -93,12 +90,9 @@ class GithubSyncJobWorkerTest {
     void pollAndExecuteSyncJobsSuccess() {
         GithubSyncJob job1 = createPendingJob(1L);
         GithubSyncJob job2 = createPendingJob(2L);
-        List<GithubSyncJob> jobs = List.of(job1, job2);
 
-        given(
-            syncJobRepository
-                .findClaimableJobsForUpdateSkipLocked(any(LocalDateTime.class), eq(GithubSyncJobWorker.BATCH_SIZE))
-        ).willReturn(jobs);
+        given(syncJobRepository.findNextClaimableJobForUpdateSkipLocked(any(LocalDateTime.class)))
+            .willReturn(Optional.of(job1), Optional.of(job2), Optional.empty());
 
         worker.pollAndExecuteSyncJobs();
 
@@ -111,8 +105,8 @@ class GithubSyncJobWorkerTest {
     @Test
     @DisplayName("선점 대상 작업이 없으면 executionService를 호출하지 않는다")
     void pollAndExecuteSyncJobsEmpty() {
-        given(syncJobRepository.findClaimableJobsForUpdateSkipLocked(any(LocalDateTime.class), anyInt()))
-            .willReturn(Collections.emptyList());
+        given(syncJobRepository.findNextClaimableJobForUpdateSkipLocked(any(LocalDateTime.class)))
+            .willReturn(Optional.empty());
 
         worker.pollAndExecuteSyncJobs();
 
@@ -124,8 +118,8 @@ class GithubSyncJobWorkerTest {
     void pollAndExecuteSyncJobsHandlesException() {
         GithubSyncJob job1 = createPendingJob(1L);
         GithubSyncJob job2 = createPendingJob(2L);
-        given(syncJobRepository.findClaimableJobsForUpdateSkipLocked(any(LocalDateTime.class), anyInt()))
-            .willReturn(List.of(job1, job2));
+        given(syncJobRepository.findNextClaimableJobForUpdateSkipLocked(any(LocalDateTime.class)))
+            .willReturn(Optional.of(job1), Optional.of(job2), Optional.empty());
 
         doThrow(new RuntimeException("Execution error")).when(executionService).executeSyncJob(1L);
 

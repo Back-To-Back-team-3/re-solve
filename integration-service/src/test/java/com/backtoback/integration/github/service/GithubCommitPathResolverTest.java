@@ -54,4 +54,14 @@ class GithubCommitPathResolverTest {
 
         assertThat(path).isEqualTo("3/303-스터디룸-예약/solution.cpp");
     }
+
+    @Test
+    @DisplayName("문제명에 풀이.java 또는 Solution.ext가 포함되어 있어도 디렉터리명이 파일명으로 오치환되지 않는다")
+    void resolvePathProblemTitleContainingKeywordDoesNotMisplaceDirectory() {
+        String template = "{문제번호}-{문제명}/풀이.java";
+        String path = resolver.resolvePath(template, 1, 100L, "풀이.java", "python3");
+
+        // 문제명 치환이 마지막에 일어나므로 디렉터리는 100-풀이.java가 유지되고 파일명만 solution.py로 변경됨
+        assertThat(path).isEqualTo("100-풀이.java/solution.py");
+    }
 }

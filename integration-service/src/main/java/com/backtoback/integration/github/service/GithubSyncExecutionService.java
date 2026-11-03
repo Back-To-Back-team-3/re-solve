@@ -83,7 +83,7 @@ public class GithubSyncExecutionService {
         if (connection == null || connection.getStatus() != GithubConnectionStatus.CONNECTED
             || connection.getInstallationId() == null) {
             log.info("연동이 해제되었거나 설치 정보가 없어 작업을 취소합니다: jobId={}", jobId);
-            cancelJobIfRunning(jobId, "GitHub 연동 해제 상태");
+            cancelJobIfRunning(jobId, job.getUpdatedAt(), "GitHub 연동 해제 상태");
             return;
         }
 
@@ -99,6 +99,7 @@ public class GithubSyncExecutionService {
         Long problemId = job.getProblemId();
         String problemTitle = job.getProblemTitle();
         int currentRetryCount = job.getRetryCount();
+        LocalDateTime observedUpdatedAt = job.getUpdatedAt();
 
         String commitPath = null;
         try {
@@ -135,7 +136,7 @@ public class GithubSyncExecutionService {
                     );
 
             // 6. 결과 반영 (조건부 UPDATE)
-            boolean updated = recordSuccess(jobId, commitResult.commitSha());
+            boolean updated = recordSuccess(jobId, observedUpdatedAt, commitResult.commitSha());
             if (updated) {
                 log
                     .info(
@@ -151,8 +152,10 @@ public class GithubSyncExecutionService {
         } catch (GithubApiException exception) {
             handleGithubApiException(
                 jobId,
+                observedUpdatedAt,
                 memberId,
                 connectionId,
+                installationId,
                 submissionId,
                 problemId,
                 problemTitle,
@@ -164,6 +167,7 @@ public class GithubSyncExecutionService {
             log.warn("내부 서비스 비즈니스 오류 발생: jobId={}, error={}", jobId, exception.getMessage());
             handleRetryOrFailure(
                 jobId,
+                observedUpdatedAt,
                 memberId,
                 submissionId,
                 problemId,
@@ -176,6 +180,7 @@ public class GithubSyncExecutionService {
             log.error("Sync Job 실행 중 예상치 못한 오류 발생: jobId={}, error={}", jobId, exception.getMessage(), exception);
             handleRetryOrFailure(
                 jobId,
+                observedUpdatedAt,
                 memberId,
                 submissionId,
                 problemId,
@@ -189,8 +194,10 @@ public class GithubSyncExecutionService {
 
     private void handleGithubApiException(
         Long jobId,
+        LocalDateTime observedUpdatedAt,
         Long memberId,
         Long connectionId,
+        Long installationId,
         Long submissionId,
         Long problemId,
         String problemTitle,
@@ -203,8 +210,10 @@ public class GithubSyncExecutionService {
             log.warn("GitHub 인증 권한 만료 (401): jobId={}, memberId={}", jobId, memberId);
             recordAuthExpired(
                 jobId,
+                observedUpdatedAt,
                 memberId,
                 connectionId,
+                installationId,
                 submissionId,
                 problemId,
                 problemTitle,
@@ -214,12 +223,23 @@ public class GithubSyncExecutionService {
             // 403 / 429: Rate Limit 초과
             LocalDateTime resetAt = resolveRateLimitResetAt(exception.getRateLimitResetAt());
             log.warn("GitHub API Rate Limit 초과: jobId={}, resetAt={}", jobId, resetAt);
-            recordRateLimited(jobId, resetAt, "Rate limit exceeded (" + exception.getStatusCode() + ")");
+            recordRateLimited(
+                jobId,
+                observedUpdatedAt,
+                memberId,
+                submissionId,
+                problemId,
+                problemTitle,
+                currentRetryCount,
+                resetAt,
+                "Rate limit exceeded (" + exception.getStatusCode() + ")"
+            );
         } else if (exception.isNotFound()) {
             // 404: 저장소를 찾을 수 없음
             log.warn("GitHub 저장소 또는 경로를 찾을 수 없음: jobId={}, path={}", jobId, commitPath);
             handleRetryOrFailure(
                 jobId,
+                observedUpdatedAt,
                 memberId,
                 submissionId,
                 problemId,
@@ -233,6 +253,7 @@ public class GithubSyncExecutionService {
             log.warn("GitHub API 응답 오류: jobId={}, status={}", jobId, exception.getStatusCode());
             handleRetryOrFailure(
                 jobId,
+                observedUpdatedAt,
                 memberId,
                 submissionId,
                 problemId,
@@ -254,23 +275,50 @@ public class GithubSyncExecutionService {
     /**
      * 성공 상태(SUCCEEDED)로 조건부 UPDATE한다.
      */
-    public boolean recordSuccess(Long jobId, String commitSha) {
+    public boolean recordSuccess(Long jobId, LocalDateTime observedUpdatedAt, String commitSha) {
         return Boolean.TRUE.equals(transactionTemplate.execute(status -> {
             LocalDateTime now = LocalDateTime.now(clock);
-            int affected = syncJobRepository.updateStatusToSucceeded(jobId, commitSha, now);
+            int affected = syncJobRepository.updateStatusToSucceeded(jobId, observedUpdatedAt, commitSha, now);
             return affected == 1;
         }));
     }
 
     /**
-     * Rate Limit 상태로 조건부 UPDATE한다.
+     * Rate Limit 상태로 조건부 UPDATE한다. 재시도 상한 초과 시 FAILED로 종결하고 Outbox 이벤트를 발행한다.
      */
-    public void recordRateLimited(Long jobId, LocalDateTime resetAt, String errorMessage) {
+    public void recordRateLimited(
+        Long jobId,
+        LocalDateTime observedUpdatedAt,
+        Long memberId,
+        Long submissionId,
+        Long problemId,
+        String problemTitle,
+        int currentRetryCount,
+        LocalDateTime resetAt,
+        String errorMessage
+    ) {
         transactionTemplate.executeWithoutResult(status -> {
             LocalDateTime now = LocalDateTime.now(clock);
-            int affected = syncJobRepository.updateStatusToRateLimited(jobId, resetAt, errorMessage, now);
-            if (affected != 1) {
-                log.info("작업 상태가 RUNNING이 아니므로 Rate Limit 전이를 생략합니다: jobId={}", jobId);
+            if (currentRetryCount >= MAX_RETRY_COUNT) {
+                int affected = syncJobRepository.updateStatusToFailed(jobId, observedUpdatedAt, errorMessage, now);
+                if (affected == 1) {
+                    publishSyncFailedOutboxEvent(
+                        jobId,
+                        memberId,
+                        submissionId,
+                        problemId,
+                        problemTitle,
+                        "RATE_LIMIT_EXHAUSTED",
+                        now
+                    );
+                    log.warn("Rate Limit 재시도 상한 초과로 최종 실패: jobId={}, retries={}", jobId, currentRetryCount);
+                }
+            } else {
+                int affected
+                    = syncJobRepository.updateStatusToRateLimited(jobId, observedUpdatedAt, resetAt, errorMessage, now);
+                if (affected != 1) {
+                    log.info("작업 상태가 RUNNING이 아니므로 Rate Limit 전이를 생략합니다: jobId={}", jobId);
+                }
             }
         });
     }
@@ -280,6 +328,7 @@ public class GithubSyncExecutionService {
      */
     public void handleRetryOrFailure(
         Long jobId,
+        LocalDateTime observedUpdatedAt,
         Long memberId,
         Long submissionId,
         Long problemId,
@@ -291,7 +340,7 @@ public class GithubSyncExecutionService {
         transactionTemplate.executeWithoutResult(status -> {
             LocalDateTime now = LocalDateTime.now(clock);
             if (currentRetryCount >= MAX_RETRY_COUNT) {
-                int affected = syncJobRepository.updateStatusToFailed(jobId, errorMessage, now);
+                int affected = syncJobRepository.updateStatusToFailed(jobId, observedUpdatedAt, errorMessage, now);
                 if (affected == 1) {
                     publishSyncFailedOutboxEvent(
                         jobId,
@@ -307,7 +356,9 @@ public class GithubSyncExecutionService {
             } else {
                 Duration backoff = calculateBackoffDuration(currentRetryCount);
                 LocalDateTime nextRetryAt = now.plus(backoff);
-                int affected = syncJobRepository.updateStatusToRetryWaiting(jobId, nextRetryAt, errorMessage, now);
+                int affected
+                    = syncJobRepository
+                        .updateStatusToRetryWaiting(jobId, observedUpdatedAt, nextRetryAt, errorMessage, now);
                 if (affected == 1) {
                     log
                         .info(
@@ -323,11 +374,14 @@ public class GithubSyncExecutionService {
 
     /**
      * 401 권한 만료 시 연동을 DISCONNECTED로 전이하고, 작업을 FAILED로 종료하며, Outbox 이벤트를 발행한다.
+     * 실행 시작 시점의 installationId와 현재 연동 값이 일치할 때만 연동 해제 및 대기 작업 취소를 수행한다.
      */
     public void recordAuthExpired(
         Long jobId,
+        LocalDateTime observedUpdatedAt,
         Long memberId,
         Long connectionId,
+        Long expectedInstallationId,
         Long submissionId,
         Long problemId,
         String problemTitle,
@@ -336,15 +390,17 @@ public class GithubSyncExecutionService {
         transactionTemplate.executeWithoutResult(status -> {
             Optional<GithubConnection> connOpt = connectionRepository.findById(connectionId);
             connOpt.ifPresent(conn -> {
-                if (conn.getStatus() == GithubConnectionStatus.CONNECTED) {
+                if (conn.getStatus() == GithubConnectionStatus.CONNECTED
+                    && java.util.Objects.equals(conn.getInstallationId(), expectedInstallationId)) {
                     conn.disconnect(GithubDisconnectedReason.AUTH_EXPIRED);
+                    syncJobService.cancelPendingJobs(connectionId, "GitHub 인증 권한 만료");
+                } else {
+                    log.info("연동 정보가 변경되었거나 installationId가 일치하지 않아 연동 해제를 건너뜁니다: connectionId={}", connectionId);
                 }
             });
 
-            syncJobService.cancelPendingJobs(connectionId, "GitHub 인증 권한 만료");
-
             LocalDateTime now = LocalDateTime.now(clock);
-            int affected = syncJobRepository.updateStatusToFailed(jobId, errorMessage, now);
+            int affected = syncJobRepository.updateStatusToFailed(jobId, observedUpdatedAt, errorMessage, now);
             if (affected == 1) {
                 publishSyncFailedOutboxEvent(
                     jobId,
@@ -362,10 +418,10 @@ public class GithubSyncExecutionService {
     /**
      * 작업을 조건부로 취소(CANCELED) 상태로 반영한다.
      */
-    public void cancelJobIfRunning(Long jobId, String reason) {
+    public void cancelJobIfRunning(Long jobId, LocalDateTime observedUpdatedAt, String reason) {
         transactionTemplate.executeWithoutResult(status -> {
             LocalDateTime now = LocalDateTime.now(clock);
-            syncJobRepository.updateStatusToCanceled(jobId, reason, now);
+            syncJobRepository.updateStatusToCanceled(jobId, observedUpdatedAt, reason, now);
         });
     }
 

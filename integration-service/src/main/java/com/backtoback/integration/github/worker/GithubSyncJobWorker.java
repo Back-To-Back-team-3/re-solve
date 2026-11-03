@@ -2,8 +2,7 @@ package com.backtoback.integration.github.worker;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.List;
+import java.util.Optional;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -18,7 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * PENDING, RETRY_WAITING, RATE_LIMITED 상태의 Sync Job을 SKIP LOCKED로 선점하고 실행을 위임하는 워커 (scheduler.md > 8.1).
- * 선점 트랜잭션과 실제 GitHub 커밋 실행 트랜잭션을 분리하여 DB 커넥션 점유를 최소화한다.
+ * 작업 1건씩 선점 트랜잭션에서 RUNNING으로 변경 후 즉시 실행하여 실제 작업 시작 시각을 보장하고,
+ * 외부 HTTP 호출을 트랜잭션 밖에서 수행하여 DB 커넥션 점유를 최소화한다.
  */
 @Slf4j
 @Component
@@ -33,48 +33,52 @@ public class GithubSyncJobWorker {
     private final Clock clock;
 
     /**
-     * 5초 주기로 선점 가능한 작업을 배치 단위(최대 10건)로 조회하여 실행한다.
+     * 5초 주기로 선점 가능한 작업을 1건씩 선점하여 즉시 실행한다 (회차당 최대 10건).
+     * 각 작업마다 실행 직전에 선점하여 RUNNING으로 전이하므로, 앞선 작업의 지연으로
+     * 뒤쪽 작업이 정체 작업(5분 초과)으로 오탐되는 문제를 원천 차단한다.
      */
     @Scheduled(
         fixedDelayString = "${integration.github.sync-worker.fixed-delay-ms:5000}",
         initialDelayString = "${integration.github.sync-worker.initial-delay-ms:5000}"
     )
     public void pollAndExecuteSyncJobs() {
-        List<Long> claimedJobIds = claimJobsBatch(BATCH_SIZE);
-        if (claimedJobIds.isEmpty()) {
-            return;
-        }
+        int processedCount = 0;
+        while (processedCount < BATCH_SIZE) {
+            Optional<Long> claimedJobIdOpt = claimNextJob();
+            if (claimedJobIdOpt.isEmpty()) {
+                break;
+            }
 
-        log.info("Sync Job {}건 선점 완료, 순차 실행 시작: jobIds={}", claimedJobIds.size(), claimedJobIds);
-        for (Long jobId : claimedJobIds) {
+            Long jobId = claimedJobIdOpt.get();
             try {
                 executionService.executeSyncJob(jobId);
             } catch (Exception e) {
                 log.error("Sync Job 실행 중 미처리 예외 발생: jobId={}", jobId, e);
             }
+            processedCount++;
+        }
+
+        if (processedCount > 0) {
+            log.info("Sync Job 폴링 처리 완료: processedCount={}", processedCount);
         }
     }
 
     /**
-     * SKIP LOCKED로 대기 작업을 선점하고 RUNNING 상태로 전이시킨 후 ID 목록을 반환한다 (선점 트랜잭션).
+     * SKIP LOCKED로 대기 작업 1건을 선점하고 RUNNING 상태로 전이시킨 후 ID를 반환한다 (단건 선점 트랜잭션).
      *
-     * @param limit 최대 선점 건수
-     * @return 선점된 작업 ID 목록
+     * @return 선점된 작업 ID Optional
      */
-    public List<Long> claimJobsBatch(int limit) {
-        List<Long> claimed = transactionTemplate.execute(status -> {
+    public Optional<Long> claimNextJob() {
+        return Optional.ofNullable(transactionTemplate.execute(status -> {
             LocalDateTime now = LocalDateTime.now(clock);
-            List<GithubSyncJob> claimableJobs = syncJobRepository.findClaimableJobsForUpdateSkipLocked(now, limit);
-            if (claimableJobs == null || claimableJobs.isEmpty()) {
-                return Collections.emptyList();
+            Optional<GithubSyncJob> claimableJobOpt = syncJobRepository.findNextClaimableJobForUpdateSkipLocked(now);
+            if (claimableJobOpt.isEmpty()) {
+                return null;
             }
 
-            for (GithubSyncJob job : claimableJobs) {
-                job.markRunning();
-            }
-            return claimableJobs.stream().map(GithubSyncJob::getId).toList();
-        });
-
-        return claimed != null ? claimed : Collections.emptyList();
+            GithubSyncJob job = claimableJobOpt.get();
+            job.markRunning();
+            return job.getId();
+        }));
     }
 }

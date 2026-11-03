@@ -30,11 +30,11 @@ public class GithubCommitPathResolver {
             = baseRule
                 .replace("{난이도}", String.valueOf(difficulty))
                 .replace("{문제번호}", String.valueOf(problemId))
-                .replace("{문제명}", sanitizedTitle)
                 .replace("{언어별 파일}", filename)
                 .replace("{Solution.ext}", filename)
                 .replace("풀이.java", filename)
-                .replace("Solution.ext", filename);
+                .replace("Solution.ext", filename)
+                .replace("{문제명}", sanitizedTitle);
 
         // 만약 확장자가 경로 끝에 누락되어 있다면 파일명 추가
         if (!path.endsWith(filename) && !path.contains(".")) {

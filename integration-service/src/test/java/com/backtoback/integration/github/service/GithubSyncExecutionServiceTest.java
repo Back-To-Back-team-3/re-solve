@@ -137,6 +137,7 @@ class GithubSyncExecutionServiceTest {
         GithubSyncJob job = GithubSyncJob.createPending(connection, 100L, 200L, "두 수의 합", 1);
         job.markRunning();
         ReflectionTestUtils.setField(job, "id", 1L);
+        ReflectionTestUtils.setField(job, "updatedAt", LocalDateTime.now(fixedClock));
         return job;
     }
 
@@ -146,8 +147,15 @@ class GithubSyncExecutionServiceTest {
         GithubConnection connection = createTestConnection();
         GithubSyncJob job = createRunningJob(connection);
         given(syncJobRepository.findByIdWithConnection(1L)).willReturn(Optional.of(job));
-        given(syncJobRepository.updateStatusToSucceeded(eq(1L), eq("commit-sha-abc"), any(LocalDateTime.class)))
-            .willReturn(1);
+        given(
+            syncJobRepository
+                .updateStatusToSucceeded(
+                    eq(1L),
+                    any(LocalDateTime.class),
+                    eq("commit-sha-abc"),
+                    any(LocalDateTime.class)
+                )
+        ).willReturn(1);
 
         given(githubAppClient.createInstallationAccessToken(12345L))
             .willReturn(new GithubInstallationTokenResponse("ghs_token", "2026-10-29T11:00:00Z"));
@@ -174,7 +182,8 @@ class GithubSyncExecutionServiceTest {
 
         executionService.executeSyncJob(1L);
 
-        verify(syncJobRepository).updateStatusToSucceeded(eq(1L), eq("commit-sha-abc"), any(LocalDateTime.class));
+        verify(syncJobRepository)
+            .updateStatusToSucceeded(eq(1L), any(LocalDateTime.class), eq("commit-sha-abc"), any(LocalDateTime.class));
         verify(outboxEventRepository, never()).save(any());
     }
 
@@ -185,7 +194,10 @@ class GithubSyncExecutionServiceTest {
         GithubSyncJob job = createRunningJob(connection);
         given(syncJobRepository.findByIdWithConnection(1L)).willReturn(Optional.of(job));
         given(connectionRepository.findById(connection.getId())).willReturn(Optional.of(connection));
-        given(syncJobRepository.updateStatusToFailed(eq(1L), anyString(), any(LocalDateTime.class))).willReturn(1);
+        given(
+            syncJobRepository
+                .updateStatusToFailed(eq(1L), any(LocalDateTime.class), anyString(), any(LocalDateTime.class))
+        ).willReturn(1);
 
         given(githubAppClient.createInstallationAccessToken(12345L))
             .willThrow(new GithubApiException("Unauthorized", 401, null, null));
@@ -195,7 +207,8 @@ class GithubSyncExecutionServiceTest {
         assertThat(connection.getStatus()).isEqualTo(GithubConnectionStatus.DISCONNECTED);
         assertThat(connection.getDisconnectedReason()).isEqualTo(GithubDisconnectedReason.AUTH_EXPIRED);
         verify(syncJobService).cancelPendingJobs(eq(connection.getId()), anyString());
-        verify(syncJobRepository).updateStatusToFailed(eq(1L), anyString(), any(LocalDateTime.class));
+        verify(syncJobRepository)
+            .updateStatusToFailed(eq(1L), any(LocalDateTime.class), anyString(), any(LocalDateTime.class));
 
         ArgumentCaptor<OutboxEvent> outboxCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
         verify(outboxEventRepository).save(outboxCaptor.capture());
@@ -205,14 +218,20 @@ class GithubSyncExecutionServiceTest {
     }
 
     @Test
-    @DisplayName("403 Rate Limit 발생 시 updateStatusToRateLimited 조건부 쿼리를 호출한다")
+    @DisplayName("403 Rate Limit 발생 시 재시도 횟수 5회 미만이면 updateStatusToRateLimited 조건부 쿼리를 호출한다")
     void executeSyncJobRateLimited() {
         GithubConnection connection = createTestConnection();
         GithubSyncJob job = createRunningJob(connection);
         given(syncJobRepository.findByIdWithConnection(1L)).willReturn(Optional.of(job));
         given(
             syncJobRepository
-                .updateStatusToRateLimited(eq(1L), any(LocalDateTime.class), anyString(), any(LocalDateTime.class))
+                .updateStatusToRateLimited(
+                    eq(1L),
+                    any(LocalDateTime.class),
+                    any(LocalDateTime.class),
+                    anyString(),
+                    any(LocalDateTime.class)
+                )
         ).willReturn(1);
 
         Instant resetInstant = Instant.parse("2026-10-29T10:30:00Z");
@@ -224,11 +243,45 @@ class GithubSyncExecutionServiceTest {
         verify(syncJobRepository)
             .updateStatusToRateLimited(
                 eq(1L),
+                any(LocalDateTime.class),
                 eq(LocalDateTime.ofInstant(resetInstant, ZoneId.of("Asia/Seoul"))),
                 anyString(),
                 any(LocalDateTime.class)
             );
         verify(outboxEventRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("403 Rate Limit 발생 시 재시도 횟수가 5회 이상이면 FAILED로 전이하고 RATE_LIMIT_EXHAUSTED Outbox 이벤트를 발행한다")
+    void executeSyncJobRateLimitExceedMaxRetriesFails() {
+        GithubConnection connection = createTestConnection();
+        GithubSyncJob job = createRunningJob(connection);
+        for (int i = 0; i < 5; i++) {
+            job.markRetryWaiting(null, "이전 실패");
+            job.markRunning();
+        }
+        assertThat(job.getRetryCount()).isEqualTo(5);
+
+        given(syncJobRepository.findByIdWithConnection(1L)).willReturn(Optional.of(job));
+        given(
+            syncJobRepository
+                .updateStatusToFailed(eq(1L), any(LocalDateTime.class), anyString(), any(LocalDateTime.class))
+        ).willReturn(1);
+
+        Instant resetInstant = Instant.parse("2026-10-29T10:30:00Z");
+        given(githubAppClient.createInstallationAccessToken(12345L))
+            .willThrow(new GithubApiException("Rate Limit", 403, resetInstant, null));
+
+        executionService.executeSyncJob(1L);
+
+        verify(syncJobRepository)
+            .updateStatusToFailed(eq(1L), any(LocalDateTime.class), anyString(), any(LocalDateTime.class));
+
+        ArgumentCaptor<OutboxEvent> outboxCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
+        verify(outboxEventRepository).save(outboxCaptor.capture());
+        OutboxEvent outboxEvent = outboxCaptor.getValue();
+        assertThat(outboxEvent.getEventType()).isEqualTo("GitHubSyncFailed");
+        assertThat(outboxEvent.getPayload()).contains("RATE_LIMIT_EXHAUSTED");
     }
 
     @Test
@@ -239,7 +292,13 @@ class GithubSyncExecutionServiceTest {
         given(syncJobRepository.findByIdWithConnection(1L)).willReturn(Optional.of(job));
         given(
             syncJobRepository
-                .updateStatusToRetryWaiting(eq(1L), any(LocalDateTime.class), anyString(), any(LocalDateTime.class))
+                .updateStatusToRetryWaiting(
+                    eq(1L),
+                    any(LocalDateTime.class),
+                    any(LocalDateTime.class),
+                    anyString(),
+                    any(LocalDateTime.class)
+                )
         ).willReturn(1);
 
         given(githubAppClient.createInstallationAccessToken(12345L))
@@ -248,7 +307,13 @@ class GithubSyncExecutionServiceTest {
         executionService.executeSyncJob(1L);
 
         verify(syncJobRepository)
-            .updateStatusToRetryWaiting(eq(1L), any(LocalDateTime.class), anyString(), any(LocalDateTime.class));
+            .updateStatusToRetryWaiting(
+                eq(1L),
+                any(LocalDateTime.class),
+                any(LocalDateTime.class),
+                anyString(),
+                any(LocalDateTime.class)
+            );
         verify(outboxEventRepository, never()).save(any());
     }
 
@@ -264,13 +329,17 @@ class GithubSyncExecutionServiceTest {
         assertThat(job.getRetryCount()).isEqualTo(5);
 
         given(syncJobRepository.findByIdWithConnection(1L)).willReturn(Optional.of(job));
-        given(syncJobRepository.updateStatusToFailed(eq(1L), anyString(), any(LocalDateTime.class))).willReturn(1);
+        given(
+            syncJobRepository
+                .updateStatusToFailed(eq(1L), any(LocalDateTime.class), anyString(), any(LocalDateTime.class))
+        ).willReturn(1);
         given(githubAppClient.createInstallationAccessToken(12345L))
             .willThrow(new GithubApiException("Server Error", 500, null, null));
 
         executionService.executeSyncJob(1L);
 
-        verify(syncJobRepository).updateStatusToFailed(eq(1L), anyString(), any(LocalDateTime.class));
+        verify(syncJobRepository)
+            .updateStatusToFailed(eq(1L), any(LocalDateTime.class), anyString(), any(LocalDateTime.class));
         verify(outboxEventRepository).save(any(OutboxEvent.class));
     }
 }

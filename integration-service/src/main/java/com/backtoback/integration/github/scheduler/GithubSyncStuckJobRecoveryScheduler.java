@@ -60,11 +60,11 @@ public class GithubSyncStuckJobRecoveryScheduler {
 
         log.warn("장기 정체된 Sync Job {}건 발견, 복구 시작: cutoff={}", stuckJobs.size(), cutoff);
         for (GithubSyncJob job : stuckJobs) {
-            recoverStuckJob(job, now);
+            recoverStuckJob(job);
         }
     }
 
-    private void recoverStuckJob(GithubSyncJob job, LocalDateTime now) {
+    private void recoverStuckJob(GithubSyncJob job) {
         Long jobId = job.getId();
         LocalDateTime observedUpdatedAt = job.getUpdatedAt();
         int currentRetryCount = job.getRetryCount();
@@ -74,6 +74,7 @@ public class GithubSyncStuckJobRecoveryScheduler {
         String problemTitle = job.getProblemTitle();
 
         transactionTemplate.executeWithoutResult(status -> {
+            LocalDateTime now = LocalDateTime.now(clock);
             if (currentRetryCount >= MAX_RETRY_COUNT) {
                 // 5회 초과 시 최종 실패 및 Outbox 이벤트 발행
                 int affected
