@@ -18,8 +18,9 @@ class ContestMigrationUpgradeTest {
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("contest_upgrade");
 
     @Test
-    @DisplayName("V7 데이터베이스에 V8부터 V16까지 추가 적용한다")
+    @DisplayName("V7 데이터베이스에 V8부터 V16.1까지 추가 적용한다")
     void migratesFromVersionSeven() throws Exception {
+        // given
         Flyway
             .configure()
             .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
@@ -38,7 +39,42 @@ class ContestMigrationUpgradeTest {
                         + "1, 100, 0, 0, NOW(6), NOW(6))"
                 );
         }
+        Flyway
+            .configure()
+            .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+            .target("16")
+            .load()
+            .migrate();
+        try (
+            var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+            var statement = connection.createStatement()
+        ) {
+            statement
+                .executeUpdate(
+                    "INSERT INTO contest_resource_guards "
+                        + "(resource_type, resource_id, state, created_at, updated_at) "
+                        + "VALUES ('PROBLEM', 1, 'OPEN', NOW(6), NOW(6))"
+                );
+        }
+        // when
         Flyway.configure().dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword()).load().migrate();
+        // then
+        try (
+            var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+            var statement = connection.createStatement();
+            var result
+                = statement
+                    .executeQuery(
+                        "SELECT source_revision_id, source_revision_number, "
+                            + "source_supported_languages FROM contest_resource_guards WHERE resource_type='PROBLEM' "
+                            + "AND resource_id=1"
+                    )
+        ) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getObject(1)).isNull();
+            assertThat(result.getObject(2)).isNull();
+            assertThat(result.getObject(3)).isNull();
+        }
         try (
             var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
             var statement = connection.createStatement();
@@ -57,7 +93,7 @@ class ContestMigrationUpgradeTest {
                     )
         ) {
             assertThat(result.next()).isTrue();
-            assertThat(result.getInt(1)).isEqualTo(16);
+            assertThat(result.getInt(1)).isEqualTo(17);
         }
     }
 }

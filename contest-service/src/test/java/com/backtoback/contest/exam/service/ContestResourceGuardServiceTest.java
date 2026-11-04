@@ -64,9 +64,11 @@ class ContestResourceGuardServiceTest {
     @Test
     @DisplayName("가드를 자원 종류와 ID 순으로 잠그고 중복 자원은 한 번만 확보한다")
     void ordersAndDeduplicatesResources() {
+        // given
         var member = new Resource("MEMBER", 99101);
         var problem = new Resource("PROBLEM", 99102);
         var other = new Resource("PROBLEM", 99103);
+        // when & then
         assertThatThrownBy(() -> guards.lockAll(List.of(member))).isInstanceOf(IllegalTransactionStateException.class);
         transactions.executeWithoutResult(status -> {
             var result = enrollment.lockForEnrollment(List.of(other, problem, member, problem));
@@ -83,6 +85,7 @@ class ContestResourceGuardServiceTest {
     @Test
     @DisplayName("PREPARED와 BLOCKED 가드는 신규 편입을 거절한다")
     void blocksNonOpenResources() {
+        // given
         for (String state : List.of("PREPARED", "BLOCKED")) {
             transactions.executeWithoutResult(status -> {
                 guards.lockAll(List.of(new Resource("PROBLEM", 99104)));
@@ -92,6 +95,7 @@ class ContestResourceGuardServiceTest {
                             + "AND resource_id = 99104",
                         state
                     );
+                // when & then
                 assertThatThrownBy(() -> enrollment.lockForEnrollment(List.of(new Resource("PROBLEM", 99104))))
                     .isInstanceOf(ContestException.class);
                 status.setRollbackOnly();
@@ -103,11 +107,13 @@ class ContestResourceGuardServiceTest {
     @Test
     @DisplayName("동시 최초 확보는 한 행으로 직렬화되고 뒤따르는 편입은 준비 상태를 확인한다")
     void concurrentFirstAcquisitionObservesPreparedState() throws Exception {
+        // given
         var resource = new Resource("PROBLEM", 99105);
         var locked = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var entered = new CountDownLatch(1);
         try (var executor = Executors.newFixedThreadPool(2)) {
+            // when
             var preparing = executor.submit(() -> transactions.executeWithoutResult(status -> {
                 guards.lockAll(List.of(resource));
                 jdbc
@@ -125,6 +131,7 @@ class ContestResourceGuardServiceTest {
             });
             try {
                 assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+                // then
                 assertThatThrownBy(() -> joining.get(200, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
             } finally {
                 release.countDown();

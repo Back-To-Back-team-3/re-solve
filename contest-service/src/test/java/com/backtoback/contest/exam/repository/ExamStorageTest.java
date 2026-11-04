@@ -169,7 +169,7 @@ class ExamStorageTest {
     }
 
     @Test
-    @DisplayName("빈 데이터베이스에 V1부터 V16까지 순서대로 적용한다")
+    @DisplayName("빈 데이터베이스에 V1부터 V16.1까지 순서대로 적용한다")
     void migratesEmptyDatabase() {
         List<String> versions
             = jdbc
@@ -179,7 +179,25 @@ class ExamStorageTest {
                     String.class
                 );
         assertThat(versions)
-            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16");
+            .containsExactly(
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15",
+                "16",
+                "16.1"
+            );
         assertThat(jdbc.queryForList("SHOW TABLES", String.class))
             .contains(
                 "outbox_events",
