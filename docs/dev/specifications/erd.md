@@ -3180,7 +3180,7 @@ study-service/src/main/resources/db/migration/
   V13__assignment_create_assignment_completions.sql
   V14__replica_create_member_ac_replicas.sql
   V15__replica_create_member_learning_profile_replicas.sql
-  V16__assignment_problems_add_revision_number.sql
+  V16__assignment_alter_assignment_problems.sql
   V17__recommendation_create_study_recommendations.sql
   V18__ai_create_hint_requests.sql
   V19__ai_create_hint_daily_usages.sql
