@@ -122,7 +122,7 @@ class ExamStorageTest {
     }
 
     @Test
-    @DisplayName("빈 데이터베이스에 V1부터 V7까지 순서대로 적용한다")
+    @DisplayName("빈 데이터베이스에 V1부터 V16까지 순서대로 적용한다")
     void migratesEmptyDatabase() {
         List<String> versions
             = jdbc
@@ -131,7 +131,8 @@ class ExamStorageTest {
                         + "AND version IS NOT NULL ORDER BY installed_rank",
                     String.class
                 );
-        assertThat(versions).containsExactly("1", "2", "3", "4", "5", "6", "7");
+        assertThat(versions)
+            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16");
         assertThat(jdbc.queryForList("SHOW TABLES", String.class))
             .contains(
                 "outbox_events",
@@ -140,7 +141,16 @@ class ExamStorageTest {
                 "audit_logs",
                 "member_replicas",
                 "exams",
-                "exam_problems"
+                "exam_problems",
+                "exam_participants",
+                "exam_participant_histories",
+                "exam_drafts",
+                "exam_submissions",
+                "exam_problem_results",
+                "study_membership_replicas",
+                "result_snapshots",
+                "contest_resource_guards",
+                "contest_admin_operations"
             );
     }
 
@@ -268,6 +278,148 @@ class ExamStorageTest {
                 .isEqualTo(1);
             status.setRollbackOnly();
         });
+    }
+
+    @Test
+    @DisplayName("활성 참가 중복을 막고 취소 후 재등록과 생성 컬럼을 확인한다")
+    void enforcesActiveParticipantUniqueness() {
+        transactions.executeWithoutResult(status -> {
+            long examId = exams.saveAndFlush(newExam()).getId();
+            insertParticipant(examId, 101L);
+            assertThatThrownBy(() -> insertParticipant(-1L, 101L)).isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(
+                jdbc
+                    .queryForObject(
+                        "SELECT active_member_id FROM exam_participants WHERE exam_id = ?",
+                        Long.class,
+                        examId
+                    )
+            ).isEqualTo(101L);
+            assertThatThrownBy(() -> insertParticipant(examId, 101L))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            jdbc.update("UPDATE exam_participants SET status = 'CANCELED' WHERE exam_id = ?", examId);
+            insertParticipant(examId, 101L);
+            assertThat(
+                jdbc
+                    .queryForObject(
+                        "SELECT COUNT(*) FROM exam_participants WHERE exam_id = ? " + "AND active_member_id IS NULL",
+                        Integer.class,
+                        examId
+                    )
+            ).isEqualTo(1);
+            status.setRollbackOnly();
+        });
+    }
+
+    @Test
+    @DisplayName("참가 이력과 Draft, 제출, 결과의 내부 참조와 복합 유일 제약을 확인한다")
+    void enforcesExamChildConstraints() {
+        transactions.executeWithoutResult(status -> {
+            long examId = exams.saveAndFlush(newExam()).getId();
+            insertParticipant(examId, 102L);
+            long participantId
+                = jdbc.queryForObject("SELECT id FROM exam_participants WHERE exam_id = ?", Long.class, examId);
+            jdbc
+                .update(
+                    "INSERT INTO exam_participant_histories (exam_participant_id, to_status, created_at) "
+                        + "VALUES (?, 'REGISTERED', NOW(6))",
+                    participantId
+                );
+            assertThatThrownBy(
+                () -> jdbc
+                    .update(
+                        "INSERT INTO exam_participant_histories "
+                            + "(exam_participant_id, to_status, created_at) VALUES (-1, 'REGISTERED', NOW(6))"
+                    )
+            ).isInstanceOf(DataIntegrityViolationException.class);
+            String draft
+                = "INSERT INTO exam_drafts (exam_participant_id, problem_id, language, source_code, seq, "
+                    + "saved_at, version, created_at, updated_at) "
+                    + "VALUES (?, 1, 'JAVA', 'code', 1, NOW(6), 0, NOW(6), NOW(6))";
+            jdbc.update(draft, participantId);
+            assertThatThrownBy(() -> jdbc.update(draft, participantId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> jdbc.update(draft, -1)).isInstanceOf(DataIntegrityViolationException.class);
+            String submission
+                = "INSERT INTO exam_submissions (exam_participant_id, exam_id, problem_id, draft_seq, "
+                    + "language, source_code, submission_type, received_at, status, is_zero_confirmed, "
+                    + "created_at, updated_at) "
+                    + "VALUES (?, ?, 1, 1, 'JAVA', 'code', 'MANUAL', NOW(6), 'ACCEPTED', false, NOW(6), NOW(6))";
+            jdbc.update(submission, participantId, examId);
+            assertThatThrownBy(() -> jdbc.update(submission, participantId, examId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> jdbc.update(submission, -1, examId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> jdbc.update(submission.replace("?, ?, 1, 1", "?, ?, 2, 1"), participantId, -1))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            long submissionId
+                = jdbc
+                    .queryForObject(
+                        "SELECT id FROM exam_submissions WHERE exam_participant_id = ?",
+                        Long.class,
+                        participantId
+                    );
+            String result
+                = "INSERT INTO exam_problem_results (exam_participant_id, problem_id, last_valid_exam_submission_id, "
+                    + "score, version, created_at, updated_at) VALUES (?, 1, ?, 0, 0, NOW(6), NOW(6))";
+            jdbc.update(result, participantId, submissionId);
+            assertThatThrownBy(() -> jdbc.update(result, participantId, submissionId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> jdbc.update(result, -1, submissionId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> jdbc.update(result.replace("?, 1, ?", "?, 2, ?"), participantId, -1))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            status.setRollbackOnly();
+        });
+    }
+
+    @Test
+    @DisplayName("복제본, 결과 스냅샷, 가드, 관리자 작업의 유일 제약을 확인한다")
+    void enforcesAdditionalTableConstraints() {
+        transactions.executeWithoutResult(status -> {
+            String replica
+                = "INSERT INTO study_membership_replicas (study_id, member_id, membership_id, is_active, "
+                    + "synced_at, created_at, updated_at) VALUES (1, 2, 3, true, NOW(6), NOW(6), NOW(6))";
+            jdbc.update(replica);
+            assertThatThrownBy(() -> jdbc.update(replica)).isInstanceOf(DataIntegrityViolationException.class);
+            String snapshot
+                = "INSERT INTO result_snapshots (context, context_id, result_revision, payload, created_at) "
+                    + "VALUES ('EXAM', 1, 1, '{}', NOW(6))";
+            jdbc.update(snapshot);
+            assertThatThrownBy(() -> jdbc.update(snapshot)).isInstanceOf(DataIntegrityViolationException.class);
+            String guard
+                = "INSERT INTO contest_resource_guards (resource_type, resource_id, state, created_at, updated_at) "
+                    + "VALUES ('MEMBER', 1, 'OPEN', NOW(6), NOW(6))";
+            jdbc.update(guard);
+            assertThatThrownBy(() -> jdbc.update(guard)).isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(
+                jdbc
+                    .queryForObject(
+                        "SELECT source_version FROM contest_resource_guards WHERE resource_id = 1",
+                        Long.class
+                    )
+            ).isZero();
+            String operation
+                = "INSERT INTO contest_admin_operations (operation_id, operation_type, context, context_id, "
+                    + "request_hash, state, actor_member_id, reason, created_at, updated_at) "
+                    + "VALUES (?, 'EXAM_RETRY', 'EXAM', 1, ?, 'PENDING', 1, 'reason', NOW(6), NOW(6))";
+            jdbc.update(operation, "Operation", "a".repeat(64));
+            jdbc.update(operation, "operation", "a".repeat(64));
+            assertThatThrownBy(() -> jdbc.update(operation, "Operation", "a".repeat(64)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+            status.setRollbackOnly();
+        });
+    }
+
+    private void insertParticipant(long examId, long memberId) {
+        jdbc
+            .update(
+                "INSERT INTO exam_participants (exam_id, member_id, status, registered_at, personal_ends_at, "
+                    + "total_score, is_ranked, version, created_at, updated_at) "
+                    + "VALUES (?, ?, 'REGISTERED', NOW(6), NOW(6), 0, false, 0, NOW(6), NOW(6))",
+                examId,
+                memberId
+            );
     }
 
     private Exam newExam() {

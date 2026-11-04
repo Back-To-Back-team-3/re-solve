@@ -1,0 +1,23 @@
+CREATE TABLE exam_participants (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    exam_id BIGINT NOT NULL,
+    member_id BIGINT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    active_member_id BIGINT GENERATED ALWAYS AS (IF(status <> 'CANCELED', member_id, NULL)) STORED,
+    participant_revision BIGINT NOT NULL DEFAULT 1,
+    registered_at DATETIME(6) NOT NULL,
+    entered_at DATETIME(6) NULL,
+    personal_ends_at DATETIME(6) NOT NULL,
+    finished_at DATETIME(6) NULL,
+    total_score DECIMAL(6, 2) NOT NULL,
+    last_valid_submitted_at DATETIME(6) NULL,
+    auto_submitted_at DATETIME(6) NULL,
+    is_ranked BOOLEAN NOT NULL,
+    final_rank INT NULL,
+    version BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_exam_participants_exam FOREIGN KEY (exam_id) REFERENCES exams (id),
+    CONSTRAINT uk_exam_participants_exam_active_member UNIQUE (exam_id, active_member_id),
+    INDEX idx_exam_participants_member_status (member_id, status)
+);
