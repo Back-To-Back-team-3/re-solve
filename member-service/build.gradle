@@ -34,6 +34,9 @@ dependencies {
     implementation project(':common-web')
     // 생성·수정 시각 감사, Clock
     implementation project(':common-jpa')
+    // Outbox 저장·SNS 발행
+    implementation project(':common-event')
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sns'
 
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'

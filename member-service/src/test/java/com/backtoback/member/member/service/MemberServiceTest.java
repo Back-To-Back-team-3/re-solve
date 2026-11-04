@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,6 +19,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.common.exception.BusinessException;
 import com.backtoback.common.exception.CommonErrorCode;
@@ -36,8 +40,23 @@ class MemberServiceTest {
     @Mock
     private MemberRepository memberRepository;
 
+    @Mock
+    private MemberEventPublisher memberEventPublisher;
+
+    @Mock
+    private TransactionTemplate transactionTemplate;
+
     @InjectMocks
     private MemberService memberService;
+
+    @BeforeEach
+    @SuppressWarnings("unchecked")
+    void runCallbackInPlace() {
+        // 실제 트랜잭션 경계는 MemberEventOutboxTest(MySQL)에서 확인하고, 여기서는 콜백만 그대로 실행한다.
+        lenient()
+            .when(transactionTemplate.execute(any()))
+            .thenAnswer(invocation -> ((TransactionCallback<Object>)invocation.getArgument(0)).doInTransaction(null));
+    }
 
     @Test
     @DisplayName("처음 로그인한 GitHub 계정은 USER·ACTIVE 회원으로 가입시킨다")
@@ -56,6 +75,7 @@ class MemberServiceTest {
         assertThat(member.getRole()).isEqualTo(MemberRole.USER);
         assertThat(member.getStatus()).isEqualTo(MemberStatus.ACTIVE);
         assertThat(member.getProfileVersion()).isEqualTo(1L);
+        verify(memberEventPublisher).memberUpdated(member);
     }
 
     @Test
@@ -69,6 +89,7 @@ class MemberServiceTest {
         assertThat(registration.newMember()).isFalse();
         assertThat(registration.member()).isSameAs(existing);
         verify(memberRepository, never()).saveAndFlush(any(Member.class));
+        verify(memberEventPublisher, never()).memberUpdated(any());
     }
 
     @Test
@@ -85,6 +106,7 @@ class MemberServiceTest {
 
         assertThat(registration.newMember()).isFalse();
         assertThat(registration.member()).isSameAs(registeredConcurrently);
+        verify(memberEventPublisher, never()).memberUpdated(any());
     }
 
     @Test
@@ -110,6 +132,7 @@ class MemberServiceTest {
 
         assertThat(member.getNickname()).isEqualTo("kim-algo");
         assertThat(member.getProfileVersion()).isEqualTo(2L);
+        verify(memberEventPublisher).memberUpdated(member);
     }
 
     @Test
@@ -123,6 +146,7 @@ class MemberServiceTest {
 
         assertThat(member.getNickname()).isEqualTo("kim-dev");
         assertThat(member.getProfileVersion()).isEqualTo(1L);
+        verify(memberEventPublisher, never()).memberUpdated(any());
     }
 
     @Test
