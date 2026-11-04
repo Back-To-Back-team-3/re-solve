@@ -30,3 +30,10 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+contest:
+  member:
+    base-url: ${MEMBER_SERVICE_URL:http://member-service:8080}
+  events:
+    enabled: ${CONTEST_EVENTS_ENABLED:false}
+    queue-url: ${CONTEST_QUEUE_URL:}
