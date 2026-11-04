@@ -28,6 +28,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +41,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.localstack.LocalStackContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.global.lock.RedisTransactionLock;
@@ -53,7 +55,13 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 
 /** 문제 서비스의 DB·Redis·S3 연결과 실제 잠금 예외·롤백 경계를 확인한다. */
-@SpringBootTest(properties = "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration")
+@MockitoBean(types = OutboxRelay.class)
+@SpringBootTest(
+    properties = {
+        "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
+        "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue"
+    }
+)
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
 @Import(ProblemServiceApplicationTest.LockTimeoutController.class)
@@ -137,7 +145,7 @@ class ProblemServiceApplicationTest {
     @DisplayName("문제 DB와 ShedLock·감사 테이블을 포함한 Flyway 마이그레이션을 적용한다")
     void applicationConnectsToProblemDatabaseAndAppliesMigrations() {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("problem_db");
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("17");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("20");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM setup_probe", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_logs", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM shedlock", Integer.class)).isZero();

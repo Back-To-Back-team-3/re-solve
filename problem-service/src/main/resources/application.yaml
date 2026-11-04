@@ -52,6 +52,8 @@ logging:
     org.hibernate.orm.jdbc.bind: INFO
 
 problem:
+  messaging:
+    validation-queue-url: ${PROBLEM_VALIDATION_QUEUE_URL:}
   image-storage:
     bucket: ${PROBLEM_S3_BUCKET:}
   tag-idempotency:

@@ -72,6 +72,7 @@ import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
@@ -88,8 +89,10 @@ import com.backtoback.problem.tag.service.TagService;
 import tools.jackson.databind.ObjectMapper;
 
 /** 태그 API의 권한·검증·순번·동시성 동작을 검증한다. */
+@MockitoBean(types = OutboxRelay.class)
 @SpringBootTest(
     properties = {
+        "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
         // 테스트 클래스패스의 잠금 fixture도 JPA 스키마 검증 대상에 포함된다.
         "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
         "spring.cloud.aws.region.static=ap-northeast-2",

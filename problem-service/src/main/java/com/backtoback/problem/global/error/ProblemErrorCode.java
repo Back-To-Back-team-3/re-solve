@@ -11,6 +11,8 @@ import lombok.Getter;
  */
 @Getter
 public enum ProblemErrorCode implements ErrorCode {
+    CODE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "코드 크기 제한을 초과했습니다."),
+    PROBLEM_VALIDATION_IN_PROGRESS(HttpStatus.CONFLICT, "같은 회차와 언어의 검증이 진행 중입니다."),
     PROBLEM_NOT_FOUND(HttpStatus.NOT_FOUND, "문제 또는 상태 작업을 찾을 수 없습니다."),
     PROBLEM_REVISION_NOT_FOUND(HttpStatus.NOT_FOUND, "문제에 속한 회차를 찾을 수 없습니다."),
     PROBLEM_VALIDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "검증 요청을 찾을 수 없습니다."),

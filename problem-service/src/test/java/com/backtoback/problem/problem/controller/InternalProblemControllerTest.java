@@ -23,7 +23,12 @@ import com.backtoback.problem.problem.config.InternalProblemStubConfiguration;
 import com.backtoback.problem.problem.service.InternalProblemService;
 
 /** API 명세서 2.6.1~2.6.5·2.6.8~2.6.10 내부 Stub의 계약을 검증한다. */
-@WebMvcTest(controllers = InternalProblemController.class)
+@WebMvcTest(
+    controllers = {
+        InternalProblemController.class,
+        ProblemValidationStubController.class
+    }
+)
 @AutoConfigureMockMvc(addFilters = false)
 @ActiveProfiles("internal-stub")
 @Import(
