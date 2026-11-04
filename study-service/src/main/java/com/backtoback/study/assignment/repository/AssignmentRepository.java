@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -15,6 +17,12 @@ import com.backtoback.study.assignment.domain.AssignmentStatus;
 public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
 
     List<Assignment> findByStudyIdAndStatusIn(Long studyId, List<AssignmentStatus> statuses);
+
+    Page<Assignment> findByStudyId(Long studyId, Pageable pageable);
+
+    Page<Assignment> findByStudyIdAndStatus(Long studyId, AssignmentStatus status, Pageable pageable);
+
+    Optional<Assignment> findByIdAndStudyId(Long id, Long studyId);
 
     /**
      * SCHEDULED 상태이고 starts_at이 기준 시각 이하인 문제집 ID를 오래된 순으로 최대 limit건 조회한다(스케줄러 §5.2).

@@ -93,4 +93,14 @@ public interface AssignmentMemberStatusRepository extends JpaRepository<Assignme
         @Param("memberIds") List<Long> memberIds,
         @Param("status") MemberProgressStatus status
     );
+
+    /**
+     * 여러 문제집에서 한 멤버의 진행 상태를 일괄 조회한다 (API 명세서 §5.4.2 myStatus).
+     */
+    List<AssignmentMemberStatus> findByAssignmentIdInAndMemberId(List<Long> assignmentIds, Long memberId);
+
+    /**
+     * 한 문제집에서 주어진 멤버들의 진행 상태를 조회한다 (API 명세서 §5.4.3 memberProgress).
+     */
+    List<AssignmentMemberStatus> findByAssignmentIdAndMemberIdIn(Long assignmentId, List<Long> memberIds);
 }
