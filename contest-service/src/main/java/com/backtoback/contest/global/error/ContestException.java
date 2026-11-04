@@ -10,4 +10,15 @@ public class ContestException extends BusinessException {
     public ContestException(ErrorCode errorCode) {
         super(errorCode);
     }
+
+    /**
+     * 오류 코드와 함께 내부 실패 원인을 보존한다.
+     *
+     * @param errorCode 공통 또는 도메인 오류 코드
+     * @param cause 내부 실패 원인
+     */
+    public ContestException(ErrorCode errorCode, Throwable cause) {
+        super(errorCode);
+        initCause(cause);
+    }
 }

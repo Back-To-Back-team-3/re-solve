@@ -17,6 +17,7 @@ public enum ContestErrorCode implements ErrorCode {
     CONTEXT_NOT_FOUND(HttpStatus.NOT_FOUND, "내부 문맥을 찾을 수 없습니다."),
     PROBLEM_REVISION_NOT_INCLUDED(HttpStatus.NOT_FOUND, "문맥에 고정된 문제 회차가 아닙니다."),
     EXAM_NOT_FOUND(HttpStatus.NOT_FOUND, "시험을 찾을 수 없습니다."),
+    EXAM_NOT_ELIGIBLE(HttpStatus.FORBIDDEN, "시험에 참가할 자격이 없습니다."),
     EXAM_CLOSED(HttpStatus.CONFLICT, "시험의 요청 시간이 종료되었습니다."),
     CONTEST_CLOSED(HttpStatus.CONFLICT, "대회의 요청 시간이 종료되었습니다."),
     WITHDRAWAL_BLOCKED_ACTIVE_EXAM(HttpStatus.CONFLICT, "실제 입장한 미확정 시험·대회가 있습니다."),
