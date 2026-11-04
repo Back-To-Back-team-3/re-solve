@@ -11,8 +11,10 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.problem.problem.domain.ProblemBodyAsset;
+import com.backtoback.problem.problem.domain.ProblemCodeAsset;
 import com.backtoback.problem.problem.domain.ProblemTestAsset;
 import com.backtoback.problem.problem.repository.ProblemBodyAssetRepository;
+import com.backtoback.problem.problem.repository.ProblemCodeAssetRepository;
 import com.backtoback.problem.problem.repository.ProblemTestAssetRepository;
 
 import jakarta.persistence.EntityManager;
@@ -27,6 +29,7 @@ import lombok.RequiredArgsConstructor;
 public class ProblemAssetUploadTracking {
     private final ProblemBodyAssetRepository bodies;
     private final ProblemTestAssetRepository tests;
+    private final ProblemCodeAssetRepository codes;
     private final Clock clock;
     private final EntityManager entityManager;
 
@@ -64,6 +67,27 @@ public class ProblemAssetUploadTracking {
     }
 
     /**
+     * 소속 문제를 고정한 코드 업로드 추적 행을 먼저 커밋한다.
+     *
+     * @param problemId 소속 문제 ID
+     * @param ownerId 작성 관리자
+     * @param content 원문 메타 정보
+     * @return 코드 파일 업로드 추적 정보
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public UploadTicket startCode(Long problemId, Long ownerId, ProblemAssetContent content) {
+        String key = "problem-code/" + UUID.randomUUID() + ".txt";
+        LocalDateTime expiry = now().plusHours(24);
+        var asset
+            = codes
+                .saveAndFlush(
+                    ProblemCodeAsset
+                        .create(problemId, ownerId, key, null, content.sha256(), content.sizeBytes(), expiry)
+                );
+        return new UploadTicket(asset.getId(), key, expiry, false, true);
+    }
+
+    /**
      * 진행 중인 같은 업로드의 보호 기간을 파일 잠금 아래 갱신한다.
      *
      * @param ticket 갱신 전 파일과 만료 시각
@@ -73,7 +97,11 @@ public class ProblemAssetUploadTracking {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public UploadTicket renew(UploadTicket ticket) {
         LocalDateTime expiry;
-        if (ticket.body()) {
+        if (ticket.code()) {
+            var asset = codes.findByIdForUpdate(ticket.id()).orElseThrow();
+            asset.renewUpload(ticket.expiry(), now());
+            expiry = asset.getUploadExpiresAt();
+        } else if (ticket.body()) {
             var asset = bodies.findByIdForUpdate(ticket.id()).orElseThrow();
             asset.renewUpload(ticket.expiry(), now());
             expiry = asset.getUploadExpiresAt();
@@ -82,7 +110,7 @@ public class ProblemAssetUploadTracking {
             asset.renewUpload(ticket.expiry(), now());
             expiry = asset.getUploadExpiresAt();
         }
-        return new UploadTicket(ticket.id(), ticket.key(), expiry, ticket.body());
+        return new UploadTicket(ticket.id(), ticket.key(), expiry, ticket.body(), ticket.code());
     }
 
     /**
@@ -92,7 +120,12 @@ public class ProblemAssetUploadTracking {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordUnknown(UploadTicket ticket) {
-        if (ticket.body()) {
+        if (ticket.code()) {
+            codes
+                .findByIdForUpdate(ticket.id())
+                .orElseThrow()
+                .recordUnknownUpload(ticket.expiry(), "UPLOAD_UNCONFIRMED");
+        } else if (ticket.body()) {
             bodies
                 .findByIdForUpdate(ticket.id())
                 .orElseThrow()
@@ -112,7 +145,15 @@ public class ProblemAssetUploadTracking {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void discardBeforeWrite(UploadTicket ticket) {
-        if (ticket.body()) {
+        if (ticket.code()) {
+            var asset = codes.findByIdForUpdate(ticket.id()).orElseThrow();
+            LocalDateTime finished = now();
+            if (finished.isBefore(ticket.expiry())) {
+                throw new IllegalStateException("업로드 보호 기간이 아직 유효합니다.");
+            }
+            requireUnreferenced(ticket);
+            asset.discardFinishedUpload(ticket.expiry(), finished, "UPLOAD_EXPIRED");
+        } else if (ticket.body()) {
             var asset = bodies.findByIdForUpdate(ticket.id()).orElseThrow();
             LocalDateTime finished = now();
             if (finished.isBefore(ticket.expiry())) {
@@ -140,7 +181,16 @@ public class ProblemAssetUploadTracking {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean complete(UploadTicket ticket, String version) {
-        if (ticket.body()) {
+        if (ticket.code()) {
+            var asset = codes.findByIdForUpdate(ticket.id()).orElseThrow();
+            LocalDateTime finished = now();
+            if (!finished.isBefore(ticket.expiry())) {
+                requireUnreferenced(ticket);
+                asset.discardFinishedUpload(ticket.expiry(), finished, "UPLOAD_EXPIRED");
+                return false;
+            }
+            asset.completeUpload(ticket.expiry(), finished, version);
+        } else if (ticket.body()) {
             var asset = bodies.findByIdForUpdate(ticket.id()).orElseThrow();
             LocalDateTime finished = now();
             if (!finished.isBefore(ticket.expiry())) {
@@ -162,13 +212,19 @@ public class ProblemAssetUploadTracking {
         return true;
     }
 
-    /** 파일 종류에 해당하는 회차와 본문 이미지 참조를 잠긴 행 아래 확인한다(ERD 4.2.3). */
+    /**
+     * 파일 종류에 해당하는 실제 참조를 잠긴 행 아래 확인한다(ERD 4.2.3).
+     *
+     * @param ticket 확인할 파일의 추적 정보
+     * @throws IllegalStateException 파일을 참조하는 행이 남아 있는 경우
+     */
     private void requireUnreferenced(UploadTicket ticket) {
         String query
-            = ticket.body()
-                ? "select (select count(*) from problem_revisions where body_asset_id = :id) + "
-                    + "(select count(*) from problem_body_images where body_asset_id = :id)"
-                : "select count(*) from problem_revision_tests where test_asset_id = :id";
+            = ticket.code() ? "select count(*) from problem_validations where code_asset_id = :id"
+                : ticket.body()
+                    ? "select (select count(*) from problem_revisions where body_asset_id = :id) + "
+                        + "(select count(*) from problem_body_images where body_asset_id = :id)"
+                    : "select count(*) from problem_revision_tests where test_asset_id = :id";
         Number count = (Number)entityManager.createNativeQuery(query).setParameter("id", ticket.id()).getSingleResult();
         if (count.longValue() != 0) {
             throw new IllegalStateException("참조 중인 파일은 폐기할 수 없습니다.");
@@ -181,6 +237,17 @@ public class ProblemAssetUploadTracking {
     }
 
     /** 업로드 추적 행과 기존 보호 만료 시각. */
-    public record UploadTicket(Long id, String key, LocalDateTime expiry, boolean body) {
+    public record UploadTicket(Long id, String key, LocalDateTime expiry, boolean body, boolean code) {
+        /**
+         * 기존 본문·테스트 파일의 업로드 추적 정보를 생성한다.
+         *
+         * @param id 파일 ID
+         * @param key 객체 키
+         * @param expiry 만료 시각
+         * @param body 본문 파일 여부
+         */
+        public UploadTicket(Long id, String key, LocalDateTime expiry, boolean body) {
+            this(id, key, expiry, body, false);
+        }
     }
 }

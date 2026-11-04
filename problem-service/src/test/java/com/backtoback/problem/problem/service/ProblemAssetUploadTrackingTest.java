@@ -22,8 +22,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.problem.problem.domain.ProblemAssetStatus;
 import com.backtoback.problem.problem.domain.ProblemBodyAsset;
+import com.backtoback.problem.problem.domain.ProblemCodeAsset;
 import com.backtoback.problem.problem.domain.ProblemTestAsset;
 import com.backtoback.problem.problem.repository.ProblemBodyAssetRepository;
+import com.backtoback.problem.problem.repository.ProblemCodeAssetRepository;
 import com.backtoback.problem.problem.repository.ProblemTestAssetRepository;
 
 import jakarta.persistence.EntityManager;
@@ -37,6 +39,9 @@ class ProblemAssetUploadTrackingTest {
     @Mock
     private ProblemTestAssetRepository tests;
 
+    @Mock
+    private ProblemCodeAssetRepository codes;
+
     /** 추적 파일의 키와 종료 미확인 상태가 유지되는지 확인한다. */
     @Test
     @DisplayName("본문 추적 시작 후 결과가 불명확하면 종료 시각을 기록하지 않는다")
@@ -48,7 +53,7 @@ class ProblemAssetUploadTrackingTest {
             ReflectionTestUtils.setField(asset, "id", 1L);
             return asset;
         });
-        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, null);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, null);
         var content
             = ProblemAssetContent
                 .fromBytes(
@@ -84,7 +89,7 @@ class ProblemAssetUploadTrackingTest {
         var test = ProblemTestAsset.create(1L, "test", null, "a".repeat(64), 1L, expiry);
         given(bodies.findByIdForUpdate(1L)).willReturn(Optional.of(body));
         given(tests.findByIdForUpdate(2L)).willReturn(Optional.of(test));
-        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, null);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, null);
 
         // when
         var bodyTicket = tracking.renew(new ProblemAssetUploadTracking.UploadTicket(1L, "body", expiry, true));
@@ -106,7 +111,7 @@ class ProblemAssetUploadTrackingTest {
         LocalDateTime expiry = LocalDateTime.of(2026, 11, 2, 0, 0);
         var body = ProblemBodyAsset.create(1L, "body", null, "a".repeat(64), 1L, expiry);
         given(bodies.findByIdForUpdate(1L)).willReturn(Optional.of(body));
-        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, null);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, null);
         var ticket = new ProblemAssetUploadTracking.UploadTicket(1L, "body", expiry, true);
 
         // when & then
@@ -143,7 +148,7 @@ class ProblemAssetUploadTrackingTest {
         given(entityManager.createNativeQuery(any(String.class))).willReturn(query);
         given(query.setParameter("id", 1L)).willReturn(query);
         given(query.getSingleResult()).willReturn(0L);
-        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, entityManager);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, entityManager);
         var ticket = new ProblemAssetUploadTracking.UploadTicket(1L, "key", expiry, body);
         var bodyAsset = ProblemBodyAsset.create(1L, "key", null, "a".repeat(64), 1L, expiry);
         var testAsset = ProblemTestAsset.create(1L, "key", null, "a".repeat(64), 1L, expiry);
@@ -188,7 +193,7 @@ class ProblemAssetUploadTrackingTest {
         given(entityManager.createNativeQuery(any(String.class))).willReturn(query);
         given(query.setParameter("id", 1L)).willReturn(query);
         given(query.getSingleResult()).willReturn(0L);
-        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, entityManager);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, entityManager);
 
         // when
         tracking.discardBeforeWrite(ticket);
@@ -215,7 +220,7 @@ class ProblemAssetUploadTrackingTest {
         given(entityManager.createNativeQuery(any(String.class))).willReturn(query);
         given(query.setParameter("id", 1L)).willReturn(query);
         given(query.getSingleResult()).willReturn(0L);
-        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, entityManager);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, entityManager);
 
         // when
         tracking.discardBeforeWrite(ticket);
@@ -241,7 +246,7 @@ class ProblemAssetUploadTrackingTest {
         given(entityManager.createNativeQuery(any(String.class))).willReturn(query);
         given(query.setParameter("id", 1L)).willReturn(query);
         given(query.getSingleResult()).willReturn(1L);
-        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, entityManager);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, entityManager);
 
         // when & then
         assertThatThrownBy(() -> tracking.discardBeforeWrite(ticket)).isInstanceOf(IllegalStateException.class);
@@ -264,9 +269,66 @@ class ProblemAssetUploadTrackingTest {
         given(entityManager.createNativeQuery(any(String.class))).willReturn(query);
         given(query.setParameter("id", 1L)).willReturn(query);
         given(query.getSingleResult()).willReturn(1L);
-        var tracking = new ProblemAssetUploadTracking(bodies, tests, clock, entityManager);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, entityManager);
 
         // when & then
+        assertThatThrownBy(() -> tracking.discardBeforeWrite(ticket)).isInstanceOf(IllegalStateException.class);
+        assertThat(asset.getStatus()).isEqualTo(ProblemAssetStatus.PENDING);
+        assertThat(asset.getUploadFinishedAt()).isNull();
+    }
+
+    /** 코드 파일은 문제 소속을 유지한 채 갱신·완료 후에만 연결한다. */
+    @Test
+    @DisplayName("코드 업로드는 같은 문제 소속을 유지하고 완료 후 연결한다")
+    void codeLifecycle() {
+        Clock clock = Clock.fixed(Instant.parse("2026-11-01T00:00:00Z"), ZoneOffset.UTC);
+        var saved = new AtomicReference<ProblemCodeAsset>();
+        given(codes.saveAndFlush(any(ProblemCodeAsset.class))).willAnswer(call -> {
+            ProblemCodeAsset asset = call.getArgument(0);
+            ReflectionTestUtils.setField(asset, "id", 3L);
+            saved.set(asset);
+            return asset;
+        });
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, null);
+        var ticket
+            = tracking
+                .startCode(
+                    2L,
+                    1L,
+                    ProblemAssetContent
+                        .fromBytes(
+                            new byte[] {
+                                1
+                            }
+                        )
+                );
+        given(codes.findByIdForUpdate(3L)).willAnswer(call -> Optional.of(saved.get()));
+        var renewed = tracking.renew(ticket);
+        assertThat(renewed.code()).isTrue();
+        assertThat(renewed.key()).startsWith("problem-code/");
+        assertThatThrownBy(() -> saved.get().linkToProblem(2L, 1L)).isInstanceOf(IllegalStateException.class);
+        assertThat(tracking.complete(renewed, "version")).isTrue();
+        assertThatThrownBy(() -> saved.get().linkToProblem(4L, 1L)).isInstanceOf(IllegalStateException.class);
+        saved.get().linkToProblem(2L, 1L);
+        assertThat(saved.get().getStatus()).isEqualTo(ProblemAssetStatus.LINKED);
+    }
+
+    /** 검증 결과와 무관하게 실제 참조가 남은 코드는 폐기하지 않는다. */
+    @Test
+    @DisplayName("검증 요청이 참조하는 코드 파일은 만료되어도 폐기하지 않는다")
+    void referencedCode() {
+        Clock clock = Clock.fixed(Instant.parse("2026-11-02T00:00:00Z"), ZoneOffset.UTC);
+        LocalDateTime expiry = LocalDateTime.of(2026, 11, 2, 0, 0);
+        var asset = ProblemCodeAsset.create(2L, 1L, "key", null, "a".repeat(64), 1L, expiry);
+        var ticket = new ProblemAssetUploadTracking.UploadTicket(3L, "key", expiry, false, true);
+        EntityManager entityManager = mock(EntityManager.class);
+        Query query = mock(Query.class);
+        given(codes.findByIdForUpdate(3L)).willReturn(Optional.of(asset));
+        given(entityManager.createNativeQuery("select count(*) from problem_validations where code_asset_id = :id"))
+            .willReturn(query);
+        given(query.setParameter("id", 3L)).willReturn(query);
+        given(query.getSingleResult()).willReturn(1L);
+        var tracking = new ProblemAssetUploadTracking(bodies, tests, codes, clock, entityManager);
         assertThatThrownBy(() -> tracking.discardBeforeWrite(ticket)).isInstanceOf(IllegalStateException.class);
         assertThat(asset.getStatus()).isEqualTo(ProblemAssetStatus.PENDING);
         assertThat(asset.getUploadFinishedAt()).isNull();
