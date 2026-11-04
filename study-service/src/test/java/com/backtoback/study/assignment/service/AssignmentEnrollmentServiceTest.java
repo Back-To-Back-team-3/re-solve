@@ -83,7 +83,7 @@ class AssignmentEnrollmentServiceTest {
         ReflectionTestUtils.setField(openAssignment, "id", ASSIGNMENT_ID);
         ReflectionTestUtils.setField(openAssignment, "status", AssignmentStatus.OPEN);
 
-        activeProblem = AssignmentProblem.assign(ASSIGNMENT_ID, PROBLEM_ID, 1L, "문제 1", 3, "[]", 1);
+        activeProblem = AssignmentProblem.assign(ASSIGNMENT_ID, PROBLEM_ID, 1L, 1, "문제 1", 3, "[]", 1);
     }
 
     @Test

@@ -6,8 +6,7 @@ import com.backtoback.study.assignment.domain.CompletionType;
 import com.fasterxml.jackson.annotation.JsonRawValue;
 
 /**
- * 문제집 배정 문제 스냅샷 (API 명세서 §5.4.3 problems[]).
- * revisionNumber는 ERD §4.5.6에 저장되지 않으므로 null을 반환한다.
+ * 문제집 배정 문제 스냅샷 (API 명세서 §5.4.3 problems[]). revisionNumber는 컬럼 추가 이전 행이면 null이다.
  */
 public record ProblemSnapshotResponse(
     String problemId,
@@ -24,7 +23,7 @@ public record ProblemSnapshotResponse(
         return new ProblemSnapshotResponse(
             String.valueOf(problem.getProblemId()),
             String.valueOf(problem.getAssignedRevisionId()),
-            null,
+            problem.getRevisionNumber(),
             problem.getProblemTitle(),
             problem.getProblemDifficulty(),
             problem.getProblemTagsJson(),

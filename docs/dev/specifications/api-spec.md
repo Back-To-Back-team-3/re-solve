@@ -8188,6 +8188,7 @@
       }
     ```
     
+    - `problems[].revisionNumber`: `integer` 또는 `null`. 이 기능 이전에 생성된 문제집은 `null`
     - 진행률 = 인정 문제 수 / `ACTIVE` 문제 수, 기한 내 완료율 = (`PRE_SOLVED` + `ON_TIME`) / `ACTIVE` 문제 수
 - **에러:**
     - `AUTH_ACCESS_DENIED`(403), `STUDY_ASSIGNMENT_NOT_FOUND`(404)

@@ -65,6 +65,9 @@ public class AssignmentProblem extends BaseTimeEntity {
     )
     private Long assignedRevisionId;
 
+    @Column(name = "revision_number")
+    private Integer revisionNumber;
+
     @Column(
         name = "problem_title",
         nullable = false,
@@ -102,6 +105,7 @@ public class AssignmentProblem extends BaseTimeEntity {
         Long assignmentId,
         Long problemId,
         Long assignedRevisionId,
+        Integer revisionNumber,
         String problemTitle,
         int problemDifficulty,
         String problemTagsJson,
@@ -110,6 +114,7 @@ public class AssignmentProblem extends BaseTimeEntity {
         this.assignmentId = assignmentId;
         this.problemId = problemId;
         this.assignedRevisionId = assignedRevisionId;
+        this.revisionNumber = revisionNumber;
         this.problemTitle = problemTitle;
         this.problemDifficulty = problemDifficulty;
         this.problemTagsJson = problemTagsJson;
@@ -118,12 +123,13 @@ public class AssignmentProblem extends BaseTimeEntity {
     }
 
     /**
-     * 문제집에 문제 1개를 배정한다. 문제 제목·난이도·태그는 배정 시점 스냅샷으로 고정한다(ERD 4.5.6).
+     * 문제집에 문제 1개를 배정한다. 제목·난이도·태그·회차 번호는 배정 시점 스냅샷으로 고정한다(ERD 4.5.6).
      */
     public static AssignmentProblem assign(
         Long assignmentId,
         Long problemId,
         Long assignedRevisionId,
+        Integer revisionNumber,
         String problemTitle,
         int problemDifficulty,
         String problemTagsJson,
@@ -133,6 +139,7 @@ public class AssignmentProblem extends BaseTimeEntity {
             assignmentId,
             problemId,
             assignedRevisionId,
+            revisionNumber,
             problemTitle,
             problemDifficulty,
             problemTagsJson,
