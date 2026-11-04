@@ -44,6 +44,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'io.github.resilience4j:resilience4j-circuitbreaker:2.3.0'
     implementation 'org.commonmark:commonmark:0.30.0'
     implementation 'org.glavo:webp:0.2.0'
 
