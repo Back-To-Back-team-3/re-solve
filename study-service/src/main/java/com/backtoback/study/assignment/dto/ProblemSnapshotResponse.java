@@ -1,5 +1,6 @@
 package com.backtoback.study.assignment.dto;
 
+import com.backtoback.study.assignment.domain.AssignmentProblem;
 import com.backtoback.study.assignment.domain.AssignmentProblemStatus;
 import com.backtoback.study.assignment.domain.CompletionType;
 import com.fasterxml.jackson.annotation.JsonRawValue;
@@ -19,4 +20,16 @@ public record ProblemSnapshotResponse(
     CompletionType myCompletionType
 ) {
 
+    public static ProblemSnapshotResponse from(AssignmentProblem p, CompletionType myCompletionType) {
+        return new ProblemSnapshotResponse(
+            String.valueOf(p.getProblemId()),
+            String.valueOf(p.getAssignedRevisionId()),
+            null,
+            p.getProblemTitle(),
+            p.getProblemDifficulty(),
+            p.getProblemTagsJson(),
+            p.getStatus(),
+            myCompletionType
+        );
+    }
 }

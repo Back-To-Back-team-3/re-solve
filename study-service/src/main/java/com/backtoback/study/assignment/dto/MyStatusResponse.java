@@ -1,5 +1,6 @@
 package com.backtoback.study.assignment.dto;
 
+import com.backtoback.study.assignment.domain.AssignmentMemberStatus;
 import com.backtoback.study.assignment.domain.MemberProgressStatus;
 
 /**
@@ -7,4 +8,7 @@ import com.backtoback.study.assignment.domain.MemberProgressStatus;
  */
 public record MyStatusResponse(MemberProgressStatus status, int completedCount, int onTimeCount) {
 
+    public static MyStatusResponse from(AssignmentMemberStatus ams) {
+        return new MyStatusResponse(ams.getStatus(), ams.getCompletedCount(), ams.getOnTimeCount());
+    }
 }

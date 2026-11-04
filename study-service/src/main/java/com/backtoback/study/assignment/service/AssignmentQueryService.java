@@ -1,8 +1,5 @@
 package com.backtoback.study.assignment.service;
 
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -25,7 +22,6 @@ import com.backtoback.study.assignment.domain.CompletionType;
 import com.backtoback.study.assignment.dto.AssignmentDetailResponse;
 import com.backtoback.study.assignment.dto.AssignmentSummaryResponse;
 import com.backtoback.study.assignment.dto.MemberProgressResponse;
-import com.backtoback.study.assignment.dto.MyStatusResponse;
 import com.backtoback.study.assignment.dto.ProblemSnapshotResponse;
 import com.backtoback.study.assignment.dto.StudyStatsResponse;
 import com.backtoback.study.assignment.repository.AssignmentCompletionRepository;
@@ -48,8 +44,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class AssignmentQueryService {
-
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ssxxx");
 
     private final StudyMembershipRepository membershipRepository;
     private final AssignmentRepository assignmentRepository;
@@ -132,50 +126,16 @@ public class AssignmentQueryService {
                 .collect(Collectors.toMap(r -> r.getMemberId(), r -> r.getNickname()));
 
         List<ProblemSnapshotResponse> problemSnapshots
-            = problems
-                .stream()
-                .map(
-                    p -> new ProblemSnapshotResponse(
-                        String.valueOf(p.getProblemId()),
-                        String.valueOf(p.getAssignedRevisionId()),
-                        null,
-                        p.getProblemTitle(),
-                        p.getProblemDifficulty(),
-                        p.getProblemTagsJson(),
-                        p.getStatus(),
-                        myCompletions.get(p.getProblemId())
-                    )
-                )
-                .toList();
+            = problems.stream().map(p -> ProblemSnapshotResponse.from(p, myCompletions.get(p.getProblemId()))).toList();
 
-        List<MemberProgressResponse> memberProgress
+        List<MemberProgressResponse> memberProgressList
             = memberStatuses
                 .stream()
-                .map(
-                    m -> new MemberProgressResponse(
-                        String.valueOf(m.getMemberId()),
-                        nicknameMap.get(m.getMemberId()),
-                        m.getStatus(),
-                        m.getCompletedCount(),
-                        m.getOnTimeCount(),
-                        activeCount
-                    )
-                )
+                .map(m -> MemberProgressResponse.from(m, nicknameMap.get(m.getMemberId()), activeCount))
                 .toList();
 
-        return new AssignmentDetailResponse(
-            String.valueOf(assignment.getId()),
-            assignment.getTitle(),
-            assignment.getGoal(),
-            assignment.getTagId() != null ? String.valueOf(assignment.getTagId()) : null,
-            assignment.getStatus(),
-            assignment.isPreSolvedAllowed(),
-            toOffsetString(assignment.getStartsAt()),
-            toOffsetString(assignment.getDeadlineAt()),
-            problemSnapshots,
-            memberProgress,
-            computeStats(memberStatuses, activeCount)
-        );
+        return AssignmentDetailResponse
+            .from(assignment, problemSnapshots, memberProgressList, computeStats(memberStatuses, activeCount));
     }
 
     private StudyStatsResponse computeStats(List<AssignmentMemberStatus> memberStatuses, int activeCount) {
@@ -194,20 +154,6 @@ public class AssignmentQueryService {
     }
 
     private AssignmentSummaryResponse toSummary(Assignment a, int activeCount, AssignmentMemberStatus ams) {
-        MyStatusResponse myStatus
-            = ams == null ? null : new MyStatusResponse(ams.getStatus(), ams.getCompletedCount(), ams.getOnTimeCount());
-        return new AssignmentSummaryResponse(
-            String.valueOf(a.getId()),
-            a.getTitle(),
-            a.getStatus(),
-            toOffsetString(a.getStartsAt()),
-            toOffsetString(a.getDeadlineAt()),
-            activeCount,
-            myStatus
-        );
-    }
-
-    private static String toOffsetString(LocalDateTime ldt) {
-        return ldt == null ? null : ldt.atOffset(ZoneOffset.of("+09:00")).format(FORMATTER);
+        return AssignmentSummaryResponse.from(a, activeCount, ams);
     }
 }
