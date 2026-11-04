@@ -70,6 +70,7 @@ class AssignmentPersistService {
                             assignment.getId(),
                             problemId,
                             item.problemRevisionId(),
+                            item.revisionNumber(),
                             item.title(),
                             item.difficulty(),
                             serializeTags(item.tags()),

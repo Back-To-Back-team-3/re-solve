@@ -2392,6 +2392,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `assignment_id` | BIGINT | Y | FK → `assignments.id` |
 | `problem_id` | BIGINT | Y | 문제 ID (외부 참조). **진행 인정 기준** |
 | `assigned_revision_id` | BIGINT | Y | 배정 당시 공개 회차 (COMMENT: `problem.problem_revisions.id`, 표시용 기록) |
+| `revision_number` | INT | N | 배정 회차 번호 스냅샷. NULL: 이 컬럼 추가 이전에 생성된 문제집 |
 | `problem_title` | VARCHAR(200) | Y | 배정 스냅샷 |
 | `problem_difficulty` | INT | Y | 배정 스냅샷 (1~3) |
 | `problem_tags_json` | JSON | Y | 배정 스냅샷. 검색·정렬 미사용 |
@@ -3183,12 +3184,13 @@ study-service/src/main/resources/db/migration/
   V13__assignment_create_assignment_completions.sql
   V14__replica_create_member_ac_replicas.sql
   V15__replica_create_member_learning_profile_replicas.sql
-  V16__recommendation_create_study_recommendations.sql
-  V17__ai_create_hint_requests.sql
-  V18__ai_create_hint_daily_usages.sql
-  V19__ai_create_hint_block_replicas.sql
-  V20__community_create_posts.sql        (P2 착수 시)
-  V21__community_create_comments.sql     (P2 착수 시)
+  V16__assignment_alter_assignment_problems.sql
+  V17__recommendation_create_study_recommendations.sql
+  V18__ai_create_hint_requests.sql
+  V19__ai_create_hint_daily_usages.sql
+  V20__ai_create_hint_block_replicas.sql
+  V21__community_create_posts.sql        (P2 착수 시)
+  V22__community_create_comments.sql     (P2 착수 시)
 ```
 
 ### 7.6 Notification (`notification-service`)
