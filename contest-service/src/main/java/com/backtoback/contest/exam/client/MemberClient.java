@@ -58,7 +58,7 @@ public class MemberClient {
                 return response;
             });
         } catch (RuntimeException failure) {
-            throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
         }
     }
 }

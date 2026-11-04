@@ -3,6 +3,7 @@ package com.backtoback.contest.exam.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import org.junit.jupiter.api.DisplayName;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.contest.global.error.ContestException;
@@ -48,6 +50,29 @@ class MemberClientTest {
             .isInstanceOf(ContestException.class)
             .extracting("errorCode")
             .isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+        server.verify();
+    }
+
+    /**
+     * 회원 API의 HTTP 오류가 의존 서비스 오류로 변환될 때 원인을 보존하는지 확인한다.
+     */
+    @Test
+    @DisplayName("회원 API가 서버 오류를 반환하면 오류 코드와 원인 예외를 보존한다")
+    void preservesCauseWhenMemberApiFails() {
+        // given
+        var builder = RestClient.builder().baseUrl("http://member-test");
+        var server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("http://member-test/internal/v1/members/7/status")).andRespond(withServerError());
+        var client = new MemberClient(builder.build());
+
+        // when & then
+        assertThatThrownBy(() -> client.fetch(7L))
+            .isInstanceOf(ContestException.class)
+            .hasCauseInstanceOf(RestClientResponseException.class)
+            .satisfies(
+                exception -> assertThat(((ContestException)exception).getErrorCode())
+                    .isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+            );
         server.verify();
     }
 }
