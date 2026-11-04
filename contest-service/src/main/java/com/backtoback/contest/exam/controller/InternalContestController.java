@@ -1,5 +1,6 @@
 package com.backtoback.contest.exam.controller;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +42,10 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequiredArgsConstructor
 @Conditional(InternalContestHttpCondition.class)
+@ConditionalOnProperty(
+    name = "contest.internal-http.mode",
+    havingValue = "stub"
+)
 public class InternalContestController {
     private final InternalContestService internalContestService;
 
