@@ -1,6 +1,9 @@
 package com.backtoback.member.member.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 
 import java.util.List;
 import java.util.Map;
@@ -12,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -44,6 +48,9 @@ class MemberEventOutboxTest {
 
     @Autowired
     private MemberService memberService;
+
+    @MockitoSpyBean
+    private MemberEventPublisher memberEventPublisher;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -89,5 +96,20 @@ class MemberEventOutboxTest {
         JsonNode rename = objectMapper.readTree(rows.get(1).get("payload").toString());
         assertThat(rename.get("sourceVersion").asLong()).isEqualTo(2L);
         assertThat(rename.get("nickname").asString()).isEqualTo("seo-algo");
+    }
+
+    @Test
+    @DisplayName("가입 중 MemberUpdated 기록이 실패하면 회원과 Outbox 행이 모두 남지 않는다")
+    void signupRollsBackWhenOutboxFails() {
+        doThrow(new IllegalStateException("outbox unavailable")).when(memberEventPublisher).memberUpdated(any());
+        Long outboxBefore = jdbcTemplate.queryForObject("select count(*) from outbox_events", Long.class);
+
+        assertThatThrownBy(() -> memberService.findOrRegister(new GitHubUser(5002L, "ryu-dev", null, null)))
+            .isInstanceOf(IllegalStateException.class);
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from members where github_id = 5002", Long.class))
+            .isZero();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from outbox_events", Long.class))
+            .isEqualTo(outboxBefore);
     }
 }

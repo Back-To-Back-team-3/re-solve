@@ -135,6 +135,7 @@ services:
       PROBLEM_SERVICE_URL: ${PROBLEM_SERVICE_URL:-http://problem-service:8080}
       MEMBER_MESSAGING_ENABLED: ${MEMBER_MESSAGING_ENABLED:-false}
       MEMBER_EVENTS_TOPIC_ARN: ${MEMBER_EVENTS_TOPIC_ARN:-}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
       mysql:
         condition: service_healthy
