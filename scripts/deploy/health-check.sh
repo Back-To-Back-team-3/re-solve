@@ -35,7 +35,7 @@ while [ $COUNT -lt "$MAX_RETRIES" ]; do
         # Actuator Health 엔드포인트 응답 검사 시도
         HEALTH_STATUS=$(docker exec "$CONTAINER_ID" sh -c "curl -s -f http://127.0.0.1:8080/actuator/health 2>/dev/null || wget -q -O - http://127.0.0.1:8080/actuator/health 2>/dev/null" || true)
         
-        if echo "$HEALTH_STATUS" | grep -q '"status":"UP"'; then
+        if echo "$HEALTH_STATUS" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"UP"'; then
             echo "✅ [Health Check] '${SERVICE_NAME}' 상태: UP (시도 ${COUNT}회차 성공)"
             exit 0
         fi

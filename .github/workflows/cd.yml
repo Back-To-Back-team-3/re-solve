@@ -29,13 +29,16 @@ jobs:
   deploy:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-24.04
+    concurrency:
+      group: cd-${{ github.event.inputs.environment || (github.event.workflow_run.head_branch == 'main' && 'production' || 'staging') }}
+      cancel-in-progress: false
     steps:
       - name: 배포 환경 및 대상 서비스 결정
         id: env
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TARGET_ENV="${{ github.event.inputs.environment }}"
-            TARGET_SERVICES="${{ github.event.inputs.services }}"
+            TARGET_SERVICES="${{ github.event.inputs.services || 'all' }}"
           else
             if [ "${{ github.event.workflow_run.head_branch }}" = "main" ]; then
               TARGET_ENV="production"
@@ -58,7 +61,7 @@ jobs:
           port: 22
           script: |
             set -eo pipefail
-            APP_DIR="${{ steps.env.outputs.target_env == 'production' && secrets.PROD_APP_DIR || secrets.STAGING_APP_DIR || '/home/ubuntu/re-solve' }}"
+            APP_DIR="${{ steps.env.outputs.target_env == 'production' && (secrets.PROD_APP_DIR || '/home/ubuntu/re-solve') || (secrets.STAGING_APP_DIR || '/home/ubuntu/re-solve') }}"
             cd "$APP_DIR"
             
             echo "📥 저장소 코드 갱신 중..."
