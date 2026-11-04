@@ -2124,6 +2124,9 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `source_status` | VARCHAR(30) | N | PROBLEM의 최신 원천 visibility. 상태 스냅샷 수신 전 또는 다른 자원은 NULL |
 | `source_scope` | VARCHAR(30) | N | 같은 원천 버전의 PROBLEM scope. 다른 자원은 NULL |
 | `source_version` | BIGINT | Y | 기본 0. 소유 서비스 상태 이벤트의 순서 값 |
+| `source_revision_id` | BIGINT | N | 최신 PROBLEM 사용 회차 ID. 수신 전 또는 사용 회차가 없으면 NULL |
+| `source_revision_number` | INT | N | 최신 사용 회차 번호. 사용 회차 ID가 NULL이면 NULL |
+| `source_supported_languages` | JSON | N | 최신 사용 회차의 통과 언어 배열. 미수신·다른 자원은 NULL, 사용 회차가 없으면 빈 배열 |
 | `prepared_at` | DATETIME(6) | N | 준비 시각. 준비 전 NULL |
 | `version` | BIGINT | Y | 기본 0. 낙관적 락 |
 | `created_at` | DATETIME(6) | Y | 생성 시간 |
@@ -3152,6 +3155,7 @@ contest-service/src/main/resources/db/migration/
   V14__result_create_result_snapshots.sql
   V15__guard_create_contest_resource_guards.sql
   V16__operation_create_contest_admin_operations.sql
+  V16_1__guard_add_problem_snapshot.sql
   V17__contest_create_contests.sql                (P2 착수 시)
   V18__contest_create_contest_problems.sql        (P2 착수 시)
   V19__contest_create_contest_participants.sql    (P2 착수 시)
