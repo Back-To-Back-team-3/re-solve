@@ -66,12 +66,30 @@ public class AssignmentEnrollmentService {
         }
     }
 
+    /**
+     * 스케줄러 OPEN 전이에서 멤버 1명을 편입한다(스케줄러 §5.2 동작 2·3·4단계).
+     * AC 복제본을 잠금 읽기로 조회해 REPEATABLE READ 스냅샷 경합을 방지한다.
+     */
+    public void enrollOpenForScheduler(Assignment assignment, Long memberId, Long membershipId, LocalDateTime now) {
+        enrollOpenInternal(assignment, memberId, membershipId, now, true);
+    }
+
     private void enrollScheduled(Long assignmentId, Long memberId, Long membershipId) {
         memberStatusRepository
             .insertIgnore(assignmentId, memberId, membershipId, MemberProgressStatus.NOT_STARTED.name(), 0, 0, null);
     }
 
     private void enrollOpen(Assignment assignment, Long memberId, Long membershipId, LocalDateTime now) {
+        enrollOpenInternal(assignment, memberId, membershipId, now, false);
+    }
+
+    private void enrollOpenInternal(
+        Assignment assignment,
+        Long memberId,
+        Long membershipId,
+        LocalDateTime now,
+        boolean withLock
+    ) {
         List<AssignmentProblem> activeProblems
             = assignmentProblemRepository
                 .findByAssignmentIdAndStatus(assignment.getId(), AssignmentProblemStatus.ACTIVE);
@@ -93,7 +111,8 @@ public class AssignmentEnrollmentService {
         List<Long> activeProblemIds = activeProblems.stream().map(AssignmentProblem::getProblemId).toList();
 
         List<MemberAcReplica> acReplicas
-            = acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(memberId, activeProblemIds);
+            = withLock ? acReplicaRepository.findAllAcceptedByMemberIdAndProblemIdsWithLock(memberId, activeProblemIds)
+                : acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(memberId, activeProblemIds);
 
         // preSolvedAllowed=false 시 starts_at 이전 제출은 근거에서 제외한다(ERD §4.5.7 completed_at 불변식)
         // JPQL 쿼리가 (problemId, submittedAt) ASC로 정렬하므로 필터 후 문제별 첫 번째가 earliest valid AC
@@ -125,8 +144,16 @@ public class AssignmentEnrollmentService {
                 );
 
         if (affected == 0) {
-            // 이미 편입된 멤버 — 완료 기록 중복 삽입 생략
-            return;
+            // SCHEDULED 편입 후 OPEN 전이 시 기존 행 갱신(스케줄러 §5.2 OPEN upsert)
+            memberStatusRepository
+                .updateStatusAndCounts(
+                    assignment.getId(),
+                    memberId,
+                    progressStatus.name(),
+                    completedCount,
+                    onTimeCount,
+                    completedAt
+                );
         }
 
         for (AssignmentCompletion completion : completions) {
