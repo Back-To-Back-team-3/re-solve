@@ -1,6 +1,7 @@
 package com.backtoback.study.assignment.repository;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -10,6 +11,11 @@ import org.springframework.data.repository.query.Param;
 import com.backtoback.study.assignment.domain.AssignmentCompletion;
 
 public interface AssignmentCompletionRepository extends JpaRepository<AssignmentCompletion, Long> {
+
+    /**
+     * 한 멤버의 문제집 내 완료 기록 전체를 반환한다 (API 명세서 §5.4.3 myCompletionType).
+     */
+    List<AssignmentCompletion> findByAssignmentIdAndMemberId(Long assignmentId, Long memberId);
 
     /**
      * 이미 있으면 무시한다. status는 항상 COMPLETED로 고정된다(ERD §6.5 uk_assignment_completions_assignment_member_problem).

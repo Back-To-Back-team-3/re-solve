@@ -12,17 +12,29 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.study.assignment.domain.Assignment;
+import com.backtoback.study.assignment.domain.AssignmentCompletion;
 import com.backtoback.study.assignment.domain.AssignmentMemberStatus;
+import com.backtoback.study.assignment.domain.AssignmentProblem;
 import com.backtoback.study.assignment.domain.AssignmentProblemStatus;
 import com.backtoback.study.assignment.domain.AssignmentStatus;
+import com.backtoback.study.assignment.domain.CompletionStatus;
+import com.backtoback.study.assignment.domain.CompletionType;
+import com.backtoback.study.assignment.dto.AssignmentDetailResponse;
 import com.backtoback.study.assignment.dto.AssignmentSummaryResponse;
+import com.backtoback.study.assignment.dto.MemberProgressResponse;
 import com.backtoback.study.assignment.dto.MyStatusResponse;
+import com.backtoback.study.assignment.dto.ProblemSnapshotResponse;
+import com.backtoback.study.assignment.dto.StudyStatsResponse;
+import com.backtoback.study.assignment.repository.AssignmentCompletionRepository;
 import com.backtoback.study.assignment.repository.AssignmentMemberStatusRepository;
 import com.backtoback.study.assignment.repository.AssignmentProblemRepository;
 import com.backtoback.study.assignment.repository.AssignmentRepository;
+import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
+import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
+import com.backtoback.study.replica.repository.MemberReplicaRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -38,6 +50,8 @@ public class AssignmentQueryService {
     private final AssignmentRepository assignmentRepository;
     private final AssignmentProblemRepository assignmentProblemRepository;
     private final AssignmentMemberStatusRepository memberStatusRepository;
+    private final AssignmentCompletionRepository completionRepository;
+    private final MemberReplicaRepository memberReplicaRepository;
 
     public Page<AssignmentSummaryResponse> listAssignments(
         Long studyId,
@@ -71,6 +85,107 @@ public class AssignmentQueryService {
                 .collect(Collectors.toMap(AssignmentMemberStatus::getAssignmentId, Function.identity()));
 
         return page.map(a -> toSummary(a, activeCounts.getOrDefault(a.getId(), 0), myStatuses.get(a.getId())));
+    }
+
+    public AssignmentDetailResponse getAssignmentDetail(Long studyId, Long memberId, Long assignmentId) {
+        membershipRepository
+            .findByStudyIdAndMemberIdAndStatusIn(studyId, memberId, List.of(MembershipStatus.APPROVED))
+            .orElseThrow(() -> new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED));
+
+        Assignment assignment
+            = assignmentRepository
+                .findByIdAndStudyId(assignmentId, studyId)
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_ASSIGNMENT_NOT_FOUND));
+
+        List<AssignmentProblem> problems
+            = assignmentProblemRepository.findByAssignmentIdOrderByDisplayOrderAsc(assignmentId);
+
+        int activeCount = (int)problems.stream().filter(p -> p.getStatus() == AssignmentProblemStatus.ACTIVE).count();
+
+        Map<Long, CompletionType> myCompletions
+            = completionRepository
+                .findByAssignmentIdAndMemberId(assignmentId, memberId)
+                .stream()
+                .filter(c -> c.getStatus() == CompletionStatus.COMPLETED)
+                .collect(Collectors.toMap(AssignmentCompletion::getProblemId, AssignmentCompletion::getCompletionType));
+
+        List<Long> approvedMemberIds
+            = membershipRepository
+                .findMemberIdsByStudyIdAndRolesAndStatus(
+                    studyId,
+                    List.of(MembershipRole.LEADER, MembershipRole.MANAGER, MembershipRole.MEMBER),
+                    MembershipStatus.APPROVED
+                );
+
+        List<AssignmentMemberStatus> memberStatuses
+            = memberStatusRepository.findByAssignmentIdAndMemberIdIn(assignmentId, approvedMemberIds);
+
+        Map<Long, String> nicknameMap
+            = memberReplicaRepository
+                .findAllByMemberIdIn(approvedMemberIds)
+                .stream()
+                .collect(Collectors.toMap(r -> r.getMemberId(), r -> r.getNickname()));
+
+        List<ProblemSnapshotResponse> problemSnapshots
+            = problems
+                .stream()
+                .map(
+                    p -> new ProblemSnapshotResponse(
+                        p.getProblemId(),
+                        p.getAssignedRevisionId(),
+                        null,
+                        p.getProblemTitle(),
+                        p.getProblemDifficulty(),
+                        p.getProblemTagsJson(),
+                        p.getStatus(),
+                        myCompletions.get(p.getProblemId())
+                    )
+                )
+                .toList();
+
+        List<MemberProgressResponse> memberProgress
+            = memberStatuses
+                .stream()
+                .map(
+                    m -> new MemberProgressResponse(
+                        m.getMemberId(),
+                        nicknameMap.get(m.getMemberId()),
+                        m.getStatus(),
+                        m.getCompletedCount(),
+                        m.getOnTimeCount(),
+                        activeCount
+                    )
+                )
+                .toList();
+
+        return new AssignmentDetailResponse(
+            assignment.getId(),
+            assignment.getTitle(),
+            assignment.getGoal(),
+            assignment.getTagId(),
+            assignment.getStatus(),
+            assignment.isPreSolvedAllowed(),
+            assignment.getStartsAt(),
+            assignment.getDeadlineAt(),
+            problemSnapshots,
+            memberProgress,
+            computeStats(memberStatuses, activeCount)
+        );
+    }
+
+    private StudyStatsResponse computeStats(List<AssignmentMemberStatus> memberStatuses, int activeCount) {
+        if (activeCount == 0 || memberStatuses.isEmpty()) {
+            return new StudyStatsResponse(null, null);
+        }
+        double avgCompletion
+            = memberStatuses
+                .stream()
+                .mapToDouble(m -> (double)m.getCompletedCount() / activeCount)
+                .average()
+                .orElse(0.0);
+        double avgOnTime
+            = memberStatuses.stream().mapToDouble(m -> (double)m.getOnTimeCount() / activeCount).average().orElse(0.0);
+        return new StudyStatsResponse(Math.round(avgCompletion * 100.0) / 100.0, Math.round(avgOnTime * 100.0) / 100.0);
     }
 
     private AssignmentSummaryResponse toSummary(Assignment a, int activeCount, AssignmentMemberStatus ams) {

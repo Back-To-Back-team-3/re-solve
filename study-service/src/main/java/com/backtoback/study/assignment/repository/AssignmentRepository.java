@@ -22,6 +22,8 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
 
     Page<Assignment> findByStudyIdAndStatus(Long studyId, AssignmentStatus status, Pageable pageable);
 
+    Optional<Assignment> findByIdAndStudyId(Long id, Long studyId);
+
     /**
      * SCHEDULED 상태이고 starts_at이 기준 시각 이하인 문제집 ID를 오래된 순으로 최대 limit건 조회한다(스케줄러 §5.2).
      */

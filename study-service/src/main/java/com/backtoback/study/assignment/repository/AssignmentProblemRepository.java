@@ -13,6 +13,8 @@ public interface AssignmentProblemRepository extends JpaRepository<AssignmentPro
 
     List<AssignmentProblem> findByAssignmentIdAndStatus(Long assignmentId, AssignmentProblemStatus status);
 
+    List<AssignmentProblem> findByAssignmentIdOrderByDisplayOrderAsc(Long assignmentId);
+
     interface ActiveCountView {
         Long getAssignmentId();
 
