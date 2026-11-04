@@ -2389,6 +2389,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `assignment_id` | BIGINT | Y | FK → `assignments.id` |
 | `problem_id` | BIGINT | Y | 문제 ID (외부 참조). **진행 인정 기준** |
 | `assigned_revision_id` | BIGINT | Y | 배정 당시 공개 회차 (COMMENT: `problem.problem_revisions.id`, 표시용 기록) |
+| `revision_number` | INT | N | 배정 회차 번호 스냅샷. NULL: 이 컬럼 추가 이전에 생성된 문제집 |
 | `problem_title` | VARCHAR(200) | Y | 배정 스냅샷 |
 | `problem_difficulty` | INT | Y | 배정 스냅샷 (1~3) |
 | `problem_tags_json` | JSON | Y | 배정 스냅샷. 검색·정렬 미사용 |
