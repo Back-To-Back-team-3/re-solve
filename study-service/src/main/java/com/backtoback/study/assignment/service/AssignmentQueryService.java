@@ -42,7 +42,6 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class AssignmentQueryService {
 
     private final StudyMembershipRepository membershipRepository;
@@ -52,6 +51,7 @@ public class AssignmentQueryService {
     private final AssignmentCompletionRepository completionRepository;
     private final MemberReplicaRepository memberReplicaRepository;
 
+    @Transactional(readOnly = true)
     public Page<AssignmentSummaryResponse> listAssignments(
         Long studyId,
         Long memberId,
@@ -86,6 +86,7 @@ public class AssignmentQueryService {
         return page.map(a -> toSummary(a, activeCounts.getOrDefault(a.getId(), 0), myStatuses.get(a.getId())));
     }
 
+    @Transactional(readOnly = true)
     public AssignmentDetailResponse getAssignmentDetail(Long studyId, Long memberId, Long assignmentId) {
         membershipRepository
             .findByStudyIdAndMemberIdAndStatusIn(studyId, memberId, List.of(MembershipStatus.APPROVED))
