@@ -9,8 +9,16 @@ spring:
     enabled: true
   jackson:
     time-zone: Asia/Seoul
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:ap-northeast-2}
 
 resolve:
+  # 회원 이벤트 SNS 발행 (이벤트 계약 2.1 member-events). 꺼져 있으면 Outbox에 기록만 한다.
+  messaging:
+    enabled: ${MEMBER_MESSAGING_ENABLED:false}
+    topic-arn: ${MEMBER_EVENTS_TOPIC_ARN:}
   auth:
     frontend-origin: ${FRONTEND_ORIGIN:http://localhost:8080}
     # 로그인 후 이동할 수 있는 프론트 경로(상대 경로 접두어). "/"는 모든 상대 경로를 허용한다.

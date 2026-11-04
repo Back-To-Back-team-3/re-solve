@@ -127,12 +127,15 @@ public class Member extends BaseTimeEntity {
 
     /**
      * 닉네임을 바꾸고 표시 정보 변경 순번({@code profileVersion})을 올린다. 같은 닉네임이면 아무것도 바꾸지 않는다.
+     *
+     * @return 닉네임이 바뀌었으면 {@code true}
      */
-    public void changeNickname(String nickname) {
+    public boolean changeNickname(String nickname) {
         if (this.nickname.equals(nickname)) {
-            return;
+            return false;
         }
         this.nickname = nickname;
         this.profileVersion++;
+        return true;
     }
 }

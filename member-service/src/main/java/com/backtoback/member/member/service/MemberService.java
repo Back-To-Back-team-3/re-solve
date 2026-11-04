@@ -5,6 +5,7 @@ import java.util.Optional;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.auth.client.GitHubUser;
@@ -24,6 +25,8 @@ public class MemberService {
     private static final int ASCII_MAX = 0x7F;
 
     private final MemberRepository memberRepository;
+    private final MemberEventPublisher memberEventPublisher;
+    private final TransactionTemplate transactionTemplate;
 
     /**
      * GitHub 사용자 ID로 회원을 찾고, 없으면 가입시킨다.
@@ -70,8 +73,9 @@ public class MemberService {
                 || trimmed.codePoints().anyMatch(MemberService::isEmoji)) {
                 throw new MemberException(MemberErrorCode.MEMBER_NICKNAME_INVALID);
             }
-            // shortcut: MemberUpdated Outbox 발행 없음, 공통 이벤트 모듈을 member에 적용할 때 같은 트랜잭션에서 기록한다.
-            member.changeNickname(trimmed);
+            if (member.changeNickname(trimmed)) {
+                memberEventPublisher.memberUpdated(member);
+            }
         }
         return member;
     }
@@ -94,7 +98,13 @@ public class MemberService {
             = Member
                 .registerWithGitHub(gitHubUser.id(), gitHubUser.login(), gitHubUser.email(), gitHubUser.avatarUrl());
         try {
-            return new GitHubMemberRegistration(memberRepository.saveAndFlush(member), true);
+            // 가입과 MemberUpdated 기록을 한 트랜잭션으로 묶는다. 유일 제약 위반이면 함께 롤백되고 아래에서 다시 조회한다.
+            Member saved = transactionTemplate.execute(status -> {
+                Member inserted = memberRepository.saveAndFlush(member);
+                memberEventPublisher.memberUpdated(inserted);
+                return inserted;
+            });
+            return new GitHubMemberRegistration(saved, true);
         } catch (DataIntegrityViolationException exception) {
             Member registered = memberRepository.findByGithubId(gitHubUser.id()).orElseThrow(() -> exception);
             return new GitHubMemberRegistration(registered, false);

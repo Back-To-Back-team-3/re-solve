@@ -6,10 +6,16 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.Import;
 
 import com.backtoback.common.web.exception.GlobalExceptionHandler;
+import com.backtoback.common.web.logging.CorrelationIdFilter;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
-@Import(GlobalExceptionHandler.class)
+@Import(
+    {
+        GlobalExceptionHandler.class,
+        CorrelationIdFilter.class
+    }
+)
 public class MemberServiceApplication {
 
     public static void main(String[] args) {
