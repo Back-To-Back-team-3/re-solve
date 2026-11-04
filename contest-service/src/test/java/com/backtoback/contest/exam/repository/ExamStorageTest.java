@@ -30,6 +30,7 @@ import com.backtoback.contest.exam.domain.Exam;
 import com.backtoback.contest.exam.domain.ExamMode;
 import com.backtoback.contest.exam.domain.ExamProblem;
 import com.backtoback.contest.exam.domain.ExamStatus;
+import com.backtoback.contest.exam.service.StudyExamQueryService;
 
 import jakarta.persistence.EntityManager;
 
@@ -79,6 +80,46 @@ class ExamStorageTest {
 
     @Autowired
     private TransactionTemplate transactions;
+
+    @Autowired
+    private StudyExamQueryService studyExamQuery;
+
+    @Test
+    @DisplayName("스터디별 시험을 ID 순으로 조회하고 다음 페이지에서 마감과 확정을 구분한다")
+    void pagesStudyExams() {
+        transactions.executeWithoutResult(status -> {
+            var start = LocalDateTime.parse("2026-01-01T09:00:00");
+            var first
+                = exams
+                    .saveAndFlush(Exam.create(98765L, 2L, "첫 시험", ExamMode.FIXED, start, start.plusHours(1), null, 2));
+            exams.saveAndFlush(Exam.create(98766L, 2L, "다른 스터디", ExamMode.FIXED, start, start.plusHours(1), null, 1));
+            var second
+                = exams
+                    .saveAndFlush(Exam.create(98765L, 2L, "둘째 시험", ExamMode.FIXED, start, start.plusHours(1), null, 3));
+            jdbc.update("UPDATE exams SET status = 'CLOSED' WHERE id = ?", first.getId());
+            jdbc.update("UPDATE exams SET status = 'FINALIZED' WHERE id = ?", second.getId());
+            entityManager.clear();
+            var page = studyExamQuery.getStudyExams("98765", null, 1);
+            assertThat(page.hasMore()).isTrue();
+            assertThat(page.items()).singleElement().satisfies(item -> {
+                assertThat(item.examId()).isEqualTo(first.getId().toString());
+                assertThat(item.status()).isEqualTo("CLOSED");
+                assertThat(item.examRevision()).isEqualTo("2");
+                assertThat(item.startsAt()).isEqualTo(OffsetDateTime.parse("2026-01-01T09:00:00+09:00"));
+            });
+            var next = studyExamQuery.getStudyExams("98765", page.nextCursor(), 1);
+            assertThat(next.hasMore()).isFalse();
+            assertThat(next.nextCursor()).isNull();
+            assertThat(next.items()).singleElement().satisfies(item -> {
+                assertThat(item.examId()).isEqualTo(second.getId().toString());
+                assertThat(item.status()).isEqualTo("FINALIZED");
+            });
+            assertThat(studyExamQuery.getStudyExams("98767", null, 20).items()).isEmpty();
+            assertThatThrownBy(() -> studyExamQuery.getStudyExams("98766", page.nextCursor(), 1))
+                .isInstanceOf(com.backtoback.contest.global.error.ContestException.class);
+            status.setRollbackOnly();
+        });
+    }
 
     @Test
     @DisplayName("빈 데이터베이스에 V1부터 V7까지 순서대로 적용한다")
