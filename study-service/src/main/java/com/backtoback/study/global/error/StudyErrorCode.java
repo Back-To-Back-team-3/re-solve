@@ -29,6 +29,7 @@ public enum StudyErrorCode implements ErrorCode {
     STUDY_ALREADY_CLOSED(HttpStatus.CONFLICT, "종료된 스터디입니다."),
 
     // 문제집 (assignment)
+    STUDY_ASSIGNMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "문제집을 찾을 수 없습니다."),
     STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE(HttpStatus.CONFLICT, "문제집에 넣을 문제가 GENERAL·PUBLIC이 아님");
 
     private final HttpStatus status;
