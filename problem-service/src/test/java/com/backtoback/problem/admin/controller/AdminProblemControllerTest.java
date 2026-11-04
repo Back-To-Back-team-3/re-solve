@@ -1,8 +1,7 @@
 package com.backtoback.problem.admin.controller;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -23,9 +22,12 @@ import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.problem.global.config.SecurityConfiguration;
 import com.backtoback.problem.global.exception.ProblemExceptionHandler;
 import com.backtoback.problem.problem.config.ProblemCreateWebConfiguration;
+import com.backtoback.problem.problem.dto.request.ProblemCreateRequest;
 import com.backtoback.problem.problem.dto.response.ProblemCreateResponse;
 import com.backtoback.problem.problem.service.ProblemCreateBodyReader;
 import com.backtoback.problem.problem.service.ProblemCreateService;
+
+import tools.jackson.databind.ObjectMapper;
 
 /** 실제 MVC 변환·Bean Validation·Gateway 권한 검사를 DB 없이 확인한다. */
 @WebMvcTest(AdminProblemController.class)
@@ -48,6 +50,8 @@ class AdminProblemControllerTest {
         """;
     @Autowired
     private MockMvc mvc;
+    @Autowired
+    private ObjectMapper mapper;
     @MockitoBean
     private ProblemCreateService service;
 
@@ -59,19 +63,21 @@ class AdminProblemControllerTest {
     @Test
     @DisplayName("관리자 등록은 최초 식별자와 버전을 201로 반환한다")
     void create() throws Exception {
-        given(service.create(eq(8004L), eq("create"), any(), any()))
+        var expectedBody = mapper.readValue(BODY, ProblemCreateRequest.class);
+        String clientIp = "192.0.2.17";
+        given(service.create(8004L, "create", expectedBody, clientIp))
             .willReturn(new ProblemCreateResponse("1", "2", 1, 1));
-        mvc
-            .perform(
-                post("/api/v1/admin/problems")
-                    .header("X-User-Id", "8004")
-                    .header("X-User-Role", "ADMIN")
-                    .header("Idempotency-Key", "create")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(BODY)
-            )
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.rowVersion").value(1));
+        mvc.perform(post("/api/v1/admin/problems").with(request -> {
+            request.setRemoteAddr(clientIp);
+            return request;
+        })
+            .header("X-User-Id", "8004")
+            .header("X-User-Role", "ADMIN")
+            .header("Idempotency-Key", "create")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(BODY)
+        ).andExpect(status().isCreated()).andExpect(jsonPath("$.data.rowVersion").value(1));
+        verify(service).create(8004L, "create", expectedBody, clientIp);
     }
 
     /**
