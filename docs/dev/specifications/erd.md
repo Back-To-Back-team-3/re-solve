@@ -3180,12 +3180,13 @@ study-service/src/main/resources/db/migration/
   V13__assignment_create_assignment_completions.sql
   V14__replica_create_member_ac_replicas.sql
   V15__replica_create_member_learning_profile_replicas.sql
-  V16__recommendation_create_study_recommendations.sql
-  V17__ai_create_hint_requests.sql
-  V18__ai_create_hint_daily_usages.sql
-  V19__ai_create_hint_block_replicas.sql
-  V20__community_create_posts.sql        (P2 착수 시)
-  V21__community_create_comments.sql     (P2 착수 시)
+  V16__assignment_problems_add_revision_number.sql
+  V17__recommendation_create_study_recommendations.sql
+  V18__ai_create_hint_requests.sql
+  V19__ai_create_hint_daily_usages.sql
+  V20__ai_create_hint_block_replicas.sql
+  V21__community_create_posts.sql        (P2 착수 시)
+  V22__community_create_comments.sql     (P2 착수 시)
 ```
 
 ### 7.6 Notification (`notification-service`)
