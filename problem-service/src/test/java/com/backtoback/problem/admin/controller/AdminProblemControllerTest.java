@@ -76,7 +76,12 @@ class AdminProblemControllerTest {
             .header("Idempotency-Key", "create")
             .contentType(MediaType.APPLICATION_JSON)
             .content(BODY)
-        ).andExpect(status().isCreated()).andExpect(jsonPath("$.data.rowVersion").value(1));
+        )
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.problemId").value("1"))
+            .andExpect(jsonPath("$.data.problemRevisionId").value("2"))
+            .andExpect(jsonPath("$.data.revisionNumber").value(1))
+            .andExpect(jsonPath("$.data.rowVersion").value(1));
         verify(service).create(8004L, "create", expectedBody, clientIp);
     }
 
