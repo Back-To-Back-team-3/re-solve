@@ -16,7 +16,15 @@ import com.backtoback.contest.exam.repository.ContestResourceGuardRepository.Res
 
 import lombok.RequiredArgsConstructor;
 
-/** 문제의 최신 원천 상태를 가드 잠금 아래 저장하고 동일 작업의 완료를 복구한다. */
+/**
+ * 문제의 최신 원천 상태를 가드 잠금 아래 저장하고 동일 작업의 완료를 복구한다.
+ * <p>기준 문서</p>
+ * <ul>
+ * <li>이벤트 계약서 v1.0 / §1.5 순서 값 규칙·§4.2 problem의 P1 {@code ProblemStateChanged} v2: 버전 비교와 작업 복구</li>
+ * <li>도메인 및 데이터베이스 v1.0 / §4.4.16 자원 작업 가드: 상태와 원천 스냅샷 저장</li>
+ * <li>정책 및 상태 v1.0 / §4 문제·테스트케이스 정책: 문제 용도와 공개 상태</li>
+ * </ul>
+ */
 @Service
 @RequiredArgsConstructor
 public class ProblemSnapshotService {
@@ -63,7 +71,8 @@ public class ProblemSnapshotService {
         var row
             = jdbc
                 .queryForMap(
-                    "SELECT * FROM contest_resource_guards WHERE resource_type = 'PROBLEM' " + "AND resource_id = ?",
+                    "SELECT * FROM contest_resource_guards WHERE resource_type = 'PROBLEM' "
+                        + "AND resource_id = ? FOR UPDATE",
                     snapshot.problemId()
                 );
         long storedVersion = ((Number)row.get("source_version")).longValue();

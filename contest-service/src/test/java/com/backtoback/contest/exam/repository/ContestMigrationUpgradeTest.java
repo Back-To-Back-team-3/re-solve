@@ -17,6 +17,7 @@ class ContestMigrationUpgradeTest {
     @Container
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("contest_upgrade");
 
+    /** V7과 V16에서 기존 시험·가드 데이터를 둔 채 새 스냅샷 컬럼까지 순서대로 적용한다. */
     @Test
     @DisplayName("V7 데이터베이스에 V8부터 V16.1까지 추가 적용한다")
     void migratesFromVersionSeven() throws Exception {

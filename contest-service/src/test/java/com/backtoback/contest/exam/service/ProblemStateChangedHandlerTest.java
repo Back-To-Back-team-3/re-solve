@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,14 +19,19 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.event.service.EventConsumer;
+import com.backtoback.common.event.service.EventMessageDecoder;
+import com.backtoback.contest.exam.service.ProblemSnapshotService.Snapshot;
 
-/** 실제 소비 트랜잭션에서 문제 스냅샷의 순서와 작업 복구를 검증한다. */
+/** 공통 소비기와 소비 트랜잭션에서 문제 스냅샷의 순서와 작업 복구를 검증한다. */
 @SpringBootTest(
     properties = {
         "spring.cloud.aws.sns.enabled=false",
@@ -53,6 +59,14 @@ class ProblemStateChangedHandlerTest {
     private EventConsumer consumer;
     @Autowired
     private JdbcTemplate jdbc;
+    @Autowired
+    private ProblemSnapshotService snapshots;
+    @Autowired
+    private ProblemStateChangedHandler handler;
+    @Autowired
+    private EventMessageDecoder decoder;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     /** 최신 회차와 언어를 보존하고 중복 및 오래된 이벤트를 무시한다. */
     @Test
@@ -128,6 +142,117 @@ class ProblemStateChangedHandlerTest {
             // then
             assertThat(((Number)row(99207).get("source_version")).longValue()).isEqualTo(2);
             assertThat(row(99207).get("source_supported_languages").toString()).contains("java", "cpp");
+        }
+    }
+
+    /**
+     * 기존 일관된 읽기 스냅샷이 있어도 가드 잠금 뒤에는 선행 커밋의 최신 버전을 읽는다.
+     *
+     * @throws Exception 경합 스레드의 실행 또는 대기에 실패한 경우
+     */
+    @Test
+    @DisplayName("이전 읽기 스냅샷을 가진 소비 트랜잭션도 잠금 대기 뒤 최신 문제 버전을 보존한다")
+    void lockingReadIgnoresEarlierConsistentSnapshot() throws Exception {
+        // given
+        long problemId = 99211;
+        consumer
+            .consume(
+                message(
+                    UUID.randomUUID().toString(),
+                    problemId,
+                    1,
+                    "GENERAL",
+                    "PUBLIC",
+                    "\"101\"",
+                    "1",
+                    "[\"java\"]",
+                    "null"
+                ),
+                mock(Runnable.class)
+            );
+        var newVersionSaved = new CountDownLatch(1);
+        var snapshotRead = new CountDownLatch(1);
+        var releaseWriter = new CountDownLatch(1);
+        var eventId = UUID.randomUUID().toString();
+        var oldMessage = message(eventId, problemId, 2, "GENERAL", "PUBLIC", "\"101\"", "1", "[\"java\"]", "null");
+        var transactions = new TransactionTemplate(transactionManager);
+        transactions.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            try {
+                // when
+                var writer = executor.submit(() -> transactions.executeWithoutResult(status -> {
+                    snapshots
+                        .apply(
+                            new Snapshot(
+                                problemId,
+                                3,
+                                "GENERAL",
+                                "PUBLIC",
+                                101L,
+                                1,
+                                java.util.List.of("java", "cpp"),
+                                null
+                            )
+                        );
+                    newVersionSaved.countDown();
+                    await(releaseWriter);
+                }));
+                assertThat(newVersionSaved.await(10, TimeUnit.SECONDS)).isTrue();
+                var reader = executor.submit(() -> transactions.executeWithoutResult(status -> {
+                    jdbc
+                        .update(
+                            "INSERT INTO processed_events (event_id, event_type, processed_at, created_at) "
+                                + "VALUES (?, 'ProblemStateChanged', NOW(6), NOW(6))",
+                            eventId
+                        );
+                    long observed
+                        = jdbc
+                            .queryForObject(
+                                "SELECT source_version FROM contest_resource_guards "
+                                    + "WHERE resource_type='PROBLEM' AND resource_id=?",
+                                Long.class,
+                                problemId
+                            );
+                    assertThat(observed).isEqualTo(1);
+                    snapshotRead.countDown();
+                    handler.handle(decoder.decode(oldMessage));
+                }));
+                assertThat(snapshotRead.await(10, TimeUnit.SECONDS)).isTrue();
+                assertThatThrownBy(() -> reader.get(200, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+                releaseWriter.countDown();
+                writer.get(10, TimeUnit.SECONDS);
+                reader.get(10, TimeUnit.SECONDS);
+                // then
+                assertThat(((Number)row(problemId).get("source_version")).longValue()).isEqualTo(3);
+                assertThat(row(problemId).get("source_supported_languages").toString()).contains("java", "cpp");
+                assertThat(
+                    jdbc
+                        .queryForObject(
+                            "SELECT COUNT(*) FROM processed_events WHERE event_id=?",
+                            Integer.class,
+                            eventId
+                        )
+                ).isEqualTo(1);
+            } finally {
+                releaseWriter.countDown();
+            }
+        }
+    }
+
+    /**
+     * 테스트 트랜잭션의 대기 실패를 호출 스레드에 전달한다.
+     *
+     * @param latch 선행 트랜잭션을 해제할 신호
+     * @throws IllegalStateException 신호를 받기 전 대기가 중단되거나 제한 시간을 넘긴 경우
+     */
+    private void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out waiting for transaction");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
         }
     }
 

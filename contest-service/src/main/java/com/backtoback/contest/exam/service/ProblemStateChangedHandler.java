@@ -13,7 +13,13 @@ import com.backtoback.contest.exam.service.ProblemSnapshotService.Snapshot;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.JsonNode;
 
-/** 문제 상태 v2를 공통 소비 트랜잭션 안에서 가드 스냅샷에 반영한다. */
+/**
+ * 문제 상태 v2를 공통 소비 트랜잭션 안에서 가드 스냅샷에 반영한다.
+ * <p>기준 문서</p>
+ * <ul>
+ * <li>이벤트 계약서 v1.0 / §1.4 소비 규칙·§4.2 problem의 P1 {@code ProblemStateChanged} v2: 소비 경계와 필드</li>
+ * </ul>
+ */
 @Component
 @RequiredArgsConstructor
 public class ProblemStateChangedHandler implements EventHandler {

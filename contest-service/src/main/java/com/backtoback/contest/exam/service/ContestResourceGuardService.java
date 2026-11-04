@@ -15,7 +15,13 @@ import com.backtoback.contest.global.error.ContestException;
 
 import lombok.RequiredArgsConstructor;
 
-/** 신규 편입 트랜잭션에서 필요한 가드를 잠그고 차단 상태를 확인한다. */
+/**
+ * 신규 편입 트랜잭션에서 필요한 가드를 잠그고 차단 상태를 확인한다.
+ * <p>기준 문서</p>
+ * <ul>
+ * <li>도메인 및 데이터베이스 v1.0 / §4.4.16 자원 작업 가드: 준비·차단 상태의 신규 편입 제한</li>
+ * </ul>
+ */
 @Service
 @RequiredArgsConstructor
 public class ContestResourceGuardService {
