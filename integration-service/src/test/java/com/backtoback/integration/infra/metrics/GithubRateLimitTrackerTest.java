@@ -14,16 +14,28 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 class GithubRateLimitTrackerTest {
 
     @Test
-    @DisplayName("기본 잔여량은 5000이고 수동 update 호출 시 갱신된다")
-    void shouldInitializeWithDefaultAndAllowUpdate() {
+    @DisplayName("관측 전에는 미관측 상태이고 수동 update 호출 시 갱신된다")
+    void shouldStartUnobservedAndAllowUpdate() {
         GithubRateLimitTracker tracker = new GithubRateLimitTracker();
-        assertThat(tracker.getRemaining()).isEqualTo(5000L);
+        assertThat(tracker.isObserved()).isFalse();
 
         Instant resetTime = Instant.now().plusSeconds(3600);
         tracker.update(4500L, resetTime);
 
+        assertThat(tracker.isObserved()).isTrue();
         assertThat(tracker.getRemaining()).isEqualTo(4500L);
         assertThat(tracker.getResetAt()).isEqualTo(resetTime);
+    }
+
+    @Test
+    @DisplayName("관측 전 게이지는 NaN을 반환해 임의 기본값이 게시되지 않는다")
+    void shouldExposeNaNBeforeObservation() {
+        GithubRateLimitMetricsBinder binder = new GithubRateLimitMetricsBinder(new GithubRateLimitTracker());
+        MeterRegistry registry = new SimpleMeterRegistry();
+
+        binder.bindTo(registry);
+
+        assertThat(registry.get("github.ratelimit.remaining").gauge().value()).isNaN();
     }
 
     @Test

@@ -97,7 +97,7 @@
           "refId": "A"
         }
       ],
-      "title": "서비스 인스턴스 헬스 상태 (UP / DOWN)",
+      "title": "메트릭 스크랩 가용성 (UP / DOWN)",
       "type": "stat"
     },
     {

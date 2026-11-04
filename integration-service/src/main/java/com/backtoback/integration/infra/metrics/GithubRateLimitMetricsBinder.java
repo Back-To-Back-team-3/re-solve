@@ -19,7 +19,7 @@ public class GithubRateLimitMetricsBinder implements MeterBinder {
     @Override
     public void bindTo(MeterRegistry registry) {
         Gauge
-            .builder("github.ratelimit.remaining", tracker, GithubRateLimitTracker::getRemaining)
+            .builder("github.ratelimit.remaining", tracker, t -> t.isObserved() ? t.getRemaining() : Double.NaN)
             .description("Remaining GitHub REST API rate limit quota")
             .register(registry);
     }

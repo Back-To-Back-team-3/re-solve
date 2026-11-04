@@ -19,6 +19,15 @@ groups:
           summary: "Outbox Relay 미발행 적체 경보"
           description: "Outbox 미발행(PENDING) 이벤트 건수가 3분 이상 100건을 초과했습니다. 현재 건수: {{ $value }}"
 
+      - alert: SqsQueueMetricsStale
+        expr: time() - aws_sqs_metrics_last_success_timestamp_seconds > 120
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SQS 큐 메트릭 갱신 중단: {{ $labels.queue }}"
+          description: "SQS 큐 {{ $labels.queue }}의 메트릭 조회가 2분 이상 성공하지 못했습니다. 적체 경보 값을 신뢰할 수 없습니다."
+
       - alert: SqsQueueAccumulation
         expr: aws_sqs_messages_visible > 50
         for: 2m

@@ -1,5 +1,6 @@
 package com.backtoback.integration.infra.metrics;
 
+import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -31,6 +32,7 @@ public class SqsQueueMetricsBinder implements MeterBinder {
     private final AtomicLong visibleMessages = new AtomicLong(0);
     private final AtomicLong notVisibleMessages = new AtomicLong(0);
     private final AtomicLong delayedMessages = new AtomicLong(0);
+    private final AtomicLong lastSuccessEpochSeconds = new AtomicLong(Instant.now().getEpochSecond());
     private volatile String cachedQueueUrl;
 
     public SqsQueueMetricsBinder(
@@ -60,6 +62,14 @@ public class SqsQueueMetricsBinder implements MeterBinder {
             .tag("queue", queueName)
             .description("Approximate number of messages delayed and not available for immediate retrieval")
             .register(registry);
+
+        if (sqsAsyncClient != null) {
+            Gauge
+                .builder("aws.sqs.metrics.last.success.timestamp.seconds", lastSuccessEpochSeconds, AtomicLong::get)
+                .tag("queue", queueName)
+                .description("Epoch seconds of the last successful SQS queue metrics refresh")
+                .register(registry);
+        }
     }
 
     /**
@@ -104,8 +114,9 @@ public class SqsQueueMetricsBinder implements MeterBinder {
             if (delayedStr != null) {
                 delayedMessages.set(Long.parseLong(delayedStr));
             }
+            lastSuccessEpochSeconds.set(Instant.now().getEpochSecond());
         } catch (Exception e) {
-            log.debug("SQS 메트릭 조회 생략: queueName={}, error={}", queueName, e.getMessage());
+            log.warn("SQS 메트릭 조회 실패: queueName={}, error={}", queueName, e.getMessage());
         }
     }
 
@@ -121,7 +132,7 @@ public class SqsQueueMetricsBinder implements MeterBinder {
             cachedQueueUrl = response.queueUrl();
             return cachedQueueUrl;
         } catch (Exception e) {
-            log.debug("SQS Queue URL 조회 실패: queueName={}, error={}", queueName, e.getMessage());
+            log.warn("SQS Queue URL 조회 실패: queueName={}, error={}", queueName, e.getMessage());
             return null;
         }
     }

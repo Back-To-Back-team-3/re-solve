@@ -32,6 +32,7 @@ class OutboxMetricsBinderTest {
 
         // when
         binder.bindTo(registry);
+        binder.refreshPendingCount();
 
         // then
         Double count = registry.get("outbox.pending.count").gauge().value();

@@ -15,9 +15,9 @@ public class GithubRateLimitTracker {
 
     private static final String HEADER_RATE_LIMIT_REMAINING = "x-ratelimit-remaining";
     private static final String HEADER_RATE_LIMIT_RESET = "x-ratelimit-reset";
-    private static final long DEFAULT_LIMIT = 5000L;
+    private static final long UNOBSERVED = -1L;
 
-    private final AtomicLong remaining = new AtomicLong(DEFAULT_LIMIT);
+    private final AtomicLong remaining = new AtomicLong(UNOBSERVED);
     private final AtomicReference<Instant> resetAt = new AtomicReference<>();
 
     /**
@@ -68,6 +68,16 @@ public class GithubRateLimitTracker {
      */
     public long getRemaining() {
         return remaining.get();
+    }
+
+    /**
+     * GitHub 응답에서 잔여량을 한 번이라도 관측했는지 반환한다.
+     * 재시작 직후처럼 관측 전에는 임의 기본값을 게시하지 않기 위해 사용한다.
+     *
+     * @return 관측했으면 true
+     */
+    public boolean isObserved() {
+        return remaining.get() != UNOBSERVED;
     }
 
     /**
