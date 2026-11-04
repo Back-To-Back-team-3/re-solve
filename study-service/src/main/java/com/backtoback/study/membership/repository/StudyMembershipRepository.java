@@ -8,6 +8,7 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -15,6 +16,8 @@ import org.springframework.data.repository.query.Param;
 import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.StudyMembership;
+
+import jakarta.persistence.LockModeType;
 
 public interface StudyMembershipRepository extends JpaRepository<StudyMembership, Long> {
 
@@ -122,4 +125,29 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
         nativeQuery = true
     )
     List<Long> findExpiredPendingIds(@Param("now") LocalDateTime now, @Param("limit") int limit);
+
+    /**
+     * 지정 스터디의 지정 상태 가입 행을 잠금 읽기(FOR SHARE)로 조회한다(스케줄러 §5.2 동시성 설계 포인트).
+     * REPEATABLE READ 스냅샷 회피를 위해 FOR SHARE를 사용한다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("SELECT m FROM StudyMembership m WHERE m.studyId = :studyId AND m.status = :status")
+    List<StudyMembership> findByStudyIdAndStatusWithLock(
+        @Param("studyId") Long studyId,
+        @Param("status") MembershipStatus status
+    );
+
+    /**
+     * 지정 스터디에서 주어진 역할 목록에 해당하는 APPROVED 멤버의 memberId 목록을 반환한다(스케줄러 §5.2 CLOSE 동작 3단계).
+     * AssignmentIncompleteRepeated 이벤트의 recipientMemberIds 구성에 사용한다.
+     */
+    @Query(
+        "SELECT m.memberId FROM StudyMembership m "
+            + "WHERE m.studyId = :studyId AND m.role IN :roles AND m.status = :status"
+    )
+    List<Long> findMemberIdsByStudyIdAndRolesAndStatus(
+        @Param("studyId") Long studyId,
+        @Param("roles") Collection<MembershipRole> roles,
+        @Param("status") MembershipStatus status
+    );
 }
