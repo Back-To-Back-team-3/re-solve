@@ -74,7 +74,9 @@ public class AssignmentQueryController {
     private Pageable resolveSort(Pageable pageable) {
         if (pageable.getSort().isUnsorted()) {
             Sort defaultSort
-                = Sort.by(Sort.Order.asc("deadlineAt").nullsLast()).and(Sort.by(Sort.Direction.ASC, "startsAt"));
+                = Sort.by(Sort.Order.asc("deadlineAt").nullsLast())
+                    .and(Sort.by(Sort.Direction.ASC, "startsAt"))
+                    .and(Sort.by(Sort.Direction.ASC, "id"));
             return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), defaultSort);
         }
         boolean hasInvalidSort
@@ -82,7 +84,10 @@ public class AssignmentQueryController {
         if (hasInvalidSort) {
             throw new StudyException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
-        return pageable;
+        Sort nullsLastSort = Sort.by(pageable.getSort().stream()
+            .map(order -> "deadlineAt".equals(order.getProperty()) ? order.nullsLast() : order)
+            .toList()).and(Sort.by(Sort.Direction.ASC, "id"));
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), nullsLastSort);
     }
 
     private Pageable clampPageSize(Pageable pageable) {
