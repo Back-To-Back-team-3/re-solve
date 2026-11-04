@@ -15,13 +15,13 @@ public record MemberProgressResponse(
     int activeProblemCount
 ) {
 
-    public static MemberProgressResponse from(AssignmentMemberStatus m, String nickname, int activeCount) {
+    public static MemberProgressResponse from(AssignmentMemberStatus ams, String nickname, int activeCount) {
         return new MemberProgressResponse(
-            String.valueOf(m.getMemberId()),
+            String.valueOf(ams.getMemberId()),
             nickname,
-            m.getStatus(),
-            m.getCompletedCount(),
-            m.getOnTimeCount(),
+            ams.getStatus(),
+            ams.getCompletedCount(),
+            ams.getOnTimeCount(),
             activeCount
         );
     }

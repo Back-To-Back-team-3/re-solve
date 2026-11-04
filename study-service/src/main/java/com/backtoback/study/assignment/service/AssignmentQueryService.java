@@ -154,7 +154,7 @@ public class AssignmentQueryService {
         return new StudyStatsResponse(Math.round(avgCompletion * 100.0) / 100.0, Math.round(avgOnTime * 100.0) / 100.0);
     }
 
-    private AssignmentSummaryResponse toSummary(Assignment a, int activeCount, AssignmentMemberStatus ams) {
-        return AssignmentSummaryResponse.from(a, activeCount, ams);
+    private AssignmentSummaryResponse toSummary(Assignment assignment, int activeCount, AssignmentMemberStatus ams) {
+        return AssignmentSummaryResponse.from(assignment, activeCount, ams);
     }
 }

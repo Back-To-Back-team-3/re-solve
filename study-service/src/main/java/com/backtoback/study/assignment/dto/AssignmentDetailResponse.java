@@ -29,20 +29,20 @@ public record AssignmentDetailResponse(
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ssxxx");
 
     public static AssignmentDetailResponse from(
-        Assignment a,
+        Assignment assignment,
         List<ProblemSnapshotResponse> problems,
         List<MemberProgressResponse> memberProgress,
         StudyStatsResponse studyStats
     ) {
         return new AssignmentDetailResponse(
-            String.valueOf(a.getId()),
-            a.getTitle(),
-            a.getGoal(),
-            a.getTagId() != null ? String.valueOf(a.getTagId()) : null,
-            a.getStatus(),
-            a.isPreSolvedAllowed(),
-            toOffsetString(a.getStartsAt()),
-            toOffsetString(a.getDeadlineAt()),
+            String.valueOf(assignment.getId()),
+            assignment.getTitle(),
+            assignment.getGoal(),
+            assignment.getTagId() != null ? String.valueOf(assignment.getTagId()) : null,
+            assignment.getStatus(),
+            assignment.isPreSolvedAllowed(),
+            toOffsetString(assignment.getStartsAt()),
+            toOffsetString(assignment.getDeadlineAt()),
             problems,
             memberProgress,
             studyStats

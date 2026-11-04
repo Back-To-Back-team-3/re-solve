@@ -23,13 +23,13 @@ public record AssignmentSummaryResponse(
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ssxxx");
 
-    public static AssignmentSummaryResponse from(Assignment a, int activeCount, AssignmentMemberStatus ams) {
+    public static AssignmentSummaryResponse from(Assignment assignment, int activeCount, AssignmentMemberStatus ams) {
         return new AssignmentSummaryResponse(
-            String.valueOf(a.getId()),
-            a.getTitle(),
-            a.getStatus(),
-            toOffsetString(a.getStartsAt()),
-            toOffsetString(a.getDeadlineAt()),
+            String.valueOf(assignment.getId()),
+            assignment.getTitle(),
+            assignment.getStatus(),
+            toOffsetString(assignment.getStartsAt()),
+            toOffsetString(assignment.getDeadlineAt()),
             activeCount,
             ams == null ? null : MyStatusResponse.from(ams)
         );

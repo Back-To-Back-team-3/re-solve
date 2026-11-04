@@ -20,15 +20,15 @@ public record ProblemSnapshotResponse(
     CompletionType myCompletionType
 ) {
 
-    public static ProblemSnapshotResponse from(AssignmentProblem p, CompletionType myCompletionType) {
+    public static ProblemSnapshotResponse from(AssignmentProblem problem, CompletionType myCompletionType) {
         return new ProblemSnapshotResponse(
-            String.valueOf(p.getProblemId()),
-            String.valueOf(p.getAssignedRevisionId()),
+            String.valueOf(problem.getProblemId()),
+            String.valueOf(problem.getAssignedRevisionId()),
             null,
-            p.getProblemTitle(),
-            p.getProblemDifficulty(),
-            p.getProblemTagsJson(),
-            p.getStatus(),
+            problem.getProblemTitle(),
+            problem.getProblemDifficulty(),
+            problem.getProblemTagsJson(),
+            problem.getStatus(),
             myCompletionType
         );
     }
