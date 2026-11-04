@@ -323,7 +323,10 @@ class ProblemValidationServiceTest {
         String queue = "http://localhost:4566/000000000000/problem-validation-queue";
         var resolver
             = new ProblemMessagingConfiguration()
-                .problemEventDestinationResolver(new ProblemMessagingProperties(queue));
+                .problemEventDestinationResolver(
+                    new ProblemMessagingProperties(queue),
+                    new com.backtoback.problem.problem.config.ProblemIntegrationProperties(null, null)
+                );
         var relay = new OutboxRelay(outbox, new AwsEventPublisher(null, sqs, resolver), List.of(), clock, transactions);
         relay.relayBatch();
         assertThat(

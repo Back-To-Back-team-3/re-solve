@@ -111,4 +111,10 @@ public class Problem extends BaseTimeEntity {
         }
         rowVersion++;
     }
+
+    /** 사용 회차 또는 통과 언어 변경을 문제 잠금 아래 버전에 반영한다. */
+    public void advanceExecutionVersion() {
+        rowVersion++;
+    }
+
 }

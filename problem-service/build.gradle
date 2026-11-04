@@ -61,6 +61,7 @@ dependencies {
     // AWS S3
     implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-s3'
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok'
