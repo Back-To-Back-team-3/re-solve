@@ -9,8 +9,8 @@ import com.fasterxml.jackson.annotation.JsonRawValue;
  * revisionNumber는 ERD §4.5.6에 저장되지 않으므로 null을 반환한다.
  */
 public record ProblemSnapshotResponse(
-    Long problemId,
-    Long assignedRevisionId,
+    String problemId,
+    String assignedRevisionId,
     Integer revisionNumber,
     String title,
     int difficulty,

@@ -1,5 +1,8 @@
 package com.backtoback.study.assignment.service;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -45,6 +48,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class AssignmentQueryService {
+
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ssxxx");
 
     private final StudyMembershipRepository membershipRepository;
     private final AssignmentRepository assignmentRepository;
@@ -131,8 +136,8 @@ public class AssignmentQueryService {
                 .stream()
                 .map(
                     p -> new ProblemSnapshotResponse(
-                        p.getProblemId(),
-                        p.getAssignedRevisionId(),
+                        String.valueOf(p.getProblemId()),
+                        String.valueOf(p.getAssignedRevisionId()),
                         null,
                         p.getProblemTitle(),
                         p.getProblemDifficulty(),
@@ -148,7 +153,7 @@ public class AssignmentQueryService {
                 .stream()
                 .map(
                     m -> new MemberProgressResponse(
-                        m.getMemberId(),
+                        String.valueOf(m.getMemberId()),
                         nicknameMap.get(m.getMemberId()),
                         m.getStatus(),
                         m.getCompletedCount(),
@@ -159,14 +164,14 @@ public class AssignmentQueryService {
                 .toList();
 
         return new AssignmentDetailResponse(
-            assignment.getId(),
+            String.valueOf(assignment.getId()),
             assignment.getTitle(),
             assignment.getGoal(),
-            assignment.getTagId(),
+            assignment.getTagId() != null ? String.valueOf(assignment.getTagId()) : null,
             assignment.getStatus(),
             assignment.isPreSolvedAllowed(),
-            assignment.getStartsAt(),
-            assignment.getDeadlineAt(),
+            toOffsetString(assignment.getStartsAt()),
+            toOffsetString(assignment.getDeadlineAt()),
             problemSnapshots,
             memberProgress,
             computeStats(memberStatuses, activeCount)
@@ -192,13 +197,17 @@ public class AssignmentQueryService {
         MyStatusResponse myStatus
             = ams == null ? null : new MyStatusResponse(ams.getStatus(), ams.getCompletedCount(), ams.getOnTimeCount());
         return new AssignmentSummaryResponse(
-            a.getId(),
+            String.valueOf(a.getId()),
             a.getTitle(),
             a.getStatus(),
-            a.getStartsAt(),
-            a.getDeadlineAt(),
+            toOffsetString(a.getStartsAt()),
+            toOffsetString(a.getDeadlineAt()),
             activeCount,
             myStatus
         );
+    }
+
+    private static String toOffsetString(LocalDateTime ldt) {
+        return ldt == null ? null : ldt.atOffset(ZoneOffset.of("+09:00")).format(FORMATTER);
     }
 }
