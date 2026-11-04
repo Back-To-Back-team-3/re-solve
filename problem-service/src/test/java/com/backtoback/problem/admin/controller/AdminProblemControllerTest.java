@@ -1,8 +1,7 @@
 package com.backtoback.problem.admin.controller;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -42,7 +41,10 @@ import com.backtoback.problem.problem.service.ProblemCreateService;
 class AdminProblemControllerTest {
     private static final String BODY = """
         {"scope":"GENERAL","title":"문제","description":"설명","constraints":"제약","examples":"예시",
-         "difficulty":1,"tagIds":[],"functionSpec":null,"testCases":[]}
+         "difficulty":1,"tagIds":[],"functionSpec":{"name":"solution",
+         "parameters":[{"name":"value","type":{"kind":"INT32"}}],"returnType":{"kind":"INT32"}},
+         "testCases":[{"isSample":true,"argumentTexts":{"value":"1"},"expectedReturnText":"2"},
+                      {"isSample":false,"argumentTexts":{"value":"2"},"expectedReturnText":"4"}]}
         """;
     @Autowired
     private MockMvc mvc;
@@ -57,7 +59,7 @@ class AdminProblemControllerTest {
     @Test
     @DisplayName("관리자 등록은 최초 식별자와 버전을 201로 반환한다")
     void create() throws Exception {
-        given(service.create(anyLong(), anyString(), any(), any()))
+        given(service.create(eq(8004L), eq("create"), any(), any()))
             .willReturn(new ProblemCreateResponse("1", "2", 1, 1));
         mvc
             .perform(

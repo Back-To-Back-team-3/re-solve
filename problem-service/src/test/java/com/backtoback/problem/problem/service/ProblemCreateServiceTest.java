@@ -6,10 +6,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
@@ -29,6 +35,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -37,6 +44,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.dto.request.ProblemCreateRequest;
+import com.backtoback.problem.problem.dto.response.ProblemCreateResponse;
 
 /** 실제 MySQL 트랜잭션에서 등록·멱등 경합·감사 및 파일 연결 롤백을 확인한다. */
 @SpringBootTest(
@@ -59,6 +67,8 @@ class ProblemCreateServiceTest {
             .withCommand("redis-server", "--requirepass", "test-password");
     @Autowired
     private ProblemCreateService service;
+    @MockitoSpyBean
+    private ProblemCreateStore store;
     @Autowired
     private ProblemAssetUploadTracking tracking;
     @Autowired
@@ -297,6 +307,58 @@ class ProblemCreateServiceTest {
                     )
             ).isEqualTo(count);
         }
+    }
+
+    /** 저장과 재조회가 모두 실패해도 원인과 업로드 파일의 실패 분류를 보존한다. */
+    @Test
+    @DisplayName("재조회 장애를 원래 저장 예외에 남기고 미연결 파일을 분류한다")
+    void replayFailurePreservesSaveFailure() {
+        var saveFailure = new IllegalStateException("저장 실패");
+        var replayFailure = new IllegalStateException("재조회 실패");
+        doReturn(Optional.empty()).doThrow(replayFailure).when(store).replay(eq(8010L), eq("replay-fail"), anyString());
+        doThrow(saveFailure).when(store).save(any(), any(), any());
+        assertThatThrownBy(() -> service.create(8010, "replay-fail", ProblemCreateFixtures.request(), null))
+            .isSameAs(saveFailure);
+        assertThat(saveFailure.getSuppressed()).containsExactly(replayFailure);
+        assertThat(
+            jdbc.queryForObject("SELECT failure_code FROM problem_body_assets WHERE owner_id=8010", String.class)
+        ).isEqualTo("REGISTRATION_NOT_COMMITTED");
+    }
+
+    /** 멱등 결과가 확정된 뒤의 추적 기록 실패는 최초 응답을 바꾸지 않는다. */
+    @Test
+    @DisplayName("미연결 파일 분류가 실패해도 재조회한 최초 응답을 반환한다")
+    void trackingFailureAfterReplay() {
+        var response = new ProblemCreateResponse("1", "2", 1, 1);
+        doReturn(Optional.empty())
+            .doReturn(Optional.of(response))
+            .when(store)
+            .replay(eq(8011L), eq("replay-ok"), anyString());
+        doThrow(new IllegalStateException("저장 실패")).when(store).save(any(), any(), any());
+        doThrow(new IllegalStateException("분류 실패")).when(store).recordLinkFailure(any());
+        assertThat(service.create(8011, "replay-ok", ProblemCreateFixtures.request(), null)).isEqualTo(response);
+        verify(store).recordLinkFailure(any());
+    }
+
+    /** 본문 업로드 이후 테스트 파일 저장 실패 시 문제 등록과 감사 기록을 시작하지 않는다. */
+    @Test
+    @DisplayName("본문 업로드 성공 후 테스트 파일 업로드 실패는 503으로 응답한다")
+    void testUploadFailureSkipsRegistration() {
+        doThrow(new IllegalStateException("테스트 파일 업로드 실패"))
+            .when(uploads)
+            .upload(anyString(), eq(8012L), any(), eq(false));
+        assertThatThrownBy(() -> service.create(8012, "upload-fail", ProblemCreateFixtures.request(), null))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+            );
+        verify(store, never()).save(any(), any(), any());
+        assertThat(jdbc.queryForObject("""
+            SELECT COUNT(*) FROM problem_body_assets WHERE owner_id=8012 AND uploaded_at IS NOT NULL
+            """, Integer.class)).isOne();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM problem_revisions WHERE author_id=8012", Integer.class))
+            .isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_logs WHERE actor_id=8012", Integer.class)).isZero();
     }
 
     /**

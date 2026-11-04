@@ -97,12 +97,17 @@ public class ProblemCreateService {
             } catch (ProblemException conflict) {
                 recordFailure(files, conflict);
                 throw conflict;
-            }
-            if (replay.isPresent()) {
-                store.recordLinkFailure(files);
-                return replay.get();
+            } catch (RuntimeException replayFailure) {
+                if (failure != replayFailure) {
+                    failure.addSuppressed(replayFailure);
+                }
+                recordFailure(files, failure);
+                throw failure;
             }
             recordFailure(files, failure);
+            if (replay.isPresent()) {
+                return replay.get();
+            }
             throw failure;
         }
     }
@@ -117,7 +122,9 @@ public class ProblemCreateService {
         try {
             store.recordLinkFailure(files);
         } catch (RuntimeException trackingFailure) {
-            failure.addSuppressed(trackingFailure);
+            if (failure != trackingFailure) {
+                failure.addSuppressed(trackingFailure);
+            }
         }
     }
 }

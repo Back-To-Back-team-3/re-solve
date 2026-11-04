@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -18,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
+import com.backtoback.problem.problem.dto.FunctionSpec;
 import com.backtoback.problem.problem.dto.request.ProblemCreateRequest;
 import com.backtoback.problem.problem.dto.request.TestCaseRequest;
 
@@ -79,6 +81,46 @@ class ProblemCreateInputTest {
             );
         assertThat(input.hash(request)).isEqualTo(input.hash(ProblemCreateFixtures.request()));
         assertThat(input.hash(explicit)).isNotEqualTo(input.hash(request));
+    }
+
+    /** 두 매개변수의 입력 키 순서만 달라진 재요청은 같은 해시를 만든다. */
+    @Test
+    @DisplayName("매개변수 값이 같고 키 삽입 순서만 다르면 멱등 해시가 같다")
+    void hashIgnoresArgumentKeyOrder() {
+        var arguments = new LinkedHashMap<String, String>();
+        arguments.put("left", "1");
+        arguments.put("right", "2");
+        assertThat(input.hash(twoArgumentRequest(arguments)))
+            .isEqualTo(input.hash(twoArgumentRequest(new LinkedHashMap<>(arguments.reversed()))));
+    }
+
+    /**
+     * 입력 키 순서를 보존한 두 매개변수 함수의 등록 요청을 만든다.
+     *
+     * @param arguments 테스트 입력값
+     * @return 등록 요청
+     */
+    private ProblemCreateRequest twoArgumentRequest(Map<String, String> arguments) {
+        var request = ProblemCreateFixtures.request();
+        var type = request.functionSpec().returnType();
+        var spec
+            = new FunctionSpec(
+                "solution",
+                List.of(new FunctionSpec.Parameter("left", type), new FunctionSpec.Parameter("right", type)),
+                type
+            );
+        return new ProblemCreateRequest(
+            request.scope(),
+            request.title(),
+            request.description(),
+            request.constraints(),
+            request.examples(),
+            request.difficulty(),
+            request.tagIds(),
+            spec,
+            null,
+            List.of(new TestCaseRequest(true, arguments, "3"), new TestCaseRequest(false, arguments, "3"))
+        );
     }
 
     /**
