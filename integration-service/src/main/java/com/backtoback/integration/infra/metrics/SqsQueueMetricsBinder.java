@@ -21,6 +21,7 @@ import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 
 /**
  * SQS 대기 메시지 수(ApproximateNumberOfMessages)를 주기적으로 갱신하여 Prometheus 게이지로 노출한다.
+ * 기본 큐와 DLQ를 모두 모니터링한다.
  */
 @Slf4j
 @Component
@@ -28,48 +29,29 @@ import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 public class SqsQueueMetricsBinder implements MeterBinder {
 
     private final SqsAsyncClient sqsAsyncClient;
-    private final String queueName;
-    private final AtomicLong visibleMessages = new AtomicLong(0);
-    private final AtomicLong notVisibleMessages = new AtomicLong(0);
-    private final AtomicLong delayedMessages = new AtomicLong(0);
-    private final AtomicLong lastSuccessEpochSeconds = new AtomicLong(Instant.now().getEpochSecond());
-    private volatile String cachedQueueUrl;
+    private final QueueMetrics mainQueue;
+    private final QueueMetrics dlqQueue;
 
+    @Autowired
     public SqsQueueMetricsBinder(
         @Autowired(required = false) SqsAsyncClient sqsAsyncClient,
-        @Value("${integration.sqs.queue-name:integration-queue}") String queueName
+        @Value("${integration.sqs.queue-name:integration-queue}") String queueName,
+        @Value("${integration.sqs.dlq-name:${integration.sqs.queue-name:integration-queue}-dlq}") String dlqQueueName
     ) {
         this.sqsAsyncClient = sqsAsyncClient;
-        this.queueName = queueName;
+        this.mainQueue = new QueueMetrics(queueName);
+        this.dlqQueue = new QueueMetrics(dlqQueueName);
+    }
+
+    public SqsQueueMetricsBinder(SqsAsyncClient sqsAsyncClient, String queueName) {
+        this(sqsAsyncClient, queueName, queueName + "-dlq");
     }
 
     @Override
     public void bindTo(MeterRegistry registry) {
-        Gauge
-            .builder("aws.sqs.messages.visible", visibleMessages, AtomicLong::get)
-            .tag("queue", queueName)
-            .description("Approximate number of messages available for retrieval from the SQS queue")
-            .register(registry);
-
-        Gauge
-            .builder("aws.sqs.messages.not_visible", notVisibleMessages, AtomicLong::get)
-            .tag("queue", queueName)
-            .description("Approximate number of messages in flight (not visible) in the SQS queue")
-            .register(registry);
-
-        Gauge
-            .builder("aws.sqs.messages.delayed", delayedMessages, AtomicLong::get)
-            .tag("queue", queueName)
-            .description("Approximate number of messages delayed and not available for immediate retrieval")
-            .register(registry);
-
-        if (sqsAsyncClient != null) {
-            Gauge
-                .builder("aws.sqs.metrics.last.success.timestamp.seconds", lastSuccessEpochSeconds, AtomicLong::get)
-                .tag("queue", queueName)
-                .description("Epoch seconds of the last successful SQS queue metrics refresh")
-                .register(registry);
-        }
+        boolean hasClient = sqsAsyncClient != null;
+        mainQueue.bindTo(registry, hasClient);
+        dlqQueue.bindTo(registry, hasClient);
     }
 
     /**
@@ -83,8 +65,13 @@ public class SqsQueueMetricsBinder implements MeterBinder {
         if (sqsAsyncClient == null) {
             return;
         }
+        refreshQueue(mainQueue);
+        refreshQueue(dlqQueue);
+    }
+
+    private void refreshQueue(QueueMetrics qm) {
         try {
-            String queueUrl = resolveQueueUrl();
+            String queueUrl = resolveQueueUrl(qm);
             if (queueUrl == null) {
                 return;
             }
@@ -104,48 +91,94 @@ public class SqsQueueMetricsBinder implements MeterBinder {
 
             String visibleStr = attributes.get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES);
             if (visibleStr != null) {
-                visibleMessages.set(Long.parseLong(visibleStr));
+                qm.visible.set(Long.parseLong(visibleStr));
             }
             String notVisibleStr = attributes.get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE);
             if (notVisibleStr != null) {
-                notVisibleMessages.set(Long.parseLong(notVisibleStr));
+                qm.notVisible.set(Long.parseLong(notVisibleStr));
             }
             String delayedStr = attributes.get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_DELAYED);
             if (delayedStr != null) {
-                delayedMessages.set(Long.parseLong(delayedStr));
+                qm.delayed.set(Long.parseLong(delayedStr));
             }
-            lastSuccessEpochSeconds.set(Instant.now().getEpochSecond());
+            qm.lastSuccessEpochSeconds.set(Instant.now().getEpochSecond());
         } catch (Exception e) {
-            log.warn("SQS 메트릭 조회 실패: queueName={}, error={}", queueName, e.getMessage());
+            log.warn("SQS 메트릭 조회 실패: queueName={}, error={}", qm.name, e.getMessage());
         }
     }
 
-    private String resolveQueueUrl() {
-        if (cachedQueueUrl != null) {
-            return cachedQueueUrl;
+    private String resolveQueueUrl(QueueMetrics qm) {
+        if (qm.cachedUrl != null) {
+            return qm.cachedUrl;
         }
         try {
             var response
                 = sqsAsyncClient
-                    .getQueueUrl(GetQueueUrlRequest.builder().queueName(queueName).build())
+                    .getQueueUrl(GetQueueUrlRequest.builder().queueName(qm.name).build())
                     .get(3, TimeUnit.SECONDS);
-            cachedQueueUrl = response.queueUrl();
-            return cachedQueueUrl;
+            qm.cachedUrl = response.queueUrl();
+            return qm.cachedUrl;
         } catch (Exception e) {
-            log.warn("SQS Queue URL 조회 실패: queueName={}, error={}", queueName, e.getMessage());
+            log.warn("SQS Queue URL 조회 실패: queueName={}, error={}", qm.name, e.getMessage());
             return null;
         }
     }
 
     public long getVisibleMessages() {
-        return visibleMessages.get();
+        return mainQueue.visible.get();
     }
 
     public long getNotVisibleMessages() {
-        return notVisibleMessages.get();
+        return mainQueue.notVisible.get();
     }
 
     public long getDelayedMessages() {
-        return delayedMessages.get();
+        return mainQueue.delayed.get();
+    }
+
+    public long getDlqVisibleMessages() {
+        return dlqQueue.visible.get();
+    }
+
+    private static class QueueMetrics {
+
+        private final String name;
+        private final AtomicLong visible = new AtomicLong(0);
+        private final AtomicLong notVisible = new AtomicLong(0);
+        private final AtomicLong delayed = new AtomicLong(0);
+        private final AtomicLong lastSuccessEpochSeconds = new AtomicLong(0L);
+        private volatile String cachedUrl;
+
+        QueueMetrics(String name) {
+            this.name = name;
+        }
+
+        void bindTo(MeterRegistry registry, boolean hasClient) {
+            Gauge
+                .builder("aws.sqs.messages.visible", visible, AtomicLong::get)
+                .tag("queue", name)
+                .description("Approximate number of messages available for retrieval from the SQS queue")
+                .register(registry);
+
+            Gauge
+                .builder("aws.sqs.messages.not_visible", notVisible, AtomicLong::get)
+                .tag("queue", name)
+                .description("Approximate number of messages in flight (not visible) in the SQS queue")
+                .register(registry);
+
+            Gauge
+                .builder("aws.sqs.messages.delayed", delayed, AtomicLong::get)
+                .tag("queue", name)
+                .description("Approximate number of messages delayed and not available for immediate retrieval")
+                .register(registry);
+
+            if (hasClient) {
+                Gauge
+                    .builder("aws.sqs.metrics.last.success.timestamp.seconds", lastSuccessEpochSeconds, AtomicLong::get)
+                    .tag("queue", name)
+                    .description("Epoch seconds of the last successful SQS queue metrics refresh")
+                    .register(registry);
+            }
+        }
     }
 }

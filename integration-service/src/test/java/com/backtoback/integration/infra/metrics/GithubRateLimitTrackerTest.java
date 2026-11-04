@@ -28,6 +28,34 @@ class GithubRateLimitTrackerTest {
     }
 
     @Test
+    @DisplayName("동일한 리셋 윈도우 내에서는 더 작은 잔여량만 유지한다")
+    void shouldKeepLowerRemainingWithinSameResetWindow() {
+        GithubRateLimitTracker tracker = new GithubRateLimitTracker();
+        Instant resetTime = Instant.now().plusSeconds(1800);
+
+        tracker.update(3000L, resetTime);
+        tracker.update(3500L, resetTime); // 높은 값 도착 (지연 응답 가정)
+        assertThat(tracker.getRemaining()).isEqualTo(3000L);
+
+        tracker.update(2500L, resetTime); // 낮은 값 도착
+        assertThat(tracker.getRemaining()).isEqualTo(2500L);
+    }
+
+    @Test
+    @DisplayName("더 미래의 리셋 윈도우가 오면 새 잔여량과 리셋 시각으로 갱신된다")
+    void shouldUpdateOnNewerResetWindow() {
+        GithubRateLimitTracker tracker = new GithubRateLimitTracker();
+        Instant resetTime1 = Instant.now().plusSeconds(100);
+        Instant resetTime2 = Instant.now().plusSeconds(3600);
+
+        tracker.update(100L, resetTime1);
+        tracker.update(5000L, resetTime2); // 새 윈도우 리셋
+
+        assertThat(tracker.getRemaining()).isEqualTo(5000L);
+        assertThat(tracker.getResetAt()).isEqualTo(resetTime2);
+    }
+
+    @Test
     @DisplayName("관측 전 게이지는 NaN을 반환해 임의 기본값이 게시되지 않는다")
     void shouldExposeNaNBeforeObservation() {
         GithubRateLimitMetricsBinder binder = new GithubRateLimitMetricsBinder(new GithubRateLimitTracker());

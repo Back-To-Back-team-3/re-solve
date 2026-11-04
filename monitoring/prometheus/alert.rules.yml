@@ -19,6 +19,15 @@ groups:
           summary: "Outbox Relay 미발행 적체 경보"
           description: "Outbox 미발행(PENDING) 이벤트 건수가 3분 이상 100건을 초과했습니다. 현재 건수: {{ $value }}"
 
+      - alert: OutboxMetricsStale
+        expr: time() - outbox_metrics_last_success_timestamp_seconds > 120
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox 메트릭 갱신 중단"
+          description: "Outbox PENDING 건수 조회가 2분 이상 성공하지 못했습니다. 적체 경보 값을 신뢰할 수 없습니다."
+
       - alert: SqsQueueMetricsStale
         expr: time() - aws_sqs_metrics_last_success_timestamp_seconds > 120
         for: 1m
@@ -29,7 +38,7 @@ groups:
           description: "SQS 큐 {{ $labels.queue }}의 메트릭 조회가 2분 이상 성공하지 못했습니다. 적체 경보 값을 신뢰할 수 없습니다."
 
       - alert: SqsQueueAccumulation
-        expr: aws_sqs_messages_visible > 50
+        expr: aws_sqs_messages_visible{queue!~".*-dlq"} > 50
         for: 2m
         labels:
           severity: warning
@@ -38,13 +47,22 @@ groups:
           description: "SQS 큐 {{ $labels.queue }}의 대기 메시지가 2분 이상 50건을 초과했습니다. 현재 대기량: {{ $value }}"
 
       - alert: SqsQueueCriticalAccumulation
-        expr: aws_sqs_messages_visible > 200
+        expr: aws_sqs_messages_visible{queue!~".*-dlq"} > 200
         for: 1m
         labels:
           severity: critical
         annotations:
           summary: "SQS 큐 대기 메시지 심각 적체 경보: {{ $labels.queue }}"
           description: "SQS 큐 {{ $labels.queue }}의 대기 메시지가 1분 이상 200건을 초과했습니다. 컨슈머 장애 또는 병목 여부를 확인하세요. 현재 대기량: {{ $value }}"
+
+      - alert: SqsDlqMessagesAccumulation
+        expr: aws_sqs_messages_visible{queue=~".*-dlq"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SQS DLQ 메시지 적체 경보: {{ $labels.queue }}"
+          description: "DLQ {{ $labels.queue }}에 처리 실패 메시지가 유입되었습니다 (건수: {{ $value }}). 즉시 재시도 정책 및 실패 원인을 확인하세요."
 
       - alert: GithubRateLimitLow
         expr: github_ratelimit_remaining < 500

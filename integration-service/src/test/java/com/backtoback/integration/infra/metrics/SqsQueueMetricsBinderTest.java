@@ -68,6 +68,25 @@ class SqsQueueMetricsBinderTest {
         assertThat(visible).isEqualTo(15.0);
         assertThat(notVisible).isEqualTo(3.0);
         assertThat(delayed).isEqualTo(1.0);
+
+        Double dlqVisible = registry.get("aws.sqs.messages.visible").tag("queue", queueName + "-dlq").gauge().value();
+        assertThat(dlqVisible).isEqualTo(15.0);
+
+        Double lastSuccess
+            = registry.get("aws.sqs.metrics.last.success.timestamp.seconds").tag("queue", queueName).gauge().value();
+        assertThat(lastSuccess).isGreaterThan(0.0);
+    }
+
+    @Test
+    @DisplayName("바인딩 직후 마지막 성공 시각 초기값은 0이다")
+    void shouldInitializeLastSuccessEpochSecondsToZero() {
+        MeterRegistry registry = new SimpleMeterRegistry();
+        SqsQueueMetricsBinder binder = new SqsQueueMetricsBinder(sqsAsyncClient, "test-queue");
+        binder.bindTo(registry);
+
+        Double lastSuccess
+            = registry.get("aws.sqs.metrics.last.success.timestamp.seconds").tag("queue", "test-queue").gauge().value();
+        assertThat(lastSuccess).isEqualTo(0.0);
     }
 
     @Test

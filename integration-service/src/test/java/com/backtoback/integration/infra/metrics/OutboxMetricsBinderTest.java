@@ -36,6 +36,9 @@ class OutboxMetricsBinderTest {
 
         // then
         Double count = registry.get("outbox.pending.count").gauge().value();
+        Double lastSuccess = registry.get("outbox.metrics.last.success.timestamp.seconds").gauge().value();
+
         assertThat(count).isEqualTo(42.0);
+        assertThat(lastSuccess).isGreaterThan(0.0);
     }
 }

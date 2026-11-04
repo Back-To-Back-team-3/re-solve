@@ -21,16 +21,30 @@ public class GithubRateLimitTracker {
     private final AtomicReference<Instant> resetAt = new AtomicReference<>();
 
     /**
-     * Rate Limit 잔여량과 리셋 시각을 직접 설정한다.
+     * Rate Limit 잔여량과 리셋 시각을 설정한다.
+     * 동일한 리셋 윈도우 내에서는 응답 도착 순서가 뒤바뀌더라도 더 작은 잔여량(소진 상태)을 보존한다.
      *
      * @param remainingCount 잔여 호출 가능 횟수
      * @param resetTime 할당량 리셋 시각
      */
-    public void update(long remainingCount, Instant resetTime) {
-        this.remaining.set(remainingCount);
+    public synchronized void update(long remainingCount, Instant resetTime) {
         if (resetTime != null) {
-            this.resetAt.set(resetTime);
+            Instant currentReset = this.resetAt.get();
+            if (currentReset == null || resetTime.isAfter(currentReset)) {
+                this.resetAt.set(resetTime);
+                this.remaining.set(remainingCount);
+                return;
+            }
+            if (resetTime.equals(currentReset)) {
+                long current = this.remaining.get();
+                if (current == UNOBSERVED || remainingCount < current) {
+                    this.remaining.set(remainingCount);
+                }
+                return;
+            }
+            return;
         }
+        this.remaining.set(remainingCount);
     }
 
     /**
@@ -42,22 +56,27 @@ public class GithubRateLimitTracker {
         if (headers == null) {
             return;
         }
+        Long remainingCount = null;
         String remainingHeader = headers.getFirst(HEADER_RATE_LIMIT_REMAINING);
         if (remainingHeader != null) {
             try {
-                this.remaining.set(Long.parseLong(remainingHeader.trim()));
+                remainingCount = Long.parseLong(remainingHeader.trim());
             } catch (NumberFormatException ignored) {
                 // 파싱 실패 시 이전 값 유지
             }
         }
+        Instant resetTime = null;
         String resetHeader = headers.getFirst(HEADER_RATE_LIMIT_RESET);
         if (resetHeader != null) {
             try {
                 long epochSecond = Long.parseLong(resetHeader.trim());
-                this.resetAt.set(Instant.ofEpochSecond(epochSecond));
+                resetTime = Instant.ofEpochSecond(epochSecond);
             } catch (Exception ignored) {
                 // 파싱 실패 시 이전 값 유지
             }
+        }
+        if (remainingCount != null) {
+            update(remainingCount, resetTime);
         }
     }
 

@@ -1,5 +1,6 @@
 package com.backtoback.integration.infra.metrics;
 
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,12 +26,18 @@ public class OutboxMetricsBinder implements MeterBinder {
 
     private final OutboxEventRepository outboxEventRepository;
     private final AtomicLong pendingCount = new AtomicLong(0);
+    private final AtomicLong lastSuccessEpochSeconds = new AtomicLong(0L);
 
     @Override
     public void bindTo(MeterRegistry registry) {
         Gauge
             .builder("outbox.pending.count", pendingCount, AtomicLong::get)
             .description("Number of pending outbox events awaiting relay")
+            .register(registry);
+
+        Gauge
+            .builder("outbox.metrics.last.success.timestamp.seconds", lastSuccessEpochSeconds, AtomicLong::get)
+            .description("Epoch seconds of the last successful outbox pending count query")
             .register(registry);
     }
 
@@ -44,6 +51,7 @@ public class OutboxMetricsBinder implements MeterBinder {
     public void refreshPendingCount() {
         try {
             pendingCount.set(outboxEventRepository.countByStatus(OutboxEventStatus.PENDING));
+            lastSuccessEpochSeconds.set(Instant.now().getEpochSecond());
         } catch (Exception e) {
             log.warn("Outbox PENDING 건수 조회 실패: error={}", e.getMessage());
         }
