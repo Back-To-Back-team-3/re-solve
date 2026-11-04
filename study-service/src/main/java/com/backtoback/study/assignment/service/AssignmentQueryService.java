@@ -1,7 +1,9 @@
 package com.backtoback.study.assignment.service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -129,29 +131,45 @@ public class AssignmentQueryService {
         List<ProblemSnapshotResponse> problemSnapshots
             = problems.stream().map(p -> ProblemSnapshotResponse.from(p, myCompletions.get(p.getProblemId()))).toList();
 
-        List<MemberProgressResponse> memberProgressList
-            = memberStatuses
-                .stream()
-                .map(m -> MemberProgressResponse.from(m, nicknameMap.get(m.getMemberId()), activeCount))
-                .toList();
+        Set<Long> enrolledMemberIds
+            = memberStatuses.stream().map(AssignmentMemberStatus::getMemberId).collect(Collectors.toSet());
+
+        List<MemberProgressResponse> memberProgressList = new ArrayList<>();
+        memberStatuses
+            .stream()
+            .map(m -> MemberProgressResponse.from(m, nicknameMap.get(m.getMemberId()), activeCount))
+            .forEach(memberProgressList::add);
+        // SCHEDULED 등 미편입 승인 구성원을 NOT_STARTED(0/0)으로 보완
+        approvedMemberIds
+            .stream()
+            .filter(id -> !enrolledMemberIds.contains(id))
+            .map(id -> MemberProgressResponse.notStarted(id, nicknameMap.get(id), activeCount))
+            .forEach(memberProgressList::add);
 
         return AssignmentDetailResponse
-            .from(assignment, problemSnapshots, memberProgressList, computeStats(memberStatuses, activeCount));
+            .from(
+                assignment,
+                problemSnapshots,
+                memberProgressList,
+                computeStats(memberStatuses, approvedMemberIds.size(), activeCount)
+            );
     }
 
-    private StudyStatsResponse computeStats(List<AssignmentMemberStatus> memberStatuses, int activeCount) {
-        if (activeCount == 0 || memberStatuses.isEmpty()) {
+    private StudyStatsResponse computeStats(
+        List<AssignmentMemberStatus> memberStatuses,
+        int totalMemberCount,
+        int activeCount
+    ) {
+        if (activeCount == 0 || totalMemberCount == 0) {
             return new StudyStatsResponse(null, null);
         }
-        double avgCompletion
-            = memberStatuses
-                .stream()
-                .mapToDouble(m -> (double)m.getCompletedCount() / activeCount)
-                .average()
-                .orElse(0.0);
-        double avgOnTime
-            = memberStatuses.stream().mapToDouble(m -> (double)m.getOnTimeCount() / activeCount).average().orElse(0.0);
-        return new StudyStatsResponse(Math.round(avgCompletion * 100.0) / 100.0, Math.round(avgOnTime * 100.0) / 100.0);
+        double sumCompletion
+            = memberStatuses.stream().mapToDouble(m -> (double)m.getCompletedCount() / activeCount).sum();
+        double sumOnTime = memberStatuses.stream().mapToDouble(m -> (double)m.getOnTimeCount() / activeCount).sum();
+        return new StudyStatsResponse(
+            Math.round(sumCompletion / totalMemberCount * 100.0) / 100.0,
+            Math.round(sumOnTime / totalMemberCount * 100.0) / 100.0
+        );
     }
 
     private AssignmentSummaryResponse toSummary(Assignment assignment, int activeCount, AssignmentMemberStatus ams) {

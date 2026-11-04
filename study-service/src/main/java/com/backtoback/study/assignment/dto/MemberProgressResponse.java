@@ -25,4 +25,15 @@ public record MemberProgressResponse(
             activeCount
         );
     }
+
+    public static MemberProgressResponse notStarted(Long memberId, String nickname, int activeCount) {
+        return new MemberProgressResponse(
+            String.valueOf(memberId),
+            nickname,
+            MemberProgressStatus.NOT_STARTED,
+            0,
+            0,
+            activeCount
+        );
+    }
 }
