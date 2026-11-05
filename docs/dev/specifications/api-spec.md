@@ -4753,10 +4753,11 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `EXAM_STUDY_CLOSED`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `CONTEST_DEPENDENCY_UNAVAILABLE`(503), `COMMON_INVALID_REQUEST`(400)
+    - `AUTH_ACCESS_DENIED`(403), `EXAM_STUDY_CLOSED`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `CONTEST_DEPENDENCY_UNAVAILABLE`(503), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `COMMON_INVALID_REQUEST`(400)
 - **외부 의존:**
     - `GET /internal/v1/problems/summaries?ids=` (problem) — `GENERAL`·`PUBLIC` 및 현재 `problemRevisionId` 검증. 실패 시 503
     - `GET /internal/v1/studies/{studyId}/members` (study) — 역할·스터디 상태 검증. 실패 시 503
+    - `GET /internal/v1/members/{memberId}/status` (member) — 회원 상태 확인. 실패 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **발행:** `ExamParticipantRegistered`는 참가 등록 시 (생성 단계에서는 불필요)
 
 #### 4.1.2 스터디 시험 목록
@@ -4907,7 +4908,7 @@
 
 - **Method / URI:** `PATCH /api/v1/exams/{examId}`
 - **인증:** 로그인 필요 + 현재 `LEADER`·`MANAGER`
-- **대응 테이블:** `exams`, `exam_problems`, `contest_resource_guards`, `outbox_events`
+- **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `contest_resource_guards`, `outbox_events`
 - **설명:** `SCHEDULED` 상태이고 양쪽 `startsAt`이 모두 서버 시간보다 미래일 때만 허용. 전체 설정을 전달한다. 문제를 다시 선택하면 그 시점 현재 회차로 고정하며 참가자 `personalEndsAt`을 함께 갱신. `examRevision`·`version` +1.
 - **요청 헤더:**
     
@@ -4949,6 +4950,7 @@
     }
     ```
     
+- 입력 제한은 시험 생성(4.1.1)과 같으며 `mode`는 기존 시험의 `FIXED`를 유지한다.
 - **응답 헤더:**
     
     
@@ -4960,13 +4962,13 @@
     ```json
     {
       "success": true,
-      "message": "시험이 생성되었습니다.",
+      "message": "시험이 수정되었습니다.",
       "data": {
         "examId": "55",
         "studyId": "12",
         "status": "SCHEDULED",
-        "examRevision": "1",
-        "version": "0",
+        "examRevision": "2",
+        "version": "1",
         "resultRevision": "0",
         "startsAt": "2026-10-20T20:00:00+09:00",
         "endsAt": "2026-10-20T21:30:00+09:00",
@@ -4978,6 +4980,20 @@
             "revisionNumber": 1,
             "score": "30.00",
             "displayOrder": 1
+          },
+          {
+            "problemId": "102",
+            "problemRevisionId": "1002",
+            "revisionNumber": 1,
+            "score": "30.00",
+            "displayOrder": 2
+          },
+          {
+            "problemId": "103",
+            "problemRevisionId": "1003",
+            "revisionNumber": 1,
+            "score": "40.00",
+            "displayOrder": 3
           }
         ]
       }
@@ -4986,7 +5002,9 @@
     
     - 시험 생성(4.1.1) 응답 본문 구조와 같음
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFY_NOT_ALLOWED`(409), `EXAM_UPDATE_CONFLICT`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `COMMON_INVALID_REQUEST`(400)
+    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFICATION_CLOSED`(409), `EXAM_REVISION_CONFLICT`(409), `EXAM_STUDY_CLOSED`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `COMMON_INVALID_REQUEST`(400)
+    - 스터디·문제 조회 실패 또는 불완전한 응답은 `CONTEST_DEPENDENCY_UNAVAILABLE`(503), 회원 상태 조회 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** 시험 생성(4.1.1)과 같은 스터디 구성원·문제 선택 조회와 회원 상태 조회를 수행한다.
 - **발행:** `ExamUpdated` — 전체 문제 목록·시간·배점·활성 등록자 ID 포함
 
 #### 4.1.5 시험 취소
