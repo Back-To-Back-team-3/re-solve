@@ -126,6 +126,8 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
     )
     List<Long> findExpiredPendingIds(@Param("now") LocalDateTime now, @Param("limit") int limit);
 
+    List<StudyMembership> findAllByStudyIdAndStatus(Long studyId, MembershipStatus status);
+
     /**
      * 지정 스터디의 지정 상태 가입 행을 잠금 읽기(FOR SHARE)로 조회한다(스케줄러 §5.2 동시성 설계 포인트).
      * REPEATABLE READ 스냅샷 회피를 위해 FOR SHARE를 사용한다.
