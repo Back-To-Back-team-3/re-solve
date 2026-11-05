@@ -36,8 +36,8 @@ public interface ProcessedEventRepository extends JpaRepository<ProcessedEvent, 
     @Modifying
     @Query(
         value = """
-            INSERT INTO processed_events (event_id, event_type, processed_at)
-            VALUES (:eventId, :eventType, :processedAt)
+            INSERT INTO processed_events (event_id, event_type, processed_at, created_at)
+            VALUES (:eventId, :eventType, :processedAt, :processedAt)
             ON DUPLICATE KEY UPDATE event_id = event_id
             """,
         nativeQuery = true

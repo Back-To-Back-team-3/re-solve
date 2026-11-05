@@ -21,6 +21,12 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:ap-northeast-2}
+      sqs:
+        enabled: ${AWS_SQS_ENABLED:true}
   data:
     redis:
       host: ${REDIS_HOST:localhost}
