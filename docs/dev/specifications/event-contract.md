@@ -297,9 +297,9 @@ flowchart LR
 | --- | --- | --- | --- |
 | `memberId` | string | Y |  |
 | `profileVersion` | integer | Y | `learning_profiles.profile_version`. 레벨 변경에도 증가 |
-| `goal` | string | N | 프로필 미입력이면 null (레벨만 변경된 경우) |
+| `goal` | string | N | `EMPLOYMENT`(취업·코딩테스트) / `CONTEST`(대회) / `STUDY`(학습). 프로필 미입력이면 null (레벨만 변경된 경우) |
 | `preferredLanguages` | string[] | Y | `java` / `python3` / `cpp` |
-| `activeTimeSlots` | string[] | Y | 값 체계 확정 필요 (정책 미결정, 2주차) |
+| `activeTimeSlots` | string[] | Y | `MORNING`(06–12시) / `AFTERNOON`(12–18시) / `EVENING`(18–24시) / `NIGHT`(00–06시) |
 | `tagLevels` | object[] | Y | `{tagId: string, level: "LV0"~"MASTER"}` 진입한 태그 전체 |
 
 | 소비자 | 처리 |
@@ -316,7 +316,7 @@ flowchart LR
   "correlationId": "req-77ab",
   "memberId": "7",
   "profileVersion": 4,
-  "goal": "JOB",
+  "goal": "EMPLOYMENT",
   "preferredLanguages": ["java"],
   "activeTimeSlots": ["EVENING"],
   "tagLevels": [
