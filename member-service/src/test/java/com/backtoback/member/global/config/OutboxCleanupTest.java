@@ -52,8 +52,9 @@ class OutboxCleanupTest {
         LocalDateTime now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
         String oldPublished = insert("PUBLISHED", now.minusDays(8));
         String recentPublished = insert("PUBLISHED", now.minusDays(6));
-        String pending = insert("PENDING", null);
-        String failed = insert("FAILED", null);
+        // 발행 시각이 오래돼도 PUBLISHED가 아니면 지우지 않는다(상태 조건 확인).
+        String pending = insert("PENDING", now.minusDays(8));
+        String failed = insert("FAILED", now.minusDays(8));
 
         outboxCleanupScheduler.cleanup();
 
