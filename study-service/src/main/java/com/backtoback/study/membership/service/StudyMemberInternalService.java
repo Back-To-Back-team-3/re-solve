@@ -37,9 +37,15 @@ public class StudyMemberInternalService {
         List<StudyMembersResponse.StudyMember> members
             = memberships
                 .stream()
-                .map(m -> new StudyMembersResponse.StudyMember(m.getMemberId(), m.getId(), m.getRole().name()))
+                .map(
+                    m -> new StudyMembersResponse.StudyMember(
+                        String.valueOf(m.getMemberId()),
+                        String.valueOf(m.getId()),
+                        m.getRole().name()
+                    )
+                )
                 .toList();
 
-        return new StudyMembersResponse(study.getId(), study.getStatus().name(), members);
+        return new StudyMembersResponse(String.valueOf(study.getId()), study.getStatus().name(), members);
     }
 }
