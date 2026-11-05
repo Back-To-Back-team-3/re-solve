@@ -114,8 +114,8 @@ public class AssignmentEnrollmentService {
             = withLock ? acReplicaRepository.findAllAcceptedByMemberIdAndProblemIdsWithLock(memberId, activeProblemIds)
                 : acReplicaRepository.findAllAcceptedByMemberIdAndProblemIds(memberId, activeProblemIds);
 
-        // preSolvedAllowed=false 시 starts_at 이전 제출은 근거에서 제외한다(ERD §4.5.7 completed_at 불변식)
-        // JPQL 쿼리가 (problemId, submittedAt) ASC로 정렬하므로 필터 후 문제별 첫 번째가 earliest valid AC
+        // preSolvedAllowed=false 시 starts_at 이전 제출은 근거에서 제외한다(ERD §4.5.7 completed_at 불변식).
+        // JPQL 쿼리가 (problemId, submittedAt) ASC로 정렬하므로 필터 후 문제별 첫 번째가 earliest valid AC이다.
         Map<Long, MemberAcReplica> earliestAcByProblem
             = acReplicas
                 .stream()
@@ -144,7 +144,11 @@ public class AssignmentEnrollmentService {
                 );
 
         if (affected == 0) {
-            // SCHEDULED 편입 후 OPEN 전이 시 기존 행 갱신(스케줄러 §5.2 OPEN upsert)
+            if (!withLock) {
+                // 가입 경로에서 이미 OPEN으로 편입된 멤버이므로 완료 기록 삽입을 생략한다.
+                return;
+            }
+            // 스케줄러 경로(withLock=true)에서만 SCHEDULED→OPEN 전이이므로 기존 행을 갱신한다(스케줄러 §5.2 OPEN upsert).
             memberStatusRepository
                 .updateStatusAndCounts(
                     assignment.getId(),
