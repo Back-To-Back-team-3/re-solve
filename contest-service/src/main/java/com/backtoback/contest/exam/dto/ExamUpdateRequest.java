@@ -3,6 +3,8 @@ package com.backtoback.contest.exam.dto;
 import java.time.OffsetDateTime;
 import java.util.List;
 
+import com.backtoback.contest.exam.dto.ExamCreateRequest.Problem;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -28,7 +30,7 @@ public record ExamUpdateRequest(
         min = 1,
         max = 20,
         message = "문제는 1개 이상 20개 이하여야 합니다."
-    ) List<@NotNull @Valid ExamCreateRequest.Problem> problems
+    ) List<@NotNull @Valid Problem> problems
 ) {
     /** 생성과 같은 범위 검증에 사용할 FIXED 설정을 만든다. */
     public ExamCreateRequest settings() {
