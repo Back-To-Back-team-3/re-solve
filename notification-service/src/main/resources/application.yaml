@@ -34,6 +34,23 @@ notification:
   sqs:
     queue-name: ${NOTIFICATION_SQS_QUEUE_NAME:notification-queue}
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus, metrics
+  endpoint:
+    health:
+      show-details: always
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
 logging:
   pattern:
     level: "%5p [correlationId=%X{correlationId:-}]"
