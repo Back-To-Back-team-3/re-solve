@@ -23,6 +23,14 @@ public interface GithubSyncJobRepository extends JpaRepository<GithubSyncJob, Lo
     Optional<GithubSyncJob> findBySubmissionId(Long submissionId);
 
     /**
+     * 동일 문제(problemId)의 가장 최근 작업 스냅샷(문제명·난이도)을 조회한다 (api-spec.md > 8.1.7).
+     *
+     * @param problemId 문제 ID
+     * @return 가장 최근 생성된 GithubSyncJob Optional
+     */
+    Optional<GithubSyncJob> findFirstByProblemIdOrderByIdDesc(Long problemId);
+
+    /**
      * 제출 ID로 작업과 연동 정보(connection)를 함께 조회한다 (api-spec.md > 8.1.7).
      *
      * @param submissionId 제출 ID

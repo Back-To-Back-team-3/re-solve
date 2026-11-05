@@ -347,10 +347,11 @@ class GithubSyncJobServiceTest {
     }
 
     @Test
-    @DisplayName("8.1.7 기존 작업이 없는 제출(연동 전 AC 제출)은 judge 검증 후 신규 PENDING 작업을 등록한다")
+    @DisplayName("8.1.7 기존 작업이 없는 제출은 동일 problemId의 기존 스냅샷으로 신규 PENDING 작업을 등록한다")
     void requestManualSyncCreatesNewPendingJobWhenAbsent() {
         GithubConnection connection = createConnection(true);
-        GithubSyncJob createdJob = GithubSyncJob.createPending(connection, 91023L, 301L, "problem-301", 1);
+        GithubSyncJob snapshotJob = GithubSyncJob.createPending(connection, 80000L, 301L, "두 수의 합", 2);
+        GithubSyncJob createdJob = GithubSyncJob.createPending(connection, 91023L, 301L, "두 수의 합", 2);
         ReflectionTestUtils.setField(createdJob, "id", 88L);
 
         given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
@@ -358,6 +359,7 @@ class GithubSyncJobServiceTest {
             .willReturn(Optional.empty())
             .willReturn(Optional.empty())
             .willReturn(Optional.of(createdJob));
+        given(syncJobRepository.findFirstByProblemIdOrderByIdDesc(301L)).willReturn(Optional.of(snapshotJob));
         given(judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(91023L, 1L))
             .willReturn(
                 new AcceptedSubmissionCodeResponse("91023", "301", "java", "class Solution {}", 1, OffsetDateTime.now())
@@ -368,9 +370,28 @@ class GithubSyncJobServiceTest {
         assertThat(response.syncJobId()).isEqualTo("88");
         assertThat(response.submissionId()).isEqualTo("91023");
         assertThat(response.status()).isEqualTo("PENDING");
-        verify(
-            syncJobRepository
-        ).insertPendingJobIfAbsent(eq(10L), eq(91023L), eq(301L), eq("problem-301"), eq(1), any(LocalDateTime.class));
+        verify(syncJobRepository)
+            .insertPendingJobIfAbsent(eq(10L), eq(91023L), eq(301L), eq("두 수의 합"), eq(2), any(LocalDateTime.class));
+    }
+
+    @Test
+    @DisplayName("8.1.7 기존 작업이 없고 동일 problemId의 스냅샷도 없으면 잘못된 경로 커밋 방지를 위해 GITHUB_SYNC_NOT_ALLOWED(409) 예외가 발생한다")
+    void requestManualSyncRejectsWhenProblemSnapshotAbsent() {
+        GithubConnection connection = createConnection(true);
+
+        given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
+        given(syncJobRepository.findBySubmissionIdWithConnection(91023L)).willReturn(Optional.empty());
+        given(syncJobRepository.findFirstByProblemIdOrderByIdDesc(301L)).willReturn(Optional.empty());
+        given(judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(91023L, 1L))
+            .willReturn(
+                new AcceptedSubmissionCodeResponse("91023", "301", "java", "class Solution {}", 1, OffsetDateTime.now())
+            );
+
+        assertThatThrownBy(() -> syncJobService.requestManualSync(1L, "91023"))
+            .isInstanceOfSatisfying(
+                IntegrationException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED)
+            );
     }
 
     @Test
@@ -385,6 +406,8 @@ class GithubSyncJobServiceTest {
         given(syncJobRepository.findBySubmissionIdWithConnection(91023L))
             .willReturn(Optional.empty())
             .willReturn(Optional.empty())
+            .willReturn(Optional.of(concurrentlySucceededJob));
+        given(syncJobRepository.findFirstByProblemIdOrderByIdDesc(301L))
             .willReturn(Optional.of(concurrentlySucceededJob));
         given(judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(91023L, 1L))
             .willReturn(

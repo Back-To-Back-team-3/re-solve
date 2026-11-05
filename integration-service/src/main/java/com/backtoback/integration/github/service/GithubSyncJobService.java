@@ -46,7 +46,7 @@ public class GithubSyncJobService {
         = List.of(GithubSyncJobStatus.PENDING, GithubSyncJobStatus.RETRY_WAITING, GithubSyncJobStatus.RATE_LIMITED);
     private static final int MAX_PAGE_SIZE = 100;
     private static final String ALLOWED_SORT_FIELD = "createdAt";
-    private static final int DEFAULT_FALLBACK_DIFFICULTY = 1;
+    private static final String TIE_BREAKER_SORT_FIELD = "id";
 
     private final GithubConnectionRepository connectionRepository;
     private final GithubSyncJobRepository syncJobRepository;
@@ -238,15 +238,19 @@ public class GithubSyncJobService {
             Optional<GithubSyncJob> jobOpt = syncJobRepository.findBySubmissionIdWithConnection(submissionId);
 
             if (jobOpt.isEmpty()) {
-                String fallbackTitle = "problem-" + problemId;
+                GithubSyncJob problemSnapshot
+                    = syncJobRepository
+                        .findFirstByProblemIdOrderByIdDesc(problemId)
+                        .orElseThrow(() -> new IntegrationException(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED));
+
                 GithubSyncJob pendingJob
                     = GithubSyncJob
                         .createPending(
                             activeConnection,
                             submissionId,
                             problemId,
-                            fallbackTitle,
-                            DEFAULT_FALLBACK_DIFFICULTY
+                            problemSnapshot.getProblemTitle(),
+                            problemSnapshot.getProblemDifficulty()
                         );
 
                 syncJobRepository
@@ -255,7 +259,7 @@ public class GithubSyncJobService {
                         submissionId,
                         problemId,
                         pendingJob.getProblemTitle(),
-                        DEFAULT_FALLBACK_DIFFICULTY,
+                        pendingJob.getProblemDifficulty(),
                         now
                     );
 
@@ -287,7 +291,7 @@ public class GithubSyncJobService {
 
     private Sort parseAndValidateSort(String sortParam) {
         if (sortParam == null || sortParam.isBlank()) {
-            return Sort.by(Sort.Direction.DESC, ALLOWED_SORT_FIELD);
+            return Sort.by(Sort.Direction.DESC, ALLOWED_SORT_FIELD, TIE_BREAKER_SORT_FIELD);
         }
 
         String[] tokens = sortParam.trim().split(",", -1);
@@ -301,15 +305,15 @@ public class GithubSyncJobService {
         }
 
         if (tokens.length == 1 || tokens[1].isBlank()) {
-            return Sort.by(Sort.Direction.DESC, ALLOWED_SORT_FIELD);
+            return Sort.by(Sort.Direction.DESC, ALLOWED_SORT_FIELD, TIE_BREAKER_SORT_FIELD);
         }
 
         String directionStr = tokens[1].trim().toLowerCase(Locale.ROOT);
         if ("desc".equals(directionStr)) {
-            return Sort.by(Sort.Direction.DESC, ALLOWED_SORT_FIELD);
+            return Sort.by(Sort.Direction.DESC, ALLOWED_SORT_FIELD, TIE_BREAKER_SORT_FIELD);
         }
         if ("asc".equals(directionStr)) {
-            return Sort.by(Sort.Direction.ASC, ALLOWED_SORT_FIELD);
+            return Sort.by(Sort.Direction.ASC, ALLOWED_SORT_FIELD, TIE_BREAKER_SORT_FIELD);
         }
         throw new IntegrationException(CommonErrorCode.COMMON_INVALID_REQUEST);
     }

@@ -218,4 +218,17 @@ class GithubSyncJobRepositoryTest {
         assertThat(reloadedFailed.getErrorMessage()).isNull();
         assertThat(reloadedFailed.getNextRetryAt()).isNull();
     }
+
+    @Test
+    @DisplayName("findFirstByProblemIdOrderByIdDesc는 동일 problemId의 가장 최근 작업 스냅샷을 조회한다")
+    void findFirstByProblemIdOrderByIdDesc() {
+        GithubSyncJob firstJob = GithubSyncJob.createPending(connection, 1020L, 301L, "두 수의 합", 1);
+        GithubSyncJob latestJob = GithubSyncJob.createPending(connection, 1021L, 301L, "두 수의 합 (개정)", 2);
+        githubSyncJobRepository.saveAllAndFlush(List.of(firstJob, latestJob));
+
+        GithubSyncJob snapshot = githubSyncJobRepository.findFirstByProblemIdOrderByIdDesc(301L).orElseThrow();
+        assertThat(snapshot.getSubmissionId()).isEqualTo(1021L);
+        assertThat(snapshot.getProblemTitle()).isEqualTo("두 수의 합 (개정)");
+        assertThat(snapshot.getProblemDifficulty()).isEqualTo(2);
+    }
 }
