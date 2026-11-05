@@ -6,6 +6,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,10 +44,6 @@ public class AssignmentCompletionRecalculationService {
 
     /**
      * 문제 1개의 재채점 결과를 반영해 완료 기록과 멤버 진행 상태를 갱신한다.
-     *
-     * @param assignmentId 문제집 ID
-     * @param memberId 멤버 ID
-     * @param problemId 문제 ID
      */
     @Transactional
     public void recalculate(Long assignmentId, Long memberId, Long problemId) {
@@ -69,14 +66,14 @@ public class AssignmentCompletionRecalculationService {
     private Optional<MemberAcReplica> findBasisAc(Assignment assignment, Long memberId, Long problemId) {
         if (assignment.isPreSolvedAllowed()) {
             return memberAcReplicaRepository
-                .findFirstByMemberIdAndProblemIdAndAcceptedTrueOrderBySubmittedAtAsc(memberId, problemId);
+                .findEarliestBasisAc(memberId, problemId, PageRequest.of(0, 1))
+                .stream()
+                .findFirst();
         }
         return memberAcReplicaRepository
-            .findFirstByMemberIdAndProblemIdAndAcceptedTrueAndSubmittedAtGreaterThanEqualOrderBySubmittedAtAsc(
-                memberId,
-                problemId,
-                assignment.getStartsAt()
-            );
+            .findEarliestBasisAcAfter(memberId, problemId, assignment.getStartsAt(), PageRequest.of(0, 1))
+            .stream()
+            .findFirst();
     }
 
     private void updateCompletion(

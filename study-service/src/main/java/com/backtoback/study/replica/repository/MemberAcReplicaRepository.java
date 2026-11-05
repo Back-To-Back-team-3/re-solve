@@ -2,8 +2,8 @@ package com.backtoback.study.replica.repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -31,19 +31,33 @@ public interface MemberAcReplicaRepository extends JpaRepository<MemberAcReplica
 
     /**
      * 사전 풀이 허용 시 근거 AC를 반환한다. 접수 시각이 가장 이른 행 1개(ERD 4.5.9 IDX 활용).
+     * {@code Pageable}로 1건만 반환하므로 {@code PageRequest.of(0, 1)}을 전달한다.
      */
-    Optional<MemberAcReplica> findFirstByMemberIdAndProblemIdAndAcceptedTrueOrderBySubmittedAtAsc(
-        Long memberId,
-        Long problemId
+    @Query(
+        "SELECT m FROM MemberAcReplica m "
+            + "WHERE m.memberId = :memberId AND m.problemId = :problemId AND m.accepted = true "
+            + "ORDER BY m.submittedAt ASC"
+    )
+    List<MemberAcReplica> findEarliestBasisAc(
+        @Param("memberId") Long memberId,
+        @Param("problemId") Long problemId,
+        Pageable pageable
     );
 
     /**
      * 사전 풀이 불허 시 근거 AC를 반환한다. startsAt 이후 중 접수 시각이 가장 이른 행 1개(ERD 4.5.9 IDX 활용).
+     * {@code Pageable}로 1건만 반환하므로 {@code PageRequest.of(0, 1)}을 전달한다.
      */
-    Optional<MemberAcReplica> findFirstByMemberIdAndProblemIdAndAcceptedTrueAndSubmittedAtGreaterThanEqualOrderBySubmittedAtAsc(
-        Long memberId,
-        Long problemId,
-        LocalDateTime startsAt
+    @Query(
+        "SELECT m FROM MemberAcReplica m "
+            + "WHERE m.memberId = :memberId AND m.problemId = :problemId AND m.accepted = true "
+            + "AND m.submittedAt >= :startsAt ORDER BY m.submittedAt ASC"
+    )
+    List<MemberAcReplica> findEarliestBasisAcAfter(
+        @Param("memberId") Long memberId,
+        @Param("problemId") Long problemId,
+        @Param("startsAt") LocalDateTime startsAt,
+        Pageable pageable
     );
 
     /**
