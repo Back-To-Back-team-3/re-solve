@@ -116,6 +116,52 @@ public class AssignmentCompletion extends BaseTimeEntity {
     }
 
     /**
+     * 재채점으로 근거 AC가 없어졌을 때 완료 인정을 취소한다(ERD 4.5.8 status=REVOKED, 정책 및 상태 §재채점 반영).
+     * basis* 필드와 completed_at을 null로 초기화한다.
+     */
+    public void revoke() {
+        this.status = CompletionStatus.REVOKED;
+        this.completionType = null;
+        this.basisSubmissionId = null;
+        this.basisSubmittedAt = null;
+        this.basisJudgeAttempt = null;
+        this.completedAt = null;
+    }
+
+    /**
+     * 재채점으로 근거 제출이 교체될 때 basis* 필드와 완료 유형을 갱신한다(정책 및 상태 §재채점 반영).
+     */
+    public void updateBasis(
+        CompletionType completionType,
+        Long basisSubmissionId,
+        LocalDateTime basisSubmittedAt,
+        Integer basisJudgeAttempt
+    ) {
+        this.completionType = completionType;
+        this.basisSubmissionId = basisSubmissionId;
+        this.basisSubmittedAt = basisSubmittedAt;
+        this.basisJudgeAttempt = basisJudgeAttempt;
+    }
+
+    /**
+     * REVOKED 상태에서 유효 AC가 다시 생겼을 때 COMPLETED로 복구한다(정책 및 상태 §재채점 반영).
+     */
+    public void reactivate(
+        CompletionType completionType,
+        Long basisSubmissionId,
+        LocalDateTime basisSubmittedAt,
+        Integer basisJudgeAttempt,
+        LocalDateTime completedAt
+    ) {
+        this.status = CompletionStatus.COMPLETED;
+        this.completionType = completionType;
+        this.basisSubmissionId = basisSubmissionId;
+        this.basisSubmittedAt = basisSubmittedAt;
+        this.basisJudgeAttempt = basisJudgeAttempt;
+        this.completedAt = completedAt;
+    }
+
+    /**
      * 채점 이벤트 반영으로 문제 1개의 완료를 인정한다. 근거 제출·채점 회차는 재채점 재계산의 비교 기준이 된다(ERD 4.5.8).
      */
     public static AssignmentCompletion complete(

@@ -95,6 +95,11 @@ public interface AssignmentMemberStatusRepository extends JpaRepository<Assignme
     );
 
     /**
+     * 한 문제집에서 한 멤버의 진행 상태를 조회한다. 재채점 재계산 시 현재 상태 확인에 사용한다(ERD 4.5.7).
+     */
+    java.util.Optional<AssignmentMemberStatus> findByAssignmentIdAndMemberId(Long assignmentId, Long memberId);
+
+    /**
      * 여러 문제집에서 한 멤버의 진행 상태를 일괄 조회한다 (API 명세서 §5.4.2 myStatus).
      */
     List<AssignmentMemberStatus> findByAssignmentIdInAndMemberId(List<Long> assignmentIds, Long memberId);
