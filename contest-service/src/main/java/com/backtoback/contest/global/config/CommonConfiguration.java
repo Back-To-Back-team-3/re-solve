@@ -10,6 +10,7 @@ import com.backtoback.common.jpa.config.JpaAuditingConfiguration;
 import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.logging.HttpClientConfiguration;
+import com.backtoback.contest.exam.client.ExamDependencyProperties;
 import com.backtoback.contest.exam.client.MemberClientProperties;
 
 /**
@@ -17,7 +18,12 @@ import com.backtoback.contest.exam.client.MemberClientProperties;
  * API 계약은 API 명세서 v1.1 §0.1, §0.3과 도메인 및 데이터베이스 v1.0 §5를 따른다.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(MemberClientProperties.class)
+@EnableConfigurationProperties(
+    {
+        MemberClientProperties.class,
+        ExamDependencyProperties.class
+    }
+)
 @Import(
     {
         GlobalExceptionHandler.class,
