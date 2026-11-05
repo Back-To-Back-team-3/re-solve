@@ -263,7 +263,7 @@ public class GithubSyncJobService {
                         now
                     );
 
-                jobOpt = syncJobRepository.findBySubmissionIdWithConnection(submissionId);
+                jobOpt = syncJobRepository.findBySubmissionIdWithConnectionForUpdate(submissionId);
             }
 
             GithubSyncJob targetJob
@@ -277,7 +277,7 @@ public class GithubSyncJobService {
                 syncJobRepository.resetJobToPendingIfRetryable(targetJob.getId(), activeConnection.getId(), now);
                 targetJob
                     = syncJobRepository
-                        .findBySubmissionIdWithConnection(submissionId)
+                        .findBySubmissionIdWithConnectionForUpdate(submissionId)
                         .orElseThrow(() -> new IntegrationException(CommonErrorCode.COMMON_INTERNAL_SERVER_ERROR));
             }
 

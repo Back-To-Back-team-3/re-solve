@@ -189,6 +189,11 @@ class GithubSyncJobRepositoryTest {
         GithubSyncJob found = githubSyncJobRepository.findBySubmissionIdWithConnection(1009L).orElseThrow();
         assertThat(found.getConnection().getMemberId()).isEqualTo(10L);
         assertThat(found.getProblemId()).isEqualTo(209L);
+
+        GithubSyncJob lockedFound
+            = githubSyncJobRepository.findBySubmissionIdWithConnectionForUpdate(1009L).orElseThrow();
+        assertThat(lockedFound.getConnection().getMemberId()).isEqualTo(10L);
+        assertThat(lockedFound.getProblemId()).isEqualTo(209L);
     }
 
     @Test

@@ -314,8 +314,8 @@ class GithubSyncJobServiceTest {
         given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
         given(syncJobRepository.findBySubmissionIdWithConnection(91023L))
             .willReturn(Optional.of(failedJob))
-            .willReturn(Optional.of(failedJob))
-            .willReturn(Optional.of(resetJob));
+            .willReturn(Optional.of(failedJob));
+        given(syncJobRepository.findBySubmissionIdWithConnectionForUpdate(91023L)).willReturn(Optional.of(resetJob));
         given(judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(91023L, 1L))
             .willReturn(
                 new AcceptedSubmissionCodeResponse("91023", "301", "java", "class Solution {}", 1, OffsetDateTime.now())
@@ -357,8 +357,8 @@ class GithubSyncJobServiceTest {
         given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
         given(syncJobRepository.findBySubmissionIdWithConnection(91023L))
             .willReturn(Optional.empty())
-            .willReturn(Optional.empty())
-            .willReturn(Optional.of(createdJob));
+            .willReturn(Optional.empty());
+        given(syncJobRepository.findBySubmissionIdWithConnectionForUpdate(91023L)).willReturn(Optional.of(createdJob));
         given(syncJobRepository.findFirstByProblemIdOrderByIdDesc(301L)).willReturn(Optional.of(snapshotJob));
         given(judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(91023L, 1L))
             .willReturn(
@@ -405,7 +405,8 @@ class GithubSyncJobServiceTest {
         given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
         given(syncJobRepository.findBySubmissionIdWithConnection(91023L))
             .willReturn(Optional.empty())
-            .willReturn(Optional.empty())
+            .willReturn(Optional.empty());
+        given(syncJobRepository.findBySubmissionIdWithConnectionForUpdate(91023L))
             .willReturn(Optional.of(concurrentlySucceededJob));
         given(syncJobRepository.findFirstByProblemIdOrderByIdDesc(301L))
             .willReturn(Optional.of(concurrentlySucceededJob));

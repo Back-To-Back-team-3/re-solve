@@ -8,12 +8,15 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.backtoback.integration.github.domain.GithubSyncJob;
 import com.backtoback.integration.github.domain.GithubSyncJobStatus;
+
+import jakarta.persistence.LockModeType;
 
 /**
  * GitHub 자동 커밋 작업 JPA 리포지토리 (erd.md > 4.8.2, scheduler.md > 8.1, 8.2).
@@ -38,6 +41,17 @@ public interface GithubSyncJobRepository extends JpaRepository<GithubSyncJob, Lo
      */
     @Query("SELECT j FROM GithubSyncJob j JOIN FETCH j.connection WHERE j.submissionId = :submissionId")
     Optional<GithubSyncJob> findBySubmissionIdWithConnection(@Param("submissionId") Long submissionId);
+
+    /**
+     * 제출 ID로 작업과 연동 정보(connection)를 잠금 읽기(현재 읽기)로 함께 조회한다 (api-spec.md > 8.1.7).
+     * REPEATABLE READ 격리 수준에서 조건부 INSERT/UPDATE 직후 타 트랜잭션의 최신 커밋 값을 읽기 위해 사용한다.
+     *
+     * @param submissionId 제출 ID
+     * @return 연동 정보가 포함된 최신 GithubSyncJob
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT j FROM GithubSyncJob j JOIN FETCH j.connection WHERE j.submissionId = :submissionId")
+    Optional<GithubSyncJob> findBySubmissionIdWithConnectionForUpdate(@Param("submissionId") Long submissionId);
 
     boolean existsBySubmissionId(Long submissionId);
 
