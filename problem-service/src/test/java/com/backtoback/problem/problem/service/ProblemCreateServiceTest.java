@@ -22,6 +22,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -340,25 +341,60 @@ class ProblemCreateServiceTest {
         verify(store).recordLinkFailure(any());
     }
 
-    /** 본문 업로드 이후 테스트 파일 저장 실패 시 문제 등록과 감사 기록을 시작하지 않는다. */
-    @Test
-    @DisplayName("본문 업로드 성공 후 테스트 파일 업로드 실패는 503으로 응답한다")
-    void testUploadFailureSkipsRegistration() {
-        doThrow(new IllegalStateException("테스트 파일 업로드 실패"))
-            .when(uploads)
-            .upload(anyString(), eq(8012L), any(), eq(false));
-        assertThatThrownBy(() -> service.create(8012, "upload-fail", ProblemCreateFixtures.request(), null))
+    /**
+     * 업로드 도중 실패하면 완료된 파일만 분류하고 문제와 감사 기록을 생성하지 않는다.
+     *
+     * @param completedUploads 실패 전에 완료할 파일 수
+     */
+    @ParameterizedTest
+    @ValueSource(
+        ints = {
+            0,
+            1,
+            2
+        }
+    )
+    @DisplayName("업로드 도중 실패하면 완료된 본문과 테스트 파일을 미등록으로 분류한다")
+    void testUploadFailureSkipsRegistration(int completedUploads) {
+        long authorId = 9100L + completedUploads;
+        var count = new AtomicInteger();
+        doAnswer(invocation -> {
+            if (count.getAndIncrement() == completedUploads) {
+                throw new IllegalStateException("파일 업로드 실패");
+            }
+            boolean body = invocation.getArgument(3);
+            var ticket = tracking.start(invocation.getArgument(1), invocation.getArgument(2), body);
+            tracking.complete(ticket, "fixed-version");
+            return ticket.id();
+        }).when(uploads).upload(anyString(), eq(authorId), any(), anyBoolean());
+        assertThatThrownBy(() -> service.create(authorId, "upload-fail", ProblemCreateFixtures.request(), null))
             .isInstanceOfSatisfying(
                 ProblemException.class,
                 failure -> assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
             );
         verify(store, never()).save(any(), any(), any());
-        assertThat(jdbc.queryForObject("""
-            SELECT COUNT(*) FROM problem_body_assets WHERE owner_id=8012 AND uploaded_at IS NOT NULL
-            """, Integer.class)).isOne();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM problem_revisions WHERE author_id=8012", Integer.class))
+        if (completedUploads == 0) {
+            verify(store, never()).recordLinkFailure(any());
+        } else {
+            verify(store).recordLinkFailure(any());
+        }
+        assertThat(jdbc.queryForList("""
+            SELECT failure_code FROM problem_body_assets WHERE owner_id=? AND uploaded_at IS NOT NULL
+            """, String.class, authorId))
+            .containsExactlyElementsOf(
+                java.util.Collections.nCopies(Math.min(1, completedUploads), "REGISTRATION_NOT_COMMITTED")
+            );
+        assertThat(jdbc.queryForList("""
+            SELECT failure_code FROM problem_test_assets WHERE owner_id=? AND uploaded_at IS NOT NULL
+            """, String.class, authorId))
+            .containsExactlyElementsOf(
+                java.util.Collections.nCopies(Math.max(0, completedUploads - 1), "REGISTRATION_NOT_COMMITTED")
+            );
+        assertThat(
+            jdbc.queryForObject("SELECT COUNT(*) FROM problem_revisions WHERE author_id=?", Integer.class, authorId)
+        ).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_logs WHERE actor_id=?", Integer.class, authorId))
             .isZero();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_logs WHERE actor_id=8012", Integer.class)).isZero();
     }
 
     /**

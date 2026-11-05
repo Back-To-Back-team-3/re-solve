@@ -50,7 +50,7 @@ public class ProblemCreateService {
             throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
         var body = serializer.serializeBody(request.description(), request.constraints(), request.examples());
-        Long bodyId;
+        Long bodyId = null;
         var testFiles = new ArrayList<ProblemCreateFiles.TestFile>();
         try {
             bodyId = uploads.upload(storage.bucket(), authorId, body, true);
@@ -60,6 +60,9 @@ public class ProblemCreateService {
                 testFiles.add(new ProblemCreateFiles.TestFile(id, content.sha256(), content.sizeBytes()));
             }
         } catch (RuntimeException failure) {
+            if (bodyId != null) {
+                recordFailure(new ProblemCreateFiles(bodyId, java.util.List.copyOf(testFiles)), failure);
+            }
             throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
         var command
