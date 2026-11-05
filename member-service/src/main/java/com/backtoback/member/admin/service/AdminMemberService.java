@@ -2,6 +2,7 @@ package com.backtoback.member.admin.service;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
@@ -19,6 +20,7 @@ import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.domain.MemberRole;
 import com.backtoback.member.member.domain.MemberStatus;
 import com.backtoback.member.member.repository.MemberRepository;
+import com.backtoback.member.member.service.MemberEventPublisher;
 
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
@@ -33,6 +35,7 @@ public class AdminMemberService {
 
     private final MemberRepository memberRepository;
     private final AuditLogRepository auditLogRepository;
+    private final MemberEventPublisher memberEventPublisher;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -48,7 +51,7 @@ public class AdminMemberService {
 
     /**
      * 회원을 정지하거나 해제한다 (API 명세서 1.6.2). {@code ACTIVE ↔ SUSPENDED}만 허용하고 탈퇴 회원·같은 상태는 400이다.
-     * 같은 트랜잭션에서 감사 로그를 남긴다.
+     * 같은 트랜잭션에서 감사 로그와 {@code MemberSuspended}(이벤트 계약 M2)를 남긴다.
      */
     @Transactional
     public Member changeStatus(Long actorId, Long memberId, MemberStatus target, String reason, String clientIp) {
@@ -57,12 +60,14 @@ public class AdminMemberService {
         if (member.isWithdrawn() || target == MemberStatus.WITHDRAWN || target == before) {
             throw new MemberException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
+        // DATETIME(6)의 반올림 저장과 이벤트 changedAt(6자리 버림)이 같은 시각이 되도록 미리 자른다.
+        LocalDateTime now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
         if (target == MemberStatus.SUSPENDED) {
-            member.suspend(LocalDateTime.now(clock));
+            member.suspend(now);
         } else {
             member.unsuspend();
         }
-        // shortcut: MemberSuspended Outbox 발행 없음, 공통 이벤트 모듈을 member에 적용할 때 같은 트랜잭션에서 기록한다.
+        memberEventPublisher.memberSuspended(member, reason, now);
         String action = target == MemberStatus.SUSPENDED ? ACTION_SUSPEND : ACTION_UNSUSPEND;
         audit(
             actorId,
