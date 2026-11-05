@@ -18,6 +18,15 @@ public interface AssignmentCompletionRepository extends JpaRepository<Assignment
     List<AssignmentCompletion> findByAssignmentIdAndMemberId(Long assignmentId, Long memberId);
 
     /**
+     * 문제 1개의 완료 기록을 반환한다. 재채점 재계산 시 기존 행 유무 판단에 사용한다(ERD 4.5.8 UK).
+     */
+    java.util.Optional<AssignmentCompletion> findByAssignmentIdAndMemberIdAndProblemId(
+        Long assignmentId,
+        Long memberId,
+        Long problemId
+    );
+
+    /**
      * 이미 있으면 무시한다. status는 항상 COMPLETED로 고정된다(ERD §6.5 uk_assignment_completions_assignment_member_problem).
      */
     @Modifying(clearAutomatically = true)
