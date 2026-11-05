@@ -1,5 +1,6 @@
 package com.backtoback.member.member.controller;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -183,7 +184,7 @@ class MemberControllerTest {
             .perform(get("/api/v1/members/me/learning-profile").header("X-User-Id", "8").header("X-User-Role", "USER"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.success").value(true))
-            .andExpect(jsonPath("$.data").isEmpty());
+            .andExpect(jsonPath("$.data").value(nullValue()));
     }
 
     @Test
@@ -211,10 +212,12 @@ class MemberControllerTest {
     }
 
     @Test
-    @DisplayName("1.3.2 목록에 없는 목표·언어·시간대, 빈 배열, 누락은 COMMON_INVALID_REQUEST이고 저장하지 않는다")
+    @DisplayName("1.3.2 목록에 없는 목표·언어·시간대, 숫자(순서 번호), 빈 배열, 누락은 COMMON_INVALID_REQUEST이고 저장하지 않는다")
     void saveLearningProfileRejectsInvalidValues() throws Exception {
         String[] bodies
             = {
+                "{\"goal\":0,\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[\"EVENING\"]}",
+                "{\"goal\":\"STUDY\",\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[0]}",
                 "{\"goal\":\"JOB\",\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[\"EVENING\"]}",
                 "{\"goal\":\"STUDY\",\"preferredLanguages\":[\"kotlin\"],\"activeTimeSlots\":[\"EVENING\"]}",
                 "{\"goal\":\"STUDY\",\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[\"DAWN\"]}",
