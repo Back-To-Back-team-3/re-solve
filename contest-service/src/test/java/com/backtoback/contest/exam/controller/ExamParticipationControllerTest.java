@@ -36,13 +36,16 @@ class ExamParticipationControllerTest {
     @MockitoBean
     private ExamParticipationService service;
 
+    /** 같은 응답 본문을 신규와 기존 참가에 사용해 HTTP 상태 차이를 확인한다. */
     @Test
     @DisplayName("신규 등록은 201, 기존 등록은 200과 같은 참가 ID를 반환한다")
     void registrationStatus() throws Exception {
+        // given
         var time = OffsetDateTime.parse("2026-10-20T21:30:00+09:00");
         var response = new ExamParticipationResponse("411", "55", "REGISTERED", null, time, time, "1");
         given(service.register("55", "7"))
             .willReturn(new Registration(response, true), new Registration(response, false));
+        // when & then
         for (int expected : new int[] {
             201,
             200
@@ -56,9 +59,11 @@ class ExamParticipationControllerTest {
         }
     }
 
+    /** Gateway 인증 정보가 없는 요청의 접근 경계를 확인한다. */
     @Test
     @DisplayName("인증되지 않은 참가 등록 요청을 거절한다")
     void requiresAuthentication() throws Exception {
+        // when & then
         mvc.perform(post("/api/v1/exams/55/participants")).andExpect(status().isUnauthorized());
     }
 }
