@@ -149,7 +149,13 @@ public class AssignmentCompletionRecalculationService {
                 .count();
 
         MemberProgressStatus newStatus
-            = resolveProgressStatus(completedCount, totalCount, assignment.getDeadlineAt(), now, !completions.isEmpty());
+            = resolveProgressStatus(
+                completedCount,
+                totalCount,
+                assignment.getDeadlineAt(),
+                now,
+                !completions.isEmpty()
+            );
         LocalDateTime completedAt = (newStatus == MemberProgressStatus.COMPLETED) ? now : null;
 
         memberStatusRepository
