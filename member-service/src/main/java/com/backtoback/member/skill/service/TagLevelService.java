@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.member.global.error.MemberErrorCode;
 import com.backtoback.member.global.error.MemberException;
-import com.backtoback.member.member.domain.Member;
+import com.backtoback.member.member.service.LearningProfileService;
 import com.backtoback.member.member.service.MemberService;
 import com.backtoback.member.skill.client.ProblemTagClient;
 import com.backtoback.member.skill.config.SkillProperties;
@@ -28,6 +28,7 @@ public class TagLevelService {
     private final MemberTagLevelRepository tagLevelRepository;
     private final MemberLevelHistoryRepository historyRepository;
     private final MemberService memberService;
+    private final LearningProfileService learningProfileService;
     private final ProblemTagClient problemTagClient;
     private final SkillProperties properties;
     private final Clock clock;
@@ -38,10 +39,8 @@ public class TagLevelService {
      */
     @Transactional
     public MemberTagLevel enter(Long memberId, Long tagId) {
-        Member member = memberService.getMember(memberId);
-        if (member.isSuspended()) {
-            throw new MemberException(MemberErrorCode.MEMBER_SUSPENDED);
-        }
+        // 태그 레벨 행의 FK가 회원 행에 공유 잠금을 걸기 전에 먼저 배타 잠금을 잡아, 같은 회원의 동시 진입이 교착되지 않게 한다.
+        memberService.lockActiveMember(memberId);
         if (tagLevelRepository.existsByMemberIdAndTagId(memberId, tagId)) {
             throw new MemberException(MemberErrorCode.LEVEL_ALREADY_ENTERED);
         }
@@ -56,8 +55,7 @@ public class TagLevelService {
             throw new MemberException(MemberErrorCode.LEVEL_ALREADY_ENTERED, exception);
         }
         historyRepository.save(MemberLevelHistory.entrySkip(tagLevel));
-        // shortcut: learning_profiles.profile_version 증가·LearningProfileUpdated 발행 없음, 학습 프로필(1.3)과 Outbox를 적용할 때 같은
-        // 트랜잭션에서 처리한다.
+        learningProfileService.tagLevelsChanged(memberId);
         return tagLevel;
     }
 
