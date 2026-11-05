@@ -24,6 +24,7 @@ public class MemberEventPublisher {
     static final String AGGREGATE_TYPE = "MEMBER";
     static final String MEMBER_UPDATED = "MemberUpdated";
     static final String MEMBER_SUSPENDED = "MemberSuspended";
+    static final String LEARNING_PROFILE_UPDATED = "LearningProfileUpdated";
     static final String SCHEMA_VERSION = "v1";
     // 이벤트 계약 공통 규칙: +09:00, 마이크로초 6자리 (occurredAt과 같은 형식)
     private static final DateTimeFormatter EVENT_TIME_FORMAT
@@ -59,6 +60,21 @@ public class MemberEventPublisher {
                 correlationId(),
                 MemberSuspendedPayload
                     .of(member, reason, EVENT_TIME_FORMAT.format(changedAt.atZone(ClockConfiguration.SERVICE_ZONE)))
+            );
+    }
+
+    /**
+     * 학습 프로필 전체 상태 (M4). 프로필 항목 변경과 태그 레벨 변경 모두 같은 {@code profileVersion} 계열로 보낸다.
+     */
+    public void learningProfileUpdated(LearningProfileSnapshot snapshot) {
+        outboxEventWriter
+            .append(
+                AGGREGATE_TYPE,
+                LEARNING_PROFILE_UPDATED,
+                SCHEMA_VERSION,
+                String.valueOf(snapshot.memberId()),
+                correlationId(),
+                LearningProfileUpdatedPayload.from(snapshot)
             );
     }
 

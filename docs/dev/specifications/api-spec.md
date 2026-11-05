@@ -542,7 +542,7 @@
     | `goal` | string | 학습 목표. `EMPLOYMENT`(취업·코딩테스트) / `CONTEST`(대회) / `STUDY`(학습) |
     | `preferredLanguages` | string[] | `java` / `python3` / `cpp` |
     | `activeTimeSlots` | string[] | 활동 시간대. `MORNING`(06–12시) / `AFTERNOON`(12–18시) / `EVENING`(18–24시) / `NIGHT`(00–06시) |
-    | `tagLevels[]` | object[] | `tagId`, `tagName`, `level` |
+    | `tagLevels[]` | object[] | `tagId`, `level`. 진입한 태그 전체. 태그 이름은 담지 않는다(1.4.1과 같음, 화면은 2.5.1 태그 목록으로 이름을 붙인다) |
     | `profileVersion` | string | 변경 순번 |
     | `updatedAt` | string (date-time) | 마지막 변경 |
     
@@ -551,7 +551,7 @@
       "success": true, "message": null,
       "data": {
         "goal": "EMPLOYMENT", "preferredLanguages": ["java"], "activeTimeSlots": ["EVENING"],
-        "tagLevels": [ { "tagId": "3", "tagName": "해시", "level": "LV2" } ],
+        "tagLevels": [ { "tagId": "3", "level": "LV2" } ],
         "profileVersion": "4", "updatedAt": "2026-10-02T21:00:00+09:00"
       }
     }

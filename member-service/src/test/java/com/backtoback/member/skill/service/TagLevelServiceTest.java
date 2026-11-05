@@ -28,8 +28,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.common.exception.BusinessException;
 import com.backtoback.member.global.error.MemberErrorCode;
+import com.backtoback.member.global.error.MemberException;
 import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.domain.MemberStatus;
+import com.backtoback.member.member.service.LearningProfileService;
 import com.backtoback.member.member.service.MemberService;
 import com.backtoback.member.skill.client.ProblemTagClient;
 import com.backtoback.member.skill.config.SkillProperties;
@@ -58,6 +60,9 @@ class TagLevelServiceTest {
     private MemberService memberService;
 
     @Mock
+    private LearningProfileService learningProfileService;
+
+    @Mock
     private ProblemTagClient problemTagClient;
 
     private TagLevelService tagLevelService;
@@ -72,6 +77,7 @@ class TagLevelServiceTest {
                 tagLevelRepository,
                 historyRepository,
                 memberService,
+                learningProfileService,
                 problemTagClient,
                 properties,
                 clock
@@ -81,7 +87,7 @@ class TagLevelServiceTest {
     @Test
     @DisplayName("태그 진입: LV1로 저장하고 ENTRY_SKIP 이력을 남긴다")
     void enterStartsAtLv1WithHistory() {
-        given(memberService.getMember(7L)).willReturn(member(MemberStatus.ACTIVE));
+        given(memberService.lockActiveMember(7L)).willReturn(member(MemberStatus.ACTIVE));
         given(problemTagClient.exists(3L)).willReturn(true);
 
         MemberTagLevel tagLevel = tagLevelService.enter(7L, 3L);
@@ -96,12 +102,13 @@ class TagLevelServiceTest {
         assertThat(history.getValue().getFromLevel()).isNull();
         assertThat(history.getValue().getToLevel()).isEqualTo(TagLevel.LV1);
         assertThat(history.getValue().getReason()).isEqualTo(LevelChangeReason.ENTRY_SKIP);
+        verify(learningProfileService).tagLevelsChanged(7L);
     }
 
     @Test
     @DisplayName("태그 진입: 이미 진입했거나 동시 진입이 유일 제약에 걸리면 LEVEL_ALREADY_ENTERED")
     void enterRejectsDuplicate() {
-        given(memberService.getMember(7L)).willReturn(member(MemberStatus.ACTIVE));
+        given(memberService.lockActiveMember(7L)).willReturn(member(MemberStatus.ACTIVE));
         given(tagLevelRepository.existsByMemberIdAndTagId(7L, 3L)).willReturn(true, false);
         given(problemTagClient.exists(3L)).willReturn(true);
         given(tagLevelRepository.saveAndFlush(any())).willThrow(new DataIntegrityViolationException("uk"));
@@ -113,24 +120,26 @@ class TagLevelServiceTest {
                 .isEqualTo(MemberErrorCode.LEVEL_ALREADY_ENTERED);
         }
         verify(historyRepository, never()).save(any());
+        verify(learningProfileService, never()).tagLevelsChanged(any());
     }
 
     @Test
     @DisplayName("태그 진입: problem에 없는 태그면 LEVEL_TAG_NOT_FOUND, 정지 회원이면 MEMBER_SUSPENDED")
     void enterRejectsMissingTagAndSuspendedMember() {
-        given(memberService.getMember(7L)).willReturn(member(MemberStatus.ACTIVE));
+        given(memberService.lockActiveMember(7L)).willReturn(member(MemberStatus.ACTIVE));
         given(problemTagClient.exists(99L)).willReturn(false);
         assertThatThrownBy(() -> tagLevelService.enter(7L, 99L))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
             .isEqualTo(MemberErrorCode.LEVEL_TAG_NOT_FOUND);
 
-        given(memberService.getMember(8L)).willReturn(member(MemberStatus.SUSPENDED));
+        given(memberService.lockActiveMember(8L)).willThrow(new MemberException(MemberErrorCode.MEMBER_SUSPENDED));
         assertThatThrownBy(() -> tagLevelService.enter(8L, 3L))
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
             .isEqualTo(MemberErrorCode.MEMBER_SUSPENDED);
         verify(tagLevelRepository, never()).saveAndFlush(any());
+        verify(learningProfileService, never()).tagLevelsChanged(any());
     }
 
     @Test

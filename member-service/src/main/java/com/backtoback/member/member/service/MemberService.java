@@ -59,13 +59,7 @@ public class MemberService {
      */
     @Transactional
     public Member updateNickname(Long memberId, String nickname) {
-        Member member
-            = memberRepository
-                .findForUpdateById(memberId)
-                .orElseThrow(() -> new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
-        if (member.isSuspended()) {
-            throw new MemberException(MemberErrorCode.MEMBER_SUSPENDED);
-        }
+        Member member = lockActiveMember(memberId);
         if (nickname != null) {
             String trimmed = nickname.strip();
             int length = trimmed.codePointCount(0, trimmed.length());
@@ -76,6 +70,21 @@ public class MemberService {
             if (member.changeNickname(trimmed)) {
                 memberEventPublisher.memberUpdated(member);
             }
+        }
+        return member;
+    }
+
+    /**
+     * 회원의 쓰기 요청용 조회. 같은 회원의 변경({@code profile_version} 증가)이 겹치지 않도록 행을 잠그고, 정지 회원은 403이다.
+     */
+    @Transactional
+    public Member lockActiveMember(Long memberId) {
+        Member member
+            = memberRepository
+                .findForUpdateById(memberId)
+                .orElseThrow(() -> new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
+        if (member.isSuspended()) {
+            throw new MemberException(MemberErrorCode.MEMBER_SUSPENDED);
         }
         return member;
     }
