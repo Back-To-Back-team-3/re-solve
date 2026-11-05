@@ -5,26 +5,35 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
+import org.slf4j.MDC;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.contest.exam.client.ExamDependencyClient;
 import com.backtoback.contest.exam.client.ExamDependencyClient.ProblemSummary;
 import com.backtoback.contest.exam.domain.Exam;
 import com.backtoback.contest.exam.domain.ExamMode;
 import com.backtoback.contest.exam.domain.ExamProblem;
+import com.backtoback.contest.exam.domain.ExamStatus;
 import com.backtoback.contest.exam.dto.ExamCreateRequest;
 import com.backtoback.contest.exam.dto.ExamResponse;
+import com.backtoback.contest.exam.dto.ExamUpdateRequest;
 import com.backtoback.contest.exam.repository.ContestResourceGuardRepository;
 import com.backtoback.contest.exam.repository.ContestResourceGuardRepository.Resource;
 import com.backtoback.contest.exam.repository.ExamProblemRepository;
@@ -45,6 +54,7 @@ public class ExamManagementService {
     private final ExamRepository exams;
     private final ExamProblemRepository examProblems;
     private final JdbcTemplate jdbc;
+    private final OutboxEventWriter outbox;
     private final TransactionTemplate transactions;
     private final Clock clock;
 
@@ -53,6 +63,40 @@ public class ExamManagementService {
         long study = positiveId(studyId);
         long member = positiveId(memberId);
         var selection = validate(request);
+        authorize(study, member);
+        var summaries = dependencies.problems(selection.ids()).items();
+        Map<Long, ProblemSummary> byId = validateSummaries(selection.ids(), summaries);
+        return transactions.execute(status -> save(study, member, request, selection, byId));
+    }
+
+    /** 최신 권한과 문제를 조회한 뒤 부모 행 잠금 아래 버전과 시작 시각을 다시 확인한다. */
+    public ExamResponse update(String examId, String memberId, ExamUpdateRequest request) {
+        long id = positiveId(examId);
+        long member = positiveId(memberId);
+        if (request == null || request.version() == null || !request.version().matches("0|[1-9][0-9]*")) {
+            throw invalid();
+        }
+        long version;
+        try {
+            version = Long.parseLong(request.version());
+        } catch (NumberFormatException failure) {
+            throw invalid();
+        }
+        var settings = request.settings();
+        var selection = validate(settings);
+        var exam = exams.findById(id).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
+        long study = exam.getStudyId();
+        authorize(study, member);
+        var summaries = validateSummaries(selection.ids(), dependencies.problems(selection.ids()).items());
+        try {
+            return transactions.execute(status -> updateLocked(id, study, version, settings, selection, summaries));
+        } catch (OptimisticLockingFailureException failure) {
+            throw new ContestException(ContestErrorCode.EXAM_REVISION_CONFLICT, failure);
+        }
+    }
+
+    /** 현재 회원 상태와 스터디의 관리 권한을 확인한다. */
+    private void authorize(long study, long member) {
         if (!"ACTIVE".equals(members.refresh(member))) {
             throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
         }
@@ -72,9 +116,6 @@ public class ExamManagementService {
             )) {
             throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
         }
-        var summaries = dependencies.problems(selection.ids()).items();
-        Map<Long, ProblemSummary> byId = validateSummaries(selection.ids(), summaries);
-        return transactions.execute(status -> save(study, member, request, selection, byId));
     }
 
     /** 입력의 범위와 중복을 확인한다. */
@@ -114,8 +155,10 @@ public class ExamManagementService {
 
     /** 시작과 길이는 실제 저장 직전에도 현재 서버 시각으로 검사한다. */
     private void validateTime(OffsetDateTime startsAt, OffsetDateTime endsAt) {
-        Duration duration = Duration.between(startsAt.toInstant(), endsAt.toInstant());
-        if (!startsAt.toInstant().isAfter(clock.instant()) || duration.compareTo(Duration.ofMinutes(1)) < 0
+        var start = startsAt.toInstant().truncatedTo(ChronoUnit.MICROS);
+        var end = endsAt.toInstant().truncatedTo(ChronoUnit.MICROS);
+        Duration duration = Duration.between(start, end);
+        if (!start.isAfter(clock.instant()) || duration.compareTo(Duration.ofMinutes(1)) < 0
             || duration.compareTo(Duration.ofMinutes(180)) > 0) {
             throw invalid();
         }
@@ -172,6 +215,31 @@ public class ExamManagementService {
         Selection selection,
         Map<Long, ProblemSummary> summaries
     ) {
+        verifyResources(study, selection, summaries);
+        validateTime(request.startsAt(), request.endsAt());
+        var exam
+            = exams
+                .saveAndFlush(
+                    Exam
+                        .create(
+                            study,
+                            member,
+                            request.title(),
+                            ExamMode.FIXED,
+                            local(request.startsAt()),
+                            local(request.endsAt()),
+                            null,
+                            1,
+                            selection.total()
+                        )
+                );
+        var pinned = pinProblems(exam, request, summaries);
+        examProblems.saveAll(pinned);
+        return ExamResponse.from(exam, pinned);
+    }
+
+    /** 가드 잠금 이후 최신 스냅샷이 여전히 편입 가능한지 확인한다. */
+    private void verifyResources(long study, Selection selection, Map<Long, ProblemSummary> summaries) {
         var resources = new ArrayList<Resource>();
         resources.add(new Resource("STUDY", study));
         selection.ids().forEach(id -> resources.add(new Resource("PROBLEM", id)));
@@ -217,23 +285,111 @@ public class ExamManagementService {
                 throw dependencyFailure();
             }
         }
+    }
+
+    /** 시험과 참가자 잠금, 문제 교체 및 Outbox 저장을 한 트랜잭션에 묶는다. */
+    private ExamResponse updateLocked(
+        long id,
+        long study,
+        long version,
+        ExamCreateRequest request,
+        Selection selection,
+        Map<Long, ProblemSummary> summaries
+    ) {
+        verifyResources(study, selection, summaries);
+        var exam = exams.findForUpdate(id).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
+        var now = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE);
+        if (!studyEquals(exam, study) || exam.getMode() != ExamMode.FIXED || exam.getStatus() != ExamStatus.SCHEDULED
+            || !exam.getStartsAt().isAfter(now)) {
+            throw new ContestException(ContestErrorCode.EXAM_MODIFICATION_CLOSED);
+        }
+        if (exam.getVersion() != version) {
+            throw new ContestException(ContestErrorCode.EXAM_REVISION_CONFLICT);
+        }
         validateTime(request.startsAt(), request.endsAt());
-        var exam
-            = exams
-                .saveAndFlush(
-                    Exam
-                        .create(
-                            study,
-                            member,
-                            request.title(),
-                            ExamMode.FIXED,
-                            local(request.startsAt()),
-                            local(request.endsAt()),
-                            null,
-                            1,
-                            selection.total()
-                        )
+        var memberIds
+            = jdbc
+                .queryForList(
+                    "SELECT member_id FROM exam_participants "
+                        + "WHERE exam_id = ? AND status <> 'CANCELED' ORDER BY id FOR UPDATE",
+                    Long.class,
+                    id
                 );
+        jdbc
+            .update(
+                "UPDATE exam_participants SET personal_ends_at = ?, version = version + 1, updated_at = ? "
+                    + "WHERE exam_id = ? AND status <> 'CANCELED'",
+                local(request.endsAt()),
+                now,
+                id
+            );
+        examProblems.deleteForExam(id);
+        exam.updateSettings(request.title(), local(request.startsAt()), local(request.endsAt()), selection.total());
+        var pinned = pinProblems(exam, request, summaries);
+        examProblems.saveAll(pinned);
+        exams.saveAndFlush(exam);
+        var result = ExamResponse.from(exam, pinned);
+        String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+        if (correlationId == null) {
+            correlationId = "contest-" + UUID.randomUUID();
+        }
+        outbox
+            .append(
+                "EXAM",
+                "ExamUpdated",
+                "v1",
+                Long.toString(id),
+                correlationId,
+                new UpdatedPayload(
+                    result.examId(),
+                    result.studyId(),
+                    result.examRevision(),
+                    result
+                        .problems()
+                        .stream()
+                        .map(
+                            problem -> new UpdatedProblem(
+                                problem.problemId(),
+                                problem.problemRevisionId(),
+                                problem.score(),
+                                problem.displayOrder()
+                            )
+                        )
+                        .toList(),
+                    formatTime(result.startsAt()),
+                    formatTime(result.endsAt()),
+                    memberIds.stream().map(String::valueOf).toList()
+                )
+            );
+        return result;
+    }
+
+    private boolean studyEquals(Exam exam, long study) {
+        return exam.getStudyId() != null && exam.getStudyId() == study;
+    }
+
+    private String formatTime(OffsetDateTime value) {
+        return DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx").format(value);
+    }
+
+    /** 변경 후의 전체 시험 설정과 활성 참가자 스냅샷이다 (이벤트 계약서 §4.4 C7). */
+    public record UpdatedPayload(
+        String examId,
+        String studyId,
+        String examRevision,
+        List<UpdatedProblem> problems,
+        String startsAt,
+        String endsAt,
+        List<String> targetMemberIds
+    ) {
+    }
+
+    /** 전체 스냅샷에 담는 문제와 배점이다. */
+    public record UpdatedProblem(String problemId, String problemRevisionId, String score, int displayOrder) {
+    }
+
+    /** 저장할 고정 문제 목록을 요청 순서에서 구성한다. */
+    private List<ExamProblem> pinProblems(Exam exam, ExamCreateRequest request, Map<Long, ProblemSummary> summaries) {
         var pinned = new ArrayList<ExamProblem>();
         for (var problem : request.problems()) {
             var item = summaries.get(Long.parseLong(problem.problemId()));
@@ -251,12 +407,12 @@ public class ExamManagementService {
                         )
                 );
         }
-        examProblems.saveAll(pinned);
-        return ExamResponse.from(exam, pinned);
+        return pinned;
     }
 
     private LocalDateTime local(OffsetDateTime value) {
-        return LocalDateTime.ofInstant(value.toInstant(), ClockConfiguration.SERVICE_ZONE);
+        return LocalDateTime
+            .ofInstant(value.toInstant().truncatedTo(ChronoUnit.MICROS), ClockConfiguration.SERVICE_ZONE);
     }
 
     private long positiveId(String value) {

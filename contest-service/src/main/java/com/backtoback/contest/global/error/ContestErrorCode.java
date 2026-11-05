@@ -19,6 +19,8 @@ public enum ContestErrorCode implements ErrorCode {
     EXAM_NOT_FOUND(HttpStatus.NOT_FOUND, "시험을 찾을 수 없습니다."),
     EXAM_STUDY_CLOSED(HttpStatus.CONFLICT, "종료된 스터디에서는 시험을 변경할 수 없습니다."),
     EXAM_PROBLEM_NOT_AVAILABLE(HttpStatus.CONFLICT, "선택할 수 없는 문제가 있습니다."),
+    EXAM_MODIFICATION_CLOSED(HttpStatus.CONFLICT, "시험을 수정할 수 있는 시간이 지났습니다."),
+    EXAM_REVISION_CONFLICT(HttpStatus.CONFLICT, "시험 버전이 일치하지 않습니다."),
     CONTEST_DEPENDENCY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "외부 서비스를 사용할 수 없습니다."),
     EXAM_NOT_ELIGIBLE(HttpStatus.FORBIDDEN, "시험에 참가할 자격이 없습니다."),
     EXAM_CLOSED(HttpStatus.CONFLICT, "시험의 요청 시간이 종료되었습니다."),
