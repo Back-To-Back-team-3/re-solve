@@ -1,6 +1,8 @@
 package com.backtoback.study.replica.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -25,6 +27,23 @@ public interface MemberAcReplicaRepository extends JpaRepository<MemberAcReplica
     List<MemberAcReplica> findAllAcceptedByMemberIdAndProblemIds(
         @Param("memberId") Long memberId,
         @Param("problemIds") List<Long> problemIds
+    );
+
+    /**
+     * 사전 풀이 허용 시 근거 AC를 반환한다. 접수 시각이 가장 이른 행 1개(ERD 4.5.9 IDX 활용).
+     */
+    Optional<MemberAcReplica> findFirstByMemberIdAndProblemIdAndAcceptedTrueOrderBySubmittedAtAsc(
+        Long memberId,
+        Long problemId
+    );
+
+    /**
+     * 사전 풀이 불허 시 근거 AC를 반환한다. startsAt 이후 중 접수 시각이 가장 이른 행 1개(ERD 4.5.9 IDX 활용).
+     */
+    Optional<MemberAcReplica> findFirstByMemberIdAndProblemIdAndAcceptedTrueAndSubmittedAtGreaterThanEqualOrderBySubmittedAtAsc(
+        Long memberId,
+        Long problemId,
+        LocalDateTime startsAt
     );
 
     /**
