@@ -504,9 +504,9 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `member_id` | BIGINT | Y | FK → `members.id` |
-| `goal` | VARCHAR(30) | N | NULL 허용: 미입력. 목표 (취업·학습 등 Enum) |
-| `preferred_languages_json` | JSON | N | NULL 허용: 미입력. 선호 언어 배열 (단일/배열 확정 시 조정) |
-| `active_time_slots_json` | JSON | N | NULL 허용: 미입력. 활동 시간대 배열 (값 체계 미결정) |
+| `goal` | VARCHAR(30) | N | NULL 허용: 미입력. 목표 (`EMPLOYMENT` / `CONTEST` / `STUDY`) |
+| `preferred_languages_json` | JSON | N | NULL 허용: 미입력. 선호 언어 배열 (`java` / `python3` / `cpp`) |
+| `active_time_slots_json` | JSON | N | NULL 허용: 미입력. 활동 시간대 배열 (`MORNING` / `AFTERNOON` / `EVENING` / `NIGHT`) |
 | `profile_version` | BIGINT | Y | 프로필 변경 순번 (`LearningProfileUpdated` 순서 값) |
 | `created_at` | DATETIME(6) | Y |  |
 | `updated_at` | DATETIME(6) | Y |  |
