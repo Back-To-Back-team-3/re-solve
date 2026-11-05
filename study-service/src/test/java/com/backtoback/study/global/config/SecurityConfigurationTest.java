@@ -102,7 +102,8 @@ class SecurityConfigurationTest {
     @Test
     @DisplayName("내부 경로는 인증 없이 허용한다")
     void permitsInternalPaths() throws Exception {
-        mockMvc.perform(get("/internal/v1/studies/1/members")).andExpect(status().isOk());
+        // 테스트 DB에 study id=1이 없어 404지만, 401이 아니라는 것이 permitAll 적용을 증명한다.
+        mockMvc.perform(get("/internal/v1/studies/1/members")).andExpect(status().isNotFound());
     }
 
     @Test
@@ -137,9 +138,7 @@ class SecurityConfigurationTest {
             return "admin";
         }
 
-        @GetMapping("/internal/v1/studies/{studyId}/members")
-        String internalMembers() {
-            return "members";
-        }
+        // GET /internal/v1/studies/{studyId}/members는 StudyMemberInternalController가 실제로 구현해
+        // 더 이상 여기서 가짜 응답을 두지 않는다.
     }
 }
