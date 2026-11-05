@@ -32,6 +32,9 @@ springdoc:
     enabled: false
 
 contest:
+  exam-dependencies:
+    study-base-url: ${STUDY_SERVICE_URL:http://study-service:8080}
+    problem-base-url: ${PROBLEM_SERVICE_URL:http://problem-service:8080}
   member:
     base-url: ${MEMBER_SERVICE_URL:http://member-service:8080}
   events:
