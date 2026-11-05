@@ -269,8 +269,6 @@ class ExamParticipationIntegrationTest {
 
     /** 정지 상태에서도 이미 취소된 응답은 외부 조회 없이 그대로 반환한다. */
     @Test
-    @DisplayName("탈퇴 가드 준비가 먼저 확정되면 대기한 입장을 차단한다")
-    @Test
     @DisplayName("정지된 회원의 취소 재요청은 회원 조회 없이 기존 결과를 반환한다")
     void canceledRetrySkipsMemberLookup() {
         // given
@@ -362,6 +360,8 @@ class ExamParticipationIntegrationTest {
     }
 
     /** 가드를 잡은 트랜잭션이 커밋될 때까지 입장이 대기하고 준비된 가드로 거절되는지 확인한다. */
+    @Test
+    @DisplayName("탈퇴 가드 준비가 먼저 확정되면 대기한 입장을 차단한다")
     void withdrawalGuardWinsEntryRace() throws Exception {
         // given
         service.register(examId, "7");
