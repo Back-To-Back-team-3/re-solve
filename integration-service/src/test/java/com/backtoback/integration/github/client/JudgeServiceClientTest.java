@@ -19,6 +19,7 @@ import org.springframework.web.client.RestClient;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.integration.github.client.dto.AcceptedSubmissionCodeResponse;
 import com.backtoback.integration.github.config.JudgeProperties;
+import com.backtoback.integration.global.error.IntegrationErrorCode;
 import com.backtoback.integration.global.error.IntegrationException;
 
 class JudgeServiceClientTest {
@@ -78,5 +79,33 @@ class JudgeServiceClientTest {
             .andRespond(withSuccess("{\"submissionId\":\"2\"}", MediaType.APPLICATION_JSON));
 
         assertThatThrownBy(() -> client.getAcceptedCode(2L, 7L)).isInstanceOf(IntegrationException.class);
+    }
+
+    @Test
+    @DisplayName("수동 동기화 검증 시 judge-service가 404 또는 409를 반환하면 GITHUB_SYNC_NOT_ALLOWED(409) 예외로 변환한다")
+    void verifyAndGetAcceptedCodeForManualSyncClientError() {
+        server
+            .expect(requestTo("http://judge-service:8080/internal/v1/submissions/999/accepted/code?memberId=7"))
+            .andRespond(withStatus(HttpStatus.CONFLICT));
+
+        assertThatThrownBy(() -> client.verifyAndGetAcceptedCodeForManualSync(999L, 7L))
+            .isInstanceOfSatisfying(
+                IntegrationException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED)
+            );
+    }
+
+    @Test
+    @DisplayName("수동 동기화 검증 시 judge-service가 5xx를 반환하면 COMMON_DEPENDENCY_UNAVAILABLE(503) 예외로 변환한다")
+    void verifyAndGetAcceptedCodeForManualSyncServerError() {
+        server
+            .expect(requestTo("http://judge-service:8080/internal/v1/submissions/999/accepted/code?memberId=7"))
+            .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+
+        assertThatThrownBy(() -> client.verifyAndGetAcceptedCodeForManualSync(999L, 7L))
+            .isInstanceOfSatisfying(
+                IntegrationException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+            );
     }
 }
