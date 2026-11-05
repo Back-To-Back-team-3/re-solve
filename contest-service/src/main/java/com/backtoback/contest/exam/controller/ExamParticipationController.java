@@ -22,7 +22,13 @@ import lombok.RequiredArgsConstructor;
 public class ExamParticipationController {
     private final ExamParticipationService service;
 
-    /** API 명세서 4.2.1 시험 참가 등록 — 기존 활성 참가를 재사용한다. */
+    /**
+     * API 명세서 4.2.1 시험 참가 등록 — 기존 활성 참가를 재사용한다.
+     *
+     * @param examId 시험 식별자 문자열
+     * @param user Gateway에서 인증한 회원
+     * @return 신규 등록 201 또는 기존 참가 200 응답
+     */
     @PostMapping("/api/v1/exams/{examId}/participants")
     public ResponseEntity<ApiResponse<ExamParticipationResponse>> register(
         @PathVariable String examId,
@@ -34,7 +40,13 @@ public class ExamParticipationController {
             .body(ApiResponse.success("참가 등록이 완료되었습니다.", result.response()));
     }
 
-    /** API 명세서 4.2.2 시험 입장 — 최초 입장 시각을 유지한다. */
+    /**
+     * API 명세서 4.2.2 시험 입장 — 최초 입장 시각을 유지한다.
+     *
+     * @param examId 시험 식별자 문자열
+     * @param user Gateway에서 인증한 회원
+     * @return 입장 시각과 개인 마감 응답
+     */
     @PostMapping("/api/v1/exams/{examId}/start")
     public ResponseEntity<ApiResponse<ExamEntryResponse>> enter(
         @PathVariable String examId,
@@ -43,7 +55,13 @@ public class ExamParticipationController {
         return ResponseEntity.ok(ApiResponse.success(null, service.enter(examId, user.userId())));
     }
 
-    /** API 명세서 4.2.10 시험 참가 취소 — 기존 취소의 응답을 유지한다. */
+    /**
+     * API 명세서 4.2.10 시험 참가 취소 — 기존 취소의 응답을 유지한다.
+     *
+     * @param examId 시험 식별자 문자열
+     * @param user Gateway에서 인증한 회원
+     * @return 취소된 참가 응답
+     */
     @PostMapping("/api/v1/exams/{examId}/participants/me/cancellation")
     public ResponseEntity<ApiResponse<ExamCancellationResponse>> cancel(
         @PathVariable String examId,

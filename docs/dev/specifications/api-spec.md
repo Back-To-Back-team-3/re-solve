@@ -5081,7 +5081,7 @@
 
 - **Method / URI:** `POST /api/v1/exams/{examId}/participants`
 - **인증:** 로그인 필요 (`SUSPENDED` 차단) + `ACTIVE` 회원이며 등록 시 `APPROVED` 구성원 복제본이 있어야 한다. 없으면 `EXAM_NOT_ELIGIBLE`(403)
-- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `study_membership_replicas`, `contest_resource_guards`, `outbox_events`
+- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `study_membership_replicas`, `member_replicas`, `contest_resource_guards`, `outbox_events`
 - **설명:** 종료 전 등록 가능. 기존 활성 참가가 있으면 `200`으로 기존 반환, 새 등록은 `201`. `CANCELED` 문맥에는 등록 불가.
 - **요청 헤더:**
     
@@ -5131,9 +5131,10 @@
     ```
     
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_ELIGIBLE`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `MEMBER_SUSPENDED`(403), `CONTEST_OPERATION_BLOCKED`(409)
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_ELIGIBLE`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `CONTEST_OPERATION_BLOCKED`(409)
 - **동시성 보장:** `MEMBER` 가드·시험·참가자 순으로 잠금, 활성 참가 1건 보장
 - **발행:** `ExamParticipantRegistered` — 새 등록 시(`201`)만
+- **외부 의존:** `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 상태 조회 실패·불완전 응답 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 자원 잠금 전에 수행한다.
 
 #### 4.2.2 시험 입장
 
@@ -5189,7 +5190,8 @@
     
 - **동시성 보장:** `MEMBER` 가드·시험·참가자 잠금
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_CLOSED`(409), `EXAM_ALREADY_FINISHED`(409), `CONTEST_OPERATION_BLOCKED`(409), `MEMBER_SUSPENDED`(403)
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_CLOSED`(409), `EXAM_ALREADY_FINISHED`(409), `CONTEST_OPERATION_BLOCKED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 상태 조회 실패·불완전 응답 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 자원 잠금 전에 수행한다.
 
 #### 4.2.3 시험 문제 목록·본문
 
@@ -5693,9 +5695,9 @@
 #### 4.2.10 시험 참가 취소
 
 - **Method / URI:** `POST /api/v1/exams/{examId}/participants/me/cancellation`
-- **인증:** 로그인 필요 (회원·문맥 권한 적용)
-- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `outbox_events`
-- **설명:** 시작 전 `REGISTERED`만 `CANCELED`로 전이. 이미 취소됐으면 기존 취소 반환. 시작 이후 `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409).
+- **인증:** 로그인 필요 (회원·문맥 권한 적용). `SUSPENDED` 회원은 새로운 참가 취소를 할 수 없다.
+- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `member_replicas`, `outbox_events`
+- **설명:** 시작 전 `REGISTERED`만 `CANCELED`로 전이. 이미 취소됐으면 회원이 정지 상태여도 기존 취소를 반환한다. 시작 이후 `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409).
 - **요청 헤더:**
     
     
@@ -5735,8 +5737,9 @@
     }
     ```
     
-- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409)
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **발행:** `ExamParticipantCanceled`
+- **외부 의존:** 신규 취소는 `GET /internal/v1/members/{memberId}/status` (member, 1.7.1)로 회원 상태를 조회한다. 조회 실패·불완전 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503)이며, 이미 취소된 참가의 재요청은 조회 없이 기존 결과를 반환한다. 원격 조회 중에는 잠금을 유지하지 않고 조회 후 참가 상태를 다시 확인한다.
 
 #### 4.2.11 시험 Draft 조회
 
