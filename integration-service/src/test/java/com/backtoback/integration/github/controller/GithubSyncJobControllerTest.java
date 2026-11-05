@@ -168,4 +168,24 @@ class GithubSyncJobControllerTest {
             .andExpect(jsonPath("$.success").value(false))
             .andExpect(jsonPath("$.error.code").value("GITHUB_SYNC_NOT_ALLOWED"));
     }
+
+    @Test
+    @DisplayName("8.1.7 SUSPENDED 회원이 수동 동기화를 요청하면 403 Forbidden을 반환한다")
+    void requestManualSyncSuspendedForbidden() throws Exception {
+        mockMvc
+            .perform(
+                post("/api/v1/integrations/github/sync-jobs")
+                    .header("X-User-Id", 1L)
+                    .header("X-User-Role", "SUSPENDED")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                        {
+                          "submissionId": "91023"
+                        }
+                        """)
+            )
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
+    }
 }

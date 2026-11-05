@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -26,6 +27,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.common.api.PageResponse;
 import com.backtoback.common.exception.CommonErrorCode;
@@ -54,14 +57,27 @@ class GithubSyncJobServiceTest {
     @Mock
     private JudgeServiceClient judgeServiceClient;
 
+    @Mock
+    private TransactionTemplate transactionTemplate;
+
     private Clock fixedClock;
     private GithubSyncJobService syncJobService;
 
     @BeforeEach
     void setUp() {
         fixedClock = Clock.fixed(Instant.parse("2026-10-29T10:00:00Z"), ZoneId.of("Asia/Seoul"));
+        lenient().when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(null);
+        });
         syncJobService
-            = new GithubSyncJobService(connectionRepository, syncJobRepository, judgeServiceClient, fixedClock);
+            = new GithubSyncJobService(
+                connectionRepository,
+                syncJobRepository,
+                judgeServiceClient,
+                transactionTemplate,
+                fixedClock
+            );
     }
 
     private GithubConnection createConnection(boolean autoCommitEnabled) {
@@ -284,7 +300,7 @@ class GithubSyncJobServiceTest {
     }
 
     @Test
-    @DisplayName("8.1.7 FAILED 상태의 작업을 수동 동기화 요청하면 retryCount=0 및 PENDING으로 초기화하여 반환한다")
+    @DisplayName("8.1.7 FAILED 상태의 작업을 수동 동기화 요청하면 조건부 UPDATE로 PENDING으로 초기화하여 반환한다")
     void requestManualSyncResetsFailedJobToPending() {
         GithubConnection connection = createConnection(true);
         GithubSyncJob failedJob = GithubSyncJob.createPending(connection, 91023L, 301L, "두 수의 합", 1);
@@ -292,19 +308,25 @@ class GithubSyncJobServiceTest {
         failedJob.markFailed("Rate limit exceeded");
         ReflectionTestUtils.setField(failedJob, "id", 77L);
 
+        GithubSyncJob resetJob = GithubSyncJob.createPending(connection, 91023L, 301L, "두 수의 합", 1);
+        ReflectionTestUtils.setField(resetJob, "id", 77L);
+
         given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
-        given(syncJobRepository.findBySubmissionIdWithConnection(91023L)).willReturn(Optional.of(failedJob));
+        given(syncJobRepository.findBySubmissionIdWithConnection(91023L))
+            .willReturn(Optional.of(failedJob))
+            .willReturn(Optional.of(failedJob))
+            .willReturn(Optional.of(resetJob));
         given(judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(91023L, 1L))
             .willReturn(
                 new AcceptedSubmissionCodeResponse("91023", "301", "java", "class Solution {}", 1, OffsetDateTime.now())
             );
+        given(syncJobRepository.resetJobToPendingIfRetryable(eq(77L), eq(10L), any(LocalDateTime.class))).willReturn(1);
 
         GithubManualSyncResponse response = syncJobService.requestManualSync(1L, "91023");
 
         assertThat(response.syncJobId()).isEqualTo("77");
         assertThat(response.status()).isEqualTo("PENDING");
-        assertThat(failedJob.getRetryCount()).isZero();
-        assertThat(failedJob.getErrorMessage()).isNull();
+        verify(syncJobRepository).resetJobToPendingIfRetryable(eq(77L), eq(10L), any(LocalDateTime.class));
     }
 
     @Test
@@ -334,6 +356,7 @@ class GithubSyncJobServiceTest {
         given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
         given(syncJobRepository.findBySubmissionIdWithConnection(91023L))
             .willReturn(Optional.empty())
+            .willReturn(Optional.empty())
             .willReturn(Optional.of(createdJob));
         given(judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(91023L, 1L))
             .willReturn(
@@ -348,5 +371,30 @@ class GithubSyncJobServiceTest {
         verify(
             syncJobRepository
         ).insertPendingJobIfAbsent(eq(10L), eq(91023L), eq(301L), eq("problem-301"), eq(1), any(LocalDateTime.class));
+    }
+
+    @Test
+    @DisplayName("8.1.7 신규 작업 조건부 삽입 시 동시 경합으로 이미 SUCCEEDED 상태가 된 작업이면 GITHUB_SYNC_NOT_ALLOWED(409) 예외가 발생한다")
+    void requestManualSyncRejectsWhenConcurrentJobAlreadySucceeded() {
+        GithubConnection connection = createConnection(true);
+        GithubSyncJob concurrentlySucceededJob = GithubSyncJob.createPending(connection, 91023L, 301L, "두 수의 합", 1);
+        concurrentlySucceededJob.markSucceeded("sha123");
+        ReflectionTestUtils.setField(concurrentlySucceededJob, "id", 88L);
+
+        given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
+        given(syncJobRepository.findBySubmissionIdWithConnection(91023L))
+            .willReturn(Optional.empty())
+            .willReturn(Optional.empty())
+            .willReturn(Optional.of(concurrentlySucceededJob));
+        given(judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(91023L, 1L))
+            .willReturn(
+                new AcceptedSubmissionCodeResponse("91023", "301", "java", "class Solution {}", 1, OffsetDateTime.now())
+            );
+
+        assertThatThrownBy(() -> syncJobService.requestManualSync(1L, "91023"))
+            .isInstanceOfSatisfying(
+                IntegrationException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED)
+            );
     }
 }

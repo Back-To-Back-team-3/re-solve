@@ -11,7 +11,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.common.api.PageResponse;
 import com.backtoback.common.exception.CommonErrorCode;
@@ -49,6 +51,7 @@ public class GithubSyncJobService {
     private final GithubConnectionRepository connectionRepository;
     private final GithubSyncJobRepository syncJobRepository;
     private final JudgeServiceClient judgeServiceClient;
+    private final TransactionTemplate transactionTemplate;
     private final Clock clock;
 
     /**
@@ -188,21 +191,23 @@ public class GithubSyncJobService {
     }
 
     /**
-     * 누락되었거나 연동 전에 맞힌 제출, 혹은 실패/취소된 작업을 수동으로 동기화(커밋) 요청한다 (api-spec.md > 8.1.7).
+     * 누락되었거나 연동 전에 맞힌 제출, 혹은 실패/취소된 작업을 수동으로 동기화(커밋) 요청한다
+     * (api-spec.md > 8.1.7, scheduler.md > 8.1).
+     * 외부 HTTP 호출(judge-service) 동안 DB 커넥션을 점유하지 않도록 트랜잭션을 분리하고,
+     * 상태 변경은 TransactionTemplate과 조건부 UPDATE로 수행한다.
      *
      * @param memberId 요청 회원 ID
      * @param submissionIdStr 제출 ID 문자열
      * @return 등록 또는 재시도 대기 전환된 작업 응답
      */
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public GithubManualSyncResponse requestManualSync(Long memberId, String submissionIdStr) {
         Long submissionId = parsePositiveLong(submissionIdStr, CommonErrorCode.COMMON_INVALID_REQUEST);
 
-        GithubConnection connection
-            = connectionRepository
-                .findByMemberId(memberId)
-                .filter(conn -> conn.getStatus() == GithubConnectionStatus.CONNECTED)
-                .orElseThrow(() -> new IntegrationException(IntegrationErrorCode.GITHUB_NOT_CONNECTED));
+        connectionRepository
+            .findByMemberId(memberId)
+            .filter(conn -> conn.getStatus() == GithubConnectionStatus.CONNECTED)
+            .orElseThrow(() -> new IntegrationException(IntegrationErrorCode.GITHUB_NOT_CONNECTED));
 
         Optional<GithubSyncJob> existingJobOpt = syncJobRepository.findBySubmissionIdWithConnection(submissionId);
         if (existingJobOpt.isPresent()) {
@@ -216,41 +221,68 @@ public class GithubSyncJobService {
             if (!existingJob.isRetryableByManualRequest()) {
                 throw new IntegrationException(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED);
             }
-
-            judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(submissionId, memberId);
-            existingJob.resetForManualRetry(connection);
-            return GithubManualSyncResponse.from(existingJob);
         }
 
         AcceptedSubmissionCodeResponse acceptedCode
             = judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(submissionId, memberId);
         Long problemId = parsePositiveLong(acceptedCode.problemId(), CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
-        String fallbackTitle = "problem-" + problemId;
 
-        GithubSyncJob pendingJob
-            = GithubSyncJob
-                .createPending(connection, submissionId, problemId, fallbackTitle, DEFAULT_FALLBACK_DIFFICULTY);
+        return transactionTemplate.execute(status -> {
+            GithubConnection activeConnection
+                = connectionRepository
+                    .findByMemberId(memberId)
+                    .filter(conn -> conn.getStatus() == GithubConnectionStatus.CONNECTED)
+                    .orElseThrow(() -> new IntegrationException(IntegrationErrorCode.GITHUB_NOT_CONNECTED));
 
-        LocalDateTime now = LocalDateTime.now(clock);
-        syncJobRepository
-            .insertPendingJobIfAbsent(
-                connection.getId(),
-                submissionId,
-                problemId,
-                pendingJob.getProblemTitle(),
-                DEFAULT_FALLBACK_DIFFICULTY,
-                now
-            );
+            LocalDateTime now = LocalDateTime.now(clock);
+            Optional<GithubSyncJob> jobOpt = syncJobRepository.findBySubmissionIdWithConnection(submissionId);
 
-        GithubSyncJob savedJob
-            = syncJobRepository
-                .findBySubmissionIdWithConnection(submissionId)
-                .orElseThrow(() -> new IntegrationException(CommonErrorCode.COMMON_INTERNAL_SERVER_ERROR));
-        if (!savedJob.getConnection().getMemberId().equals(memberId)) {
-            throw new IntegrationException(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED);
-        }
+            if (jobOpt.isEmpty()) {
+                String fallbackTitle = "problem-" + problemId;
+                GithubSyncJob pendingJob
+                    = GithubSyncJob
+                        .createPending(
+                            activeConnection,
+                            submissionId,
+                            problemId,
+                            fallbackTitle,
+                            DEFAULT_FALLBACK_DIFFICULTY
+                        );
 
-        return GithubManualSyncResponse.from(savedJob);
+                syncJobRepository
+                    .insertPendingJobIfAbsent(
+                        activeConnection.getId(),
+                        submissionId,
+                        problemId,
+                        pendingJob.getProblemTitle(),
+                        DEFAULT_FALLBACK_DIFFICULTY,
+                        now
+                    );
+
+                jobOpt = syncJobRepository.findBySubmissionIdWithConnection(submissionId);
+            }
+
+            GithubSyncJob targetJob
+                = jobOpt.orElseThrow(() -> new IntegrationException(CommonErrorCode.COMMON_INTERNAL_SERVER_ERROR));
+
+            if (!targetJob.getConnection().getMemberId().equals(memberId)) {
+                throw new IntegrationException(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED);
+            }
+
+            if (targetJob.isRetryableByManualRequest()) {
+                syncJobRepository.resetJobToPendingIfRetryable(targetJob.getId(), activeConnection.getId(), now);
+                targetJob
+                    = syncJobRepository
+                        .findBySubmissionIdWithConnection(submissionId)
+                        .orElseThrow(() -> new IntegrationException(CommonErrorCode.COMMON_INTERNAL_SERVER_ERROR));
+            }
+
+            if (!targetJob.isInProgressOrPending()) {
+                throw new IntegrationException(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED);
+            }
+
+            return GithubManualSyncResponse.from(targetJob);
+        });
     }
 
     private Sort parseAndValidateSort(String sortParam) {

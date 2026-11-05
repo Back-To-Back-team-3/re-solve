@@ -12,10 +12,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.api.PageResponse;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.integration.github.dto.request.GithubManualSyncRequest;
 import com.backtoback.integration.github.dto.response.GithubManualSyncResponse;
 import com.backtoback.integration.github.dto.response.GithubSyncJobItemResponse;
 import com.backtoback.integration.github.service.GithubSyncJobService;
+import com.backtoback.integration.global.error.IntegrationException;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -69,14 +71,22 @@ public class GithubSyncJobController {
      * 8.1.7 수동 동기화 요청.
      *
      * @param memberId Gateway가 전달한 사용자 ID
+     * @param role Gateway가 전달한 사용자 역할
      * @param request 제출 ID를 포함한 수동 동기화 요청 바디
      * @return 202 Accepted 및 등록된 작업 상태 응답
      */
     @PostMapping
     public ResponseEntity<ApiResponse<GithubManualSyncResponse>> requestManualSync(
         @RequestHeader("X-User-Id") Long memberId,
+        @RequestHeader(
+            value = "X-User-Role",
+            required = false
+        ) String role,
         @Valid @RequestBody GithubManualSyncRequest request
     ) {
+        if ("SUSPENDED".equalsIgnoreCase(role)) {
+            throw new IntegrationException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
         GithubManualSyncResponse response = githubSyncJobService.requestManualSync(memberId, request.submissionId());
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.success("GitHub 커밋 작업을 등록했습니다.", response));
     }

@@ -190,4 +190,32 @@ class GithubSyncJobRepositoryTest {
         assertThat(found.getConnection().getMemberId()).isEqualTo(10L);
         assertThat(found.getProblemId()).isEqualTo(209L);
     }
+
+    @Test
+    @DisplayName("resetJobToPendingIfRetryable은 FAILED 또는 CANCELED 상태 작업만 조건부로 PENDING 상태로 초기화한다")
+    void resetJobToPendingIfRetryable() {
+        GithubSyncJob failedJob = GithubSyncJob.createPending(connection, 1010L, 210L, "DP 문제", 2);
+        failedJob.markRetryWaiting(LocalDateTime.now().plusMinutes(1), "Temp error");
+        failedJob.markFailed("Rate limit exceeded");
+
+        GithubSyncJob succeededJob = GithubSyncJob.createPending(connection, 1011L, 211L, "그리디 문제", 1);
+        succeededJob.markSucceeded("sha-abc");
+
+        githubSyncJobRepository.saveAllAndFlush(List.of(failedJob, succeededJob));
+
+        LocalDateTime now = LocalDateTime.now();
+        int updatedFailed
+            = githubSyncJobRepository.resetJobToPendingIfRetryable(failedJob.getId(), connection.getId(), now);
+        int updatedSucceeded
+            = githubSyncJobRepository.resetJobToPendingIfRetryable(succeededJob.getId(), connection.getId(), now);
+
+        assertThat(updatedFailed).isEqualTo(1);
+        assertThat(updatedSucceeded).isZero();
+
+        GithubSyncJob reloadedFailed = githubSyncJobRepository.findById(failedJob.getId()).orElseThrow();
+        assertThat(reloadedFailed.getStatus()).isEqualTo(GithubSyncJobStatus.PENDING);
+        assertThat(reloadedFailed.getRetryCount()).isZero();
+        assertThat(reloadedFailed.getErrorMessage()).isNull();
+        assertThat(reloadedFailed.getNextRetryAt()).isNull();
+    }
 }

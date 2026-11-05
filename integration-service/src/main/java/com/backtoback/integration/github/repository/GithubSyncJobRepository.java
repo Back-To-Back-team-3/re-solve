@@ -263,6 +263,37 @@ public interface GithubSyncJobRepository extends JpaRepository<GithubSyncJob, Lo
     );
 
     /**
+     * 실패(FAILED) 또는 취소(CANCELED) 상태인 작업을 조건부로 대기(PENDING) 상태로 초기화한다 (api-spec.md > 8.1.7, scheduler.md > 8.1).
+     *
+     * @param id 작업 ID
+     * @param connectionId 현재 활성 연동 ID
+     * @param now 갱신 시각
+     * @return 반영된 행 수 (1이면 초기화 성공, 0이면 이미 다른 상태로 변경됨)
+     */
+    @Modifying(
+        clearAutomatically = true,
+        flushAutomatically = true
+    )
+    @Query(
+        value = """
+            UPDATE github_sync_jobs
+            SET connection_id = :connectionId,
+                status = 'PENDING',
+                retry_count = 0,
+                next_retry_at = NULL,
+                error_message = NULL,
+                updated_at = :now
+            WHERE id = :id AND status IN ('FAILED', 'CANCELED')
+            """,
+        nativeQuery = true
+    )
+    int resetJobToPendingIfRetryable(
+        @Param("id") Long id,
+        @Param("connectionId") Long connectionId,
+        @Param("now") LocalDateTime now
+    );
+
+    /**
      * 실행 대기(PENDING, RETRY_WAITING, RATE_LIMITED) 상태의 다음 1개 작업을 선점하기 위해
      * SKIP LOCKED로 조회한다 (scheduler.md > 8.1).
      *
