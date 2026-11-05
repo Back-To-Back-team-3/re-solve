@@ -337,4 +337,37 @@ class AssignmentCompletionRecalculationServiceTest {
         verify(memberStatusRepository)
             .updateStatusAndCounts(eq(ASSIGNMENT_ID), eq(MEMBER_ID), eq("INCOMPLETE"), eq(0), eq(0), eq(null));
     }
+
+    @Test
+    @DisplayName("마감 전 완료 기록이 REVOKE되면 멤버 상태를 IN_PROGRESS로 갱신한다")
+    void recalculate_revokedBeforeDeadline_syncsMemberStatusInProgress() {
+        // given
+        given(memberAcReplicaRepository.findEarliestBasisAc(eq(MEMBER_ID), eq(PROBLEM_ID), any(Pageable.class)))
+            .willReturn(List.of());
+        AssignmentCompletion existing
+            = AssignmentCompletion
+                .complete(
+                    ASSIGNMENT_ID,
+                    MEMBER_ID,
+                    PROBLEM_ID,
+                    CompletionType.ON_TIME,
+                    SUBMISSION_ID,
+                    SUBMITTED_AT,
+                    1,
+                    NOW
+                );
+        given(completionRepository.findByAssignmentIdAndMemberIdAndProblemId(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID))
+            .willReturn(Optional.of(existing));
+        given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
+            .willReturn(List.of(activeProblem));
+        given(completionRepository.findByAssignmentIdAndMemberId(ASSIGNMENT_ID, MEMBER_ID))
+            .willReturn(List.of(existing));
+
+        // when
+        service.recalculate(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID);
+
+        // then — REVOKED 기록이 남으므로 NOT_STARTED가 아니라 IN_PROGRESS
+        verify(memberStatusRepository)
+            .updateStatusAndCounts(eq(ASSIGNMENT_ID), eq(MEMBER_ID), eq("IN_PROGRESS"), eq(0), eq(0), eq(null));
+    }
 }

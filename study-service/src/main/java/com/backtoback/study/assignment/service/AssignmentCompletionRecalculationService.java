@@ -149,7 +149,7 @@ public class AssignmentCompletionRecalculationService {
                 .count();
 
         MemberProgressStatus newStatus
-            = resolveProgressStatus(completedCount, totalCount, assignment.getDeadlineAt(), now);
+            = resolveProgressStatus(completedCount, totalCount, assignment.getDeadlineAt(), now, !completions.isEmpty());
         LocalDateTime completedAt = (newStatus == MemberProgressStatus.COMPLETED) ? now : null;
 
         memberStatusRepository
@@ -167,7 +167,8 @@ public class AssignmentCompletionRecalculationService {
         int completedCount,
         int totalCount,
         LocalDateTime deadlineAt,
-        LocalDateTime now
+        LocalDateTime now,
+        boolean hasAnyRecord
     ) {
         if (totalCount > 0 && completedCount >= totalCount) {
             return MemberProgressStatus.COMPLETED;
@@ -175,7 +176,8 @@ public class AssignmentCompletionRecalculationService {
         if (deadlineAt != null && now.isAfter(deadlineAt)) {
             return MemberProgressStatus.INCOMPLETE;
         }
-        if (completedCount == 0) {
+        // 완료 기록이 없을 때만 NOT_STARTED — REVOKED 기록이 있으면 IN_PROGRESS로 유지한다.
+        if (completedCount == 0 && !hasAnyRecord) {
             return MemberProgressStatus.NOT_STARTED;
         }
         return MemberProgressStatus.IN_PROGRESS;
