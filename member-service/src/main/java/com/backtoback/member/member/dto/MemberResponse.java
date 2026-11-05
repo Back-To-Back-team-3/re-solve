@@ -20,7 +20,7 @@ public record MemberResponse(
     OffsetDateTime createdAt
 ) {
 
-    public static MemberResponse from(Member member) {
+    public static MemberResponse from(Member member, boolean hasLearningProfile) {
         return new MemberResponse(
             String.valueOf(member.getId()),
             member.getGithubLogin(),
@@ -29,8 +29,7 @@ public record MemberResponse(
             member.getEmail(),
             member.getRole().name(),
             member.getStatus().name(),
-            // shortcut: 학습 프로필(1.3)이 아직 없어 항상 false, learning_profiles를 추가할 때 실제 여부로 바꾼다.
-            false,
+            hasLearningProfile,
             member.getCreatedAt().atZone(ClockConfiguration.SERVICE_ZONE).toOffsetDateTime()
         );
     }
