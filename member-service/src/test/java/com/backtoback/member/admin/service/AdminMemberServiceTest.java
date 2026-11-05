@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -27,6 +28,9 @@ import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.domain.MemberRole;
 import com.backtoback.member.member.domain.MemberStatus;
 import com.backtoback.member.member.repository.MemberRepository;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 검색 쿼리(LIKE 이스케이프·조건·정렬)와 감사 로그 JSON 컬럼은 MySQL에 의존하므로 실제 MySQL로 검증한다.
@@ -59,6 +63,12 @@ class AdminMemberServiceTest {
 
     @Autowired
     private AuditLogRepository auditLogRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     @DisplayName("회원 목록: 닉네임·로그인명 부분 일치와 상태·권한 조건으로 거르고, %·_는 문자 그대로 찾으며 최신 가입순으로 준다")
@@ -97,7 +107,7 @@ class AdminMemberServiceTest {
     }
 
     @Test
-    @DisplayName("정지·해제: 상태·정지 시각·profileVersion을 바꾸고 사유·집행자·IP·전후 상태를 감사 로그에 남긴다")
+    @DisplayName("정지·해제: 상태·정지 시각·profileVersion을 바꾸고 사유·집행자·IP·전후 상태를 감사 로그에, MemberSuspended를 Outbox에 남긴다")
     void changeStatusRecordsAudit() {
         Member member = save(4001L, "choi-dev", MemberStatus.ACTIVE, MemberRole.USER);
         long auditsBefore = auditLogRepository.count();
@@ -132,10 +142,22 @@ class AdminMemberServiceTest {
         assertThat(audits.get(1).getAfterState()).contains("\"status\"", "ACTIVE");
         assertThat(audits.get(1).getReason()).isEqualTo("소명 확인");
         assertThat(audits.get(1).getClientIp()).isNull();
+
+        List<JsonNode> events = memberSuspendedEvents(member.getId());
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0).get("memberId").asString()).isEqualTo(String.valueOf(member.getId()));
+        assertThat(events.get(0).get("suspended").asBoolean()).isTrue();
+        assertThat(events.get(0).get("sourceVersion").asLong()).isEqualTo(2L);
+        assertThat(events.get(0).get("reason").asString()).isEqualTo("부정 행위 신고 확인");
+        assertThat(events.get(0).get("changedAt").asString())
+            .matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}\\+09:00");
+        assertThat(events.get(1).get("suspended").asBoolean()).isFalse();
+        assertThat(events.get(1).get("sourceVersion").asLong()).isEqualTo(3L);
+        assertThat(events.get(1).get("reason").asString()).isEqualTo("소명 확인");
     }
 
     @Test
-    @DisplayName("정지·해제: 같은 상태·탈퇴 회원·WITHDRAWN 대상은 COMMON_INVALID_REQUEST이고 감사 로그를 남기지 않는다")
+    @DisplayName("정지·해제: 같은 상태·탈퇴 회원·WITHDRAWN 대상은 COMMON_INVALID_REQUEST이고 감사 로그·이벤트를 남기지 않는다")
     void changeStatusRejectsInvalidTransition() {
         Member active = save(4002L, "jung-dev", MemberStatus.ACTIVE, MemberRole.USER);
         Member withdrawn = save(4003L, "han-dev", MemberStatus.WITHDRAWN, MemberRole.USER);
@@ -147,6 +169,8 @@ class AdminMemberServiceTest {
 
         assertThat(auditLogRepository.count()).isEqualTo(auditsBefore);
         assertThat(memberRepository.findById(active.getId()).orElseThrow().getProfileVersion()).isEqualTo(1L);
+        assertThat(memberSuspendedEvents(active.getId())).isEmpty();
+        assertThat(memberSuspendedEvents(withdrawn.getId())).isEmpty();
     }
 
     @Test
@@ -177,6 +201,20 @@ class AdminMemberServiceTest {
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
             .isEqualTo(CommonErrorCode.COMMON_INVALID_REQUEST);
+    }
+
+    private List<JsonNode> memberSuspendedEvents(Long memberId) {
+        return jdbcTemplate
+            .queryForList(
+                "select status, payload from outbox_events "
+                    + "where aggregate_type = 'MEMBER' and event_type = 'MemberSuspended' and aggregate_id = ? "
+                    + "order by id",
+                String.valueOf(memberId)
+            )
+            .stream()
+            .peek(row -> assertThat(row.get("status")).isEqualTo("PENDING"))
+            .map(row -> objectMapper.readTree(row.get("payload").toString()))
+            .toList();
     }
 
     private List<AuditLog> latestAudits(long skip) {
