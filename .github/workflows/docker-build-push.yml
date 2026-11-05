@@ -1,0 +1,154 @@
+name: Docker Build & Push
+
+on:
+  push:
+    branches: [ develop, main ]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: '빌드할 서비스 (auto: 변경 감지, all: 전체 서비스)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - all
+          - api-gateway
+          - member-service
+          - problem-service
+          - judge-service
+          - contest-service
+          - study-service
+          - notification-service
+          - integration-service
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      common: ${{ steps.filter.outputs.common }}
+      api-gateway: ${{ steps.filter.outputs.api-gateway }}
+      member-service: ${{ steps.filter.outputs.member-service }}
+      problem-service: ${{ steps.filter.outputs.problem-service }}
+      judge-service: ${{ steps.filter.outputs.judge-service }}
+      contest-service: ${{ steps.filter.outputs.contest-service }}
+      study-service: ${{ steps.filter.outputs.study-service }}
+      notification-service: ${{ steps.filter.outputs.notification-service }}
+      integration-service: ${{ steps.filter.outputs.integration-service }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            common:
+              - 'common-**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'Dockerfile'
+            api-gateway:
+              - 'api-gateway/**'
+            member-service:
+              - 'member-service/**'
+            problem-service:
+              - 'problem-service/**'
+            judge-service:
+              - 'judge-service/**'
+            contest-service:
+              - 'contest-service/**'
+            study-service:
+              - 'study-service/**'
+            notification-service:
+              - 'notification-service/**'
+            integration-service:
+              - 'integration-service/**'
+
+  build-and-push:
+    needs: [detect-changes]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api-gateway
+          - member-service
+          - problem-service
+          - judge-service
+          - contest-service
+          - study-service
+          - notification-service
+          - integration-service
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: 빌드 대상 여부 판단
+        id: target
+        run: |
+          MANUAL_INPUT="${{ github.event.inputs.service }}"
+          if [ "$MANUAL_INPUT" = "all" ] || [ "$MANUAL_INPUT" = "${{ matrix.service }}" ]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          elif [ "$MANUAL_INPUT" = "auto" ] || [ -z "$MANUAL_INPUT" ]; then
+            if [ "${{ needs.detect-changes.outputs.common }}" = "true" ] || [ "${{ needs.detect-changes.outputs[matrix.service] }}" = "true" ]; then
+              echo "should_build=true" >> $GITHUB_OUTPUT
+            else
+              echo "should_build=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Java 21 설정
+        if: steps.target.outputs.should_build == 'true'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: ${{ matrix.service }} bootJar 빌드
+        if: steps.target.outputs.should_build == 'true'
+        run: bash ./gradlew :${{ matrix.service }}:bootJar -x test --no-daemon
+
+      - name: QEMU 설정 (멀티 아키텍처)
+        if: steps.target.outputs.should_build == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Docker Buildx 설정
+        if: steps.target.outputs.should_build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker Hub 로그인
+        if: steps.target.outputs.should_build == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker 메타데이터 추출
+        if: steps.target.outputs.should_build == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/re-solve-${{ matrix.service }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+
+      - name: 멀티 아키텍처 Docker 이미지 빌드 및 푸시
+        if: steps.target.outputs.should_build == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
