@@ -2,6 +2,7 @@ package com.backtoback.member.admin.service;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
@@ -59,7 +60,8 @@ public class AdminMemberService {
         if (member.isWithdrawn() || target == MemberStatus.WITHDRAWN || target == before) {
             throw new MemberException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
-        LocalDateTime now = LocalDateTime.now(clock);
+        // DATETIME(6)의 반올림 저장과 이벤트 changedAt(6자리 버림)이 같은 시각이 되도록 미리 자른다.
+        LocalDateTime now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
         if (target == MemberStatus.SUSPENDED) {
             member.suspend(now);
         } else {

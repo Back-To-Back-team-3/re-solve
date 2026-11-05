@@ -3,6 +3,7 @@ package com.backtoback.member.admin.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -41,6 +42,8 @@ class AdminMemberServiceTest {
 
     private static final PageRequest NEWEST_FIRST
         = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt", "id"));
+
+    private static final String EVENT_TIME_PATTERN = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}\\+09:00";
 
     @Container
     static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("member_db");
@@ -149,11 +152,15 @@ class AdminMemberServiceTest {
         assertThat(events.get(0).get("suspended").asBoolean()).isTrue();
         assertThat(events.get(0).get("sourceVersion").asLong()).isEqualTo(2L);
         assertThat(events.get(0).get("reason").asString()).isEqualTo("부정 행위 신고 확인");
-        assertThat(events.get(0).get("changedAt").asString())
-            .matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}\\+09:00");
+        assertThat(events.get(0).get("changedAt").asString()).matches(EVENT_TIME_PATTERN);
+        assertThat(OffsetDateTime.parse(events.get(0).get("changedAt").asString()).toLocalDateTime())
+            .isEqualTo(suspended.getSuspendedAt());
         assertThat(events.get(1).get("suspended").asBoolean()).isFalse();
         assertThat(events.get(1).get("sourceVersion").asLong()).isEqualTo(3L);
         assertThat(events.get(1).get("reason").asString()).isEqualTo("소명 확인");
+        assertThat(events.get(1).get("changedAt").asString()).matches(EVENT_TIME_PATTERN);
+        // 이벤트 계약 M2: 정지·해제는 MemberUpdated를 따로 내지 않는다.
+        assertThat(outboxEventCount(member.getId(), "MemberUpdated")).isZero();
     }
 
     @Test
@@ -215,6 +222,17 @@ class AdminMemberServiceTest {
             .peek(row -> assertThat(row.get("status")).isEqualTo("PENDING"))
             .map(row -> objectMapper.readTree(row.get("payload").toString()))
             .toList();
+    }
+
+    private long outboxEventCount(Long memberId, String eventType) {
+        return jdbcTemplate
+            .queryForObject(
+                "select count(*) from outbox_events where aggregate_type = 'MEMBER' and event_type = ? "
+                    + "and aggregate_id = ?",
+                Long.class,
+                eventType,
+                String.valueOf(memberId)
+            );
     }
 
     private List<AuditLog> latestAudits(long skip) {
