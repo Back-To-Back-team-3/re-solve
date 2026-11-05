@@ -230,6 +230,44 @@ public class GithubSyncJob extends BaseTimeEntity {
         this.errorMessage = truncateErrorMessage(reason);
     }
 
+    /**
+     * 작업이 현재 대기 중이거나 실행 중인지 확인한다 (api-spec.md > 8.1.7 멱등 반환 조건).
+     *
+     * @return PENDING, RUNNING, RETRY_WAITING, RATE_LIMITED 중 하나이면 true
+     */
+    public boolean isInProgressOrPending() {
+        return this.status == GithubSyncJobStatus.PENDING || this.status == GithubSyncJobStatus.RUNNING
+            || this.status == GithubSyncJobStatus.RETRY_WAITING || this.status == GithubSyncJobStatus.RATE_LIMITED;
+    }
+
+    /**
+     * 수동 동기화 요청으로 재시도(PENDING 초기화)가 가능한 상태인지 확인한다 (api-spec.md > 8.1.7).
+     *
+     * @return FAILED 또는 CANCELED 상태이면 true
+     */
+    public boolean isRetryableByManualRequest() {
+        return this.status == GithubSyncJobStatus.FAILED || this.status == GithubSyncJobStatus.CANCELED;
+    }
+
+    /**
+     * 수동 동기화 요청에 의해 실패(FAILED) 또는 취소(CANCELED)된 작업을 대기(PENDING) 상태로 초기화한다 (api-spec.md > 8.1.7).
+     *
+     * @param activeConnection 현재 활성화된 연동 정보
+     */
+    public void resetForManualRetry(GithubConnection activeConnection) {
+        if (activeConnection == null) {
+            throw new IllegalArgumentException("activeConnection은 필수입니다.");
+        }
+        if (!isRetryableByManualRequest()) {
+            throw new IllegalStateException("FAILED 또는 CANCELED 상태의 작업만 수동 재시도할 수 있습니다: status=" + this.status);
+        }
+        this.connection = activeConnection;
+        this.status = GithubSyncJobStatus.PENDING;
+        this.retryCount = 0;
+        this.nextRetryAt = null;
+        this.errorMessage = null;
+    }
+
     private static String truncateErrorMessage(String message) {
         if (message == null) {
             return null;

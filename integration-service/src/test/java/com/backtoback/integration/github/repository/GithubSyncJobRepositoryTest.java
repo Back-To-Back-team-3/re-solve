@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +42,8 @@ class GithubSyncJobRepositoryTest {
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
         registry.add("integration.crypto.secret-key", () -> TEST_SECRET_KEY_BASE64);
+        registry.add("spring.cloud.aws.region.static", () -> "ap-northeast-2");
+        registry.add("spring.cloud.aws.sqs.enabled", () -> "false");
     }
 
     @Autowired
@@ -148,5 +153,41 @@ class GithubSyncJobRepositoryTest {
             .hasSize(2)
             .extracting(GithubSyncJob::getSubmissionId)
             .containsExactlyInAnyOrder(1001L, 1002L);
+    }
+
+    @Test
+    @DisplayName("연동 ID 및 상태 필터 조건으로 동기화 작업 목록을 페이지네이션 조회할 수 있다")
+    void findByConnectionIdAndStatusWithPagination() {
+        GithubSyncJob job1 = GithubSyncJob.createPending(connection, 1001L, 201L, "두 수의 합", 1);
+        GithubSyncJob job2 = GithubSyncJob.createPending(connection, 1002L, 202L, "세 수의 합", 2);
+        job2.markFailed("Rate limit exceeded");
+        GithubSyncJob job3 = GithubSyncJob.createPending(connection, 1003L, 203L, "네 수의 합", 3);
+        job3.markFailed("Repository not found");
+
+        githubSyncJobRepository.saveAllAndFlush(List.of(job1, job2, job3));
+
+        PageRequest pageRequest = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        Page<GithubSyncJob> allPage = githubSyncJobRepository.findByConnectionId(connection.getId(), pageRequest);
+        assertThat(allPage.getTotalElements()).isEqualTo(3);
+
+        Page<GithubSyncJob> failedPage
+            = githubSyncJobRepository
+                .findByConnectionIdAndStatus(connection.getId(), GithubSyncJobStatus.FAILED, pageRequest);
+        assertThat(failedPage.getTotalElements()).isEqualTo(2);
+        assertThat(failedPage.getContent())
+            .extracting(GithubSyncJob::getSubmissionId)
+            .containsExactlyInAnyOrder(1002L, 1003L);
+    }
+
+    @Test
+    @DisplayName("findBySubmissionIdWithConnection으로 제출 ID에 해당하는 작업과 연동 정보를 함께 조회한다")
+    void findBySubmissionIdWithConnection() {
+        GithubSyncJob job = GithubSyncJob.createPending(connection, 1009L, 209L, "그래프 탐색", 2);
+        githubSyncJobRepository.saveAndFlush(job);
+
+        GithubSyncJob found = githubSyncJobRepository.findBySubmissionIdWithConnection(1009L).orElseThrow();
+        assertThat(found.getConnection().getMemberId()).isEqualTo(10L);
+        assertThat(found.getProblemId()).isEqualTo(209L);
     }
 }

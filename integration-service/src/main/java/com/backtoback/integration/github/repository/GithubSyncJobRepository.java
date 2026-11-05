@@ -5,6 +5,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -20,9 +22,37 @@ public interface GithubSyncJobRepository extends JpaRepository<GithubSyncJob, Lo
 
     Optional<GithubSyncJob> findBySubmissionId(Long submissionId);
 
+    /**
+     * 제출 ID로 작업과 연동 정보(connection)를 함께 조회한다 (api-spec.md > 8.1.7).
+     *
+     * @param submissionId 제출 ID
+     * @return 연동 정보가 포함된 GithubSyncJob
+     */
+    @Query("SELECT j FROM GithubSyncJob j JOIN FETCH j.connection WHERE j.submissionId = :submissionId")
+    Optional<GithubSyncJob> findBySubmissionIdWithConnection(@Param("submissionId") Long submissionId);
+
     boolean existsBySubmissionId(Long submissionId);
 
     List<GithubSyncJob> findByConnectionIdAndStatusIn(Long connectionId, Collection<GithubSyncJobStatus> statuses);
+
+    /**
+     * 특정 연동 ID의 전체 동기화 작업 목록을 페이지네이션 조회한다 (api-spec.md > 8.1.6).
+     *
+     * @param connectionId 연동 ID
+     * @param pageable 페이지 및 정렬 정보
+     * @return 동기화 작업 페이지
+     */
+    Page<GithubSyncJob> findByConnectionId(Long connectionId, Pageable pageable);
+
+    /**
+     * 특정 연동 ID와 작업 상태로 필터링한 동기화 작업 목록을 페이지네이션 조회한다 (api-spec.md > 8.1.6).
+     *
+     * @param connectionId 연동 ID
+     * @param status 작업 상태 필터
+     * @param pageable 페이지 및 정렬 정보
+     * @return 동기화 작업 페이지
+     */
+    Page<GithubSyncJob> findByConnectionIdAndStatus(Long connectionId, GithubSyncJobStatus status, Pageable pageable);
 
     /**
      * 연동 정보(connection)를 Fetch Join하여 LAZY 초기화 예외 없이 한 번에 조회한다.
