@@ -1,11 +1,14 @@
 package com.backtoback.member.member.service;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.member.member.domain.Member;
 
@@ -20,7 +23,11 @@ public class MemberEventPublisher {
 
     static final String AGGREGATE_TYPE = "MEMBER";
     static final String MEMBER_UPDATED = "MemberUpdated";
+    static final String MEMBER_SUSPENDED = "MemberSuspended";
     static final String SCHEMA_VERSION = "v1";
+    // 이벤트 계약 공통 규칙: +09:00, 마이크로초 6자리 (occurredAt과 같은 형식)
+    private static final DateTimeFormatter EVENT_TIME_FORMAT
+        = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx");
 
     private final OutboxEventWriter outboxEventWriter;
 
@@ -36,6 +43,22 @@ public class MemberEventPublisher {
                 String.valueOf(member.getId()),
                 correlationId(),
                 MemberUpdatedPayload.from(member)
+            );
+    }
+
+    /**
+     * 관리자 정지·해제 (M2). {@code suspended}는 바뀐 뒤의 상태, {@code sourceVersion}은 M1과 같은 {@code profile_version}이다.
+     */
+    public void memberSuspended(Member member, String reason, LocalDateTime changedAt) {
+        outboxEventWriter
+            .append(
+                AGGREGATE_TYPE,
+                MEMBER_SUSPENDED,
+                SCHEMA_VERSION,
+                String.valueOf(member.getId()),
+                correlationId(),
+                MemberSuspendedPayload
+                    .of(member, reason, EVENT_TIME_FORMAT.format(changedAt.atZone(ClockConfiguration.SERVICE_ZONE)))
             );
     }
 
