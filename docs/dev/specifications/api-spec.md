@@ -539,9 +539,9 @@
     
     | 필드 | 타입 | 설명 |
     | --- | --- | --- |
-    | `goal` | string | 학습 목표 Enum |
+    | `goal` | string | 학습 목표. `EMPLOYMENT`(취업·코딩테스트) / `CONTEST`(대회) / `STUDY`(학습) |
     | `preferredLanguages` | string[] | `java` / `python3` / `cpp` |
-    | `activeTimeSlots` | string[] | 활동 시간대 Enum |
+    | `activeTimeSlots` | string[] | 활동 시간대. `MORNING`(06–12시) / `AFTERNOON`(12–18시) / `EVENING`(18–24시) / `NIGHT`(00–06시) |
     | `tagLevels[]` | object[] | `tagId`, `tagName`, `level` |
     | `profileVersion` | string | 변경 순번 |
     | `updatedAt` | string (date-time) | 마지막 변경 |
@@ -558,7 +558,7 @@
     
     ```
     
-    - `preferredLanguages`·`activeTimeSlots` 단일/배열과 값 체계는 미결정(배열 초안)
+    - 목표·활동 시간대 값 목록은 스터디(5.1·5.2)의 `goal`·`activeTimeSlot`과 같다(추천의 목표 일치·시간대 겹침 비교).
 
 #### 1.3.2 학습 프로필 저장
 
@@ -572,9 +572,9 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `goal` | string | Y | 학습 목표 Enum |
+    | `goal` | string | Y | 학습 목표. `EMPLOYMENT`(취업·코딩테스트) / `CONTEST`(대회) / `STUDY`(학습) |
     | `preferredLanguages` | string[] | Y | 1개 이상 |
-    | `activeTimeSlots` | string[] | Y | 1개 이상 |
+    | `activeTimeSlots` | string[] | Y | 1개 이상. `MORNING`(06–12시) / `AFTERNOON`(12–18시) / `EVENING`(18–24시) / `NIGHT`(00–06시) |
     
     ```json
     { "goal": "EMPLOYMENT", "preferredLanguages": ["java"], "activeTimeSlots": ["EVENING"] }
