@@ -25,6 +25,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.contest.exam.client.ExamDependencyClient;
 import com.backtoback.contest.exam.client.ExamDependencyClient.ProblemSummaries;
@@ -60,6 +61,8 @@ class ExamManagementServiceTest {
     @Mock
     private JdbcTemplate jdbc;
     @Mock
+    private OutboxEventWriter outbox;
+    @Mock
     private TransactionTemplate transactions;
     private ExamManagementService service;
 
@@ -74,6 +77,7 @@ class ExamManagementServiceTest {
                 exams,
                 problems,
                 jdbc,
+                outbox,
                 transactions,
                 Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC)
             );
@@ -93,6 +97,27 @@ class ExamManagementServiceTest {
     }
 
     @Test
+    @DisplayName("0점과 배점 합계 초과, 빠진 표시 순서를 외부 조회 전에 거절한다")
+    void rejectsInvalidScoresAndOrder() {
+        var invalid
+            = List
+                .of(
+                    request(List.of(new Problem("1", "0.00", 1))),
+                    request(List.of(new Problem("1", "9999.99", 1), new Problem("2", "0.01", 2))),
+                    request(List.of(new Problem("1", "50.00", 1), new Problem("2", "50.00", 1)))
+                );
+        for (var item : invalid) {
+            assertThatThrownBy(() -> service.create("12", "7", item))
+                .isInstanceOf(ContestException.class)
+                .satisfies(
+                    error -> assertThat(((ContestException)error).getErrorCode())
+                        .isEqualTo(CommonErrorCode.COMMON_INVALID_REQUEST)
+                );
+        }
+        verifyNoInteractions(dependencies, members, transactions);
+    }
+
+    @Test
     @DisplayName("시작 시각이 서버 시각과 같으면 거절한다")
     void rejectsCurrentStart() {
         var request
@@ -101,6 +126,26 @@ class ExamManagementServiceTest {
                 "FIXED",
                 OffsetDateTime.parse("2026-01-01T00:00:00Z"),
                 OffsetDateTime.parse("2026-01-01T01:30:00Z"),
+                List.of(new Problem("1", "100.00", 1))
+            );
+        assertThatThrownBy(() -> service.create("12", "7", request))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(CommonErrorCode.COMMON_INVALID_REQUEST)
+            );
+        verifyNoInteractions(dependencies, members, transactions);
+    }
+
+    @Test
+    @DisplayName("마이크로초로 저장하면 현재와 같아지는 시작 시각은 거절한다")
+    void rejectsStartLostByDatabasePrecision() {
+        var request
+            = new ExamCreateRequest(
+                "시험",
+                "FIXED",
+                OffsetDateTime.parse("2026-01-01T00:00:00.000000001Z"),
+                OffsetDateTime.parse("2026-01-01T01:00:00.000000001Z"),
                 List.of(new Problem("1", "100.00", 1))
             );
         assertThatThrownBy(() -> service.create("12", "7", request))

@@ -159,4 +159,13 @@ public class Exam extends BaseTimeEntity {
     ) {
         return new Exam(studyId, creatorId, title, mode, startsAt, endsAt, durationMinutes, examRevision, totalScore);
     }
+
+    /** 시작 전 검증을 마친 전체 설정을 교체하고 이벤트 순서를 증가시킨다. */
+    public void updateSettings(String title, LocalDateTime startsAt, LocalDateTime endsAt, BigDecimal totalScore) {
+        this.title = title;
+        this.startsAt = startsAt;
+        this.endsAt = endsAt;
+        this.totalScore = totalScore;
+        this.examRevision = Math.incrementExact(this.examRevision);
+    }
 }
