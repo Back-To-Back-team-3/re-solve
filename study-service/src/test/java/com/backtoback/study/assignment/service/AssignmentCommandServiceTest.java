@@ -131,7 +131,8 @@ class AssignmentCommandServiceTest {
         given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(eq(STUDY_ID), eq(MEMBER_ID), anyList()))
             .willReturn(Optional.of(leaderMembership));
         given(problemSummariesClient.summaries(List.of(PROBLEM_ID))).willReturn(summaries);
-        given(assignmentPersistService.persist(eq(STUDY_ID), eq(request), any(Map.class))).willReturn(ASSIGNMENT_ID);
+        given(assignmentPersistService.persist(eq(STUDY_ID), eq(MEMBER_ID), eq(request), any(Map.class)))
+            .willReturn(ASSIGNMENT_ID);
 
         // when
         AssignmentCreateResponse response = assignmentCommandService.createAssignment(STUDY_ID, MEMBER_ID, request);
@@ -211,7 +212,7 @@ class AssignmentCommandServiceTest {
                 ex -> assertThat(((StudyException)ex).getErrorCode())
                     .isEqualTo(StudyErrorCode.STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE)
             );
-        verify(assignmentPersistService, never()).persist(any(), any(), any());
+        verify(assignmentPersistService, never()).persist(any(), any(), any(), any());
     }
 
     @Test

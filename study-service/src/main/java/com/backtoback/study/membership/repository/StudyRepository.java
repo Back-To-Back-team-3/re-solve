@@ -1,12 +1,17 @@
 package com.backtoback.study.membership.repository;
 
+import java.util.Optional;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.backtoback.study.membership.domain.Study;
+
+import jakarta.persistence.LockModeType;
 
 public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecificationExecutor<Study> {
 
@@ -51,4 +56,11 @@ public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecific
         nativeQuery = true
     )
     void leaveAndAutoReopen(@Param("studyId") Long studyId);
+
+    /**
+     * 스터디 행에 쓰기 잠금(FOR UPDATE)을 취득해 반환한다(scheduler.md §5.0 잠금 순서 ②).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM Study s WHERE s.id = :id")
+    Optional<Study> findByIdWithLock(@Param("id") Long id);
 }
