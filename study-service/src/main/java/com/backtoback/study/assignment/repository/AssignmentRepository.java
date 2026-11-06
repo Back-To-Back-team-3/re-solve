@@ -7,12 +7,15 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.backtoback.study.assignment.domain.Assignment;
 import com.backtoback.study.assignment.domain.AssignmentStatus;
+
+import jakarta.persistence.LockModeType;
 
 public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
 
@@ -99,5 +102,16 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
         @Param("studyId") Long studyId,
         @Param("deadlineAt") LocalDateTime deadlineAt,
         @Param("assignmentId") Long assignmentId
+    );
+
+    /**
+     * SCHEDULED·OPEN 상태의 문제집을 FOR SHARE로 조회한다.
+     * 가입 트랜잭션에서 잠금 순서 scheduler.md §5.0 ③<④를 보장하기 위해 사용한다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("SELECT a FROM Assignment a WHERE a.studyId = :studyId AND a.status IN :statuses")
+    List<Assignment> findByStudyIdAndStatusInWithLock(
+        @Param("studyId") Long studyId,
+        @Param("statuses") List<AssignmentStatus> statuses
     );
 }

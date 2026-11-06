@@ -14,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.study.assignment.domain.AssignmentStatus;
+import com.backtoback.study.assignment.repository.AssignmentRepository;
 import com.backtoback.study.assignment.service.AssignmentEnrollmentService;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
@@ -56,6 +58,7 @@ public class StudyMembershipCommandService {
     private final StudyMembershipRepository membershipRepository;
     private final StudyMembershipHistoryRepository historyRepository;
     private final StudyMemberQuotaRepository quotaRepository;
+    private final AssignmentRepository assignmentRepository;
     private final AssignmentEnrollmentService enrollmentService;
     private final OutboxEventWriter outboxEventWriter;
     private final Clock clock;
@@ -148,6 +151,13 @@ public class StudyMembershipCommandService {
             }
             throw new StudyException(StudyErrorCode.STUDY_FULL);
         }
+
+        // ③ assignments FOR SHARE — scheduler.md §5.0 ③<④ 잠금 순서 준수
+        assignmentRepository
+            .findByStudyIdAndStatusInWithLock(
+                study.getId(),
+                List.of(AssignmentStatus.SCHEDULED, AssignmentStatus.OPEN)
+            );
 
         StudyMembership membership
             = StudyMembership
@@ -348,25 +358,13 @@ public class StudyMembershipCommandService {
         String correlationId,
         LocalDateTime now
     ) {
-        // ① membership: PENDING + 만료 안 됨 조건부 UPDATE
-        if (membershipRepository.approveIfPending(target.getId(), now) == 0) {
-            StudyMembership refreshed
-                = membershipRepository
-                    .findById(target.getId())
-                    .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
-            if (refreshed.getStatus() != MembershipStatus.PENDING) {
-                throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_STATUS_CONFLICT);
-            }
-            throw new StudyException(StudyErrorCode.STUDY_APPLICATION_EXPIRED);
-        }
-
-        // ② quota
+        // ① quota
         quotaRepository.insertQuotaIfAbsent(target.getMemberId());
         if (quotaRepository.incrementIfBelowLimit(target.getMemberId()) == 0) {
             throw new StudyException(StudyErrorCode.STUDY_JOIN_LIMIT_EXCEEDED);
         }
 
-        // ③ study: CLOSED 아니고 정원 남은 경우 증가
+        // ② study: CLOSED 아니고 정원 남은 경우 증가
         if (studyRepository.approveIfNotFull(study.getId()) == 0) {
             Study refreshed
                 = studyRepository
@@ -378,7 +376,26 @@ public class StudyMembershipCommandService {
             throw new StudyException(StudyErrorCode.STUDY_FULL);
         }
 
-        // ④ 문제집 편입
+        // ③ assignments FOR SHARE — scheduler.md §5.0 ③<④ 잠금 순서 준수
+        assignmentRepository
+            .findByStudyIdAndStatusInWithLock(
+                study.getId(),
+                List.of(AssignmentStatus.SCHEDULED, AssignmentStatus.OPEN)
+            );
+
+        // ④ membership: PENDING + 만료 안 됨 조건부 UPDATE
+        if (membershipRepository.approveIfPending(target.getId(), now) == 0) {
+            StudyMembership refreshed
+                = membershipRepository
+                    .findById(target.getId())
+                    .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
+            if (refreshed.getStatus() != MembershipStatus.PENDING) {
+                throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_STATUS_CONFLICT);
+            }
+            throw new StudyException(StudyErrorCode.STUDY_APPLICATION_EXPIRED);
+        }
+
+        // ⑤ 문제집 편입
         enrollmentService.enroll(study.getId(), target.getMemberId(), target.getId());
 
         historyRepository
