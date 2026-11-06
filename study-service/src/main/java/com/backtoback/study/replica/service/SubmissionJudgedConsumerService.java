@@ -95,12 +95,8 @@ public class SubmissionJudgedConsumerService {
         Optional<MemberAcReplica> existing = memberAcReplicaRepository.findBySubmissionId(submissionId);
 
         if (existing.isEmpty()) {
-            if (!payload.isAccepted()) {
-                // 케이스 D: 첫 비AC — 복제본 없음, 재계산 불필요
-                log.warn("SubmissionJudged 비AC 최초 수신 무시 submissionId={}", payload.submissionId());
-                return false;
-            }
-            // 케이스 A: 신규 AC
+            // 케이스 A·D: 신규 삽입 (ERD §4.5.9 판정 무관, event-contract.md §1.5 judgeAttempt 순서 값)
+            // 비AC도 삽입해 채점 회차를 선점하면 이후 역순 AC가 케이스 B에서 거부된다.
             Long memberId = Long.parseLong(payload.userId());
             Long problemId = Long.parseLong(payload.problemId());
             LocalDateTime submittedAt = OffsetDateTime.parse(payload.submittedAt()).toLocalDateTime();
@@ -118,7 +114,7 @@ public class SubmissionJudgedConsumerService {
                             LocalDateTime.now(clock)
                         )
                 );
-            return true;
+            return payload.isAccepted(); // 케이스 A: 재계산 필요 / 케이스 D: 행 선점만
         }
 
         // 케이스 B·C: 조건부 UPDATE로 동시 소비 역전 방지(event-contract.md §5.1 §3)
