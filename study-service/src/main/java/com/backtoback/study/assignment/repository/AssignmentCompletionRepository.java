@@ -55,7 +55,7 @@ public interface AssignmentCompletionRepository extends JpaRepository<Assignment
 
     /**
      * (assignmentId, memberId)의 완료 기록을 FOR SHARE로 조회한다.
-     * REPEATABLE READ 스냅샷을 우회해 최신 커밋을 반영한다(SubmissionJudged C3).
+     * REPEATABLE READ 스냅샷을 우회해 최신 커밋을 반영한다(scheduler.md §5.0).
      */
     @Lock(LockModeType.PESSIMISTIC_READ)
     @Query("SELECT c FROM AssignmentCompletion c " + "WHERE c.assignmentId = :assignmentId AND c.memberId = :memberId")

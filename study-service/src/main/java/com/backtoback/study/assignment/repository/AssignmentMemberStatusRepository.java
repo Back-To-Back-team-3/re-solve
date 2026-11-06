@@ -115,7 +115,7 @@ public interface AssignmentMemberStatusRepository extends JpaRepository<Assignme
 
     /**
      * (assignmentId, memberId) 행을 FOR UPDATE로 조회해 재계산을 직렬화한다
-     * (SubmissionJudged C3 동시성 보장).
+     * (scheduler.md §5.0).
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
