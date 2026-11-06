@@ -13,8 +13,10 @@ import com.backtoback.problem.problem.dto.request.ProblemCreateRequest;
 import com.backtoback.problem.problem.dto.response.ProblemCreateResponse;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /** 기존 응답 조회·입력 검증·파일 업로드·짧은 원자 저장을 연결한다. */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProblemCreateService {
@@ -63,6 +65,7 @@ public class ProblemCreateService {
             if (bodyId != null) {
                 recordFailure(new ProblemCreateFiles(bodyId, java.util.List.copyOf(testFiles)), failure);
             }
+            log.warn("문제 등록 파일 업로드 실패 authorId={}", authorId, failure);
             throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
         var command
