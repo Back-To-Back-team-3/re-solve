@@ -29,7 +29,7 @@ public interface MemberAcReplicaRepository extends JpaRepository<MemberAcReplica
      *
      * @return 갱신된 행 수 (0이면 역순 수신)
      */
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query(
         "UPDATE MemberAcReplica m " + "SET m.judgeAttempt = :newJudgeAttempt, m.verdict = :verdict, "
             + "m.accepted = :accepted, m.syncedAt = :syncedAt "
