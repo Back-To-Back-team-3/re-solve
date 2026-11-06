@@ -8,10 +8,25 @@ import org.springframework.data.repository.query.Param;
 
 import com.backtoback.study.assignment.domain.AssignmentProblem;
 import com.backtoback.study.assignment.domain.AssignmentProblemStatus;
+import com.backtoback.study.assignment.domain.AssignmentStatus;
 
 public interface AssignmentProblemRepository extends JpaRepository<AssignmentProblem, Long> {
 
     List<AssignmentProblem> findByAssignmentIdAndStatus(Long assignmentId, AssignmentProblemStatus status);
+
+    /**
+     * 주어진 문제가 ACTIVE 상태로 배정된 OPEN 문제집의 ID 목록을 반환한다(event-contract.md §J1 study 처리).
+     */
+    @Query(
+        "SELECT ap.assignmentId FROM AssignmentProblem ap " + "WHERE ap.problemId = :problemId "
+            + "AND ap.status = :apStatus "
+            + "AND ap.assignmentId IN (SELECT a.id FROM Assignment a WHERE a.status = :aStatus)"
+    )
+    List<Long> findOpenAssignmentIdsByProblemId(
+        @Param("problemId") Long problemId,
+        @Param("apStatus") AssignmentProblemStatus apStatus,
+        @Param("aStatus") AssignmentStatus aStatus
+    );
 
     List<AssignmentProblem> findByAssignmentIdOrderByDisplayOrderAsc(Long assignmentId);
 

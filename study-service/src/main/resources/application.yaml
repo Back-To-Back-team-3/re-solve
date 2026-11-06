@@ -20,6 +20,10 @@ logging:
   pattern:
     level: "%5p [correlationId=%X{correlationId:-}]"
 
+study:
+  sqs:
+    queue-name: ${STUDY_SQS_QUEUE_NAME:study-queue}
+
 springdoc:
   api-docs:
     enabled: false
