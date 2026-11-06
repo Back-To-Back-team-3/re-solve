@@ -162,16 +162,11 @@ public class AssignmentLifecycleService {
             }
         }
 
-        appendRetroactiveEventIfNeeded(assignment, assignmentId, incompleteMemberIds, correlationId);
+        appendRetroactiveEventIfNeeded(assignment, assignmentId, correlationId);
         return true;
     }
 
-    private void appendRetroactiveEventIfNeeded(
-        Assignment assignment,
-        Long assignmentId,
-        List<Long> aIncompleteMemberIds,
-        String correlationId
-    ) {
+    private void appendRetroactiveEventIfNeeded(Assignment assignment, Long assignmentId, String correlationId) {
         if (assignment.getDeadlineAt() == null) {
             return;
         }
