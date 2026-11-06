@@ -99,6 +99,11 @@ class ExamQueryRepositoryTest {
         assertThat(visible.getTotalElements()).isEqualTo(1);
         assertThat(visible.getContent()).extracting("id").containsExactly(2L);
         assertThat(exams.findVisible(12, 7, true, null, page).getTotalElements()).isEqualTo(3);
+        assertThat(exams.findVisible(12, 7, true, null, page).getContent()).extracting("id").containsExactly(3L);
+        assertThat(exams.findVisible(12, 7, true, null, page.next()).getContent()).extracting("id").containsExactly(2L);
+        assertThat(exams.findVisible(12, 7, true, null, PageRequest.of(0, 2, Sort.by("startsAt"))).getContent())
+            .extracting("id")
+            .containsExactly(1L, 2L);
         assertThat(exams.findVisible(12, 7, false, ExamStatus.CANCELED, page).getTotalElements()).isZero();
     }
 }
