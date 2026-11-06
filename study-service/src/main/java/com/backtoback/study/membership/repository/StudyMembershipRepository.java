@@ -140,6 +140,21 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
     );
 
     /**
+     * 지정 스터디의 특정 멤버·상태 가입 행을 잠금 읽기(FOR SHARE)로 조회한다(scheduler.md §5.2 동시성 설계 포인트).
+     * REPEATABLE READ 스냅샷 회피를 위해 FOR SHARE를 사용한다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query(
+        "SELECT m FROM StudyMembership m "
+            + "WHERE m.studyId = :studyId AND m.memberId = :memberId AND m.status = :status"
+    )
+    Optional<StudyMembership> findByStudyIdAndMemberIdAndStatusWithLock(
+        @Param("studyId") Long studyId,
+        @Param("memberId") Long memberId,
+        @Param("status") MembershipStatus status
+    );
+
+    /**
      * 지정 스터디에서 주어진 역할 목록에 해당하는 APPROVED 멤버의 memberId 목록을 반환한다(스케줄러 §5.2 CLOSE 동작 3단계).
      * AssignmentIncompleteRepeated 이벤트의 recipientMemberIds 구성에 사용한다.
      */
