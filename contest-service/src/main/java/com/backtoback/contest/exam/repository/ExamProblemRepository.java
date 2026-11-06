@@ -11,6 +11,9 @@ import com.backtoback.contest.exam.domain.ExamProblem;
  * 시험에 고정된 문제를 저장하고 조회한다.
  */
 public interface ExamProblemRepository extends JpaRepository<ExamProblem, Long> {
+    /** 시험의 문제 수를 조회한다. */
+    long countByExamId(Long examId);
+
     /** 기존 문제 행을 먼저 삭제해 같은 문제의 유일 키가 충돌하지 않게 한다. */
     @Modifying
     @Query("delete from ExamProblem problem where problem.exam.id = :examId")
