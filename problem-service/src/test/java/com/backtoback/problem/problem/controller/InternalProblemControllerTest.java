@@ -26,6 +26,7 @@ import com.backtoback.problem.problem.service.InternalProblemService;
 @WebMvcTest(
     controllers = {
         InternalProblemController.class,
+        InternalProblemOperationStubController.class,
         ProblemValidationStubController.class
     }
 )
