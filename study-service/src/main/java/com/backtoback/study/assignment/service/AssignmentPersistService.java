@@ -30,6 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * 문제집 생성 저장 전용 서비스. 트랜잭션 경계를 분리해 Problem API 호출 중 DB 커넥션을 점유하지 않는다.
+ * 저장 트랜잭션 진입 시 요청자 권한을 재확인해 경쟁 조건을 방지한다.
  */
 @Service
 @RequiredArgsConstructor
