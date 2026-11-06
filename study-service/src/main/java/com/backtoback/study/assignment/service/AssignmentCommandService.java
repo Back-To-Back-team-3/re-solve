@@ -72,7 +72,7 @@ public class AssignmentCommandService {
             }
         }
 
-        Long assignmentId = assignmentPersistService.persist(studyId, request, summaryMap);
+        Long assignmentId = assignmentPersistService.persist(studyId, requestMemberId, request, summaryMap);
         return new AssignmentCreateResponse(String.valueOf(assignmentId), "SCHEDULED");
     }
 }

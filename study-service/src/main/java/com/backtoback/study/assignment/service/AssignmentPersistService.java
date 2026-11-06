@@ -16,7 +16,13 @@ import com.backtoback.study.assignment.domain.AssignmentProblem;
 import com.backtoback.study.assignment.dto.AssignmentCreateRequest;
 import com.backtoback.study.assignment.repository.AssignmentProblemRepository;
 import com.backtoback.study.assignment.repository.AssignmentRepository;
+import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
+import com.backtoback.study.membership.domain.MembershipRole;
+import com.backtoback.study.membership.domain.MembershipStatus;
+import com.backtoback.study.membership.domain.StudyMembership;
+import com.backtoback.study.membership.repository.StudyMembershipRepository;
+import com.backtoback.study.membership.repository.StudyRepository;
 
 import lombok.RequiredArgsConstructor;
 import tools.jackson.core.JacksonException;
@@ -32,14 +38,32 @@ class AssignmentPersistService {
     private final AssignmentRepository assignmentRepository;
     private final AssignmentProblemRepository assignmentProblemRepository;
     private final ObjectMapper objectMapper;
+    private final StudyRepository studyRepository;
+    private final StudyMembershipRepository membershipRepository;
 
     /**
      * Assignment와 AssignmentProblem 목록을 단일 트랜잭션으로 저장한다(ERD §4.5.5·§4.5.6).
+     * 저장 전 스터디 행 쓰기 잠금 취득 후 요청자 권한을 재확인한다(scheduler.md §5.0 잠금 순서 ②→④).
      *
      * @return 생성된 assignmentId
+     * @throws StudyException STUDY_NOT_FOUND, AUTH_ACCESS_DENIED
      */
     @Transactional
-    public Long persist(Long studyId, AssignmentCreateRequest request, Map<Long, ProblemSummaryItem> summaryMap) {
+    public Long persist(
+        Long studyId,
+        Long requestMemberId,
+        AssignmentCreateRequest request,
+        Map<Long, ProblemSummaryItem> summaryMap
+    ) {
+        // 멤버 제거 경로와 같은 순서(studies → study_memberships)로 잠금을 취득해 교착을 방지한다(scheduler.md §5.0).
+        studyRepository.findByIdWithLock(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        StudyMembership requester
+            = membershipRepository
+                .findByStudyIdAndMemberIdAndStatusWithLock(studyId, requestMemberId, MembershipStatus.APPROVED)
+                .orElseThrow(() -> new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED));
+        if (requester.getRole() != MembershipRole.LEADER && requester.getRole() != MembershipRole.MANAGER) {
+            throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
         boolean preSolvedAllowed = Boolean.TRUE.equals(request.isPreSolvedAllowed());
         LocalDateTime startsAt
             = request.startsAt().atZoneSameInstant(ClockConfiguration.SERVICE_ZONE).toLocalDateTime();
