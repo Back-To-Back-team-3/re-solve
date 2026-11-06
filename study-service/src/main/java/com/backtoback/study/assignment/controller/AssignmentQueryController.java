@@ -22,13 +22,14 @@ import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.study.assignment.domain.AssignmentStatus;
 import com.backtoback.study.assignment.dto.AssignmentDetailResponse;
 import com.backtoback.study.assignment.dto.AssignmentSummaryResponse;
+import com.backtoback.study.assignment.dto.FollowUpCandidatesResponse;
 import com.backtoback.study.assignment.service.AssignmentQueryService;
 import com.backtoback.study.global.error.StudyException;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * 문제집 조회 API (API 명세서 §5.4.2·§5.4.3).
+ * 문제집 조회 API (API 명세서 §5.4.2·§5.4.3·§5.4.4).
  */
 @RestController
 @RequestMapping("/api/v1/studies/{studyId}/assignments")
@@ -69,6 +70,20 @@ public class AssignmentQueryController {
         Long memberId = Long.parseLong(user.userId());
         AssignmentDetailResponse response = assignmentQueryService.getAssignmentDetail(studyId, memberId, assignmentId);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    /**
+     * 5.4.4 후속 문제집 후보 조회 — LEADER 또는 MANAGER만 호출할 수 있다.
+     */
+    @GetMapping("/{assignmentId}/follow-up-candidates")
+    public ResponseEntity<ApiResponse<FollowUpCandidatesResponse>> getFollowUpCandidates(
+        @PathVariable Long studyId,
+        @PathVariable Long assignmentId,
+        @AuthenticationPrincipal GatewayUser user
+    ) {
+        Long memberId = Long.parseLong(user.userId());
+        return ResponseEntity
+            .ok(ApiResponse.success(assignmentQueryService.getFollowUpCandidates(studyId, assignmentId, memberId)));
     }
 
     private Pageable resolveSort(Pageable pageable) {

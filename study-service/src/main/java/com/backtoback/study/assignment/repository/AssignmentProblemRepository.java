@@ -32,4 +32,29 @@ public interface AssignmentProblemRepository extends JpaRepository<AssignmentPro
         @Param("ids") List<Long> ids,
         @Param("status") AssignmentProblemStatus status
     );
+
+    interface FollowUpCandidateView {
+        Long getProblemId();
+
+        String getTitle();
+
+        Long getUnsolvedMemberCount();
+    }
+
+    /**
+     * 미해결 구성원이 있는 ACTIVE 문제를 미해결 인원 내림차순으로 반환한다 (API 명세서 §5.4.4).
+     * unsolvedMemberCount = 편입 멤버 수 - 해당 문제를 완료(COMPLETED)한 멤버 수.
+     */
+    @Query(
+        value = "SELECT " + "    ap.problem_id AS problemId, " + "    ap.problem_title AS title, " + "    ( "
+            + "        (SELECT COUNT(*) FROM assignment_member_statuses ams "
+            + "         WHERE ams.assignment_id = :assignmentId) " + "        - COALESCE(("
+            + "            SELECT COUNT(DISTINCT ac.member_id) " + "            FROM assignment_completions ac "
+            + "            WHERE ac.assignment_id = :assignmentId " + "              AND ac.problem_id = ap.problem_id "
+            + "              AND ac.status = 'COMPLETED'), 0) " + "    ) AS unsolvedMemberCount "
+            + "FROM assignment_problems ap " + "WHERE ap.assignment_id = :assignmentId " + "  AND ap.status = 'ACTIVE' "
+            + "HAVING unsolvedMemberCount > 0 " + "ORDER BY unsolvedMemberCount DESC",
+        nativeQuery = true
+    )
+    List<FollowUpCandidateView> findFollowUpCandidates(@Param("assignmentId") Long assignmentId);
 }

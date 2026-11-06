@@ -23,6 +23,7 @@ import com.backtoback.study.assignment.domain.CompletionStatus;
 import com.backtoback.study.assignment.domain.CompletionType;
 import com.backtoback.study.assignment.dto.AssignmentDetailResponse;
 import com.backtoback.study.assignment.dto.AssignmentSummaryResponse;
+import com.backtoback.study.assignment.dto.FollowUpCandidatesResponse;
 import com.backtoback.study.assignment.dto.MemberProgressResponse;
 import com.backtoback.study.assignment.dto.ProblemSnapshotResponse;
 import com.backtoback.study.assignment.dto.StudyStatsResponse;
@@ -34,13 +35,14 @@ import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
+import com.backtoback.study.membership.domain.StudyMembership;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.replica.repository.MemberReplicaRepository;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * 문제집 조회 서비스 (API 명세서 §5.4.2·§5.4.3).
+ * 문제집 조회 서비스 (API 명세서 §5.4.2·§5.4.3·§5.4.4).
  */
 @Service
 @RequiredArgsConstructor
@@ -153,6 +155,21 @@ public class AssignmentQueryService {
                 memberProgressList,
                 computeStats(memberStatuses, approvedMemberIds.size(), activeCount)
             );
+    }
+
+    @Transactional(readOnly = true)
+    public FollowUpCandidatesResponse getFollowUpCandidates(Long studyId, Long assignmentId, Long memberId) {
+        StudyMembership membership
+            = membershipRepository
+                .findByStudyIdAndMemberIdAndStatusIn(studyId, memberId, List.of(MembershipStatus.APPROVED))
+                .orElseThrow(() -> new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED));
+        if (membership.getRole() != MembershipRole.LEADER && membership.getRole() != MembershipRole.MANAGER) {
+            throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        assignmentRepository
+            .findByIdAndStudyId(assignmentId, studyId)
+            .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_ASSIGNMENT_NOT_FOUND));
+        return FollowUpCandidatesResponse.from(assignmentProblemRepository.findFollowUpCandidates(assignmentId));
     }
 
     private StudyStatsResponse computeStats(
