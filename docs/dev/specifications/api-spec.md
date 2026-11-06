@@ -1689,7 +1689,7 @@
 | 필드 | 타입 | 단위 | 설명 |
 | --- | --- | --- | --- |
 | `timeMs` | int 또는 null | ms | CPU 시간 제한. 기본 2,000·최소 1,000. 저장 시 정적 조건을 검사하고 공개 전 관리자가 C++ 정답 최대 실행 시간 ×3 이상인지 확인 (B-5) |
-| `memoryKb` | int 또는 null | KB | 메모리 제한. 기본 262,144 |
+| `memoryKb` | int 또는 null | KB | 메모리 제한. 허용 범위 1~512,000, 생략·null이면 기본 262,144 |
 | `wallTimeMs` | int 또는 null | ms | 생략 시 `timeMs + 5,000` |
 | `outputLimitKb` | int 또는 null | KiB | 테스트별 반환 JSON 크기 제한. 허용 범위 1~256, 생략·null이면 기본 64. 디버그 출력 제한과 별개이며 초과 판정은 정책 및 상태 §3.2·§3.3을 따른다 |
 - 언어별 보정은 두지 않는다. 최종 값은 회차에 저장하고 이후 공통 설정 변경은 기존 회차에 반영하지 않는다.
@@ -1727,7 +1727,7 @@
     | `functionSpec.returnType` | TypeSpec | Y | 반환값 타입 |
     | `executionLimits` | object 또는 null | N | 생략·null 필드는 등록 시 기본값 |
     | `executionLimits.timeMs` | integer 또는 null | N | 기본 2,000, 최소 1,000. C++ 실행 시간 ×3은 공개 전 관리자 확인 |
-    | `executionLimits.memoryKb` | integer 또는 null | N | 기본 262,144KB |
+    | `executionLimits.memoryKb` | integer 또는 null | N | 허용 범위 1~512,000KB. 생략·null이면 기본 262,144KB |
     | `executionLimits.wallTimeMs` | integer 또는 null | N | 기본 timeMs+5,000ms |
     | `executionLimits.outputLimitKb` | integer 또는 null | N | 1~256KB, 기본 64 |
     | `testCases` | object[] | Y | 최대 50개, 공개·숨김 각 1개 이상, UTF-8 합계 4MB 이하 |
@@ -2104,7 +2104,7 @@
     | `functionSpec.returnType` | TypeSpec | Y | 반환값 타입 |
     | `executionLimits` | object 또는 null | N | 생략·null 필드는 등록 시 기본값 |
     | `executionLimits.timeMs` | integer 또는 null | N | 기본 2,000, 최소 1,000. C++ 실행 시간 ×3은 공개 전 관리자 확인 |
-    | `executionLimits.memoryKb` | integer 또는 null | N | 기본 262,144KB |
+    | `executionLimits.memoryKb` | integer 또는 null | N | 허용 범위 1~512,000KB. 생략·null이면 기본 262,144KB |
     | `executionLimits.wallTimeMs` | integer 또는 null | N | 기본 timeMs+5,000ms |
     | `executionLimits.outputLimitKb` | integer 또는 null | N | 1~256KB, 기본 64 |
     | `testCases` | object[] | Y | 최대 50개, 공개·숨김 각 1개 이상, UTF-8 합계 4MB 이하 |

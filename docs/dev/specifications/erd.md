@@ -937,7 +937,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `difficulty` | INT | Y | 1 / 2 / 3 |
 | `function_spec` | JSON | Y | 함수 명세 (이름·매개변수·반환 타입) |
 | `time_limit_ms` | INT | Y | 기준 시간 제한 (기본 2,000, 최소 1,000) |
-| `memory_limit_kb` | INT | Y | 기준 메모리 제한 (기본 262,144) |
+| `memory_limit_kb` | INT | Y | 기준 메모리 제한 (기본 262,144, 허용 범위 1~512,000) |
 | `author_id` | BIGINT | Y | 회차 작성 관리자 (COMMENT: `members.id`) |
 | `idempotency_key` | VARCHAR(100) `_bin` | Y | 최초·새 회차 등록의 멱등키 |
 | `request_hash` | CHAR(64) `_bin` | Y | 요청 종류·대상 문제·원래 본문·rowVersion의 정규화 해시 |
