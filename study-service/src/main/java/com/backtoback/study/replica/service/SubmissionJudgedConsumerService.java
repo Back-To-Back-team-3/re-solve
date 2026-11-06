@@ -119,21 +119,23 @@ public class SubmissionJudgedConsumerService {
             return true;
         }
 
-        MemberAcReplica replica = existing.get();
-        if (payload.judgeAttempt() <= replica.getJudgeAttempt()) {
-            // 케이스 B: 역순 재채점 — 더 오래된 결과이므로 무시
+        // 케이스 B·C: 조건부 UPDATE로 동시 소비 역전 방지(event-contract.md §5.1 §3)
+        JudgeVerdict verdict = JudgeVerdict.valueOf(payload.verdict());
+        boolean accepted = verdict == JudgeVerdict.AC;
+        int updated
+            = memberAcReplicaRepository
+                .updateVerdictIfNewer(submissionId, payload.judgeAttempt(), verdict, accepted, LocalDateTime.now());
+        if (updated == 0) {
+            // 케이스 B: 역순 재채점 — 조건부 UPDATE가 갱신한 행 없음
             log
                 .warn(
-                    "SubmissionJudged 역순 재채점 무시 submissionId={} 수신={} 기존={}",
+                    "SubmissionJudged 역순 재채점 무시 submissionId={} 수신={}",
                     payload.submissionId(),
-                    payload.judgeAttempt(),
-                    replica.getJudgeAttempt()
+                    payload.judgeAttempt()
                 );
             return false;
         }
-        // 케이스 C: 순방향 재채점 — verdict·accepted 갱신
-        JudgeVerdict verdict = JudgeVerdict.valueOf(payload.verdict());
-        replica.updateVerdict(payload.judgeAttempt(), verdict, LocalDateTime.now());
+        // 케이스 C: 순방향 재채점 — 갱신 완료
         return true;
     }
 }

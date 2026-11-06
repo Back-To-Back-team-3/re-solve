@@ -2,6 +2,8 @@ package com.backtoback.study.replica.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
@@ -125,30 +127,31 @@ class SubmissionJudgedConsumerServiceTest {
     }
 
     @Test
-    @DisplayName("역순 judgeAttempt이면 복제본을 갱신하지 않고 재계산도 호출하지 않는다")
+    @DisplayName("역순 judgeAttempt이면 조건부 UPDATE가 0행을 반환하여 재계산을 호출하지 않는다")
     void consume_outOfOrderJudgeAttempt_skipsUpdateAndRecalculation() {
         // given
         SubmissionJudgedPayload payload = payload("WA", 1);
-        MemberAcReplica existing = existingReplica(JudgeVerdict.AC, 2);
         given(memberAcReplicaRepository.findBySubmissionId(Long.parseLong(SUBMISSION_ID)))
-            .willReturn(Optional.of(existing));
+            .willReturn(Optional.of(existingReplica(JudgeVerdict.AC, 2)));
+        given(memberAcReplicaRepository.updateVerdictIfNewer(any(), anyInt(), any(), anyBoolean(), any()))
+            .willReturn(0);
 
         // when
         service.consume(payload);
 
         // then
-        assertThat(existing.getJudgeAttempt()).isEqualTo(2);
         verify(recalculationService, never()).recalculate(any(), any(), any());
     }
 
     @Test
-    @DisplayName("순방향 재채점이면 verdict를 갱신하고 완료 재계산을 호출한다")
+    @DisplayName("순방향 재채점이면 조건부 UPDATE로 verdict를 갱신하고 완료 재계산을 호출한다")
     void consume_laterJudgeAttempt_updatesVerdictAndRecalculates() {
         // given
         SubmissionJudgedPayload payload = payload("WA", 2);
-        MemberAcReplica existing = existingReplica(JudgeVerdict.AC, 1);
         given(memberAcReplicaRepository.findBySubmissionId(Long.parseLong(SUBMISSION_ID)))
-            .willReturn(Optional.of(existing));
+            .willReturn(Optional.of(existingReplica(JudgeVerdict.AC, 1)));
+        given(memberAcReplicaRepository.updateVerdictIfNewer(any(), anyInt(), any(), anyBoolean(), any()))
+            .willReturn(1);
         AssignmentMemberStatus ams = mockAms(ASSIGNMENT_ID);
         given(
             assignmentProblemRepository
@@ -167,9 +170,8 @@ class SubmissionJudgedConsumerServiceTest {
         service.consume(payload);
 
         // then
-        assertThat(existing.isAccepted()).isFalse();
-        assertThat(existing.getVerdict()).isEqualTo(JudgeVerdict.WA);
-        assertThat(existing.getJudgeAttempt()).isEqualTo(2);
+        verify(memberAcReplicaRepository)
+            .updateVerdictIfNewer(eq(Long.parseLong(SUBMISSION_ID)), eq(2), eq(JudgeVerdict.WA), eq(false), any());
         verify(recalculationService).recalculate(ASSIGNMENT_ID, Long.parseLong(USER_ID), Long.parseLong(PROBLEM_ID));
     }
 
