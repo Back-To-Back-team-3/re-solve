@@ -14,9 +14,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.dto.FunctionSpec;
@@ -57,6 +61,69 @@ class ProblemCreateInputTest {
     void defaults() {
         var result = input.validate(ProblemCreateFixtures.request());
         assertThat(result).isEqualTo(new ProblemCreateInput.Validated(List.of(), 2000, 262144, 7000, 64));
+    }
+
+    /**
+     * 메모리 제한의 양 끝 경계와 명시적 null 기본값을 확인한다.
+     *
+     * @param memoryKb 요청 메모리 제한
+     */
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(
+        ints = {
+            1,
+            512000
+        }
+    )
+    @DisplayName("메모리 제한은 1부터 512000까지 허용하고 null이면 기본값을 적용한다")
+    void memoryLimitAccepted(Integer memoryKb) {
+        assertThat(input.validate(withMemoryLimit(memoryKb)).memory()).isEqualTo(memoryKb == null ? 262144 : memoryKb);
+    }
+
+    /**
+     * 메모리 제한 범위를 벗어난 입력을 거절한다.
+     *
+     * @param memoryKb 요청 메모리 제한
+     */
+    @ParameterizedTest
+    @ValueSource(
+        ints = {
+            0,
+            -1,
+            512001,
+            Integer.MAX_VALUE
+        }
+    )
+    @DisplayName("메모리 제한이 양수가 아니거나 512000을 초과하면 입력 오류로 거절한다")
+    void memoryLimitRejected(int memoryKb) {
+        assertThatThrownBy(() -> input.validate(withMemoryLimit(memoryKb)))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_INVALID_REQUEST)
+            );
+    }
+
+    /**
+     * 지정한 메모리 제한으로 등록 입력을 생성한다.
+     *
+     * @param memoryKb 요청 메모리 제한
+     * @return 메모리 제한을 포함한 등록 입력
+     */
+    private ProblemCreateRequest withMemoryLimit(Integer memoryKb) {
+        var request = ProblemCreateFixtures.request();
+        return new ProblemCreateRequest(
+            request.scope(),
+            request.title(),
+            request.description(),
+            request.constraints(),
+            request.examples(),
+            request.difficulty(),
+            request.tagIds(),
+            request.functionSpec(),
+            new ProblemCreateRequest.Limits(null, memoryKb, null, null),
+            request.testCases()
+        );
     }
 
     /**

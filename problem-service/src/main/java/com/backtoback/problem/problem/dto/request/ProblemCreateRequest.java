@@ -44,7 +44,11 @@ public record ProblemCreateRequest(
             value = 1000,
             message = "CPU 시간 제한은 1000ms 이상이어야 합니다."
         ) Integer timeMs,
-        @Positive(message = "메모리 제한은 양수여야 합니다.") Integer memoryKb,
+        @Positive(message = "메모리 제한은 양수여야 합니다.")
+        @Max(
+            value = 512000,
+            message = "메모리 제한은 512000KB 이하여야 합니다."
+        ) Integer memoryKb,
         @Positive(message = "벽시계 시간 제한은 양수여야 합니다.") Integer wallTimeMs,
         @Min(
             value = 1,

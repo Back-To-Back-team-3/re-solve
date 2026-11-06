@@ -97,6 +97,7 @@ class AdminProblemControllerTest {
             "\"title\":\" \"",
             "\"title\":null",
             "\"title\":\"문제\",\"executionLimits\":{\"outputLimitKb\":257}",
+            "\"title\":\"문제\",\"executionLimits\":{\"memoryKb\":512001}",
             "\"title\":\"문제\",\"unknown\":true",
             "\"title\":\"문제\",\"executionLimits\":{\"timeMs\":1000.5}"
         }
