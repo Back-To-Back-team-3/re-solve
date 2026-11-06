@@ -82,4 +82,22 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
         @Param("deadlineAt") LocalDateTime deadlineAt,
         @Param("assignmentId") Long assignmentId
     );
+
+    /**
+     * 동일 스터디에서 현재 문제집보다 나중에 마감된 문제집 중 가장 이른 것의 ID를 반환한다
+     * (스케줄러 §5.2 소급 연속 INCOMPLETE 재판정).
+     * deadline_at이 같으면 id 오름차순 기준으로 뒤선 문제집을 직후로 간주한다.
+     */
+    @Query(
+        value = "SELECT id FROM assignments WHERE study_id = :studyId AND status = 'CLOSED' "
+            + "AND deadline_at IS NOT NULL "
+            + "AND (deadline_at > :deadlineAt OR (deadline_at = :deadlineAt AND id > :assignmentId)) "
+            + "ORDER BY deadline_at ASC, id ASC LIMIT 1",
+        nativeQuery = true
+    )
+    Optional<Long> findNextClosedId(
+        @Param("studyId") Long studyId,
+        @Param("deadlineAt") LocalDateTime deadlineAt,
+        @Param("assignmentId") Long assignmentId
+    );
 }
