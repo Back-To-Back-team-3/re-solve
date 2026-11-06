@@ -1,0 +1,118 @@
+package com.backtoback.study.replica.service;
+
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.backtoback.common.event.store.JdbcProcessedEventStore;
+import com.backtoback.study.assignment.domain.AssignmentProblemStatus;
+import com.backtoback.study.assignment.domain.AssignmentStatus;
+import com.backtoback.study.assignment.repository.AssignmentMemberStatusRepository;
+import com.backtoback.study.assignment.repository.AssignmentProblemRepository;
+import com.backtoback.study.assignment.service.AssignmentCompletionRecalculationService;
+import com.backtoback.study.replica.domain.JudgeVerdict;
+import com.backtoback.study.replica.domain.MemberAcReplica;
+import com.backtoback.study.replica.event.dto.SubmissionJudgedPayload;
+import com.backtoback.study.replica.repository.MemberAcReplicaRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * SubmissionJudged 이벤트를 소비하여 AC 복제본을 갱신하고 완료 재계산을 위임한다
+ * (event-contract.md §J1, policy-and-state.md §재채점 반영).
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class SubmissionJudgedConsumerService {
+
+    private final JdbcProcessedEventStore processedEventStore;
+    private final MemberAcReplicaRepository memberAcReplicaRepository;
+    private final AssignmentProblemRepository assignmentProblemRepository;
+    private final AssignmentMemberStatusRepository assignmentMemberStatusRepository;
+    private final AssignmentCompletionRecalculationService recalculationService;
+
+    @Transactional
+    public void consume(SubmissionJudgedPayload payload) {
+        try {
+            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now());
+        } catch (DuplicateKeyException e) {
+            log.warn("SubmissionJudged 중복 수신 무시 eventId={}", payload.eventId());
+            return;
+        }
+
+        boolean shouldRecalculate = applyAcReplica(payload);
+        if (!shouldRecalculate) {
+            return;
+        }
+
+        Long memberId = Long.parseLong(payload.userId());
+        Long problemId = Long.parseLong(payload.problemId());
+
+        List<Long> assignmentIds
+            = assignmentProblemRepository
+                .findOpenAssignmentIdsByProblemId(problemId, AssignmentProblemStatus.ACTIVE, AssignmentStatus.OPEN);
+        if (assignmentIds.isEmpty()) {
+            return;
+        }
+
+        assignmentMemberStatusRepository
+            .findByAssignmentIdInAndMemberId(assignmentIds, memberId)
+            .forEach(ams -> recalculationService.recalculate(ams.getAssignmentId(), memberId, problemId));
+    }
+
+    private boolean applyAcReplica(SubmissionJudgedPayload payload) {
+        Long submissionId = Long.parseLong(payload.submissionId());
+        Optional<MemberAcReplica> existing = memberAcReplicaRepository.findBySubmissionId(submissionId);
+
+        if (existing.isEmpty()) {
+            if (!payload.isAccepted()) {
+                // 케이스 D: 첫 비AC — 복제본 없음, 재계산 불필요
+                log.warn("SubmissionJudged 비AC 최초 수신 무시 submissionId={}", payload.submissionId());
+                return false;
+            }
+            // 케이스 A: 신규 AC
+            Long memberId = Long.parseLong(payload.userId());
+            Long problemId = Long.parseLong(payload.problemId());
+            LocalDateTime submittedAt = OffsetDateTime.parse(payload.submittedAt()).toLocalDateTime();
+            JudgeVerdict verdict = JudgeVerdict.valueOf(payload.verdict());
+            memberAcReplicaRepository
+                .save(
+                    MemberAcReplica
+                        .sync(
+                            submissionId,
+                            memberId,
+                            problemId,
+                            submittedAt,
+                            payload.judgeAttempt(),
+                            verdict,
+                            LocalDateTime.now()
+                        )
+                );
+            return true;
+        }
+
+        MemberAcReplica replica = existing.get();
+        if (payload.judgeAttempt() <= replica.getJudgeAttempt()) {
+            // 케이스 B: 역순 재채점 — 더 오래된 결과이므로 무시
+            log
+                .warn(
+                    "SubmissionJudged 역순 재채점 무시 submissionId={} 수신={} 기존={}",
+                    payload.submissionId(),
+                    payload.judgeAttempt(),
+                    replica.getJudgeAttempt()
+                );
+            return false;
+        }
+        // 케이스 C: 순방향 재채점 — verdict·accepted 갱신
+        JudgeVerdict verdict = JudgeVerdict.valueOf(payload.verdict());
+        replica.updateVerdict(payload.judgeAttempt(), verdict, LocalDateTime.now());
+        return true;
+    }
+}

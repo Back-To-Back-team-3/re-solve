@@ -115,6 +115,16 @@ public class MemberAcReplica extends BaseTimeEntity {
     }
 
     /**
+     * 재채점으로 채점 결과가 바뀐 경우 verdict·accepted·judgeAttempt를 갱신한다(이벤트 계약 §1.5 judgeAttempt 순서 값).
+     */
+    public void updateVerdict(int newJudgeAttempt, JudgeVerdict newVerdict, LocalDateTime newSyncedAt) {
+        this.judgeAttempt = newJudgeAttempt;
+        this.verdict = newVerdict;
+        this.accepted = newVerdict == JudgeVerdict.AC;
+        this.syncedAt = newSyncedAt;
+    }
+
+    /**
      * 제출 1건의 채점 결과 복제본을 만든다. 같은 제출의 지연·중복 반영 비교는 이벤트 소비 기능에서 처리한다(ERD 4.5.9).
      */
     public static MemberAcReplica sync(

@@ -57,6 +57,10 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
+    // AWS Messaging (SQS)
+    implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
+
     // OpenAPI / Swagger UI
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1'
 

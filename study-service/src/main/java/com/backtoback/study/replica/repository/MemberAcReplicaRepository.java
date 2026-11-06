@@ -2,6 +2,7 @@ package com.backtoback.study.replica.repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -14,6 +15,11 @@ import com.backtoback.study.replica.domain.MemberAcReplica;
 import jakarta.persistence.LockModeType;
 
 public interface MemberAcReplicaRepository extends JpaRepository<MemberAcReplica, Long> {
+
+    /**
+     * 제출 ID로 AC 복제본을 조회한다(SubmissionJudged 소비 시 케이스 판별에 사용).
+     */
+    Optional<MemberAcReplica> findBySubmissionId(Long submissionId);
 
     /**
      * 문제별 AC 중 earliest submitted_at 순으로 정렬한 결과를 반환한다.
