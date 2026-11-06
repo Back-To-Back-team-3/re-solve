@@ -4,11 +4,13 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.study.assignment.domain.AssignmentProblemStatus;
 import com.backtoback.study.assignment.domain.AssignmentStatus;
@@ -65,6 +67,25 @@ public class SubmissionJudgedConsumerService {
         assignmentMemberStatusRepository
             .findByAssignmentIdInAndMemberId(assignmentIds, memberId)
             .forEach(ams -> recalculationService.recalculate(ams.getAssignmentId(), memberId, problemId));
+    }
+
+    @Transactional
+    public void consumeUnknown(
+        String rawEventId,
+        String rawEventType,
+        String rawOccurredAt,
+        String rawAggregateId,
+        String rawCorrelationId
+    ) {
+        OffsetDateTime odt = OffsetDateTime.parse(rawOccurredAt);
+        String corrId = (rawCorrelationId != null && !rawCorrelationId.isBlank()) ? rawCorrelationId : "anonymous";
+        EventMetadata metadata
+            = new EventMetadata(UUID.fromString(rawEventId), rawEventType, "v1", odt, rawAggregateId, corrId);
+        try {
+            processedEventStore.insert(metadata, LocalDateTime.now());
+        } catch (DuplicateKeyException e) {
+            log.warn("미지원 이벤트 중복 수신 무시 eventId={} eventType={}", rawEventId, rawEventType);
+        }
     }
 
     private boolean applyAcReplica(SubmissionJudgedPayload payload) {

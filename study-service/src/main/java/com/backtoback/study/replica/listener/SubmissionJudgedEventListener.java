@@ -41,6 +41,15 @@ public class SubmissionJudgedEventListener {
             String eventType = eventTypeNode != null ? eventTypeNode.asString() : null;
 
             if (!SUPPORTED_EVENT_TYPE.equals(eventType)) {
+                // event-contract.md §1.4 §1: 모르는 eventType은 processed_events만 기록 후 성공
+                consumerService
+                    .consumeUnknown(
+                        nodeString(payload, "eventId"),
+                        eventType,
+                        nodeString(payload, "occurredAt"),
+                        nodeString(payload, "aggregateId"),
+                        nodeString(payload, "correlationId")
+                    );
                 log.warn("처리 대상이 아닌 이벤트 무시 eventType={}", eventType);
                 return;
             }
@@ -50,6 +59,11 @@ public class SubmissionJudgedEventListener {
         } finally {
             MDC.remove(MDC_CORRELATION_ID);
         }
+    }
+
+    private String nodeString(JsonNode node, String field) {
+        JsonNode fieldNode = node.get(field);
+        return (fieldNode != null && !fieldNode.isNull()) ? fieldNode.asString() : null;
     }
 
     private JsonNode extractPayload(String body) {
