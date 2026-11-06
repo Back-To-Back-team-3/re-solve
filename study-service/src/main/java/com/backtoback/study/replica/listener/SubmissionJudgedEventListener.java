@@ -23,6 +23,8 @@ public class SubmissionJudgedEventListener {
 
     private static final String SUPPORTED_EVENT_TYPE = "SubmissionJudged";
     private static final String MDC_CORRELATION_ID = "correlationId";
+    private static final String MDC_EVENT_ID = "eventId";
+    private static final String MDC_EVENT_TYPE = "eventType";
 
     private final ObjectMapper objectMapper;
     private final SubmissionJudgedConsumerService consumerService;
@@ -31,24 +33,29 @@ public class SubmissionJudgedEventListener {
     public void onMessage(String messageBody) {
         JsonNode payload = extractPayload(messageBody);
 
-        JsonNode correlationIdNode = payload.get("correlationId");
-        if (correlationIdNode != null && !correlationIdNode.isNull()) {
-            MDC.put(MDC_CORRELATION_ID, correlationIdNode.asString());
+        String eventId = nodeString(payload, "eventId");
+        String eventType = nodeString(payload, "eventType");
+        if (eventId != null) {
+            MDC.put(MDC_EVENT_ID, eventId);
+        }
+        if (eventType != null) {
+            MDC.put(MDC_EVENT_TYPE, eventType);
+        }
+        String correlationId = nodeString(payload, "correlationId");
+        if (correlationId != null) {
+            MDC.put(MDC_CORRELATION_ID, correlationId);
         }
 
         try {
-            JsonNode eventTypeNode = payload.get("eventType");
-            String eventType = eventTypeNode != null ? eventTypeNode.asString() : null;
-
             if (!SUPPORTED_EVENT_TYPE.equals(eventType)) {
                 // event-contract.md §1.4 §1: 모르는 eventType은 processed_events만 기록 후 성공
                 consumerService
                     .consumeUnknown(
-                        nodeString(payload, "eventId"),
+                        eventId,
                         eventType,
                         nodeString(payload, "occurredAt"),
                         nodeString(payload, "aggregateId"),
-                        nodeString(payload, "correlationId")
+                        correlationId
                     );
                 log.warn("처리 대상이 아닌 이벤트 무시 eventType={}", eventType);
                 return;
@@ -57,6 +64,8 @@ public class SubmissionJudgedEventListener {
             SubmissionJudgedPayload event = objectMapper.treeToValue(payload, SubmissionJudgedPayload.class);
             consumerService.consume(event);
         } finally {
+            MDC.remove(MDC_EVENT_ID);
+            MDC.remove(MDC_EVENT_TYPE);
             MDC.remove(MDC_CORRELATION_ID);
         }
     }
