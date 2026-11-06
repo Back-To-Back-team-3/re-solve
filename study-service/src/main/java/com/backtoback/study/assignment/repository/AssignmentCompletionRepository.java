@@ -2,13 +2,17 @@ package com.backtoback.study.assignment.repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.backtoback.study.assignment.domain.AssignmentCompletion;
+
+import jakarta.persistence.LockModeType;
 
 public interface AssignmentCompletionRepository extends JpaRepository<AssignmentCompletion, Long> {
 
@@ -20,7 +24,7 @@ public interface AssignmentCompletionRepository extends JpaRepository<Assignment
     /**
      * 문제 1개의 완료 기록을 반환한다. 재채점 재계산 시 기존 행 유무 판단에 사용한다(ERD 4.5.8 UK).
      */
-    java.util.Optional<AssignmentCompletion> findByAssignmentIdAndMemberIdAndProblemId(
+    Optional<AssignmentCompletion> findByAssignmentIdAndMemberIdAndProblemId(
         Long assignmentId,
         Long memberId,
         Long problemId
@@ -47,5 +51,16 @@ public interface AssignmentCompletionRepository extends JpaRepository<Assignment
         @Param("basisSubmittedAt") LocalDateTime basisSubmittedAt,
         @Param("basisJudgeAttempt") Integer basisJudgeAttempt,
         @Param("completedAt") LocalDateTime completedAt
+    );
+
+    /**
+     * (assignmentId, memberId)의 완료 기록을 FOR SHARE로 조회한다.
+     * REPEATABLE READ 스냅샷을 우회해 최신 커밋을 반영한다(SubmissionJudged C3).
+     */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("SELECT c FROM AssignmentCompletion c " + "WHERE c.assignmentId = :assignmentId AND c.memberId = :memberId")
+    List<AssignmentCompletion> findByAssignmentIdAndMemberIdWithForShare(
+        @Param("assignmentId") Long assignmentId,
+        @Param("memberId") Long memberId
     );
 }
