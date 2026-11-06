@@ -87,7 +87,8 @@ class ExamDetailQueryServiceTest {
     @DisplayName("현재 구성원은 활성 참가가 없으면 참가 정보 없이 조회한다")
     void memberCanReadWithoutParticipation() {
         // given
-        given(exams.findById(55L)).willReturn(Optional.of(exam()));
+        Exam exam = exam();
+        given(exams.findById(55L)).willReturn(Optional.of(exam));
         given(memberships.isActive(12, 7)).willReturn(true);
         given(clock.instant()).willReturn(Instant.parse("2026-11-07T00:00:00Z"));
         // when
@@ -101,7 +102,8 @@ class ExamDetailQueryServiceTest {
     @DisplayName("시작과 종료 시각에도 저장된 시험 상태와 서버 시간을 반환한다")
     void readsStoredStateAtTimeBoundaries() {
         // given
-        given(exams.findById(55L)).willReturn(Optional.of(exam()));
+        Exam exam = exam();
+        given(exams.findById(55L)).willReturn(Optional.of(exam));
         given(memberships.isActive(12, 7)).willReturn(true);
         given(clock.instant()).willReturn(Instant.parse("2026-11-07T01:00:00Z"), Instant.parse("2026-11-07T02:00:00Z"));
         // when
