@@ -1,5 +1,9 @@
 package com.backtoback.contest.exam.service;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -7,13 +11,16 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.api.PageResponse;
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.domain.ExamParticipantStatus;
 import com.backtoback.contest.exam.domain.ExamStatus;
+import com.backtoback.contest.exam.dto.ExamDetailResponse;
 import com.backtoback.contest.exam.dto.ExamListResponse;
 import com.backtoback.contest.exam.repository.ExamParticipantRepository;
 import com.backtoback.contest.exam.repository.ExamProblemRepository;
 import com.backtoback.contest.exam.repository.ExamRepository;
 import com.backtoback.contest.exam.repository.StudyMembershipReplicaRepository;
+import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
 import lombok.RequiredArgsConstructor;
@@ -26,8 +33,35 @@ public class ExamQueryService {
     private final ExamParticipantRepository participants;
     private final ExamProblemRepository problems;
     private final StudyMembershipReplicaRepository memberships;
+    private final Clock clock;
 
-    /** 허용된 시험에 필터와 페이지를 적용한다. */
+    /**
+     * 현재 구성원이나 활성 참가자에게 부수 효과 없이 시험 상세를 반환한다 (API 명세서 4.1.3).
+     * 잘못된 식별자는 {@code COMMON_INVALID_REQUEST}, 없는 시험은 {@code EXAM_NOT_FOUND},
+     * 권한이 없으면 {@code AUTH_ACCESS_DENIED}로 거절한다.
+     */
+    @Transactional(readOnly = true)
+    public ExamDetailResponse detail(String examId, String memberId) {
+        long examNumber = id(examId);
+        long member = id(memberId);
+        var exam = exams.findById(examNumber).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
+        var participant
+            = participants
+                .findByExamIdAndMemberIdAndStatusNot(examNumber, member, ExamParticipantStatus.CANCELED)
+                .orElse(null);
+        if (participant == null && !memberships.isActive(exam.getStudyId(), member)) {
+            throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        var now
+            = LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MICROS), ClockConfiguration.SERVICE_ZONE);
+        return ExamDetailResponse.from(exam, problems.countByExamId(examNumber), participant, now);
+    }
+
+    /**
+     * 권한으로 시험 범위를 제한한 뒤 상태 필터와 페이지를 적용한다 (API 명세서 4.1.2).
+     * 잘못된 입력은 {@code COMMON_INVALID_REQUEST}, 구성원이 아니고 활성 참가도 없으면
+     * {@code AUTH_ACCESS_DENIED}로 거절한다.
+     */
     @Transactional(readOnly = true)
     public PageResponse<ExamListResponse> list(
         String studyId,
