@@ -234,11 +234,18 @@ judge0_curl_headers=()
 if [ -n "${JUDGE0_AUTH_TOKEN:-}" ]; then
   judge0_curl_headers=(-H "X-Auth-Token: ${JUDGE0_AUTH_TOKEN}")
 fi
+curl --fail --silent --show-error "${judge0_curl_headers[@]}" "$JUDGE0_BASE_URL/config_info"
 curl --fail --silent --show-error "${judge0_curl_headers[@]}" "$JUDGE0_BASE_URL/system_info"
 curl --fail --silent --show-error "${judge0_curl_headers[@]}" "$JUDGE0_BASE_URL/languages/"
 ```
 
 언어 ID·버전은 설치한 Judge0의 응답으로 확인한다. 특정 ID가 항상 Java 17이라고 가정하지 않는다. Java는 JDK·OpenJDK 17, Python은 Python 3, C++은 GCC 기반 후보를 선택하며 C++ 제출에는 `-std=c++17`을 전달한다. 지원 후보가 없으면 다른 언어·주요 버전으로 대체하지 않는다.
+
+문제의 메모리 제한은 기본 262,144, 허용 범위 1~512,000이다. 운영 Judge0 서버와 worker는 이 범위를 지원하는 동일한 설정을 사용해야 한다. 저장소의 `judge0.conf`는 `MAX_MEMORY_LIMIT=512000`으로 설정되어 있다.
+
+배포 시 실제 운영 Judge0의 `GET /config_info` 응답에서 `max_memory_limit >= 512000`인지 확인한다. 위 예시의 로컬 주소를 운영 접속 주소로 바꾸고 해당 환경의 인증 설정을 사용한다. 상한이 부족하면 Judge0 설정을 맞추고 서버·worker에 적용한 뒤 다시 확인한다. 저장소 설정만으로 운영 반영을 완료한 것으로 판단하지 않는다.
+
+Judge0의 `MEMORY_LIMIT`는 실행 요청에서 값을 생략했을 때의 기본값이다. Judge 서비스는 고정 문제 회차의 메모리 제한을 명시적으로 전달한다. Judge0의 상한을 늘리더라도 문제 API의 허용 상한은 512,000으로 유지하며, 정책 변경 시 별도로 합의한다.
 
 ### 5.2 실제 실행 접수·조회 검증
 
