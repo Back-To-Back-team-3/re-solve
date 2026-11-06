@@ -11,6 +11,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -49,6 +51,8 @@ class SubmissionJudgedConsumerServiceTest {
     private static final String PROBLEM_ID = "100";
     private static final Long ASSIGNMENT_ID = 1L;
 
+    @Spy
+    private Clock clock = Clock.systemDefaultZone();
     @Mock
     private JdbcProcessedEventStore processedEventStore;
     @Mock

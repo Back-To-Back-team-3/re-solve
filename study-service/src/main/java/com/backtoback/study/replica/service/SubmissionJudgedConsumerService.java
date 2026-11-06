@@ -1,5 +1,6 @@
 package com.backtoback.study.replica.service;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -34,6 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class SubmissionJudgedConsumerService {
 
+    private final Clock clock;
     private final JdbcProcessedEventStore processedEventStore;
     private final MemberAcReplicaRepository memberAcReplicaRepository;
     private final AssignmentProblemRepository assignmentProblemRepository;
@@ -43,7 +45,7 @@ public class SubmissionJudgedConsumerService {
     @Transactional
     public void consume(SubmissionJudgedPayload payload) {
         try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now());
+            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
         } catch (DuplicateKeyException e) {
             log.warn("SubmissionJudged 중복 수신 무시 eventId={}", payload.eventId());
             return;
@@ -82,7 +84,7 @@ public class SubmissionJudgedConsumerService {
         EventMetadata metadata
             = new EventMetadata(UUID.fromString(rawEventId), rawEventType, "v1", odt, rawAggregateId, corrId);
         try {
-            processedEventStore.insert(metadata, LocalDateTime.now());
+            processedEventStore.insert(metadata, LocalDateTime.now(clock));
         } catch (DuplicateKeyException e) {
             log.warn("미지원 이벤트 중복 수신 무시 eventId={} eventType={}", rawEventId, rawEventType);
         }
@@ -113,7 +115,7 @@ public class SubmissionJudgedConsumerService {
                             submittedAt,
                             payload.judgeAttempt(),
                             verdict,
-                            LocalDateTime.now()
+                            LocalDateTime.now(clock)
                         )
                 );
             return true;
@@ -124,7 +126,13 @@ public class SubmissionJudgedConsumerService {
         boolean accepted = verdict == JudgeVerdict.AC;
         int updated
             = memberAcReplicaRepository
-                .updateVerdictIfNewer(submissionId, payload.judgeAttempt(), verdict, accepted, LocalDateTime.now());
+                .updateVerdictIfNewer(
+                    submissionId,
+                    payload.judgeAttempt(),
+                    verdict,
+                    accepted,
+                    LocalDateTime.now(clock)
+                );
         if (updated == 0) {
             // 케이스 B: 역순 재채점 — 조건부 UPDATE가 갱신한 행 없음
             log
