@@ -1,8 +1,11 @@
 package com.backtoback.problem.problem.dto.response;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
+/** 숨김 테스트와 회원별 풀이 상태를 제외한 고정 회차 본문. */
 public record ProblemContentResponse(
     String problemId,
     String problemRevisionId,
@@ -10,7 +13,7 @@ public record ProblemContentResponse(
     String title,
     int difficulty,
     List<ProblemTagResponse> tags,
-    String publishedAt,
+    OffsetDateTime publishedAt,
     String description,
     String constraints,
     String examples,
@@ -38,7 +41,7 @@ public record ProblemContentResponse(
             revision.getTitle(),
             revision.getDifficulty(),
             fixed.tags().stream().map(tag -> new ProblemTagResponse(Long.toString(tag.id()), tag.name())).toList(),
-            revision.getCreatedAt().toString(),
+            revision.getCreatedAt().atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
             value.body().description(),
             value.body().constraints(),
             value.body().examples(),

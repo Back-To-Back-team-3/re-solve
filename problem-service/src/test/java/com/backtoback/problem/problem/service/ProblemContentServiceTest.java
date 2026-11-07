@@ -39,7 +39,7 @@ import com.backtoback.problem.problem.dto.response.ProblemContentResponse;
 import com.backtoback.problem.problem.dto.response.ProblemDetailResponse;
 import com.backtoback.problem.problem.dto.response.StarterCodeResponse;
 
-/** 실제 DB에서 통과 사용 회차 검색과 목적별 편입 요약을 검증한다. */
+/** 실제 DB에서 공개·고정 회차 본문과 연결 이미지 조회를 검증한다. */
 @SpringBootTest(
     properties = {
         "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
@@ -131,12 +131,13 @@ class ProblemContentServiceTest {
                 );
         jdbc
             .update(
-                "UPDATE problem_validations SET result_status='PASSED',runtime_key='original',runner_version='v1'"
+                "UPDATE problem_validations SET result_status='PASSED',runtime_key=REPEAT('a',64),runner_version='v1'"
                     + " WHERE id=?",
                 accepted.validationId()
             );
         jdbc.update("UPDATE problems SET visibility='PUBLIC' WHERE id=?", id);
         given(starter.read(any(), any())).willReturn(List.of(new StarterCodeResponse("java", "starter")));
+        jdbc.update("UPDATE problem_revisions SET created_at='2026-11-07 10:20:30' WHERE id=?", revision);
         clearInvocations(reader);
         var response = ProblemContentResponse.from(queries.read(id, null, null));
         assertThat(response.samples()).hasSize(1);
@@ -145,6 +146,8 @@ class ProblemContentServiceTest {
         var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
         var json = mapper.valueToTree(ProblemDetailResponse.from(response, true));
         assertThat(json.has("content")).isFalse();
+        assertThat(json.get("publishedAt").asString()).isEqualTo("2026-11-07T10:20:30+09:00");
+        assertThat(mapper.valueToTree(response).get("publishedAt").asString()).isEqualTo("2026-11-07T10:20:30+09:00");
         assertThat(json.get("problemId").asString()).isEqualTo(first.problemId());
         assertThat(json.get("solvedStatus").asString()).isEqualTo("SOLVED");
         jdbc.update("UPDATE problems SET visibility='ARCHIVED' WHERE id=?", id);
