@@ -197,7 +197,7 @@ class ValidationCompletedHandlerTest {
     void unhandledSubscription() {
         var listener = new ValidationResultListener(consumer, decoder, List.of(handler));
         var ack = mock(Acknowledgement.class);
-        String body = message(8100, 8002, "java").replace("ProblemValidationCompleted", "SubmissionJudged");
+        String body = message(8100, 8002, "java").replace("ProblemValidationCompleted", "MemberUpdated");
         String id = decoder.decode(body).metadata().eventId().toString();
         assertThatThrownBy(() -> listener.receive(body, ack)).isInstanceOf(IllegalStateException.class);
         verifyNoInteractions(ack);
