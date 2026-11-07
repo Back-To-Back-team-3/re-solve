@@ -1,6 +1,8 @@
 package com.backtoback.problem.problem.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,6 +14,7 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -67,5 +70,25 @@ class ProblemValidationDataControllerTest {
     void missingCorrelation() throws Exception {
         mvc.perform(get("/internal/v1/problems/validations/3/data")).andExpect(status().isBadRequest());
         verifyNoInteractions(data);
+    }
+
+    /** 기존 기본 경로는 유지하고 명시적 비활성화 및 Stub 프로필에서는 실제 컨트롤러를 제외한다. */
+    @Test
+    @DisplayName("실제 검증 자료는 기본 활성화되지만 내부 API 비활성화와 Stub 프로필에서는 등록하지 않는다")
+    void activationConditions() {
+        var runner
+            = new ApplicationContextRunner()
+                .withBean(ProblemValidationDataService.class, () -> mock(ProblemValidationDataService.class))
+                .withUserConfiguration(ProblemValidationDataController.class);
+        runner.run(context -> assertThat(context).hasSingleBean(ProblemValidationDataController.class));
+        runner
+            .withPropertyValues("problem.internal-api.enabled=true")
+            .run(context -> assertThat(context).hasSingleBean(ProblemValidationDataController.class));
+        runner
+            .withPropertyValues("problem.internal-api.enabled=false")
+            .run(context -> assertThat(context).doesNotHaveBean(ProblemValidationDataController.class));
+        runner
+            .withPropertyValues("spring.profiles.active=internal-stub", "problem.internal-api.enabled=true")
+            .run(context -> assertThat(context).doesNotHaveBean(ProblemValidationDataController.class));
     }
 }

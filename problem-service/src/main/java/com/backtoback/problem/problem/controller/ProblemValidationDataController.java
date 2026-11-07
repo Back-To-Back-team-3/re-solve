@@ -1,5 +1,6 @@
 package com.backtoback.problem.problem.controller;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -12,9 +13,18 @@ import com.backtoback.problem.problem.service.ProblemValidationDataService;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 
-/** Judge에 실제 저장된 검증 자료를 제공한다. Stub 프로필과 동시에 등록하지 않는다. */
+/**
+ * Judge에 실제 저장된 검증 자료를 제공한다. Stub 프로필 또는 명시적 내부 API 비활성화 시 등록하지 않는다.
+ * 이 경로는 기본 제공하며 아직 선택 구현이 필요한 다른 내부 API의 구현 선택값에 의존하지 않는다.
+ */
 @RestController
 @Profile("!internal-stub")
+@ConditionalOnProperty(
+    prefix = "problem.internal-api",
+    name = "enabled",
+    havingValue = "true",
+    matchIfMissing = true
+)
 @RequiredArgsConstructor
 public class ProblemValidationDataController {
     private final ProblemValidationDataService service;

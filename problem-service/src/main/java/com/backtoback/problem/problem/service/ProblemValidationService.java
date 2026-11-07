@@ -1,5 +1,8 @@
 package com.backtoback.problem.problem.service;
 
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -16,9 +19,11 @@ import com.backtoback.problem.problem.dto.response.ProblemValidationResponse;
 
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.json.JsonMapper;
 
 /** 검증 코드 입력·멱등 조회·원격 업로드와 최종 원자 저장을 조정한다. */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProblemValidationService {
@@ -57,7 +62,7 @@ public class ProblemValidationService {
             || correlationId == null || correlationId.isBlank() || correlationId.length() > 64) {
             throw new ProblemException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
-        var code = ProblemAssetContent.fromBytes(request.sourceCode().getBytes(StandardCharsets.UTF_8));
+        var code = encodeCode(request.sourceCode());
         if (code.sizeBytes() > 65536) {
             throw new ProblemException(ProblemErrorCode.CODE_TOO_LARGE);
         }
@@ -116,13 +121,42 @@ public class ProblemValidationService {
             } catch (ProblemException conflict) {
                 recordFailure(assetId, conflict);
                 throw conflict;
+            } catch (RuntimeException replayFailure) {
+                if (failure != replayFailure) {
+                    failure.addSuppressed(replayFailure);
+                }
+                recordFailure(assetId, failure);
+                throw failure;
             }
             if (replay.isPresent()) {
-                store.recordLinkFailure(assetId);
+                recordFailure(assetId, failure);
                 return replay.get();
             }
             recordFailure(assetId, failure);
             throw failure;
+        }
+    }
+
+    /**
+     * 코드 원문을 손실 없이 UTF-8로 변환한다. 짝 없는 surrogate를 대체 문자로 저장하지 않는다.
+     *
+     * @param sourceCode 원래 코드 문자열
+     * @return 원문 바이트·체크섬·크기
+     * @throws ProblemException 인코딩할 수 없는 문자열이면 {@code COMMON_INVALID_REQUEST}
+     */
+    private ProblemAssetContent encodeCode(String sourceCode) {
+        try {
+            var encoded
+                = StandardCharsets.UTF_8
+                    .newEncoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .encode(CharBuffer.wrap(sourceCode));
+            byte[] bytes = new byte[encoded.remaining()];
+            encoded.get(bytes);
+            return ProblemAssetContent.fromBytes(bytes);
+        } catch (CharacterCodingException failure) {
+            throw new ProblemException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
     }
 
@@ -136,7 +170,10 @@ public class ProblemValidationService {
         try {
             store.recordLinkFailure(assetId);
         } catch (RuntimeException trackingFailure) {
-            failure.addSuppressed(trackingFailure);
+            if (failure != trackingFailure) {
+                failure.addSuppressed(trackingFailure);
+            }
+            log.warn("검증 코드 파일 실패 분류 기록 실패 assetId={}", assetId, trackingFailure);
         }
     }
 }
