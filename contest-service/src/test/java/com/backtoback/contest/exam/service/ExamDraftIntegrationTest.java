@@ -38,9 +38,13 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.common.event.dto.EventMetadata;
+import com.backtoback.common.event.service.EventConsumer;
+import com.backtoback.common.event.service.EventJsonCodec;
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.client.ExamContentClient;
+import com.backtoback.contest.exam.client.ExamReceiptClient.Receipt;
 import com.backtoback.contest.exam.service.ExamDraftStore.SaveRequest;
 import com.backtoback.contest.exam.service.ExamSubmissionService.Request;
 import com.backtoback.contest.global.error.ContestErrorCode;
@@ -91,6 +95,14 @@ class ExamDraftIntegrationTest {
     @Autowired
     private ExamAutoSubmissionService autoSubmissions;
     @Autowired
+    private EventConsumer consumer;
+    @Autowired
+    private EventJsonCodec codec;
+    @Autowired
+    private ExamReceiptReconciliation reconciliation;
+    @Autowired
+    private ExamJudgementService judgements;
+    @Autowired
     private JdbcTemplate jdbc;
     @MockitoSpyBean
     private StringRedisTemplate redis;
@@ -103,6 +115,8 @@ class ExamDraftIntegrationTest {
     @BeforeEach
     void setUp() {
         jdbc.update("DELETE FROM outbox_events");
+        jdbc.update("DELETE FROM contest_admin_operations");
+        jdbc.update("DELETE FROM exam_problem_results");
         jdbc.update("DELETE FROM exam_submissions");
         jdbc.update("DELETE FROM exam_drafts");
         jdbc.update("DELETE FROM exam_participant_histories");
@@ -452,6 +466,251 @@ class ExamDraftIntegrationTest {
         // then
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+    }
+
+    /** 소비 기록과 점수가 함께 저장되며 같은 회차 상충은 격리된다. */
+    @Test
+    @DisplayName("채점 결과는 절사해 반영하고 같은 회차의 다른 판정은 거절한다")
+    void consumesJudgementAndRejectsConflict() {
+        // given
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        var receipt = submissions.submit(examId, "7", new Request("101", "java", "코드", "1"));
+        var data = new java.util.HashMap<String, Object>();
+        data.put("context", "EXAM");
+        data.put("examId", examId);
+        data.put("examSubmissionId", receipt.examSubmissionId());
+        data.put("submissionId", "9001");
+        data.put("userId", "7");
+        data.put("problemId", "101");
+        data.put("problemRevisionId", "1001");
+        data.put("judgeAttempt", 1);
+        data.put("status", "COMPLETED");
+        data.put("verdict", "WA");
+        data.put("passedCount", 1);
+        data.put("totalCount", 3);
+        data.put("submittedAt", receipt.receivedAt().toString());
+        var metadata
+            = new EventMetadata(
+                java.util.UUID.randomUUID(),
+                "ExamSubmissionJudged",
+                "v1",
+                java.time.OffsetDateTime.now(),
+                "9001",
+                "test"
+            );
+        var message = codec.serialize(metadata, data);
+        var acknowledgements = new java.util.concurrent.atomic.AtomicInteger();
+        // when
+        assertThatThrownBy(() -> consumer.consume(message, () -> {
+            acknowledgements.incrementAndGet();
+            throw new IllegalStateException("ack failure");
+        })).isInstanceOf(IllegalStateException.class);
+        consumer.consume(message, acknowledgements::incrementAndGet);
+        // then
+        assertThat(acknowledgements).hasValue(2);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT score FROM exam_submissions WHERE id=?",
+                    java.math.BigDecimal.class,
+                    receipt.examSubmissionId()
+                )
+        ).isEqualByComparingTo("16.66");
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT total_score FROM exam_participants WHERE id=?",
+                    java.math.BigDecimal.class,
+                    participantId
+                )
+        ).isEqualByComparingTo("16.66");
+        data.put("verdict", "AC");
+        var conflicting
+            = new EventMetadata(
+                java.util.UUID.randomUUID(),
+                "ExamSubmissionJudged",
+                "v1",
+                java.time.OffsetDateTime.now(),
+                "9001",
+                "test"
+            );
+        assertThatThrownBy(
+            () -> consumer.consume(codec.serialize(conflicting, data), acknowledgements::incrementAndGet)
+        ).isInstanceOf(IllegalArgumentException.class);
+        assertThat(acknowledgements).hasValue(2);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM processed_events WHERE event_id=?",
+                    Integer.class,
+                    conflicting.eventId().toString()
+                )
+        ).isZero();
+    }
+
+    /** 미종결의 최신 접수가 이전 제출의 점수를 대체하지 않도록 0으로 집계한다. */
+    @Test
+    @DisplayName("새 제출이 미종결이면 이전 AC 점수를 마지막 제출 점수로 사용하지 않는다")
+    void pendingLatestDoesNotReusePreviousScore() {
+        // given
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        var first = submissions.submit(examId, "7", new Request("101", "java", "첫 코드", "1"));
+        transactions
+            .executeWithoutResult(
+                status -> judgements
+                    .apply(
+                        new ExamJudgementService.Result(
+                            Long.parseLong(examId),
+                            Long.parseLong(first.examSubmissionId()),
+                            9001,
+                            7,
+                            101,
+                            1001,
+                            1,
+                            "JUDGED",
+                            "AC",
+                            3,
+                            3,
+                            first.receivedAt()
+                        )
+                    )
+            );
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT total_score FROM exam_participants WHERE id=?",
+                    java.math.BigDecimal.class,
+                    participantId
+                )
+        ).isEqualByComparingTo("50.00");
+        // when
+        submissions.submit(examId, "7", new Request("101", "java", "두 번째 코드", "2"));
+        // then
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT total_score FROM exam_participants WHERE id=?",
+                    java.math.BigDecimal.class,
+                    participantId
+                )
+        ).isEqualByComparingTo("0.00");
+    }
+
+    /** Judge 미접수는 원래 Outbox 이벤트 ID를 유지한 채 재발행 대기로 바꾼다. */
+    @Test
+    @DisplayName("Judge에 없는 접수는 기존 Outbox를 같은 이벤트 ID로 재전달한다")
+    void requeuesOriginalOutbox() {
+        // given
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        var receipt = submissions.submit(examId, "7", new Request("101", "java", "코드", "1"));
+        var eventId = jdbc.queryForObject("SELECT event_id FROM outbox_events", String.class);
+        jdbc.update("UPDATE outbox_events SET status='PUBLISHED'");
+        var missing = new Receipt(false, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        // when
+        reconciliation.reconcile(Long.parseLong(receipt.examSubmissionId()), missing);
+        // then
+        assertThat(jdbc.queryForObject("SELECT status FROM outbox_events", String.class)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT event_id FROM outbox_events", String.class)).isEqualTo(eventId);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+    }
+
+    /** 관리자 작업이 허용한 새 회차를 반영한 뒤 오래된 결과를 무시한다. */
+    @Test
+    @DisplayName("재처리 목표 회차 뒤에 온 이전 결과는 점수를 되돌리지 않는다")
+    void rejectsOldJudgementAfterRetry() {
+        // given
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        var receipt = submissions.submit(examId, "7", new Request("101", "java", "코드", "1"));
+        long id = Long.parseLong(receipt.examSubmissionId());
+        var first
+            = new ExamJudgementService.Result(
+                Long.parseLong(examId),
+                id,
+                9001,
+                7,
+                101,
+                1001,
+                1,
+                "FAILED",
+                null,
+                null,
+                null,
+                receipt.receivedAt()
+            );
+        transactions.executeWithoutResult(status -> judgements.apply(first));
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
+        jdbc
+            .update(
+                "INSERT INTO contest_admin_operations (operation_id,operation_type,context,context_id,receipt_id,"
+                    + "request_hash,expected_judge_attempt,target_judge_attempt,state,actor_member_id,reason,"
+                    + "created_at,updated_at) "
+                    + "VALUES ('retry-test','EXAM_RETRY','EXAM',?,?,?,1,2,'SUCCEEDED',7,'재처리',?,?)",
+                examId,
+                id,
+                "a".repeat(64),
+                now,
+                now
+            );
+        var second
+            = new ExamJudgementService.Result(
+                Long.parseLong(examId),
+                id,
+                9001,
+                7,
+                101,
+                1001,
+                2,
+                "JUDGED",
+                "CE",
+                0,
+                3,
+                receipt.receivedAt()
+            );
+        // when
+        transactions.executeWithoutResult(status -> judgements.apply(second));
+        transactions.executeWithoutResult(status -> judgements.apply(first));
+        // then
+        assertThat(jdbc.queryForObject("SELECT judge_attempt FROM exam_submissions WHERE id=?", Integer.class, id))
+            .isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT score FROM exam_submissions WHERE id=?", java.math.BigDecimal.class, id))
+            .isEqualByComparingTo("0.00");
+    }
+
+    /** Judge 응답의 원래 회원이 다르면 접수 상태를 변경하지 않는다. */
+    @Test
+    @DisplayName("대사 응답의 회원 연결이 다르면 기존 접수를 보존한다")
+    void rejectsMismatchedRemoteReceipt() {
+        // given
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        var receipt = submissions.submit(examId, "7", new Request("101", "java", "코드", "1"));
+        var remote
+            = new Receipt(
+                true,
+                "9001",
+                "EXAM",
+                examId,
+                receipt.examSubmissionId(),
+                "8",
+                "101",
+                "1001",
+                receipt.receivedAt(),
+                "COMPLETED",
+                1,
+                "AC",
+                3,
+                3
+            );
+        // when & then
+        assertThatThrownBy(() -> reconciliation.reconcile(Long.parseLong(receipt.examSubmissionId()), remote))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT status FROM exam_submissions WHERE id=?",
+                    String.class,
+                    receipt.examSubmissionId()
+                )
+        ).isEqualTo("ACCEPTED");
     }
 
     /** 동일 창의 뒤 요청만 저장하고 밀린 다른 문제는 0과 null을 반환한다. */
