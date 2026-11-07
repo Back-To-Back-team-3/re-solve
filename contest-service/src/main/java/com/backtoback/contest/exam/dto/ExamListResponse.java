@@ -16,7 +16,6 @@ public record ExamListResponse(
     long problemCount,
     String myParticipantStatus
 ) {
-    /** 저장된 시험과 활성 참가를 목록 항목으로 변환한다. */
     public static ExamListResponse from(Exam exam, long problemCount, ExamParticipant participant) {
         return new ExamListResponse(
             exam.getId().toString(),
