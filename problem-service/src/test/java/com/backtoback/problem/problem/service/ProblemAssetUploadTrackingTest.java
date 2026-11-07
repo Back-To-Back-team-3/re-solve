@@ -303,11 +303,15 @@ class ProblemAssetUploadTrackingTest {
                         )
                 );
         given(codes.findByIdForUpdate(3L)).willAnswer(call -> Optional.of(saved.get()));
-        var renewed = tracking.renew(ticket);
+        Clock later = Clock.offset(clock, java.time.Duration.ofHours(12));
+        var laterTracking = new ProblemAssetUploadTracking(bodies, tests, codes, later, null);
+        var renewed = laterTracking.renew(ticket);
+        assertThat(renewed.expiry()).isEqualTo(ticket.expiry().plusHours(12));
+        assertThat(saved.get().getUploadExpiresAt()).isEqualTo(renewed.expiry());
         assertThat(renewed.code()).isTrue();
         assertThat(renewed.key()).startsWith("problem-code/");
         assertThatThrownBy(() -> saved.get().linkToProblem(2L, 1L)).isInstanceOf(IllegalStateException.class);
-        assertThat(tracking.complete(renewed, "version")).isTrue();
+        assertThat(laterTracking.complete(renewed, "version")).isTrue();
         assertThatThrownBy(() -> saved.get().linkToProblem(4L, 1L)).isInstanceOf(IllegalStateException.class);
         saved.get().linkToProblem(2L, 1L);
         assertThat(saved.get().getStatus()).isEqualTo(ProblemAssetStatus.LINKED);
