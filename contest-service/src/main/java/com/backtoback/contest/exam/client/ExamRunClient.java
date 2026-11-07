@@ -72,6 +72,12 @@ public class ExamRunClient {
                 if (status == 429 && body.contains("RUN_IN_PROGRESS")) {
                     throw new ContestException(ContestErrorCode.RUN_IN_PROGRESS, failure);
                 }
+                if (status == 400 && body.contains("UNSUPPORTED_LANGUAGE")) {
+                    throw new ContestException(ContestErrorCode.UNSUPPORTED_LANGUAGE, failure);
+                }
+                if (status == 413 && body.contains("CODE_TOO_LARGE")) {
+                    throw new ContestException(ContestErrorCode.CODE_TOO_LARGE, failure);
+                }
                 if ((status != 502 && status != 503 && status != 504) || attempt == 2) {
                     throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
                 }

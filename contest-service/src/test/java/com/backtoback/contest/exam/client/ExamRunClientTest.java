@@ -71,4 +71,31 @@ class ExamRunClientTest {
             );
         server.verify();
     }
+
+    /** 고정 회차에 지원되지 않는 언어의 Judge 응답을 전달한다. */
+    @Test
+    @DisplayName("Judge의 지원하지 않는 언어 오류는 400으로 전달한다")
+    void unsupportedLanguage() {
+        // given
+        var builder = RestClient.builder().baseUrl("http://judge-test");
+        var server = MockRestServiceServer.bindTo(builder).build();
+        server
+            .expect(requestTo("http://judge-test/internal/v1/judge/runs"))
+            .andRespond(
+                withStatus(HttpStatus.BAD_REQUEST)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"error\":{\"code\":\"UNSUPPORTED_LANGUAGE\"}}")
+            );
+        var client = new ExamRunClient(remaining -> builder.build());
+        var request = new ExamRunClient.Request("EXAM", "55", "7", "101", "1001", "java", "code", List.of());
+        // when & then
+        assertThatThrownBy(() -> client.run(request))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> org.assertj.core.api.Assertions
+                    .assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(ContestErrorCode.UNSUPPORTED_LANGUAGE)
+            );
+        server.verify();
+    }
 }
