@@ -20,8 +20,42 @@ import com.backtoback.common.event.store.JdbcOutboxStore;
 import com.backtoback.contest.exam.client.ExamReceiptClient.Receipt;
 import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** 접수 대사의 연결 검증과 최초 채점 요청 복원을 검증한다. */
 class ExamReceiptReconciliationIntegrationTest extends ExamIntegrationTestSupport {
+    @Test
+    @DisplayName("AC 판정인데 통과 개수가 전체보다 적으면 접수 결과를 변경하지 않는다")
+    void rejectsInconsistentAcceptedCounts() {
+        var receipt = submissions.submit(examId, "7", new ExamSubmissionRequest("101", "java", "코드", "1"));
+        var remote
+            = new Receipt(
+                true,
+                "9001",
+                "EXAM",
+                examId,
+                receipt.examSubmissionId(),
+                "7",
+                "101",
+                "1001",
+                receipt.receivedAt(),
+                "COMPLETED",
+                1,
+                "AC",
+                1,
+                3
+            );
+
+        assertThatThrownBy(() -> reconciliation.reconcile(Long.parseLong(receipt.examSubmissionId()), remote))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT status FROM exam_submissions WHERE id=?",
+                    String.class,
+                    receipt.examSubmissionId()
+                )
+        ).isEqualTo("ACCEPTED");
+    }
+
     @MockitoSpyBean
     private JdbcOutboxStore outboxStore;
 

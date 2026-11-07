@@ -109,7 +109,8 @@ public class ExamReceiptReconciliation {
         if (!failed && (!"COMPLETED".equals(remote.status()) || remote.verdict() == null
             || !Set.of("AC", "WA", "TLE", "MLE", "RE", "CE").contains(remote.verdict()) || remote.totalCount() == null
             || remote.totalCount() <= 0 || remote.passedCount() == null || remote.passedCount() < 0
-            || remote.passedCount() > remote.totalCount())) {
+            || remote.passedCount() > remote.totalCount()
+            || "AC".equals(remote.verdict()) && !remote.passedCount().equals(remote.totalCount()))) {
             throw new IllegalArgumentException("Invalid remote result");
         }
         results

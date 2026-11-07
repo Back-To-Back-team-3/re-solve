@@ -37,12 +37,10 @@ public class ExamJudgementHandlers {
 
     private EventHandler handler(String type, boolean failed) {
         return new EventHandler() {
-            /** 이벤트 종류를 반환한다. */
             public String eventType() {
                 return type;
             }
 
-            /** 지원하는 이벤트 버전이다. */
             public String schemaVersion() {
                 return "v1";
             }
@@ -71,7 +69,7 @@ public class ExamJudgementHandlers {
                 if (failed) {
                     text(data, "errorCode");
                 } else if (!Set.of("AC", "WA", "TLE", "MLE", "RE", "CE").contains(verdict) || total <= 0 || passed < 0
-                    || passed > total) {
+                    || passed > total || "AC".equals(verdict) && !passed.equals(total)) {
                     throw new IllegalArgumentException("Invalid verdict or counts");
                 }
                 if (!failed) {
