@@ -92,13 +92,22 @@ groups:
           description: "{{ $labels.application }} 서비스의 HTTP 5xx 에러율이 5분간 1%를 초과했습니다."
 
       - alert: JudgeJobQueueAccumulation
-        expr: judge_jobs_pending_count > 50 or scheduler_backlog_oldest_seconds{scheduler=~".*Judge.*"} > 60
+        expr: judge_jobs_pending_count > 50
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "채점 작업 대기열 적체 경보"
-          description: "채점 대기(PENDING) 작업이 50건을 초과했거나 가장 오래된 채점 대기 시간이 60초를 초과한 상태가 2분 이상 지속되었습니다. 현재 값: {{ $value }}"
+          summary: "채점 작업 대기 건수 적체 경보"
+          description: "채점 대기(PENDING) 작업이 2분 이상 50건을 초과했습니다. 현재 대기량: {{ $value }}건"
+
+      - alert: JudgeJobWaitTimeExceeded
+        expr: scheduler_backlog_oldest_seconds{scheduler=~".*Judge.*"} > 60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "채점 작업 대기 시간 초과 경보"
+          description: "채점 대기열에서 가장 오래된 작업의 대기 시간이 2분 이상 60초를 초과했습니다. 현재 대기 시간: {{ $value }}초"
 
       - alert: JudgeJobQueueCriticalAccumulation
         expr: judge_jobs_pending_count > 200

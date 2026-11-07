@@ -14,7 +14,7 @@
 - `config.js`: 기본 대상 URL, 테스트 계정/문제/회차 ID, 공통 HTTP 헤더 생성 유틸리티, 비기능 요구사항 임계치(Thresholds)
 - `scenarios/`:
   - `auth.js`: 개발용 로그인(`1.1.6`) 및 토큰 재발급(`1.1.4`) 부하 테스트
-  - `problem-submission.js`: 문제 목록/상세 조회(`2.1`), `Idempotency-Key` 기반 일반 풀이 제출(`3.1.2`) 및 채점 상태 조회(`3.1.5`)
+  - `problem-submission.js`: 문제 목록/상세 조회(`2.1`), `Idempotency-Key` 기반 일반 풀이 제출(`3.1.2`) 및 채점 상태 조회(`3.1.3`)
   - `sse-notification.js`: 실시간 SSE 알림 스트림 구독(`7.1.1`) 및 연결 유지
 - `common-scenarios.js`: 3가지 워크로드를 동시 또는 환경변수(`SCENARIO`)에 따라 단독 실행하는 통합 엔트리포인트
 

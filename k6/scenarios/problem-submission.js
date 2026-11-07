@@ -1,6 +1,6 @@
 // 시나리오 2: 문제 조회 및 일반 풀이 제출 (PRACTICE) 부하 테스트
 // 기준 문서:
-//   - docs/dev/specifications/api-spec.md > 2.1 문제 조회, 3.1.2 일반 풀이 제출, 3.1.5 제출 상태 조회
+//   - docs/dev/specifications/api-spec.md > 2.1 문제 조회, 3.1.2 일반 풀이 제출, 3.1.3 제출 상태·결과 조회
 //   - docs/dev/planning/policy-and-state.md > 2.1 TTL 표 > 제출 Rate Limit, 3.1 제출 > Java 제출 코드 조건
 
 import http from 'k6/http';
@@ -40,7 +40,7 @@ export function testProblemSubmissionScenario() {
             problemRevisionId = String(detailBody.data.problemRevisionId || detailBody.data.latestRevisionId);
         }
     } catch (e) {
-        // 기본값 유지
+        // 파싱 실패 시 기본 회차 ID를 유지한다.
     }
 
     sleep(1);
@@ -71,7 +71,7 @@ export function testProblemSubmissionScenario() {
         '풀이 제출 접수 성공 (202 Accepted 또는 200 OK)': (r) => r.status === 202 || r.status === 200,
     });
 
-    // 4. 채점 결과 확인 (제출 접수 성공 시 3.1.5 조회)
+    // 4. 채점 결과 확인 (제출 접수 성공 시 3.1.3 제출 상태·결과 조회)
     if (submitSuccess) {
         try {
             const body = JSON.parse(submitRes.body);
@@ -87,7 +87,10 @@ export function testProblemSubmissionScenario() {
                 });
             }
         } catch (e) {
-            // JSON 파싱 실패 무시
+            // JSON 파싱 실패 시 무시한다.
         }
     }
+
+    // 동일 문제 5초 간격 및 사용자당 분당 10회 제한(최소 6초 간격)을 준수하도록 추가 대기한다.
+    sleep(4);
 }

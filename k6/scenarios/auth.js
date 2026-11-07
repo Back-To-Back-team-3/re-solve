@@ -35,7 +35,7 @@ export function testAuthScenario() {
                 accessToken = body.data.accessToken;
             }
         } catch (e) {
-            // JSON 파싱 실패 무시
+            // JSON 파싱 실패 시 무시한다.
         }
 
         // Set-Cookie 헤더에서 refreshToken 값을 추출한다.
