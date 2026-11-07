@@ -3,6 +3,8 @@ package com.backtoback.contest.exam.service;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -19,6 +21,7 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.contest.exam.store.ExamSchedulerCursorStore;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -42,18 +45,21 @@ public class ExamAutoSubmissionScheduler {
     private final MeterRegistry metrics;
     private final AtomicLong overdue = new AtomicLong();
     private final AtomicLong oldestBacklog = new AtomicLong();
+    private final ExamSchedulerCursorStore cursors;
 
     /** 자동 제출의 누락 건수 지표를 등록한다. */
     public ExamAutoSubmissionScheduler(
         JdbcTemplate jdbc,
         ExamAutoSubmissionService submissions,
         Clock clock,
-        MeterRegistry metrics
+        MeterRegistry metrics,
+        ExamSchedulerCursorStore cursors
     ) {
         this.jdbc = jdbc;
         this.submissions = submissions;
         this.clock = clock;
         this.metrics = metrics;
+        this.cursors = cursors;
         Gauge.builder("exam.auto_submission.overdue", overdue, AtomicLong::get).register(metrics);
         Gauge
             .builder("scheduler.backlog.oldest.seconds", oldestBacklog, AtomicLong::get)
@@ -84,21 +90,12 @@ public class ExamAutoSubmissionScheduler {
                         now.minusSeconds(30)
                     );
             overdue.set(count == null ? 0 : count);
-            var candidates
-                = jdbc
-                    .query(
-                        "SELECT p.exam_id,p.member_id,p.id,p.personal_ends_at FROM exam_participants p "
-                            + "JOIN exams e ON e.id=p.exam_id WHERE p.status='STARTED' AND p.entered_at IS NOT NULL "
-                            + "AND p.auto_submitted_at IS NULL AND e.status<>'CANCELED' AND p.personal_ends_at<=? "
-                            + "ORDER BY p.personal_ends_at,p.id LIMIT 100",
-                        (rs, row) -> new Candidate(
-                            rs.getLong(1),
-                            rs.getLong(2),
-                            rs.getLong(3),
-                            rs.getObject(4, LocalDateTime.class)
-                        ),
-                        now.minusSeconds(3)
-                    );
+            var cursor = cursors.load(JOB);
+            var candidates = candidates(now.minusSeconds(3), cursor);
+            if (candidates.isEmpty() && cursor != null) {
+                cursors.clear(JOB);
+                candidates = candidates(now.minusSeconds(3), null);
+            }
             oldestBacklog
                 .set(
                     candidates.isEmpty() ? 0 : Math
@@ -125,10 +122,41 @@ public class ExamAutoSubmissionScheduler {
                             failure.getClass().getSimpleName()
                         );
                 }
+                cursors
+                    .save(
+                        JOB,
+                        new ExamSchedulerCursorStore.Cursor(candidate.personalEndsAt(), candidate.participant())
+                    );
             }
         } finally {
             sample.stop(metrics.timer("scheduler.run.duration", "job", JOB));
         }
+    }
+
+    private List<Candidate> candidates(LocalDateTime cutoff, ExamSchedulerCursorStore.Cursor cursor) {
+        String query
+            = "SELECT p.exam_id,p.member_id,p.id,p.personal_ends_at FROM exam_participants p "
+                + "JOIN exams e ON e.id=p.exam_id WHERE p.status='STARTED' AND p.entered_at IS NOT NULL "
+                + "AND p.auto_submitted_at IS NULL AND e.status<>'CANCELED' AND p.personal_ends_at<=? ";
+        var arguments = new ArrayList<Object>();
+        arguments.add(cutoff);
+        if (cursor != null) {
+            query += "AND (p.personal_ends_at>? OR (p.personal_ends_at=? AND p.id>?)) ";
+            arguments.add(cursor.time());
+            arguments.add(cursor.time());
+            arguments.add(cursor.id());
+        }
+        return jdbc
+            .query(
+                query + "ORDER BY p.personal_ends_at,p.id LIMIT 100",
+                (rs, row) -> new Candidate(
+                    rs.getLong(1),
+                    rs.getLong(2),
+                    rs.getLong(3),
+                    rs.getObject(4, LocalDateTime.class)
+                ),
+                arguments.toArray()
+            );
     }
 
     /** 잠금 전에 선택한 참가 식별자다. */

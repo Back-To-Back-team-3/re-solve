@@ -27,10 +27,35 @@ import com.backtoback.contest.exam.store.ExamSubmissionRequestStore;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** 수동 종료·자동 제출의 최신 Draft 선택과 원자성을 검증한다. */
 class ExamAutoSubmissionServiceIntegrationTest extends ExamIntegrationTestSupport {
     @MockitoSpyBean
     private ExamSubmissionRequestStore requestStore;
+
+    @Test
+    @DisplayName("최신 공백 Draft는 이전 코드를 자동 제출하지 않고 종료한다")
+    void latestBlankDraftSuppressesEarlierCode() {
+        store.save(store.prepare(examId, "7", "101", new SaveRequest("java", "이전", "1")));
+        store.save(store.prepare(examId, "7", "101", new SaveRequest("java", " \n\t", "2")));
+
+        assertThat(autoSubmissions.finish(examId, "7").autoSubmissionIds()).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("고정 회차가 지원하지 않는 기존 Draft는 접수와 종료를 롤백한다")
+    void rejectsUnsupportedPinnedLanguage() {
+        store.save(store.prepare(examId, "7", "101", new SaveRequest("cpp", "기존", "1")));
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+
+        assertThatThrownBy(() -> autoSubmissions.finish(examId, "7"))
+            .isInstanceOf(ContestException.class)
+            .extracting("errorCode")
+            .isEqualTo(ContestErrorCode.UNSUPPORTED_LANGUAGE);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT status FROM exam_participants WHERE id=?", String.class, participantId))
+            .isEqualTo("STARTED");
+    }
 
     @Test
     @DisplayName("자동 제출의 보존 실패는 접수와 종료를 함께 롤백한다")
