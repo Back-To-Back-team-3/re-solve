@@ -4,10 +4,15 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.LinkedHashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import org.commonmark.node.AbstractVisitor;
+import org.commonmark.node.Image;
+import org.commonmark.parser.IncludeSourceSpans;
+import org.commonmark.parser.Parser;
+import org.commonmark.renderer.markdown.MarkdownRenderer;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -34,6 +39,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ExamContentService {
     private static final Pattern IMAGE = Pattern.compile("image:([1-9][0-9]*)");
+    private static final Parser MARKDOWN
+        = Parser.builder().includeSourceSpans(IncludeSourceSpans.BLOCKS_AND_INLINES).build();
+    private static final MarkdownRenderer IMAGE_RENDERER = MarkdownRenderer.builder().build();
     private final ExamRepository exams;
     private final ExamProblemRepository problems;
     private final ExamParticipantRepository participants;
@@ -49,6 +57,7 @@ public class ExamContentService {
         var items = snapshot.problems().stream().map(problem -> {
             var source = content.content(exam, problem.problemId(), problem.revisionId());
             var body = body(source);
+            var images = imageReferences(body);
             return new Problem(
                 Long.toString(problem.problemId()),
                 Long.toString(problem.revisionId()),
@@ -56,11 +65,11 @@ public class ExamContentService {
                 problem.title(),
                 problem.score(),
                 problem.displayOrder(),
-                rewrite(body, exam, problem.problemId()),
+                rewrite(body, images, exam, problem.problemId()),
                 source.functionSpec(),
                 source.executionLimits(),
                 source.samples(),
-                imageIds(body)
+                images.stream().map(ImageReference::id).distinct().toList()
             );
         }).toList();
         return new ProblemList(examId, snapshot.personalEndsAt(), now(), items);
@@ -81,7 +90,9 @@ public class ExamContentService {
                 .findFirst()
                 .orElseThrow(() -> new ContestException(ContestErrorCode.PROBLEM_NOT_FOUND));
         var source = content.content(exam, problem, pinned.revisionId());
-        if (!imageIds(body(source)).contains(Long.toString(image))) {
+        if (imageReferences(body(source))
+            .stream()
+            .noneMatch(reference -> reference.id().equals(Long.toString(image)))) {
             throw new ContestException(ContestErrorCode.PROBLEM_NOT_FOUND);
         }
         return content.image(exam, problem, pinned.revisionId(), image);
@@ -127,18 +138,44 @@ public class ExamContentService {
     }
 
     /** 본문의 이미지 참조를 시험 권한 검증 경로로 바꾼다. */
-    private String rewrite(String body, long exam, long problem) {
-        return IMAGE.matcher(body).replaceAll("/api/v1/exams/" + exam + "/problems/" + problem + "/images/$1");
+    private String rewrite(String body, List<ImageReference> images, long exam, long problem) {
+        var rewritten = new StringBuilder(body);
+        String prefix = "/api/v1/exams/" + exam + "/problems/" + problem + "/images/";
+        for (var reference : images.reversed()) {
+            reference.image().setDestination(prefix + reference.id());
+            rewritten
+                .replace(reference.start(), reference.end(), IMAGE_RENDERER.render(reference.image()).stripTrailing());
+        }
+        return rewritten.toString();
     }
 
     /** 본문에 포함된 이미지 ID를 중복 없이 원래 순서대로 수집한다. */
-    private List<String> imageIds(String body) {
-        var ids = new LinkedHashSet<String>();
-        var matcher = IMAGE.matcher(body);
-        while (matcher.find()) {
-            ids.add(matcher.group(1));
-        }
-        return List.copyOf(ids);
+    private List<ImageReference> imageReferences(String body) {
+        var images = new ArrayList<ImageReference>();
+        MARKDOWN.parse(body).accept(new AbstractVisitor() {
+            @Override
+            public void visit(Image image) {
+                var destination = IMAGE.matcher(image.getDestination());
+                var spans = image.getSourceSpans();
+                if (destination.matches() && !spans.isEmpty()) {
+                    var first = spans.getFirst();
+                    var last = spans.getLast();
+                    images
+                        .add(
+                            new ImageReference(
+                                destination.group(1),
+                                image,
+                                first.getInputIndex(),
+                                last.getInputIndex() + last.getLength()
+                            )
+                        );
+                }
+            }
+        });
+        return images;
+    }
+
+    private record ImageReference(String id, Image image, int start, int end) {
     }
 
     /** 현재 서버 시간을 마이크로초 정밀도로 반환한다. */

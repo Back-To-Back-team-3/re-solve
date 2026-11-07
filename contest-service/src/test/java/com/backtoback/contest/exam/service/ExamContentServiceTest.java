@@ -105,8 +105,8 @@ class ExamContentServiceTest {
                     "1001",
                     2,
                     "제목",
-                    "본문 ![그림](image:701)",
-                    "제한",
+                    "본문 image:702 및 [링크](image:703), ![그림](image:701)",
+                    "제한 `![코드](image:704)`",
                     "예시",
                     new ExamContentClient.FunctionSpec(
                         "solution",
@@ -123,7 +123,9 @@ class ExamContentServiceTest {
         assertThat(response.problems()).hasSize(1);
         assertThat(response.problems().getFirst().problemRevisionId()).isEqualTo("1001");
         assertThat(response.problems().getFirst().imageIds()).containsExactly("701");
-        assertThat(response.problems().getFirst().body()).contains("/api/v1/exams/55/problems/101/images/701");
+        assertThat(response.problems().getFirst().body())
+            .contains("![그림](/api/v1/exams/55/problems/101/images/701)")
+            .contains("image:702", "[링크](image:703)", "`![코드](image:704)`");
     }
 
     /** 등록만 한 회원은 Problem에 요청을 보내기 전에 차단한다. */
