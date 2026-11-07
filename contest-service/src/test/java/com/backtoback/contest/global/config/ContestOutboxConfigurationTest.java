@@ -35,7 +35,10 @@ class ContestOutboxConfigurationTest {
         strings = {
             "ExamUpdated",
             "ExamParticipantRegistered",
-            "ExamParticipantCanceled"
+            "ExamParticipantCanceled",
+            "ExamStarted",
+            "ExamClosed",
+            "ExamCanceled"
         }
     )
     @DisplayName("시험 설정 변경과 참가 이벤트를 지정한 SNS 토픽에 원본 그대로 발행한다")
