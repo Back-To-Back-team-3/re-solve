@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -98,8 +99,8 @@ class ExamManagementIntegrationTest {
     }
 
     @Test
-    @DisplayName("설정 수정은 활성 참가자 마감과 전체 이벤트를 함께 저장한다")
-    void updatesParticipantAndOutbox() {
+    @DisplayName("설정 수정은 문제 배점과 참가자 마감 및 전체 이벤트를 함께 저장한다")
+    void updatesProblemsParticipantsAndOutbox() {
         var created = service.create("12", "7", createRequest());
         long examId = Long.parseLong(created.examId());
         jdbc
@@ -112,6 +113,8 @@ class ExamManagementIntegrationTest {
         var result = service.update(created.examId(), "7", updateRequest(created.version()));
         assertThat(result.version()).isEqualTo("1");
         assertThat(result.examRevision()).isEqualTo("2");
+        var scores = jdbc.queryForList("SELECT score FROM exam_problems WHERE exam_id = ?", BigDecimal.class, examId);
+        assertThat(scores).containsExactly(new BigDecimal("90.00"));
         assertThat(
             jdbc
                 .queryForObject(
@@ -272,7 +275,7 @@ class ExamManagementIntegrationTest {
             "변경",
             start.plusHours(1),
             start.plusHours(2),
-            List.of(new Problem("1", "100.00", 1))
+            List.of(new Problem("1", "90.00", 1))
         );
     }
 }
