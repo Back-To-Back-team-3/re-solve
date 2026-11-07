@@ -44,7 +44,7 @@ import com.backtoback.problem.problem.dto.response.ProblemSummaryListResponse;
     }
 )
 @Testcontainers(disabledWithoutDocker = true)
-class ProblemSearchTest {
+class ProblemReadStoreTest {
     @Container
     private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db");
     @Container
@@ -123,7 +123,7 @@ class ProblemSearchTest {
                 );
         jdbc
             .update(
-                "UPDATE problem_validations SET result_status='PASSED',runtime_key='runtime',runner_version='v1'"
+                "UPDATE problem_validations SET result_status='PASSED',runtime_key=REPEAT('a',64),runner_version='v1'"
                     + " WHERE id=?",
                 accepted.validationId()
             );
@@ -189,7 +189,7 @@ class ProblemSearchTest {
                 );
         jdbc
             .update(
-                "UPDATE problem_validations SET result_status='PASSED',runtime_key='runtime',runner_version='v1'"
+                "UPDATE problem_validations SET result_status='PASSED',runtime_key=REPEAT('a',64),runner_version='v1'"
                     + " WHERE id=?",
                 accepted.validationId()
             );
