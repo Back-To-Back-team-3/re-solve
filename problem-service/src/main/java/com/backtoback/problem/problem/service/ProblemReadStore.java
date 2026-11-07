@@ -37,6 +37,7 @@ public class ProblemReadStore {
      * @param member 조회 회원
      * @param request 검색 조건
      * @return 사용 회차 페이지
+     * @throws ProblemException 회원 식별자·필터·페이지·정렬이 잘못되면 {@code COMMON_INVALID_REQUEST}
      */
     @Transactional(readOnly = true)
     public Page<Item> search(long member, ProblemSearchRequest request) {
@@ -60,7 +61,7 @@ public class ProblemReadStore {
      * @param ids 최대 50개 문제 ID
      * @param purpose 편입 용도
      * @return 없는 문제를 포함한 항목 목록
-     * @throws ProblemException 식별자 또는 용도가 잘못된 경우
+     * @throws ProblemException 식별자가 잘못되거나 50개를 초과하거나 용도가 잘못되면 {@code COMMON_INVALID_REQUEST}
      */
     @Transactional(readOnly = true)
     public List<Item> summaries(List<Long> ids, String purpose) {
