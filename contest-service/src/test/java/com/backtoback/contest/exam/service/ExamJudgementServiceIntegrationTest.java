@@ -22,14 +22,14 @@ class ExamJudgementServiceIntegrationTest extends ExamIntegrationTestSupport {
         var data = new java.util.HashMap<String, Object>();
         data.put("context", "EXAM");
         data.put("status", "FAILED");
-        data.put("examId", examId);
-        data.put("examSubmissionId", receipt.examSubmissionId());
+        data.put("contextId", examId);
+        data.put("receiptId", receipt.examSubmissionId());
         data.put("submissionId", "9001");
         data.put("userId", "7");
         data.put("problemId", "101");
         data.put("problemRevisionId", "1001");
         data.put("judgeAttempt", 1);
-        data.put("errorCode", "SYSTEM_ERROR");
+        data.put("errorCode", "LEASE_EXHAUSTED");
         data.put("submittedAt", receipt.receivedAt().toString());
         var metadata
             = new EventMetadata(
