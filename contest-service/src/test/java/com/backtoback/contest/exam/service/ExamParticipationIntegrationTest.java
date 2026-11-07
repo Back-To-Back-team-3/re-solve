@@ -183,7 +183,7 @@ class ExamParticipationIntegrationTest {
         var entry = service.enter(examId, "7");
         var again = service.enter(examId, "7");
         // then
-        assertThat(entry.enteredAt()).isEqualTo(again.enteredAt());
+        assertThat(entry.enteredAt()).isNotNull().isEqualTo(again.enteredAt());
         assertThat(again.participantRevision()).isEqualTo("2");
         assertThat(count("exam_participant_histories")).isEqualTo(2);
     }
