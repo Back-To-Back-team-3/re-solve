@@ -58,6 +58,34 @@ public class ProblemStateOperation extends BaseTimeEntity {
     }
 
     /**
+     * 비공개·보관 작업의 원래 입력을 보존한다.
+     *
+     * @param operationId 작업 ID
+     * @param problem 잠근 문제
+     * @param key 멱등키
+     * @param hash 요청 해시
+     * @param version 기대 버전
+     * @param target 목표 상태
+     * @param reason 조치 사유
+     * @return 미종결 작업
+     */
+    public static ProblemStateOperation hide(
+        String operationId,
+        Problem problem,
+        String key,
+        String hash,
+        int version,
+        ProblemVisibility target,
+        String reason
+    ) {
+        var operation = new ProblemStateOperation(operationId, problem, key, hash, version);
+        operation.operationType = target == ProblemVisibility.PRIVATE ? "UNPUBLICATION" : "ARCHIVE";
+        operation.targetVisibility = target.name();
+        operation.reason = reason;
+        return operation;
+    }
+
+    /**
      * 공개 작업의 필수 입력과 초기 상태를 함께 설정한다.
      *
      * @param operationId 새 작업 ID
