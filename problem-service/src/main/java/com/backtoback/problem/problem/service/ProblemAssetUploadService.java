@@ -37,7 +37,39 @@ public class ProblemAssetUploadService {
     @Transactional(propagation = Propagation.NEVER)
     public Long upload(String bucket, Long ownerId, ProblemAssetContent content, boolean body) {
         Objects.requireNonNull(bucket);
-        var ticket = tracking.start(ownerId, content, body);
+        return uploadTracked(bucket, content, tracking.start(ownerId, content, body));
+    }
+
+    /**
+     * 문제 소속 코드 파일을 추적하고 기존 업로드 보호 규칙으로 저장한다.
+     *
+     * @param bucket 저장 버킷
+     * @param problemId 소속 문제
+     * @param ownerId 작성 관리자
+     * @param content 코드 원문
+     * @return 완료된 코드 파일 ID
+     * @throws IllegalStateException 업로드 또는 보호 갱신 실패
+     */
+    @Transactional(propagation = Propagation.NEVER)
+    public Long uploadCode(String bucket, Long problemId, Long ownerId, ProblemAssetContent content) {
+        Objects.requireNonNull(bucket);
+        return uploadTracked(bucket, content, tracking.startCode(problemId, ownerId, content));
+    }
+
+    /**
+     * 추적된 파일에 외부 쓰기와 보호 갱신·저장 확인을 적용한다.
+     *
+     * @param bucket 저장 버킷
+     * @param content 원문
+     * @param ticket 이미 커밋한 추적 정보
+     * @return 완료된 파일 ID
+     * @throws IllegalStateException 저장 또는 보호 갱신 실패
+     */
+    private Long uploadTracked(
+        String bucket,
+        ProblemAssetContent content,
+        ProblemAssetUploadTracking.UploadTicket ticket
+    ) {
         LocalDateTime started = LocalDateTime.now(clock);
         if (!started.isBefore(ticket.expiry())) {
             tracking.discardBeforeWrite(ticket);

@@ -33,6 +33,7 @@ import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.problem.problem.domain.Problem;
 import com.backtoback.problem.problem.domain.ProblemBodyAsset;
 import com.backtoback.problem.problem.domain.ProblemBodyImage;
@@ -53,8 +54,10 @@ import com.backtoback.problem.tag.repository.TagRepository;
  * 문제 패키지 Repository의 저장·조회와 DB 제약을 실제 MySQL에 대해 확인한다.
  * Redis는 Redisson 클라이언트 빈 기동에 필요해 함께 띄우며, 이 테스트에서 락은 직접 쓰지 않는다.
  */
+@MockitoBean(types = OutboxRelay.class)
 @SpringBootTest(
     properties = {
+        "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
         "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
         "spring.cloud.aws.region.static=ap-northeast-2",
         "spring.cloud.aws.credentials.access-key=test",

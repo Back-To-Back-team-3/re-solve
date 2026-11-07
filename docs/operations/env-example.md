@@ -128,6 +128,10 @@ GRAFANA_ADMIN_PASSWORD=
 - 첫 실행에서 `mysql-init`이 현재 9개 서비스 DB를 만들고 개발 계정에 권한을 부여한다.
 - 실제 비밀번호·접속 주소·토큰은 GitHub에 올리면 안되고 Issue, PR에도 적지 않는다.
 
+### Problem 검증 요청 발행
+
+`PROBLEM_VALIDATION_QUEUE_URL`은 필수이며, Judge가 수신하는 `problem-validation-queue`의 Standard SQS URL을 지정한다. Docker Compose로 실행할 때는 이 값을 `problem-service` 컨테이너의 환경변수로 전달해야 한다.
+
 ### Judge 검증 수신·실행·결과 이벤트 연결
 
 | 환경변수 | 기본값 | 설명 |

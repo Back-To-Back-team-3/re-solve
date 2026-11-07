@@ -27,6 +27,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -34,6 +35,7 @@ import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
@@ -50,8 +52,10 @@ import com.backtoback.problem.problem.repository.ProblemRevisionRepository;
 import com.backtoback.problem.tag.repository.TagRepository;
 
 /** 호출자의 트랜잭션에 참여하는 회차 저장과 롤백을 실제 MySQL로 확인한다. */
+@MockitoBean(types = OutboxRelay.class)
 @SpringBootTest(
     properties = {
+        "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
         "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
         "spring.cloud.aws.region.static=ap-northeast-2",
         "spring.cloud.aws.credentials.access-key=test",
