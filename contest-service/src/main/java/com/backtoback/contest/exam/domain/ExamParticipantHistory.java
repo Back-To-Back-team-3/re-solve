@@ -68,7 +68,7 @@ public class ExamParticipantHistory {
         ExamParticipant participant,
         ExamParticipantStatus fromStatus,
         ExamParticipantStatus toStatus,
-        long actorMemberId,
+        Long actorMemberId,
         LocalDateTime now
     ) {
         this.participant = participant;
@@ -92,7 +92,7 @@ public class ExamParticipantHistory {
         ExamParticipant participant,
         ExamParticipantStatus fromStatus,
         ExamParticipantStatus toStatus,
-        long actorMemberId,
+        Long actorMemberId,
         LocalDateTime now
     ) {
         return new ExamParticipantHistory(participant, fromStatus, toStatus, actorMemberId, now);

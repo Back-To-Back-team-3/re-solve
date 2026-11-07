@@ -35,6 +35,7 @@ dependencies {
     implementation project(':common-web')
     implementation project(':common-jpa')
     implementation project(':common-event')
+    implementation project(':common-scheduling')
 
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
