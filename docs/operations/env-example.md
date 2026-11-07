@@ -159,6 +159,15 @@ GRAFANA_ADMIN_PASSWORD=
 - `JUDGE_SUBMISSION_QUEUE_URL`은 `ExamSubmissionRequested`를 전달할 Judge 제출 SQS 큐 URL이다.
 - 발행을 활성화하면 두 목적지가 모두 필요하다. 소비 활성화는 기존 `CONTEST_EVENTS_ENABLED`로 설정한다.
 
+### Contest 시험 순위 캐시
+
+| 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `CONTEST_RANKINGCACHE_TTLSECONDS` | `3600` | 시험 순위 데이터·현재 버전 포인터 TTL(초), 최소 1초 |
+| `CONTEST_RANKINGCACHE_FINALIZEDRETENTIONDAYS` | `7` | 시험 최초 확정 후 정기 캐시 재생성 기간(일), 최소 1일 |
+
+Spring 설정 키는 각각 `contest.ranking-cache.ttl-seconds`, `contest.ranking-cache.finalized-retention-days`다. 기간이 지난 시험도 DB 스냅샷으로 조회하며 DB 결과·스냅샷은 삭제하지 않는다.
+
 ### Judge0 연결 설정
 
 | 환경변수 | 기본값 | 설명 |
