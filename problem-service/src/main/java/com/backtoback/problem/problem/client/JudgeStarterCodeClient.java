@@ -30,7 +30,8 @@ public class JudgeStarterCodeClient {
      * @param function 고정 함수 명세
      * @param languages 통과 언어
      * @return 요청 순서의 기본 코드
-     * @throws ProblemException 통신 장애·언어 누락·중복·잘못된 응답
+     * @throws ProblemException 통신 장애·서킷 차단·언어 누락·중복·잘못된 응답 시
+     *     {@code COMMON_DEPENDENCY_UNAVAILABLE}
      */
     public List<StarterCodeResponse> read(Map<String, Object> function, List<String> languages) {
         if (languages.isEmpty()) {
@@ -39,7 +40,7 @@ public class JudgeStarterCodeClient {
         try {
             return circuit.executeSupplier(() -> fetch(function, languages));
         } catch (CallNotPermittedException | RestClientException failure) {
-            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
         }
     }
 
@@ -49,7 +50,7 @@ public class JudgeStarterCodeClient {
      * @param function 고정 명세
      * @param languages 요청 언어
      * @return 기본 코드
-     * @throws ProblemException 잘못된 원격 응답
+     * @throws ProblemException 잘못된 원격 응답 시 {@code COMMON_DEPENDENCY_UNAVAILABLE}
      */
     private List<StarterCodeResponse> fetch(Map<String, Object> function, List<String> languages) {
         var root

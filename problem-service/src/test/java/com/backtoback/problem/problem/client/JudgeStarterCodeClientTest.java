@@ -3,6 +3,7 @@ package com.backtoback.problem.problem.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.util.List;
@@ -14,8 +15,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -39,6 +42,22 @@ class JudgeStarterCodeClientTest {
         var client = new JudgeStarterCodeClient(builder.build(), CircuitBreaker.ofDefaults("starter-test"));
         assertThat(client.read(Map.of("name", "solution"), List.of("java")).getFirst().sourceCode())
             .isEqualTo("class Solution {}");
+        server.verify();
+    }
+
+    /** 원격 서버 오류를 공통 예외 처리기까지 보존한다. */
+    @Test
+    @DisplayName("Judge 서버 오류를 의존 장애로 변환하면서 원인을 보존한다")
+    void preservesRemoteFailure() {
+        var builder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("/internal/v1/judge/starter-codes")).andRespond(withServerError());
+        var client = new JudgeStarterCodeClient(builder.build(), CircuitBreaker.ofDefaults("starter-failure"));
+        assertThatThrownBy(() -> client.read(Map.of("name", "solution"), List.of("java")))
+            .isInstanceOfSatisfying(ProblemException.class, failure -> {
+                assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+                assertThat(failure).hasCauseInstanceOf(HttpServerErrorException.class);
+            });
         server.verify();
     }
 
