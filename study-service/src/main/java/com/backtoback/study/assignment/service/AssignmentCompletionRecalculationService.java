@@ -55,9 +55,14 @@ public class AssignmentCompletionRecalculationService {
         LocalDateTime now
             = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
 
+        // FOR UPDATE: (assignmentId, memberId) 재계산 직렬화 + 최신 상태 조회
+        memberStatusRepository.findByAssignmentIdAndMemberIdWithLock(assignmentId, memberId);
+
         Optional<MemberAcReplica> basisAc = findBasisAc(assignment, memberId, problemId);
+        // FOR SHARE: REPEATABLE READ 스냅샷 우회, 직렬화 잠금 획득 후 최신 커밋을 반영한다(scheduler.md §5.0).
         Optional<AssignmentCompletion> existing
-            = completionRepository.findByAssignmentIdAndMemberIdAndProblemId(assignmentId, memberId, problemId);
+            = completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(assignmentId, memberId, problemId);
 
         updateCompletion(assignment, memberId, problemId, basisAc, existing, now);
         syncMemberStatus(assignment, memberId, now);
@@ -137,7 +142,7 @@ public class AssignmentCompletionRecalculationService {
                 .size();
 
         List<AssignmentCompletion> completions
-            = completionRepository.findByAssignmentIdAndMemberId(assignment.getId(), memberId);
+            = completionRepository.findByAssignmentIdAndMemberIdWithForShare(assignment.getId(), memberId);
 
         int completedCount = (int)completions.stream().filter(c -> c.getStatus() == CompletionStatus.COMPLETED).count();
         int onTimeCount

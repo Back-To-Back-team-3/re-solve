@@ -25,6 +25,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.study.assignment.repository.AssignmentRepository;
 import com.backtoback.study.assignment.service.AssignmentEnrollmentService;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
@@ -65,6 +66,8 @@ class StudyMembershipCommandServiceTest {
     private StudyMembershipHistoryRepository historyRepository;
     @Mock
     private StudyMemberQuotaRepository quotaRepository;
+    @Mock
+    private AssignmentRepository assignmentRepository;
     @Mock
     private AssignmentEnrollmentService enrollmentService;
     @Mock
@@ -362,6 +365,8 @@ class StudyMembershipCommandServiceTest {
             .willReturn(Optional.of(pending))
             .willReturn(Optional.of(alreadyApproved));
         given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(approvalStudy));
+        given(quotaRepository.incrementIfBelowLimit(20L)).willReturn(1);
+        given(studyRepository.approveIfNotFull(STUDY_ID)).willReturn(1);
         given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(0);
 
         assertThatThrownBy(() -> service.approve(STUDY_ID, membershipId, MEMBER_ID, CORR_ID))
@@ -393,6 +398,8 @@ class StudyMembershipCommandServiceTest {
             .willReturn(Optional.of(pending))
             .willReturn(Optional.of(expiredPending));
         given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(approvalStudy));
+        given(quotaRepository.incrementIfBelowLimit(20L)).willReturn(1);
+        given(studyRepository.approveIfNotFull(STUDY_ID)).willReturn(1);
         given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(0);
 
         assertThatThrownBy(() -> service.approve(STUDY_ID, membershipId, MEMBER_ID, CORR_ID))
@@ -431,7 +438,6 @@ class StudyMembershipCommandServiceTest {
         given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
             .willReturn(Optional.of(leaderMembership));
         given(membershipRepository.findById(membershipId)).willReturn(Optional.of(pending));
-        given(membershipRepository.approveIfPending(eq(membershipId), any())).willReturn(1);
         given(quotaRepository.incrementIfBelowLimit(targetMemberId)).willReturn(1);
         given(studyRepository.approveIfNotFull(STUDY_ID)).willReturn(0);
         given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(full));
