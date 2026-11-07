@@ -102,7 +102,7 @@ class ProblemReadStoreTest {
         });
     }
 
-    /** 最新 작성 회차 대신 통과 사용 회차를 선택하고 회원별 해결 상태를 반영한다. */
+    /** 최신 작성 회차 대신 통과 사용 회차를 선택하고 회원별 해결 상태를 반영한다. */
     @Test
     @DisplayName("검색은 미통과 최신 회차를 제외하고 통과 회차와 회원 풀이 상태를 반환한다")
     void searchesPassedRevision() {
@@ -167,7 +167,7 @@ class ProblemReadStoreTest {
             .noneMatch(item -> item.id() == id);
     }
 
-    /** 미존재・미통과 항목과 대회 전용 문제의 가용 조건을 구분한다. */
+    /** 미존재·미통과 항목과 대회 전용 문제의 가용 조건을 구분한다. */
     @Test
     @DisplayName("선택 요약은 순서와 미존재 항목을 보존하고 대회 전용 문제는 CONTEST만 허용한다")
     void purposeAndMissing() {
