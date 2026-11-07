@@ -168,4 +168,30 @@ public class Exam extends BaseTimeEntity {
         this.totalScore = totalScore;
         this.examRevision = Math.incrementExact(this.examRevision);
     }
+
+    /** 시작 조건을 확인한 시험을 진행 상태로 바꾼다. */
+    public void start() {
+        if (status != ExamStatus.SCHEDULED) {
+            throw new IllegalStateException("Exam is not scheduled");
+        }
+        status = ExamStatus.IN_PROGRESS;
+    }
+
+    /** 전체 마감이 지난 진행 시험의 종료 시각을 기록한다. */
+    public void close(LocalDateTime now) {
+        if (status != ExamStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Exam is not in progress");
+        }
+        status = ExamStatus.CLOSED;
+        closedAt = now;
+    }
+
+    /** 시작 전 시험을 취소하고 처리 시각을 보관한다. */
+    public void cancel(LocalDateTime now) {
+        if (status != ExamStatus.SCHEDULED) {
+            throw new IllegalStateException("Exam is not scheduled");
+        }
+        status = ExamStatus.CANCELED;
+        canceledAt = now;
+    }
 }

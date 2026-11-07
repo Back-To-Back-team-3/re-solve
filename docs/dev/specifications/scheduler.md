@@ -437,6 +437,8 @@
 | 발행 이벤트 | ExamStarted / ExamClosed |
 | 지표 | §4.0 공통 지표 및 대상 상태·회차·버전별 보류 원인 |
 
+`ExamLifecycleScheduler`의 이벤트 추적용 작업명은 `exam-lifecycle`이며 `correlationId`는 `sched-exam-lifecycle-{UUID}`다. ShedLock 이름은 위 표를 따른다.
+
 **동작:**
 
 1. 부모 잠금 뒤 최신 상태·설정을 다시 확인한다. 시작에 도달하고 마감 전이면 IN_PROGRESS, 전체 마감을 초과하면 CLOSED로 전이하고 해당 Outbox를 저장한다.

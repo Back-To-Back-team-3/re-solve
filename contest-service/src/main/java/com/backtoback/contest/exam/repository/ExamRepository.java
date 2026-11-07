@@ -1,5 +1,6 @@
 package com.backtoback.contest.exam.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -51,4 +52,14 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select exam from Exam exam where exam.id = :id")
     Optional<Exam> findForUpdate(@Param("id") Long id);
+
+    /** 시작 또는 종료 시각에 도달한 시험을 전이 시각과 ID 순서로 선정한다. */
+    @Query("""
+        select e.id from Exam e
+        where (e.status = com.backtoback.contest.exam.domain.ExamStatus.SCHEDULED and e.startsAt <= :now)
+           or (e.status = com.backtoback.contest.exam.domain.ExamStatus.IN_PROGRESS and e.endsAt < :now)
+        order by case when e.status = com.backtoback.contest.exam.domain.ExamStatus.SCHEDULED
+            then e.startsAt else e.endsAt end, e.id
+        """)
+    List<Long> findLifecycleCandidates(@Param("now") LocalDateTime now, Pageable pageable);
 }
