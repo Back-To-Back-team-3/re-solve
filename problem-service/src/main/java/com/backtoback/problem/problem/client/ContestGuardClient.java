@@ -74,6 +74,9 @@ public class ContestGuardClient {
                 } catch (tools.jackson.core.JacksonException malformed) {
                     throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
                 }
+                if (body == null || !body.isObject()) {
+                    throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+                }
                 var code = body.path("error").path("code").asString();
                 if (code != null && REJECTIONS.contains(code)
                     && (status == 422) == "IDEMPOTENCY_KEY_CONFLICT".equals(code)) {
