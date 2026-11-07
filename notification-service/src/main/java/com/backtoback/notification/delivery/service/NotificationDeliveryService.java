@@ -125,12 +125,47 @@ public class NotificationDeliveryService {
      * @param notification 전송할 알림 엔티티
      */
     public void sendToMember(Long memberId, Notification notification) {
+        sendNotificationToMemberSessions(memberId, notification);
+    }
+
+    /**
+     * 회원별 알림 엔티티 맵을 기반으로 활성 SSE 세션에 브로드캐스트 전송한다.
+     * 각 회원의 세션에는 해당 회원의 고유 Notification ID를 가진 페이로드를 전달한다.
+     *
+     * @param noticesByMemberId 회원 ID별 알림 엔티티 맵
+     * @return 성공적으로 전송된 세션 수
+     */
+    public int broadcast(java.util.Map<Long, Notification> noticesByMemberId) {
+        if (noticesByMemberId == null || noticesByMemberId.isEmpty()) {
+            return 0;
+        }
+
+        int deliveredCount = 0;
+        for (java.util.Map.Entry<Long, Notification> entry : noticesByMemberId.entrySet()) {
+            Long memberId = entry.getKey();
+            Notification notification = entry.getValue();
+            deliveredCount += sendNotificationToMemberSessions(memberId, notification);
+        }
+        return deliveredCount;
+    }
+
+    /**
+     * 연결된 모든 활성 세션에 30초 주기 Heartbeat 이벤트를 전송한다.
+     */
+    public void broadcastHeartbeat() {
+        List<SseSession> allSessions = emitterRepository.findAll();
+        allSessions.forEach(this::sendHeartbeat);
+    }
+
+    private int sendNotificationToMemberSessions(Long memberId, Notification notification) {
         List<SseSession> sessions = emitterRepository.findAllByMemberId(memberId);
         if (sessions.isEmpty()) {
-            return;
+            return 0;
         }
 
         NotificationEventResponse response = NotificationEventResponse.from(notification);
+        int successCount = 0;
+
         for (SseSession session : sessions) {
             SseEmitter emitter = session.emitter();
             synchronized (emitter) {
@@ -151,6 +186,7 @@ public class NotificationDeliveryService {
                     if (notification.getId() != null) {
                         tracker.set(Math.max(tracker.get(), notification.getId()));
                     }
+                    successCount++;
                 } catch (IOException | IllegalStateException exception) {
                     log
                         .debug(
@@ -163,68 +199,7 @@ public class NotificationDeliveryService {
                 }
             }
         }
-    }
-
-    /**
-     * 연결된 모든 활성 세션에 30초 주기 Heartbeat 이벤트를 전송한다.
-     */
-    public void broadcastHeartbeat() {
-        List<SseSession> allSessions = emitterRepository.findAll();
-        allSessions.forEach(this::sendHeartbeat);
-    }
-
-    /**
-     * 현재 활성화된 모든 SSE 세션에 시스템 알림을 실시간 브로드캐스트 전송한다.
-     *
-     * @param notification 전송할 알림 엔티티
-     * @return 성공적으로 전송된 세션 수
-     */
-    public int broadcast(Notification notification) {
-        List<SseSession> sessions = emitterRepository.findAll();
-        if (sessions.isEmpty()) {
-            return 0;
-        }
-
-        NotificationEventResponse response = NotificationEventResponse.from(notification);
-        int deliveredCount = 0;
-
-        for (SseSession session : sessions) {
-            SseEmitter emitter = session.emitter();
-            synchronized (emitter) {
-                AtomicLong tracker = session.lastSentNotificationId();
-                if (notification.getId() != null && notification.getId() <= tracker.get()) {
-                    continue;
-                }
-
-                try {
-                    emitter
-                        .send(
-                            SseEmitter
-                                .event()
-                                .id(
-                                    notification.getId() != null ? String.valueOf(notification.getId())
-                                        : UUID.randomUUID().toString()
-                                )
-                                .name(EVENT_NOTIFICATION)
-                                .data(response)
-                        );
-                    if (notification.getId() != null) {
-                        tracker.set(Math.max(tracker.get(), notification.getId()));
-                    }
-                    deliveredCount++;
-                } catch (IOException | IllegalStateException exception) {
-                    log
-                        .debug(
-                            "브로드캐스트 SSE 전송 실패, 세션 정리: emitterId={}, memberId={}",
-                            session.emitterId(),
-                            session.memberId(),
-                            exception
-                        );
-                    cleanup(session.emitterId(), emitter, exception);
-                }
-            }
-        }
-        return deliveredCount;
+        return successCount;
     }
 
     /**

@@ -11,10 +11,16 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.backtoback.notification.admin.dto.request.AdminNotificationBroadcastRequest;
@@ -34,6 +40,7 @@ class AdminNotificationServiceTest {
     private EmitterRepository emitterRepository;
     private NotificationWithdrawnMemberRepository withdrawnMemberRepository;
     private Clock fixedClock;
+    private TransactionTemplate transactionTemplate;
     private AdminNotificationService adminNotificationService;
 
     @BeforeEach
@@ -43,6 +50,14 @@ class AdminNotificationServiceTest {
         emitterRepository = mock(EmitterRepository.class);
         withdrawnMemberRepository = mock(NotificationWithdrawnMemberRepository.class);
         fixedClock = Clock.fixed(Instant.parse("2026-11-07T15:30:00Z"), ZoneId.of("Asia/Seoul"));
+        transactionTemplate = mock(TransactionTemplate.class);
+
+        // TransactionTemplate이 넘겨받은 콜백을 동기 실행하도록 설정
+        given(transactionTemplate.execute(any())).willAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            TransactionStatus status = new SimpleTransactionStatus();
+            return callback.doInTransaction(status);
+        });
 
         adminNotificationService
             = new AdminNotificationService(
@@ -50,12 +65,14 @@ class AdminNotificationServiceTest {
                 deliveryService,
                 emitterRepository,
                 withdrawnMemberRepository,
-                fixedClock
+                fixedClock,
+                transactionTemplate
             );
     }
 
     @Test
-    @DisplayName("관리자 공지 발송 시 관리자 알림 및 활성 세션 회원 알림을 저장하고 전체 브로드캐스트를 전송한다")
+    @DisplayName("관리자 공지 발송 시 각 수신 회원별로 고유한 Notification 엔티티를 생성하고, 회원별 맵으로 브로드캐스트를 전송한다")
+    @SuppressWarnings("unchecked")
     void broadcastSystemNoticeSuccess() {
         // given
         Long adminId = 1L;
@@ -70,7 +87,7 @@ class AdminNotificationServiceTest {
         given(withdrawnMemberRepository.existsByMemberId(activeMemberId)).willReturn(false);
         given(withdrawnMemberRepository.existsByMemberId(withdrawnMemberId)).willReturn(true);
         given(notificationRepository.save(any(Notification.class))).willAnswer(invocation -> invocation.getArgument(0));
-        given(deliveryService.broadcast(any(Notification.class))).willReturn(2);
+        given(deliveryService.broadcast(any(Map.class))).willReturn(2);
 
         AdminNotificationBroadcastRequest request
             = new AdminNotificationBroadcastRequest("긴급 점검 공지", "30분간 긴급 점검이 진행됩니다.", "/notices/99");
@@ -84,7 +101,21 @@ class AdminNotificationServiceTest {
         assertThat(response.deliveredSseCount()).isEqualTo(2);
 
         // 관리자 본인 1회 + 활성 회원 1회 = 총 2회 저장 (탈퇴 회원은 제외)
-        verify(notificationRepository, times(2)).save(any(Notification.class));
-        verify(deliveryService).broadcast(any(Notification.class));
+        ArgumentCaptor<Notification> notificationCaptor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository, times(2)).save(notificationCaptor.capture());
+
+        List<Notification> savedNotifications = notificationCaptor.getAllValues();
+        assertThat(savedNotifications)
+            .extracting(Notification::getMemberId)
+            .containsExactlyInAnyOrder(adminId, activeMemberId);
+
+        // deliveryService.broadcast에 회원별 알림 맵이 올바르게 전달되었는지 검증
+        ArgumentCaptor<Map<Long, Notification>> mapCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(deliveryService).broadcast(mapCaptor.capture());
+
+        Map<Long, Notification> broadcastMap = mapCaptor.getValue();
+        assertThat(broadcastMap).containsOnlyKeys(adminId, activeMemberId);
+        assertThat(broadcastMap.get(adminId).getMemberId()).isEqualTo(adminId);
+        assertThat(broadcastMap.get(activeMemberId).getMemberId()).isEqualTo(activeMemberId);
     }
 }

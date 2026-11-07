@@ -1,18 +1,18 @@
 package com.backtoback.notification.admin.controller;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import com.backtoback.common.api.ApiResponse;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.notification.admin.dto.request.AdminNotificationBroadcastRequest;
 import com.backtoback.notification.admin.dto.response.AdminNotificationBroadcastResponse;
 import com.backtoback.notification.admin.service.AdminNotificationService;
+import com.backtoback.notification.global.error.NotificationException;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -46,7 +46,7 @@ public class AdminNotificationController {
         @Valid @RequestBody AdminNotificationBroadcastRequest request
     ) {
         if (!ADMIN_ROLE.equals(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다.");
+            throw new NotificationException(CommonErrorCode.AUTH_ACCESS_DENIED);
         }
 
         AdminNotificationBroadcastResponse response

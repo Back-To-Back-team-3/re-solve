@@ -9,7 +9,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,12 +42,23 @@ class AdminNotificationControllerTest {
     void broadcastSuccess() throws Exception {
         // given
         AdminNotificationBroadcastResponse response
-            = new AdminNotificationBroadcastResponse(
-                NotificationType.SYSTEM_NOTICE,
-                "시스템 정기 점검 안내",
-                LocalDateTime.of(2026, 11, 7, 15, 30, 0),
-                5
-            );
+            = AdminNotificationBroadcastResponse
+                .of(
+                    NotificationType.SYSTEM_NOTICE,
+                    "시스템 정기 점검 안내",
+                    OffsetDateTime
+                        .of(
+                            2026,
+                            11,
+                            7,
+                            15,
+                            30,
+                            0,
+                            123456000,
+                            ZoneId.of("Asia/Seoul").getRules().getOffset(OffsetDateTime.now().toInstant())
+                        ),
+                    5
+                );
         given(adminNotificationService.broadcastSystemNotice(eq(1L), any(AdminNotificationBroadcastRequest.class)))
             .willReturn(response);
 
@@ -77,7 +89,7 @@ class AdminNotificationControllerTest {
     }
 
     @Test
-    @DisplayName("관리자 권한이 아닌 일반 사용자(USER)가 요청하면 403 Forbidden을 반환한다")
+    @DisplayName("관리자 권한이 아닌 일반 사용자(USER)가 요청하면 403과 AUTH_ACCESS_DENIED 에러 코드를 반환한다")
     void broadcastForbiddenWhenNotAdmin() throws Exception {
         String requestBody = """
             {
@@ -94,11 +106,13 @@ class AdminNotificationControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(requestBody)
             )
-            .andExpect(status().isForbidden());
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
     }
 
     @Test
-    @DisplayName("X-User-Role 헤더가 누락되면 403 Forbidden을 반환한다")
+    @DisplayName("X-User-Role 헤더가 누락되면 403과 AUTH_ACCESS_DENIED 에러 코드를 반환한다")
     void broadcastForbiddenWhenRoleHeaderMissing() throws Exception {
         String requestBody = """
             {
@@ -114,11 +128,13 @@ class AdminNotificationControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(requestBody)
             )
-            .andExpect(status().isForbidden());
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
     }
 
     @Test
-    @DisplayName("제목 또는 내용이 비어 있으면 400 Bad Request를 반환한다")
+    @DisplayName("제목 또는 내용이 비어 있으면 400과 COMMON_INVALID_REQUEST 에러 코드를 반환한다")
     void broadcastBadRequestWhenFieldsBlank() throws Exception {
         String requestBody = """
             {
@@ -135,6 +151,8 @@ class AdminNotificationControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(requestBody)
             )
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
     }
 }
