@@ -99,7 +99,7 @@ public class ProblemValidationService {
         try {
             assetId = uploads.uploadCode(storage.bucket(), problemId, authorId, code);
         } catch (RuntimeException failure) {
-            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
         }
         var command
             = new ProblemValidationStore.Command(

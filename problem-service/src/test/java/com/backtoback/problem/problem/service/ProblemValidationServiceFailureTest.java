@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -84,6 +85,21 @@ class ProblemValidationServiceFailureTest {
         var content = ArgumentCaptor.forClass(ProblemAssetContent.class);
         verify(uploads).uploadCode(eq("bucket"), eq(1L), eq(2L), content.capture());
         assertThat(content.getValue().bytes()).isEqualTo("한글 🚀".getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** 업로드 실패의 원인을 공통 예외 처리기에 전달하고 기존 오류 응답을 유지한다. */
+    @Test
+    @DisplayName("코드 업로드 실패는 원인 예외를 보존한 503 오류로 전달하고 접수를 저장하지 않는다")
+    void preservesUploadFailure() {
+        var cause = new IllegalStateException("upload failed");
+        given(uploads.uploadCode(anyString(), anyLong(), anyLong(), any())).willThrow(cause);
+
+        assertThatThrownBy(() -> accept("code")).isInstanceOfSatisfying(ProblemException.class, failure -> {
+            assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            assertThat(failure.getErrorCode().getStatus().value()).isEqualTo(503);
+            assertThat(failure.getCause()).isSameAs(cause);
+        });
+        verify(store, never()).save(any(), anyLong());
     }
 
     /** 재조회도 실패하면 원래 저장 예외와 파일 실패 분류를 보존한다. */
