@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -159,38 +160,44 @@ class ExamDraftIntegrationTest {
     /** 동일 창의 뒤 요청만 저장하고 밀린 다른 문제는 0과 null을 반환한다. */
     @Test
     @DisplayName("같은 참가자의 버퍼에서 밀린 요청은 미저장 문제의 순번 0과 null 시각을 반환한다")
-    void bufferKeepsLastRequest() throws Exception {
+    void bufferKeepsLastRequest() {
         // given
         String prefix = "exam:draft:buffer:" + participantId;
         var openSlot = new DefaultRedisScript<Long>("""
             local time = redis.call('TIME')
-            local due = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000) + 3000
+            local due = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000) + 60000
             redis.call('SET', KEYS[1], string.format('%.0f', due), 'PX', 120000)
             return due
             """, Long.class);
         long due = redis.execute(openSlot, List.of(prefix + ":due"));
         String slot = prefix + ":slot:" + due;
-        try (var pool = Executors.newFixedThreadPool(2)) {
-            var first = pool.submit(() -> buffer.save(examId, "7", "102", new SaveRequest("java", "첫 코드", "1")));
-            var end = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (!Boolean.TRUE.equals(redis.hasKey(slot))) {
-                if (System.nanoTime() >= end) {
-                    throw new IllegalStateException("Buffer not created");
-                }
-                Thread.sleep(10);
-            }
-            // when
-            var last = pool.submit(() -> buffer.save(examId, "7", "101", new SaveRequest("java", "마지막", "1")));
-            var skipped = first.get(5, TimeUnit.SECONDS);
-            var saved = last.get(5, TimeUnit.SECONDS);
-            // then
-            assertThat(saved.applied()).isTrue();
-            assertThat(skipped.applied()).isFalse();
-            assertThat(skipped.serverSeq()).isEqualTo("0");
-            assertThat(skipped.savedAt()).isNull();
-            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isEqualTo(1);
-            assertThat(redis.getExpire(slot)).isPositive();
-        }
+        var first = store.prepare(examId, "7", "102", new SaveRequest("java", "첫 코드", "1"));
+        var last = store.prepare(examId, "7", "101", new SaveRequest("java", "마지막", "1"));
+        var enqueue = bufferScript("ENQUEUE", List.class);
+        var close = bufferScript("CLOSE_SLOT", List.class);
+
+        List<?> firstSlot = redis.execute(enqueue, List.of(prefix), "first");
+        List<?> lastSlot = redis.execute(enqueue, List.of(prefix), "last");
+        assertThat(firstSlot.getFirst()).isEqualTo(due);
+        assertThat(lastSlot.getFirst()).isEqualTo(due);
+        List<?> closed = redis.execute(close, List.of(slot), "0");
+        assertThat(closed.get(1)).isEqualTo("last");
+
+        var saved = store.save(last);
+        redis.execute(bufferScript("RECORD_STATUS", Long.class), List.of(slot), "done");
+        var skipped = store.skipped(first);
+
+        assertThat(saved.applied()).isTrue();
+        assertThat(skipped.applied()).isFalse();
+        assertThat(skipped.serverSeq()).isEqualTo("0");
+        assertThat(skipped.savedAt()).isNull();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isEqualTo(1);
+        assertThat(redis.getExpire(slot)).isPositive();
+    }
+
+    private <T> DefaultRedisScript<T> bufferScript(String field, Class<T> resultType) {
+        var script = (RedisScript<?>)ReflectionTestUtils.getField(ExamDraftBuffer.class, field);
+        return new DefaultRedisScript<>(script.getScriptAsString(), resultType);
     }
 
     @Test
