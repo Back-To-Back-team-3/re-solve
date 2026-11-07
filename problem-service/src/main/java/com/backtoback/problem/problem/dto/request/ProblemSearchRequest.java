@@ -7,6 +7,7 @@ import com.backtoback.problem.global.exception.ProblemException;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 
 /** 일반 공개 문제 검색 조건(API 명세서 §2.1.1). */
 public record ProblemSearchRequest(
@@ -20,16 +21,29 @@ public record ProblemSearchRequest(
         message = "난이도는 3 이하여야 합니다."
     ) Integer difficulty,
     List<Long> tagIds,
-    String solvedStatus,
-    Integer page,
-    Integer size,
+    @Pattern(
+        regexp = "SOLVED|UNSOLVED",
+        message = "풀이 상태는 SOLVED 또는 UNSOLVED여야 합니다."
+    ) String solvedStatus,
+    @Min(
+        value = 0,
+        message = "페이지는 0 이상이어야 합니다."
+    ) Integer page,
+    @Min(
+        value = 1,
+        message = "크기는 1 이상이어야 합니다."
+    )
+    @Max(
+        value = 100,
+        message = "크기는 100 이하여야 합니다."
+    ) Integer size,
     String sort
 ) {
     /**
      * 기본값을 적용하고 검색 범위를 검증한다.
      *
      * @return 정규화 검색 조건
-     * @throws ProblemException 잘못된 검색 조건
+     * @throws ProblemException 필터·페이지·정렬이 잘못되면 {@code COMMON_INVALID_REQUEST}
      */
     public ProblemSearchRequest normalized() {
         int number = page == null ? 0 : page;

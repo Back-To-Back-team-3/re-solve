@@ -1,6 +1,7 @@
 package com.backtoback.problem.problem.dto.response;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import com.backtoback.problem.problem.service.ProblemReadStore.Item;
@@ -13,7 +14,7 @@ public record ProblemSearchResponse(
     String title,
     int difficulty,
     List<ProblemTagResponse> tags,
-    LocalDateTime publishedAt,
+    OffsetDateTime publishedAt,
     String solvedStatus,
     List<String> supportedLanguages
 ) {
@@ -32,7 +33,7 @@ public record ProblemSearchResponse(
             revision.getTitle(),
             revision.getDifficulty(),
             item.tags().stream().map(tag -> new ProblemTagResponse(Long.toString(tag.id()), tag.name())).toList(),
-            revision.getCreatedAt(),
+            revision.getCreatedAt().atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
             item.solved() ? "SOLVED" : "UNSOLVED",
             item.languages()
         );
