@@ -123,6 +123,28 @@ public class ProblemValidation extends BaseTimeEntity {
     }
 
     /**
+     * 기존 통과 코드로 결과 미반영 자동 요청을 생성한다. 통과 결과와 실행 환경은 복사하지 않는다.
+     *
+     * @param revisionId 새 회차
+     * @param authorId 작성 관리자
+     * @param language 통과 코드 언어
+     * @param assetId 재사용 코드 파일
+     * @param hash 새 회차·언어·불변 코드의 해시
+     * @return 멱등키가 null인 자동 검증 요청
+     */
+    public static ProblemValidation automatic(
+        Long revisionId,
+        Long authorId,
+        String language,
+        Long assetId,
+        String hash
+    ) {
+        var request = new ProblemValidation(revisionId, authorId, language, assetId, null, hash);
+        request.triggerType = "AUTO";
+        return request;
+    }
+
+    /**
      * 최종 결과가 아직 반영되지 않았는지 판단한다.
      *
      * @return 결과 미반영 여부
