@@ -9,9 +9,10 @@ import org.springframework.web.client.RestClient;
 
 import com.backtoback.problem.problem.client.ContestGuardClient;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import tools.jackson.databind.ObjectMapper;
 
-/** Contest 기본 서비스 주소와 짧은 HTTP 제한을 적용한다. */
+/** Contest 기본 서비스 주소와 2초 HTTP 제한과 전용 서킷을 적용한다. */
 @Configuration(proxyBeanMethods = false)
 public class ContestGuardConfiguration {
     /**
@@ -28,7 +29,8 @@ public class ContestGuardConfiguration {
         factory.setReadTimeout(Duration.ofSeconds(2));
         return new ContestGuardClient(
             builder.clone().baseUrl("http://contest-service:8080").requestFactory(factory).build(),
-            mapper
+            mapper,
+            CircuitBreaker.ofDefaults("contestProblemGuard")
         );
     }
 }
