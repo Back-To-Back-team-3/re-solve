@@ -5,6 +5,38 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { CONFIG, createHeaders } from '../config.js';
 
+// VU별 독립적인 JWT AccessToken을 발급받는다.
+// 게이트웨이 인증 통과 및 동일 회원 Rate Limit 충돌 방지용으로 사용한다.
+export function obtainDevToken(memberId) {
+    const loginPayload = JSON.stringify({
+        memberId: String(memberId),
+    });
+
+    const loginRes = http.post(
+        `${CONFIG.BASE_URL}/api/v1/auth/dev-login`,
+        loginPayload,
+        {
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            tags: { is_api: 'true', name: 'auth_obtain_dev_token' },
+        }
+    );
+
+    if (loginRes.status === 200) {
+        try {
+            const body = JSON.parse(loginRes.body);
+            if (body.data && body.data.accessToken) {
+                return body.data.accessToken;
+            }
+        } catch (e) {
+            // JSON 파싱 실패 시 null을 반환한다.
+        }
+    }
+    return null;
+}
+
 export function testAuthScenario() {
     const memberIdNum = (typeof __VU !== 'undefined' && __VU > 0) ? __VU : Math.floor(Math.random() * 100) + 1;
     const memberId = String(memberIdNum);
@@ -18,7 +50,10 @@ export function testAuthScenario() {
     const loginRes = http.post(
         `${CONFIG.BASE_URL}/api/v1/auth/dev-login`,
         loginPayload,
-        { headers: createHeaders(null, null, memberId) }
+        {
+            headers: createHeaders(null, null, memberId),
+            tags: { is_api: 'true', name: 'auth_dev_login' },
+        }
     );
 
     const loginSuccess = check(loginRes, {
@@ -56,7 +91,10 @@ export function testAuthScenario() {
     const refreshRes = http.post(
         `${CONFIG.BASE_URL}/api/v1/auth/token/refresh`,
         null,
-        { headers: refreshHeaders }
+        {
+            headers: refreshHeaders,
+            tags: { is_api: 'true', name: 'auth_token_refresh' },
+        }
     );
 
     check(refreshRes, {

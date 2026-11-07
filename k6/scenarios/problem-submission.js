@@ -6,14 +6,27 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { CONFIG, createHeaders } from '../config.js';
+import { obtainDevToken } from './auth.js';
+
+// VU 로컬 캐시: 각 VU 인스턴스마다 최초 1회 개발용 로그인을 수행해 토큰을 재사용한다.
+let cachedToken = null;
 
 export function testProblemSubmissionScenario() {
     const memberId = typeof __VU !== 'undefined' && __VU > 0 ? String(__VU) : String(CONFIG.TEST_MEMBER_ID);
 
+    // VU별 유효한 JWT 토큰을 취득하여 게이트웨이 인증 통과 및 동일 회원 Rate Limit 충돌을 방지한다.
+    if (!cachedToken && !CONFIG.ACCESS_TOKEN) {
+        cachedToken = obtainDevToken(memberId);
+    }
+    const effectiveToken = CONFIG.ACCESS_TOKEN || cachedToken;
+
     // 1. 문제 목록 조회 (api-spec.md > 2.1.1)
     const listRes = http.get(
         `${CONFIG.BASE_URL}/api/v1/problems?page=0&size=10`,
-        { headers: createHeaders(null, null, memberId) }
+        {
+            headers: createHeaders(effectiveToken, null, memberId),
+            tags: { is_api: 'true', name: 'problem_list' },
+        }
     );
 
     check(listRes, {
@@ -25,7 +38,10 @@ export function testProblemSubmissionScenario() {
     // 2. 문제 상세 조회 (api-spec.md > 2.1.2)
     const detailRes = http.get(
         `${CONFIG.BASE_URL}/api/v1/problems/${CONFIG.TEST_PROBLEM_ID}`,
-        { headers: createHeaders(null, null, memberId) }
+        {
+            headers: createHeaders(effectiveToken, null, memberId),
+            tags: { is_api: 'true', name: 'problem_detail' },
+        }
     );
 
     check(detailRes, {
@@ -64,7 +80,10 @@ export function testProblemSubmissionScenario() {
     const submitRes = http.post(
         `${CONFIG.BASE_URL}/api/v1/submissions`,
         submissionPayload,
-        { headers: createHeaders(null, idempotencyKey, memberId) }
+        {
+            headers: createHeaders(effectiveToken, idempotencyKey, memberId),
+            tags: { is_api: 'true', name: 'submission_post' },
+        }
     );
 
     const submitSuccess = check(submitRes, {
@@ -80,7 +99,10 @@ export function testProblemSubmissionScenario() {
                 sleep(2);
                 const statusRes = http.get(
                     `${CONFIG.BASE_URL}/api/v1/submissions/${submissionId}`,
-                    { headers: createHeaders(null, null, memberId) }
+                    {
+                        headers: createHeaders(effectiveToken, null, memberId),
+                        tags: { is_api: 'true', name: 'submission_status' },
+                    }
                 );
                 check(statusRes, {
                     '채점 상태 조회 성공 (200 OK)': (r) => r.status === 200,

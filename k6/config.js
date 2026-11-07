@@ -38,8 +38,10 @@ export function createHeaders(token = null, idempotencyKey = null, memberId = nu
 }
 
 // policy-and-state.md 11. 비기능 요구사항 기준 성능 임계치를 정의한다.
-// 일반 API p95 <= 1000ms, 서버 에러율 < 1%를 목표로 한다.
+// 일반 HTTP API 요청의 p95 <= 1000ms, 서버 에러율 < 1%를 목표로 하며,
+// 장기 커넥션을 유지하는 SSE 스트림 지표와 일반 API 요청 지표를 태그로 분리한다.
 export const COMMON_THRESHOLDS = {
-    'http_req_duration': ['p(95)<1000', 'p(99)<2000'],
-    'http_req_failed': ['rate<0.01'],
+    'http_req_duration{is_api:true}': ['p(95)<1000', 'p(99)<2000'],
+    'http_req_failed{is_api:true}': ['rate<0.01'],
+    'sse_connected_rate': ['rate>0.95'],
 };

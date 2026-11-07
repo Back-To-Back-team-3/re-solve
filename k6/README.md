@@ -58,6 +58,7 @@ k6 run \
 ```
 
 #### 특정 시나리오만 단독 실행 (`SCENARIO` 환경변수 활용)
+`SCENARIO` 옵션으로 특정 워크로드만 선택하여 실행할 수 있습니다. (유효값: `auth`, `submission`, `sse`, `all` 또는 미지정. 유효하지 않은 값 입력 시 실행이 차단됩니다.)
 ```bash
 # 1. 인증 시나리오만 단독 실행 (최대 20 VUs)
 k6 run --env SCENARIO=auth k6/common-scenarios.js
@@ -69,12 +70,19 @@ k6 run --env SCENARIO=submission k6/common-scenarios.js
 k6 run --env SCENARIO=sse k6/common-scenarios.js
 ```
 
+### 3. 인증 토큰 및 동시성 동작 방식
+- **VU별 고유 토큰 자동 발급**: `ACCESS_TOKEN` 환경변수를 전달하지 않은 경우, 각 VU는 고유한 `memberId`(`String(__VU)`)로 개발용 로그인(`POST /api/v1/auth/dev-login`)을 호출해 JWT 토큰을 발급받아 캐싱합니다.
+- **실환경 게이트웨이 호환**: API Gateway의 외부 식별 헤더 제거(`RemoveExternalHeadersFilter`) 정책을 안전하게 통과하며, 단일 회원의 제출 Rate Limit(분당 10회) 충돌을 방지합니다.
+- **고정 토큰 사용 시**: 특정 사용자의 토큰을 일괄 적용하려면 `--env ACCESS_TOKEN="Bearer ..."` 옵션을 부여할 수 있습니다.
+
 ---
 
 ## 📊 성능 임계치 (Thresholds - policy-and-state.md 11)
 
-- `http_req_duration`:
-  - **p(95) < 1000ms**: 95%의 요청이 1초 이내에 처리되어야 함.
-  - **p(99) < 2000ms**: 99%의 요청이 2초 이내에 처리되어야 함.
-- `http_req_failed`:
-  - **rate < 0.01**: 전체 요청 중 서버 오류율이 1% 미만이어야 함.
+- `http_req_duration{is_api:true}`:
+  - **p(95) < 1000ms**: 95%의 일반 API 요청이 1초 이내에 처리되어야 함.
+  - **p(99) < 2000ms**: 99%의 일반 API 요청이 2초 이내에 처리되어야 함.
+- `http_req_failed{is_api:true}`:
+  - **rate < 0.01**: 일반 API 요청 중 오류율이 1% 미만이어야 함.
+- `sse_connected_rate`:
+  - **rate > 0.95**: 실시간 SSE 스트림 연결 수립 성공률이 95% 이상이어야 함. (지속 스트림의 타임아웃이 일반 API 실패율에 영향을 주지 않도록 지표 분리)

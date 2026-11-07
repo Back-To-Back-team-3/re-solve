@@ -27,3 +27,9 @@ scrape_configs:
     scrape_interval: 10s
     static_configs:
       - targets: ["notification-service:8080"]
+
+  - job_name: "judge-service"
+    metrics_path: "/actuator/prometheus"
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["judge-service:8080"]

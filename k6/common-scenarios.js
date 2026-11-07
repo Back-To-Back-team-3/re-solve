@@ -49,18 +49,23 @@ const ALL_SCENARIOS = {
 function getActiveScenarios() {
     const selectedScenario = __ENV.SCENARIO;
 
-    if (selectedScenario === 'auth') {
+    // 미지정 또는 'all' 지정 시 전체 3개 시나리오 동시 실행
+    if (!selectedScenario || selectedScenario.toLowerCase() === 'all') {
+        return ALL_SCENARIOS;
+    }
+
+    const scenarioKey = selectedScenario.toLowerCase();
+    if (scenarioKey === 'auth') {
         return { auth_workload: ALL_SCENARIOS.auth_workload };
     }
-    if (selectedScenario === 'submission') {
+    if (scenarioKey === 'submission') {
         return { submission_workload: ALL_SCENARIOS.submission_workload };
     }
-    if (selectedScenario === 'sse') {
+    if (scenarioKey === 'sse') {
         return { sse_workload: ALL_SCENARIOS.sse_workload };
     }
 
-    // 미지정 시 전체 3개 시나리오 동시 실행
-    return ALL_SCENARIOS;
+    throw new Error(`지원하지 않는 SCENARIO 값입니다: '${selectedScenario}'. 유효한 값: 'auth', 'submission', 'sse', 'all'(또는 미지정)`);
 }
 
 export const options = {
