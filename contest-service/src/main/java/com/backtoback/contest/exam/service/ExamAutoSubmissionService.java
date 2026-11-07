@@ -34,6 +34,7 @@ import com.backtoback.contest.exam.service.ExamSubmissionMessageSize.Payload;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 
 /** 개인 마감의 최신 Draft 접수와 참가 종료를 한 트랜잭션으로 처리한다. */
@@ -45,6 +46,8 @@ public class ExamAutoSubmissionService {
     private final ExamProblemRepository problems;
     private final ExamParticipantHistoryRepository histories;
     private final ExamSubmissionMessageSize size;
+    private final ExamJudgementService judgements;
+    private final EntityManager entityManager;
     private final OutboxEventWriter outbox;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
@@ -113,6 +116,7 @@ public class ExamAutoSubmissionService {
                     participant.getId()
                 );
         var ids = new ArrayList<String>();
+        var acceptedProblems = new ArrayList<Long>();
         for (var draft : drafts) {
             Long last
                 = jdbc
@@ -133,6 +137,7 @@ public class ExamAutoSubmissionService {
                     .orElseThrow(() -> new IllegalStateException("Draft problem is not pinned"))
                     .getProblemRevisionId();
             ids.add(append(participant, draft, revision, now));
+            acceptedProblems.add(draft.problemId());
         }
         participant.finish(now);
         histories
@@ -140,6 +145,10 @@ public class ExamAutoSubmissionService {
                 ExamParticipantHistory
                     .transition(participant, ExamParticipantStatus.STARTED, ExamParticipantStatus.FINISHED, actor, now)
             );
+        entityManager.flush();
+        for (long problemId : acceptedProblems) {
+            judgements.refreshProblem(participant.getExam().getId(), participant.getId(), problemId, now);
+        }
         return ids;
     }
 

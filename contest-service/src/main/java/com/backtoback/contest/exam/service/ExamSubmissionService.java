@@ -47,6 +47,7 @@ public class ExamSubmissionService {
     private final ExamContentClient content;
     private final ExamSubmissionRateLimiter limiter;
     private final ExamSubmissionMessageSize messageSize;
+    private final ExamJudgementService judgements;
     private final OutboxEventWriter outbox;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
@@ -194,6 +195,7 @@ public class ExamSubmissionService {
             return statement;
         }, keys);
         long receipt = keys.getKey().longValue();
+        judgements.refreshProblem(examId, participant.getId(), problemId, now);
         String correlation = MDC.get(CorrelationIdFilter.MDC_KEY);
         if (correlation == null) {
             correlation = "contest-" + UUID.randomUUID();
