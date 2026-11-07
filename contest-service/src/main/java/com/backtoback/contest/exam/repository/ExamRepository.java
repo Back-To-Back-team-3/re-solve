@@ -19,20 +19,29 @@ import jakarta.persistence.LockModeType;
  * 시험을 저장하고 조회한다.
  */
 public interface ExamRepository extends JpaRepository<Exam, Long> {
-    /** 권한 범위와 상태를 적용해 스터디 시험을 페이지로 조회한다. */
-    @Query("""
-        select e from Exam e where e.studyId = :studyId
+    String VISIBLE_EXAMS = """
+        from Exam e where e.studyId = :studyId
         and (:status is null or e.status = :status)
         and (:approved = true or exists (select p.id from ExamParticipant p
             where p.exam = e and p.memberId = :memberId
             and p.status <> com.backtoback.contest.exam.domain.ExamParticipantStatus.CANCELED))
-        """)
+        """;
+
+    @Query("select e " + VISIBLE_EXAMS)
     Page<Exam> findVisible(
         @Param("studyId") long studyId,
         @Param("memberId") long memberId,
         @Param("approved") boolean approved,
         @Param("status") ExamStatus status,
         Pageable pageable
+    );
+
+    @Query("select count(e) " + VISIBLE_EXAMS)
+    long countVisible(
+        @Param("studyId") long studyId,
+        @Param("memberId") long memberId,
+        @Param("approved") boolean approved,
+        @Param("status") ExamStatus status
     );
 
     /** 마지막 ID 이후의 시험을 스터디별로 조회한다. (API 명세서 §4.7.5) */

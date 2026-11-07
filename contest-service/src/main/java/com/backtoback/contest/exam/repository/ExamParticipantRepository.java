@@ -30,6 +30,12 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
         ExamParticipantStatus status
     );
 
+    List<ExamParticipant> findByExamIdInAndMemberIdAndStatusNot(
+        List<Long> examIds,
+        Long memberId,
+        ExamParticipantStatus status
+    );
+
     /**
      * 부모 시험 잠금 뒤 같은 회원의 참가를 최신 순으로 잠근다.
      *
