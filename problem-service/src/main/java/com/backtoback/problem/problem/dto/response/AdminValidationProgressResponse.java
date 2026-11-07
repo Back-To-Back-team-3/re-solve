@@ -2,7 +2,6 @@ package com.backtoback.problem.problem.dto.response;
 
 import java.util.List;
 
-import com.backtoback.problem.problem.client.JudgeProgressClient.Progress;
 import com.backtoback.problem.problem.service.ValidationProgressStore.Snapshot;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -28,7 +27,7 @@ public record AdminValidationProgressResponse(
      * @param progress Judge 작업 정보 또는 작업 미생성 시 null
      * @return 관리자 진행 응답
      */
-    public static AdminValidationProgressResponse from(Snapshot local, Progress progress) {
+    public static AdminValidationProgressResponse from(Snapshot local, JudgeValidationProgressResponse progress) {
         return new AdminValidationProgressResponse(
             local.id(),
             local.problemId(),
