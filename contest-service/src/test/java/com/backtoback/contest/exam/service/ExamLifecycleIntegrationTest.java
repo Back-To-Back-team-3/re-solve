@@ -19,6 +19,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -34,6 +35,7 @@ import net.javacrumbs.shedlock.core.LockConfiguration;
 import net.javacrumbs.shedlock.core.LockProvider;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
+import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
 import com.backtoback.common.time.ClockConfiguration;
 
 /** MySQL의 부모 잠금과 Outbox 트랜잭션 및 JDBC ShedLock을 확인한다. */
@@ -43,6 +45,7 @@ import com.backtoback.common.time.ClockConfiguration;
         "spring.cloud.aws.sqs.enabled=false"
     }
 )
+@Import(SchedulerLockConfiguration.class)
 @Testcontainers(disabledWithoutDocker = true)
 class ExamLifecycleIntegrationTest {
     @Container
