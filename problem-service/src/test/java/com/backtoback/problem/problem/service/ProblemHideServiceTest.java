@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -30,9 +32,11 @@ import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import tools.jackson.databind.ObjectMapper;
 
-/** 실제 MySQL 잠금과 원자 저장으로 공개 멱등 계약을 검증한다. */
+/** 실제 MySQL 잠금과 원자 저장으로 비공개·보관 멱등 계약을 검증한다. */
 @SpringBootTest(
     properties = {
         "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
@@ -82,7 +86,7 @@ class ProblemHideServiceTest {
         registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
     }
 
-    /** 통과한 사용 회차가 있는 비공개 일반 문제를 준비한다. */
+    /** 통과한 사용 회차가 있는 공개 일반 문제를 준비한다. */
     @BeforeEach
     void fixture() {
         id = IDS.incrementAndGet();
@@ -106,16 +110,30 @@ class ProblemHideServiceTest {
         jdbc.update("""
             INSERT INTO problem_validations(problem_revision_id,requested_by,language,code_asset_id,
                 trigger_type,request_hash,result_status,runtime_key,runner_version,created_at,updated_at)
-            VALUES(?,?,'cpp',?,'MANUAL',repeat('a',64),'PASSED','runtime','v1',now(6),now(6))
+            VALUES(?,?,'cpp',?,'MANUAL',repeat('a',64),'PASSED',repeat('a',64),'v1',now(6),now(6))
             """, id, id, id);
     }
 
-    /** 완료 전송 장애에도 같은 최초 응답과 한 번의 상태 변경을 보존한다. */
-    @Test
+    /**
+     * 완료 전송 장애에도 같은 최초 응답과 한 번의 상태 변경을 보존한다.
+     *
+     * @param circuitOpen 서킷 차단 여부
+     */
+    @ParameterizedTest
+    @ValueSource(
+        booleans = {
+            false,
+            true
+        }
+    )
     @DisplayName("완료 전송 실패와 재시도는 상태·감사·Outbox를 중복시키지 않는다")
-    void committedReplay() {
+    void committedReplay(boolean circuitOpen) {
         org.mockito.Mockito
-            .doThrow(new org.springframework.web.client.ResourceAccessException("offline"))
+            .doThrow(
+                circuitOpen
+                    ? CallNotPermittedException.createCallNotPermittedException(CircuitBreaker.ofDefaults("open"))
+                    : new org.springframework.web.client.ResourceAccessException("offline")
+            )
             .when(guard)
             .finish(any());
         var first = hide("same", false);
@@ -144,10 +162,28 @@ class ProblemHideServiceTest {
         assertThat(hide("same", false).status()).isEqualTo(200);
     }
 
-    /** 준비 뒤 버전 변경을 재검증하고 같은 준비만 취소한다. */
-    @Test
+    /**
+     * 준비 뒤 버전 변경을 재검증하고 같은 준비만 취소한다.
+     *
+     * @param circuitOpen 취소 전달 시 서킷 차단 여부
+     */
+    @ParameterizedTest
+    @ValueSource(
+        booleans = {
+            false,
+            true
+        }
+    )
     @DisplayName("준비 이후 버전 경합은 ABORTED로 보존하고 취소를 전달한다")
-    void versionRace() {
+    void versionRace(boolean circuitOpen) {
+        if (circuitOpen) {
+            org.mockito.Mockito
+                .doThrow(
+                    CallNotPermittedException.createCallNotPermittedException(CircuitBreaker.ofDefaults("cancel-open"))
+                )
+                .when(guard)
+                .finish(any());
+        }
         org.mockito.Mockito.when(guard.prepare(any())).thenAnswer(call -> {
             assertThat(
                 org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()

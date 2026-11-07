@@ -13,6 +13,7 @@ import com.backtoback.problem.problem.client.ContestGuardClient;
 import com.backtoback.problem.problem.domain.ProblemStateOperation;
 import com.backtoback.problem.problem.domain.ProblemVisibility;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.ObjectMapper;
@@ -38,7 +39,10 @@ public class ProblemHideService {
      * @param correlationId 추적 ID
      * @param clientIp 감사 주소
      * @return 최초 종결 응답
-     * @throws ProblemException 입력·권한·버전 오류 또는 원격 의존 실패
+     * @throws ProblemException 입력 오류는 {@code COMMON_INVALID_REQUEST}, 작성자 불일치는
+     *     {@code AUTH_ACCESS_DENIED}, 문제 없음은 {@code PROBLEM_NOT_FOUND}, 다른 본문의 동일 키는
+     *     {@code IDEMPOTENCY_KEY_CONFLICT}, 다른 미종결 작업은 {@code PROBLEM_VERSION_CONFLICT},
+     *     준비 실패·서킷 차단은 {@code COMMON_DEPENDENCY_UNAVAILABLE}
      */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ProblemPublicationService.Result hide(
@@ -108,7 +112,7 @@ public class ProblemHideService {
     private void notifyGuard(ProblemStateOperation operation) {
         try {
             guard.finish(operation);
-        } catch (RestClientException failure) {
+        } catch (RestClientException | CallNotPermittedException failure) {
             log.warn("문제 가드 종결 전달 실패: operationId={}", operation.getOperationId(), failure);
         }
     }
