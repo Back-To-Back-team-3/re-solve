@@ -11,7 +11,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,7 +20,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.contest.exam.domain.Exam;
@@ -59,7 +60,14 @@ class ExamQueryServiceTest {
         var response = service.list("12", "7", "SCHEDULED", 0, 20, "startsAt,desc");
         // then
         assertThat(response.content()).isEmpty();
-        verify(exams).findVisible(eq(12L), eq(7L), eq(true), eq(ExamStatus.SCHEDULED), any(Pageable.class));
+        verify(exams)
+            .findVisible(
+                12L,
+                7L,
+                true,
+                ExamStatus.SCHEDULED,
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "startsAt").and(Sort.by("id")))
+            );
     }
 
     /** 취소 이력만 있을 때 활성 참가 조회는 비어 있으며 목록 상태도 null이다. */
@@ -75,12 +83,28 @@ class ExamQueryServiceTest {
         given(memberships.isActive(12, 7)).willReturn(true);
         given(exams.findVisible(eq(12L), eq(7L), eq(true), eq(null), any(Pageable.class)))
             .willReturn(new PageImpl<>(List.of(exam)));
-        given(participants.findByExamIdAndMemberIdAndStatusNot(55L, 7L, ExamParticipantStatus.CANCELED))
-            .willReturn(Optional.empty());
         // when
         var response = service.list("12", "7", null, 0, 20, "startsAt,desc");
         // then
         assertThat(response.content()).singleElement().extracting("myParticipantStatus").isNull();
+        verify(problems).countByExamIds(List.of(55L));
+        verify(participants).findByExamIdInAndMemberIdAndStatusNot(List.of(55L), 7L, ExamParticipantStatus.CANCELED);
+    }
+
+    @Test
+    @DisplayName("JPA 조회 범위를 넘는 페이지는 같은 권한 조건의 전체 건수와 빈 목록을 반환한다")
+    void returnsEmptyPageForLargeOffset() {
+        given(participants.hasActiveInStudy(12, 7)).willReturn(true);
+        given(exams.countVisible(12, 7, false, ExamStatus.SCHEDULED)).willReturn(101L);
+
+        var response = service.list("12", "7", "SCHEDULED", Integer.MAX_VALUE, 100, "startsAt,desc");
+
+        assertThat(response.content()).isEmpty();
+        assertThat(response.page()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(response.totalElements()).isEqualTo(101L);
+        assertThat(response.totalPages()).isEqualTo(2);
+        assertThat(response.hasNext()).isFalse();
+        verifyNoInteractions(problems);
     }
 
     /** 탈퇴자는 활성 참가가 있을 때 제한된 범위로 조회한다. */

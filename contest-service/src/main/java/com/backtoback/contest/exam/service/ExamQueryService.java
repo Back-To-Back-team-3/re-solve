@@ -3,7 +3,11 @@ package com.backtoback.contest.exam.service;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -12,12 +16,14 @@ import org.springframework.transaction.annotation.Transactional;
 import com.backtoback.common.api.PageResponse;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.contest.exam.domain.Exam;
 import com.backtoback.contest.exam.domain.ExamParticipantStatus;
 import com.backtoback.contest.exam.domain.ExamStatus;
 import com.backtoback.contest.exam.dto.ExamDetailResponse;
 import com.backtoback.contest.exam.dto.ExamListResponse;
 import com.backtoback.contest.exam.repository.ExamParticipantRepository;
 import com.backtoback.contest.exam.repository.ExamProblemRepository;
+import com.backtoback.contest.exam.repository.ExamProblemRepository.ProblemCount;
 import com.backtoback.contest.exam.repository.ExamRepository;
 import com.backtoback.contest.exam.repository.StudyMembershipReplicaRepository;
 import com.backtoback.contest.global.error.ContestErrorCode;
@@ -90,7 +96,28 @@ public class ExamQueryService {
             throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
         }
         Sort ordering = Sort.by(Sort.Direction.fromString(parts[1]), parts[0]).and(Sort.by("id"));
-        var result = exams.findVisible(study, member, approved, filter, PageRequest.of(page, size, ordering));
+        var pageable = PageRequest.of(page, size, ordering);
+        // JPA의 첫 결과 위치는 int만 지원하므로 범위를 넘는 요청은 같은 조건의 전체 건수만 구한다.
+        if (pageable.getOffset() > Integer.MAX_VALUE) {
+            long total = exams.countVisible(study, member, approved, filter);
+            int totalPages = (int)Math.min(Integer.MAX_VALUE, Math.ceilDiv(total, size));
+            return new PageResponse<>(List.of(), page, size, total, totalPages, false);
+        }
+        var result = exams.findVisible(study, member, approved, filter, pageable);
+        if (result.isEmpty()) {
+            return PageResponse.from(new PageImpl<>(List.of(), pageable, result.getTotalElements()));
+        }
+        var examIds = result.getContent().stream().map(Exam::getId).toList();
+        var problemCounts
+            = problems
+                .countByExamIds(examIds)
+                .stream()
+                .collect(Collectors.toMap(ProblemCount::getExamId, ProblemCount::getProblemCount));
+        var activeParticipants
+            = participants
+                .findByExamIdInAndMemberIdAndStatusNot(examIds, member, ExamParticipantStatus.CANCELED)
+                .stream()
+                .collect(Collectors.toMap(participant -> participant.getExam().getId(), Function.identity()));
         return PageResponse
             .from(
                 result
@@ -98,14 +125,8 @@ public class ExamQueryService {
                         exam -> ExamListResponse
                             .from(
                                 exam,
-                                problems.countByExamId(exam.getId()),
-                                participants
-                                    .findByExamIdAndMemberIdAndStatusNot(
-                                        exam.getId(),
-                                        member,
-                                        ExamParticipantStatus.CANCELED
-                                    )
-                                    .orElse(null)
+                                problemCounts.getOrDefault(exam.getId(), 0L),
+                                activeParticipants.get(exam.getId())
                             )
                     )
             );
