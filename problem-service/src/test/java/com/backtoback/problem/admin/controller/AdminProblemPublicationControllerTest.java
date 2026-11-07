@@ -8,6 +8,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -89,11 +90,12 @@ class AdminProblemPublicationControllerTest {
     @Test
     @DisplayName("저장된 확정 실패 응답을 HTTP 상태와 함께 그대로 반환한다")
     void replaysFailure() throws Exception {
+        String expectedJson = """
+            {"success":false,"error":{"code":"PROBLEM_VERSION_CONFLICT","message":"저장된 오류 안내",
+            "details":[{"field":"rowVersion","reason":"기존 상세"}]}}
+            """;
         given(service.publish(anyLong(), anyLong(), anyString(), any(), anyString(), any()))
-            .willReturn(new ProblemPublicationService.Result(422, """
-                {"success":false,"error":{"code":"PROBLEM_VERSION_CONFLICT","message":"저장된 오류 안내",
-                "details":[{"field":"rowVersion","reason":"기존 상세"}]}}
-                """));
+            .willReturn(new ProblemPublicationService.Result(422, expectedJson));
         mvc
             .perform(
                 post(PATH)
@@ -104,6 +106,7 @@ class AdminProblemPublicationControllerTest {
                     .content(BODY)
             )
             .andExpect(status().is(422))
+            .andExpect(content().string(expectedJson))
             .andExpect(jsonPath("$.success").value(false))
             .andExpect(jsonPath("$.error.code").value("PROBLEM_VERSION_CONFLICT"))
             .andExpect(jsonPath("$.error.message").value("저장된 오류 안내"))
