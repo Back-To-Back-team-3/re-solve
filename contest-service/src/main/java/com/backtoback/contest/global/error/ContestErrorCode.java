@@ -22,6 +22,8 @@ public enum ContestErrorCode implements ErrorCode {
     EXAM_PROBLEM_NOT_INCLUDED(HttpStatus.NOT_FOUND, "시험에 포함되지 않은 문제입니다."),
     PROBLEM_NOT_FOUND(HttpStatus.NOT_FOUND, "문제나 이미지를 찾을 수 없습니다."),
     CODE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "코드 크기가 제한을 초과했습니다."),
+    DRAFT_SEQ_CONFLICT(HttpStatus.CONFLICT, "Draft 순번이 최신 상태와 일치하지 않습니다."),
+    SUBMISSION_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "제출 요청이 너무 많습니다."),
     UNSUPPORTED_LANGUAGE(HttpStatus.BAD_REQUEST, "지원하지 않는 언어입니다."),
     RUN_IN_PROGRESS(HttpStatus.TOO_MANY_REQUESTS, "코드 실행이 진행 중입니다."),
     RUN_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "코드 실행 시간이 초과되었습니다."),
