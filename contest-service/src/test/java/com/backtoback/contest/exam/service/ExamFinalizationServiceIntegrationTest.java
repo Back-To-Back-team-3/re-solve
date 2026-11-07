@@ -20,7 +20,7 @@ import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** 확정 조건과 결과 스냅샷의 원자 저장·중복 실행을 검증한다. */
 class ExamFinalizationServiceIntegrationTest extends ExamIntegrationTestSupport {
     @Test
     @DisplayName("PENDING 관리자 작업은 확정을 막고 확인된 FAILED 작업은 막지 않는다")

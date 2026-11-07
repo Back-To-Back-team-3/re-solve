@@ -14,7 +14,7 @@ import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** 본인 결과와 순위의 공개 조건·버전 커서를 검증한다. */
 class ExamResultQueryServiceIntegrationTest extends ExamIntegrationTestSupport {
     @Test
     @DisplayName("시험 결과는 종료 전 비공개이며 확정 후 스냅샷을 조회한다")

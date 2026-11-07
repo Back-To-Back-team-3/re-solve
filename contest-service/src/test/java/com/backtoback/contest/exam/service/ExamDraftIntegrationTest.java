@@ -21,7 +21,7 @@ import com.backtoback.contest.exam.service.ExamDraftStore.SaveRequest;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** Draft 순번·크기 제한과 Redis 버퍼의 저장 순서를 검증한다. */
 class ExamDraftIntegrationTest extends ExamIntegrationTestSupport {
     @Test
     @DisplayName("언어를 바꿔도 작은 순번을 무시하고 빈 최신 코드를 복구한다")

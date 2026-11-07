@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import com.backtoback.contest.exam.service.ExamIntegrationTestSupport;
 import com.backtoback.contest.exam.service.ExamResultQueryService;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** 순위 캐시가 이전 결과 버전으로 덮어써지지 않는지 검증한다. */
 class ExamRankingCacheIntegrationTest extends ExamIntegrationTestSupport {
     @Test
     @DisplayName("순위 캐시는 버전이 같을 때만 조회하고 역행을 거절한다")
