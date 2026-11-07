@@ -24,6 +24,7 @@ Write a PR body from the actual changes and verification results only, and regis
 5. If files owned by another owner group changed, write the target, the reason, and a confirmation request line in the reviewer section. If you do not know the owner's GitHub account, leave it empty and ask the user.
 6. If a decision record is related, name the file in the reviewer section.
 7. Output the body and wait for approval. Register it on GitHub only after the user says to register it.
+8. (Stack PR only) After the PR is registered, ask the user to complete the Stack connection on GitHub ("Create stack / Add to stack" in the GitHub web UI). The PR base branch alone does not complete Stack registration.
 
 ## Output format
 
@@ -36,6 +37,7 @@ Write a PR body from the actual changes and verification results only, and regis
 - Describe planned work as done.
 - Check tests that are not in the stage 40 result.
 - Register without approval.
+- Edit a registered PR without approval.
 - Include CI check results in the PR body. CI failures are notified via Discord.
 - Include test results of services not in the diff. Report only the owner's service test result.
 - Assign reviewers by part. Always assign all team members except the author. Use the 리뷰어에게 section for part-specific requests.
