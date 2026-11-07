@@ -2,7 +2,10 @@ package com.backtoback.contest.exam.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doThrow;
 
 import java.time.LocalDateTime;
 import java.util.concurrent.CountDownLatch;
@@ -11,15 +14,50 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 import com.backtoback.contest.exam.service.ExamDraftStore.SaveRequest;
+import com.backtoback.contest.exam.store.ExamSubmissionRequestStore;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
 /** 시험 기능의 저장 및 동시성 통합 검증이다. */
 class ExamAutoSubmissionServiceIntegrationTest extends ExamIntegrationTestSupport {
+    @MockitoSpyBean
+    private ExamSubmissionRequestStore requestStore;
+
+    @Test
+    @DisplayName("자동 제출의 보존 실패는 접수와 종료를 함께 롤백한다")
+    void autoSnapshotFailureRollsBackFinish() {
+        store.save(store.prepare(examId, "7", "101", new SaveRequest("java", "코드", "1")));
+        ExamSubmissionRequestStore target = AopTestUtils.getUltimateTargetObject(requestStore);
+        doThrow(new IllegalStateException("snapshot failure")).when(target).preserve(anyLong(), any());
+        assertThatThrownBy(() -> autoSubmissions.finish(examId, "7")).hasMessage("snapshot failure");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT status FROM exam_participants WHERE id=?", String.class, participantId))
+            .isEqualTo("STARTED");
+    }
+
+    @Test
+    @DisplayName("자동 제출도 최초 요청의 전체 메시지를 접수와 함께 보존한다")
+    void autoSubmissionPreservesOriginalMessage() {
+        store.save(store.prepare(examId, "7", "101", new SaveRequest("java", "코드", "1")));
+        autoSubmissions.finish(examId, "7");
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT request_snapshot=payload FROM exam_submissions "
+                        + "JOIN outbox_events ON aggregate_id=CAST(exam_submissions.id AS CHAR) "
+                        + "WHERE event_type='ExamSubmissionRequested'",
+                    Boolean.class
+                )
+        ).isTrue();
+    }
+
     @Test
     @DisplayName("수동 종료는 최신 Draft만 자동 제출하고 반복 요청에도 중복하지 않는다")
     void manualFinishSubmitsLatestDraftOnce() {

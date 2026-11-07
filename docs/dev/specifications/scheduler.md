@@ -630,7 +630,7 @@
 1. B의 by-receipt API로 context·receiptId를 조회한다. submissionId·userId·문제·고정 회차·submittedAt을 원래 접수와 대조하며 불일치는 격리·운영 오류 기록한다.
 2. DB §6.4.2의 회차 비교와 결과 재계산을 적용한다. judge_attempt는 마지막 종결 반영 회차, 목표 회차는 관리자 작업의 target_judge_attempt다.
 3. 작은 회차·같은 회차 동일 결과는 무시한다. 같은 회차 상충은 격리한다. 큰 최초 결과 또는 허용 재처리 회차만 적용한다.
-4. B에 없는 접수는 기존 Outbox 상태를 확인해 동일 receiptId·eventId 요청을 재전달한다. 새 C 접수·seq를 만들지 않으며 B receipt 유일 제약이 중복 채점을 막는다.
+4. B에 없는 접수는 기존 Outbox 상태를 확인해 동일 receiptId·eventId 요청을 재전달한다. 원본 행이 삭제됐으면 접수의 불변 요청 보존본을 접수·고정 회차와 검증해 같은 헤더·본문으로 복원한다. 원본과 보존본이 모두 없거나 보존본이 불일치하면 발행하지 않고 오류·실패 지표를 남긴다. 새 C 접수·seq·eventId를 만들지 않으며 B receipt 유일 제약이 중복 채점을 막는다.
 5. QUEUED/JUDGING/RETRY_WAITING을 임의 FAILED로 바꾸지 않는다. judge_jobs 임대·워커 회수·Run 락 복구는 B가 담당한다(§3.2·§3.5).
 6. FINALIZED에 상충하는 새 회차가 발견되면 기존 스냅샷을 보존하고 오류 기록만 남긴다.
 

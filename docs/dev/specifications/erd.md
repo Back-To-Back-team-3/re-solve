@@ -1867,6 +1867,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `draft_seq` | BIGINT | Y | 제출한 Draft 순번 |
 | `language` | VARCHAR(30) | Y | JAVA / PYTHON / CPP |
 | `source_code` | MEDIUMTEXT | Y | 채점 요청 이벤트에 담을 코드 |
+| `request_snapshot` | JSON | N | 최초 채점 요청의 공통 헤더와 전체 업무 필드. 접수·Outbox와 함께 저장하고 변경하지 않는다. 기존 원본이 없는 접수는 NULL |
 | `submission_type` | VARCHAR(30) | Y | `MANUAL` / `AUTO` |
 | `received_at` | DATETIME(6) | Y | 접수 시각 (자동 제출은 `personal_ends_at`) |
 | `status` | VARCHAR(30) | Y | `ACCEPTED` / `REQUESTED` / `JUDGED` / `FAILED` |
@@ -2904,7 +2905,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 마감 판정 | 상태가 아니라 서버 시각 `<= personal_ends_at` 비교 | `[시험 제출 유효성]` |
 | Draft 역전 방지 | 참가자 잠금 아래 문제별 전체 언어 최대 `seq`와 비교. 큰 순번만 해당 언어 Draft에 반영하고 DB 커밋 후 응답 (§6.4.1) | `[Draft]` |
 | 자동·수동 제출 중복 | `uk_exam_submissions_participant_problem_seq`, 위반은 "이미 제출됨" 처리 | `[시험 제출 유효성]` |
-| 제출 접수 원자성 | Draft·`exam_submissions`·Outbox를 한 트랜잭션에 저장 | — |
+| 제출 접수 원자성 | Draft·`exam_submissions`·최초 요청 보존본·Outbox를 한 트랜잭션에 저장 | — |
 | 채점 결과 역전 방지 | `exam_submissions.judge_attempt` 비교 | — |
 | 참가자 결과 동시 갱신 | `exam_problem_results`·`exam_participants`·`contest_*_results` `version` 낙관적 락 | — |
 | 결과 확정 | 종료·자동 제출 완료·미종결 제출 0건을 함께 확인. 시험 `FAILED`는 `is_zero_confirmed=true`, 대회 `FAILED`는 `is_void_confirmed=true`만 종결 인정 (§6.4.2) | `[결과 확정]` |
@@ -3157,6 +3158,7 @@ contest-service/src/main/resources/db/migration/
   V15__guard_create_contest_resource_guards.sql
   V16__operation_create_contest_admin_operations.sql
   V16_1__guard_add_problem_snapshot.sql
+  V16_2__examsubmission_preserve_request.sql
   V17__contest_create_contests.sql                (P2 착수 시)
   V18__contest_create_contest_problems.sql        (P2 착수 시)
   V19__contest_create_contest_participants.sql    (P2 착수 시)
