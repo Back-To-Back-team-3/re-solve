@@ -78,6 +78,8 @@ public class TagService {
      */
     @Transactional
     public TagResponse create(String adminId, String key, TagCreateRequest request) {
+        // DB 잠금을 보유한 채 Redis 잠금을 기다리지 않도록 공통 잠금을 먼저 획득한다.
+        tagOrderService.lock();
         var savedRecord = creationRecords.lock(adminId, key, request.name(), request.displayOrder());
         if (!savedRecord.matches(request.name(), request.displayOrder())) {
             throw new ProblemException(CommonErrorCode.IDEMPOTENCY_KEY_CONFLICT);
@@ -89,7 +91,6 @@ public class TagService {
                 savedRecord.getResultDisplayOrder()
             );
         }
-        tagOrderService.lock();
         int displayOrder = tagOrderService.makeRoomFor(request.displayOrder());
         Tag tag = tagRepository.saveAndFlush(Tag.create(request.name().strip(), displayOrder));
         TagResponse response = TagResponse.from(tag);
