@@ -42,7 +42,7 @@ class IntegrationServiceApplicationTests {
     void contextLoads() {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("integration_db");
         assertThat(flyway.info().current()).isNotNull();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
     }
 
 }
