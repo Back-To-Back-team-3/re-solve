@@ -103,7 +103,6 @@ public class ExamAutoSubmissionService {
         return true;
     }
 
-    /** 최신 전체 언어 Draft만 자동 접수하고 모두 성공한 뒤 참가 상태를 전이한다. */
     private List<String> process(ExamParticipant participant, LocalDateTime now, Long actor) {
         var drafts
             = jdbc
@@ -152,7 +151,6 @@ public class ExamAutoSubmissionService {
         return ids;
     }
 
-    /** 개인 마감을 접수 시각으로 고정하고 원본 코드와 이벤트를 함께 저장한다. */
     private String append(ExamParticipant participant, Draft draft, long revision, LocalDateTime now) {
         var keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
@@ -211,7 +209,6 @@ public class ExamAutoSubmissionService {
         return receipt;
     }
 
-    /** 반복 종료 응답에 기존 자동 접수 식별자를 반환한다. */
     private List<String> autoIds(long participantId) {
         return jdbc
             .queryForList(
@@ -225,7 +222,6 @@ public class ExamAutoSubmissionService {
             .toList();
     }
 
-    /** 종료된 참가와 생성된 자동 접수 목록을 반환한다. */
     private Response response(ExamParticipant participant, List<String> ids) {
         return new Response(
             participant.getId().toString(),
@@ -236,7 +232,6 @@ public class ExamAutoSubmissionService {
         );
     }
 
-    /** 양의 BIGINT 문자열을 검증한다. */
     private long id(String value) {
         try {
             if (value == null || !value.matches("[1-9][0-9]*")) {
@@ -248,17 +243,14 @@ public class ExamAutoSubmissionService {
         }
     }
 
-    /** 마이크로초 정밀도의 서버 시각이다. */
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MICROS), ClockConfiguration.SERVICE_ZONE);
     }
 
-    /** 서울 시간으로 응답 시각을 변환한다. */
     private OffsetDateTime offset(LocalDateTime value) {
         return value.atZone(ClockConfiguration.SERVICE_ZONE).toOffsetDateTime();
     }
 
-    /** 이벤트 시간의 마이크로초를 유지한다. */
     private String format(LocalDateTime value) {
         return DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx").format(offset(value));
     }
@@ -272,7 +264,6 @@ public class ExamAutoSubmissionService {
         List<String> autoSubmissionIds
     ) {
     }
-    /** 문제별 최신 Draft의 불변 복사본이다. */
     private record Draft(long problemId, String language, String sourceCode, long seq) {
     }
 }

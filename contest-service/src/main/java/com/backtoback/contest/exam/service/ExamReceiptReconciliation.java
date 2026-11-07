@@ -144,7 +144,6 @@ public class ExamReceiptReconciliation {
             );
     }
 
-    /** 접수 소유 시험과 회원이다. */
     private record Owner(long exam, long member) {
     }
     /** 잠금 아래 확인한 접수 연결이다. */

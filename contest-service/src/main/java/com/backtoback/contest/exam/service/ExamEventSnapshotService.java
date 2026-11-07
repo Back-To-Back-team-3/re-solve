@@ -59,7 +59,6 @@ public class ExamEventSnapshotService {
         );
     }
 
-    /** 양의 BIGINT 식별자를 확인한다. */
     private long id(String value) {
         try {
             if (value == null || !value.matches("[1-9][0-9]*")) {

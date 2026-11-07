@@ -19,6 +19,7 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.contest.exam.store.ExamSchedulerCursorStore;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -114,7 +115,6 @@ public class ExamResultFinalizationScheduler {
         }
     }
 
-    /** 마지막 종료 시각과 ID 다음부터 한 페이지를 선택한다. */
     private java.util.List<Candidate> candidates(ExamSchedulerCursorStore.Cursor cursor) {
         String query = "SELECT id,closed_at FROM exams WHERE status='CLOSED' ";
         if (cursor == null) {
@@ -134,7 +134,6 @@ public class ExamResultFinalizationScheduler {
             );
     }
 
-    /** 종료 시각 순으로 선정한 시험이다. */
     private record Candidate(long id, LocalDateTime closedAt) {
     }
 }

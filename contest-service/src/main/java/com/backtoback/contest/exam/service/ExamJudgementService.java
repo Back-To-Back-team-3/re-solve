@@ -195,7 +195,6 @@ public class ExamJudgementService {
             );
     }
 
-    /** 서버 시각을 DB 정밀도로 반환한다. */
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MICROS), ClockConfiguration.SERVICE_ZONE);
     }
@@ -216,7 +215,6 @@ public class ExamJudgementService {
         OffsetDateTime submittedAt
     ) {
     }
-    /** 현재 접수와 고정 문제의 DB 값이다. */
     private record Stored(
         long problemId,
         long revisionId,
@@ -230,7 +228,6 @@ public class ExamJudgementService {
         BigDecimal score
     ) {
     }
-    /** 점수 갱신에 필요한 마지막 접수다. */
     private record Latest(long id, String status, BigDecimal score, LocalDateTime receivedAt) {
     }
 }

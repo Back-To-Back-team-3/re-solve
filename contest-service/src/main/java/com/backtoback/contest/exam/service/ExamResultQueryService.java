@@ -22,6 +22,7 @@ import com.backtoback.contest.exam.repository.ExamParticipantRepository;
 import com.backtoback.contest.exam.repository.ExamRepository;
 import com.backtoback.contest.exam.repository.StudyMembershipReplicaRepository;
 import com.backtoback.contest.exam.service.ExamFinalizationService.Snapshot;
+import com.backtoback.contest.exam.store.ExamRankingCache;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
@@ -195,7 +196,6 @@ public class ExamResultQueryService {
         return new CacheSnapshot(exam.getResultRevision(), standingsFromDatabase(exam));
     }
 
-    /** 확정 후에는 불변 스냅샷을, 이전에는 현재 집계를 사용한다. */
     private List<Standing> standingsFromDatabase(Exam exam) {
         if (exam.getStatus() == ExamStatus.FINALIZED) {
             return snapshot(exam)
@@ -217,7 +217,6 @@ public class ExamResultQueryService {
         return ranking(exam.getId());
     }
 
-    /** DB 점수와 마지막 접수 시각으로 공동 순위를 계산한다. */
     private List<Standing> ranking(long examId) {
         var rows
             = jdbc
@@ -285,7 +284,6 @@ public class ExamResultQueryService {
         return mapper.readValue(json, Snapshot.class);
     }
 
-    /** 회원 복제본의 표시 이름을 읽는다. */
     private String nickname(String memberId) {
         return jdbc
             .query(
@@ -318,7 +316,6 @@ public class ExamResultQueryService {
             );
     }
 
-    /** 시험을 조회한다. */
     private Exam exam(long id) {
         return exams.findById(id).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
     }
@@ -328,7 +325,6 @@ public class ExamResultQueryService {
         return exam.getStatus() == ExamStatus.CLOSED || exam.getStatus() == ExamStatus.FINALIZED;
     }
 
-    /** 점수를 문자열로 변환한다. */
     private String money(BigDecimal value) {
         return value == null ? null : value.toPlainString();
     }
@@ -357,7 +353,6 @@ public class ExamResultQueryService {
         }
     }
 
-    /** 양의 식별자를 검증한다. */
     private long id(String value) {
         try {
             if (value == null || !value.matches("[1-9][0-9]*")) {
@@ -406,7 +401,6 @@ public class ExamResultQueryService {
     /** 외부에 공개하는 순위 항목이다. */
     public record StandingItem(String memberId, String nickname, String score, Integer rank, boolean pending) {
     }
-    /** 정렬 전 DB 행이다. */
     private record RankingRow(
         long participant,
         long member,

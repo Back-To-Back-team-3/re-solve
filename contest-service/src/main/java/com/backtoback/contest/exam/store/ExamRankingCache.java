@@ -1,4 +1,4 @@
-package com.backtoback.contest.exam.service;
+package com.backtoback.contest.exam.store;
 
 import java.util.Arrays;
 import java.util.List;
@@ -75,7 +75,6 @@ public class ExamRankingCache {
             );
     }
 
-    /** Redis Cluster에서도 같은 시험의 키가 같은 슬롯에 있도록 묶는다. */
     private String prefix(long examId) {
         return "exam:ranking:{" + examId + "}";
     }
