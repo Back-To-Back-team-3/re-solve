@@ -102,13 +102,16 @@ class AssignmentCompletionRecalculationServiceTest {
         // given
         given(memberAcReplicaRepository.findEarliestBasisAc(eq(MEMBER_ID), eq(PROBLEM_ID), any(Pageable.class)))
             .willReturn(List.of(basisAc));
-        given(completionRepository.findByAssignmentIdAndMemberIdAndProblemId(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID))
-            .willReturn(Optional.empty());
+        given(
+            completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID)
+        ).willReturn(Optional.empty());
         given(completionTypeCalculator.calculate(SUBMITTED_AT, STARTS_AT, DEADLINE_AT))
             .willReturn(CompletionType.ON_TIME);
         given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
             .willReturn(List.of(activeProblem));
-        given(completionRepository.findByAssignmentIdAndMemberId(ASSIGNMENT_ID, MEMBER_ID)).willReturn(List.of());
+        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID))
+            .willReturn(List.of());
 
         // when
         service.recalculate(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID);
@@ -138,11 +141,13 @@ class AssignmentCompletionRecalculationServiceTest {
                     1,
                     NOW
                 );
-        given(completionRepository.findByAssignmentIdAndMemberIdAndProblemId(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID))
-            .willReturn(Optional.of(existing));
+        given(
+            completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID)
+        ).willReturn(Optional.of(existing));
         given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
             .willReturn(List.of(activeProblem));
-        given(completionRepository.findByAssignmentIdAndMemberId(ASSIGNMENT_ID, MEMBER_ID))
+        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID))
             .willReturn(List.of(existing));
 
         // when
@@ -172,13 +177,15 @@ class AssignmentCompletionRecalculationServiceTest {
                     NOW
                 );
         existing.revoke();
-        given(completionRepository.findByAssignmentIdAndMemberIdAndProblemId(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID))
-            .willReturn(Optional.of(existing));
+        given(
+            completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID)
+        ).willReturn(Optional.of(existing));
         given(completionTypeCalculator.calculate(SUBMITTED_AT, STARTS_AT, DEADLINE_AT))
             .willReturn(CompletionType.ON_TIME);
         given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
             .willReturn(List.of(activeProblem));
-        given(completionRepository.findByAssignmentIdAndMemberId(ASSIGNMENT_ID, MEMBER_ID))
+        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID))
             .willReturn(List.of(existing));
 
         // when
@@ -208,13 +215,15 @@ class AssignmentCompletionRecalculationServiceTest {
                     1,
                     NOW
                 );
-        given(completionRepository.findByAssignmentIdAndMemberIdAndProblemId(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID))
-            .willReturn(Optional.of(existing));
+        given(
+            completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID)
+        ).willReturn(Optional.of(existing));
         given(completionTypeCalculator.calculate(SUBMITTED_AT, STARTS_AT, DEADLINE_AT))
             .willReturn(CompletionType.ON_TIME);
         given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
             .willReturn(List.of(activeProblem));
-        given(completionRepository.findByAssignmentIdAndMemberId(ASSIGNMENT_ID, MEMBER_ID))
+        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID))
             .willReturn(List.of(existing));
 
         // when
@@ -246,13 +255,15 @@ class AssignmentCompletionRecalculationServiceTest {
                     1,
                     NOW
                 );
-        given(completionRepository.findByAssignmentIdAndMemberIdAndProblemId(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID))
-            .willReturn(Optional.of(existing));
+        given(
+            completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID)
+        ).willReturn(Optional.of(existing));
         given(completionTypeCalculator.calculate(DEADLINE_AT.plusHours(1), STARTS_AT, DEADLINE_AT))
             .willReturn(CompletionType.LATE);
         given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
             .willReturn(List.of(activeProblem));
-        given(completionRepository.findByAssignmentIdAndMemberId(ASSIGNMENT_ID, MEMBER_ID))
+        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID))
             .willReturn(List.of(existing));
 
         // when
@@ -270,8 +281,10 @@ class AssignmentCompletionRecalculationServiceTest {
         // given
         given(memberAcReplicaRepository.findEarliestBasisAc(eq(MEMBER_ID), eq(PROBLEM_ID), any(Pageable.class)))
             .willReturn(List.of(basisAc));
-        given(completionRepository.findByAssignmentIdAndMemberIdAndProblemId(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID))
-            .willReturn(Optional.empty());
+        given(
+            completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID)
+        ).willReturn(Optional.empty());
         given(completionTypeCalculator.calculate(SUBMITTED_AT, STARTS_AT, DEADLINE_AT))
             .willReturn(CompletionType.ON_TIME);
         given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
@@ -288,7 +301,7 @@ class AssignmentCompletionRecalculationServiceTest {
                     1,
                     NOW
                 );
-        given(completionRepository.findByAssignmentIdAndMemberId(ASSIGNMENT_ID, MEMBER_ID))
+        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID))
             .willReturn(List.of(savedCompletion));
 
         // when
@@ -323,11 +336,13 @@ class AssignmentCompletionRecalculationServiceTest {
                     1,
                     NOW
                 );
-        given(completionRepository.findByAssignmentIdAndMemberIdAndProblemId(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID))
-            .willReturn(Optional.of(existing));
+        given(
+            completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID)
+        ).willReturn(Optional.of(existing));
         given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
             .willReturn(List.of(activeProblem));
-        given(completionRepository.findByAssignmentIdAndMemberId(ASSIGNMENT_ID, MEMBER_ID))
+        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID))
             .willReturn(List.of(existing));
 
         // when
@@ -356,11 +371,13 @@ class AssignmentCompletionRecalculationServiceTest {
                     1,
                     NOW
                 );
-        given(completionRepository.findByAssignmentIdAndMemberIdAndProblemId(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID))
-            .willReturn(Optional.of(existing));
+        given(
+            completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID)
+        ).willReturn(Optional.of(existing));
         given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
             .willReturn(List.of(activeProblem));
-        given(completionRepository.findByAssignmentIdAndMemberId(ASSIGNMENT_ID, MEMBER_ID))
+        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID))
             .willReturn(List.of(existing));
 
         // when

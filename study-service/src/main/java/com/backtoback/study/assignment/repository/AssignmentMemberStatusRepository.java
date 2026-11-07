@@ -2,14 +2,18 @@ package com.backtoback.study.assignment.repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.backtoback.study.assignment.domain.AssignmentMemberStatus;
 import com.backtoback.study.assignment.domain.MemberProgressStatus;
+
+import jakarta.persistence.LockModeType;
 
 public interface AssignmentMemberStatusRepository extends JpaRepository<AssignmentMemberStatus, Long> {
 
@@ -97,7 +101,7 @@ public interface AssignmentMemberStatusRepository extends JpaRepository<Assignme
     /**
      * 한 문제집에서 한 멤버의 진행 상태를 조회한다. 재채점 재계산 시 현재 상태 확인에 사용한다(ERD 4.5.7).
      */
-    java.util.Optional<AssignmentMemberStatus> findByAssignmentIdAndMemberId(Long assignmentId, Long memberId);
+    Optional<AssignmentMemberStatus> findByAssignmentIdAndMemberId(Long assignmentId, Long memberId);
 
     /**
      * 여러 문제집에서 한 멤버의 진행 상태를 일괄 조회한다 (API 명세서 §5.4.2 myStatus).
@@ -108,4 +112,17 @@ public interface AssignmentMemberStatusRepository extends JpaRepository<Assignme
      * 한 문제집에서 주어진 멤버들의 진행 상태를 조회한다 (API 명세서 §5.4.3 memberProgress).
      */
     List<AssignmentMemberStatus> findByAssignmentIdAndMemberIdIn(Long assignmentId, List<Long> memberIds);
+
+    /**
+     * (assignmentId, memberId) 행을 FOR UPDATE로 조회해 재계산을 직렬화한다
+     * (scheduler.md §5.0).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query(
+        "SELECT s FROM AssignmentMemberStatus s " + "WHERE s.assignmentId = :assignmentId AND s.memberId = :memberId"
+    )
+    Optional<AssignmentMemberStatus> findByAssignmentIdAndMemberIdWithLock(
+        @Param("assignmentId") Long assignmentId,
+        @Param("memberId") Long memberId
+    );
 }

@@ -101,6 +101,7 @@ public class AssignmentLifecycleService {
     /**
      * OPEN 문제집 1건을 CLOSED로 전이하고 미완료 멤버를 INCOMPLETE 처리한다.
      * 연속 2회 INCOMPLETE 멤버가 있으면 AssignmentIncompleteRepeated 이벤트를 기록한다.
+     * 선행 마감 실패를 대비해 A 직후 CLOSED 문제집(B)도 소급 재판정한다(§5.2 C6).
      * closeIfOpen이 0행이면 다른 인스턴스가 먼저 처리한 것이므로 false를 반환한다.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -126,21 +127,70 @@ public class AssignmentLifecycleService {
         Optional<Long> previousClosedId
             = assignmentRepository
                 .findPreviousClosedId(assignment.getStudyId(), assignment.getDeadlineAt(), assignmentId);
-        if (previousClosedId.isEmpty()) {
-            return true;
+        if (previousClosedId.isPresent()) {
+            List<Long> repeatedMemberIds
+                = memberStatusRepository
+                    .findMemberIdsByAssignmentIdAndMemberIdsAndStatus(
+                        previousClosedId.get(),
+                        incompleteMemberIds,
+                        MemberProgressStatus.INCOMPLETE
+                    );
+            if (!repeatedMemberIds.isEmpty()) {
+                List<Long> recipientMemberIds
+                    = membershipRepository
+                        .findMemberIdsByStudyIdAndRolesAndStatus(
+                            assignment.getStudyId(),
+                            List.of(MembershipRole.LEADER, MembershipRole.MANAGER),
+                            MembershipStatus.APPROVED
+                        );
+                AssignmentIncompleteRepeatedPayload payload
+                    = new AssignmentIncompleteRepeatedPayload(
+                        String.valueOf(assignment.getStudyId()),
+                        String.valueOf(assignmentId),
+                        repeatedMemberIds.stream().map(String::valueOf).toList(),
+                        recipientMemberIds.stream().map(String::valueOf).toList()
+                    );
+                outboxEventWriter
+                    .append(
+                        AGGREGATE_TYPE,
+                        INCOMPLETE_REPEATED_EVENT_TYPE,
+                        SCHEMA_VERSION,
+                        String.valueOf(assignmentId),
+                        correlationId,
+                        payload
+                    );
+            }
         }
 
-        List<Long> repeatedMemberIds
+        appendRetroactiveEventIfNeeded(assignment, assignmentId, correlationId);
+        return true;
+    }
+
+    private void appendRetroactiveEventIfNeeded(Assignment assignment, Long assignmentId, String correlationId) {
+        if (assignment.getDeadlineAt() == null) {
+            return;
+        }
+        Optional<Long> nextClosedId
+            = assignmentRepository.findNextClosedId(assignment.getStudyId(), assignment.getDeadlineAt(), assignmentId);
+        if (nextClosedId.isEmpty()) {
+            return;
+        }
+        List<Long> bIncompleteMemberIds
+            = memberStatusRepository
+                .findMemberIdsByAssignmentIdAndStatus(nextClosedId.get(), MemberProgressStatus.INCOMPLETE);
+        if (bIncompleteMemberIds.isEmpty()) {
+            return;
+        }
+        List<Long> retroRepeatedMemberIds
             = memberStatusRepository
                 .findMemberIdsByAssignmentIdAndMemberIdsAndStatus(
-                    previousClosedId.get(),
-                    incompleteMemberIds,
+                    assignmentId,
+                    bIncompleteMemberIds,
                     MemberProgressStatus.INCOMPLETE
                 );
-        if (repeatedMemberIds.isEmpty()) {
-            return true;
+        if (retroRepeatedMemberIds.isEmpty()) {
+            return;
         }
-
         List<Long> recipientMemberIds
             = membershipRepository
                 .findMemberIdsByStudyIdAndRolesAndStatus(
@@ -148,24 +198,21 @@ public class AssignmentLifecycleService {
                     List.of(MembershipRole.LEADER, MembershipRole.MANAGER),
                     MembershipStatus.APPROVED
                 );
-
-        AssignmentIncompleteRepeatedPayload payload
+        AssignmentIncompleteRepeatedPayload retroPayload
             = new AssignmentIncompleteRepeatedPayload(
                 String.valueOf(assignment.getStudyId()),
-                String.valueOf(assignmentId),
-                repeatedMemberIds.stream().map(String::valueOf).toList(),
+                String.valueOf(nextClosedId.get()),
+                retroRepeatedMemberIds.stream().map(String::valueOf).toList(),
                 recipientMemberIds.stream().map(String::valueOf).toList()
             );
-
         outboxEventWriter
             .append(
                 AGGREGATE_TYPE,
                 INCOMPLETE_REPEATED_EVENT_TYPE,
                 SCHEMA_VERSION,
-                String.valueOf(assignmentId),
+                String.valueOf(nextClosedId.get()),
                 correlationId,
-                payload
+                retroPayload
             );
-        return true;
     }
 }
