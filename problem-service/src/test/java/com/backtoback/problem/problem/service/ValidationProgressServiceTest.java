@@ -51,6 +51,51 @@ class ValidationProgressServiceTest {
             .willReturn(new ValidationProgressStore.Snapshot("1", "4", "3", "java", false, List.of(), null));
     }
 
+    /**
+     * 테스트 순번과 실행 시간의 잘못된 값을 의존 장애로 처리한다.
+     *
+     * @param testJson 잘못된 테스트 결과
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "{\"testOrder\":0}",
+            "{\"testOrder\":-1}",
+            "{\"testOrder\":1,\"timeMs\":-1}"
+        }
+    )
+    @DisplayName("Judge의 잘못된 테스트 순번과 음수 실행 시간은 503으로 거절한다")
+    void invalidTestValues(String testJson) {
+        server
+            .expect(requestTo("http://judge/internal/v1/judge/validations/1"))
+            .andRespond(
+                withStatus(HttpStatus.OK)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(
+                        "{\"validationId\":\"1\",\"problemRevisionId\":\"3\",\"language\":\"java\","
+                            + "\"status\":\"RUNNING\",\"tests\":[" + testJson + "]}"
+                    )
+            );
+        assertThatThrownBy(() -> service.read(1, 2))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                error -> assertThat(error.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+            );
+    }
+
+    /** 미판정 테스트의 판정과 측정값은 null을 허용한다. */
+    @Test
+    @DisplayName("미판정 테스트는 판정과 실행 시간이 없어도 조회할 수 있다")
+    void pendingTest() {
+        server
+            .expect(requestTo("http://judge/internal/v1/judge/validations/1"))
+            .andRespond(withStatus(HttpStatus.OK).contentType(MediaType.APPLICATION_JSON).body("""
+                {"validationId":"1","problemRevisionId":"3","language":"java","status":"RUNNING",
+                 "tests":[{"testOrder":1,"verdict":null,"timeMs":null,"memoryKb":null}]}
+                """));
+        assertThat(service.read(1, 2).tests()).hasSize(1);
+    }
+
     /** Judge가 종결해도 이벤트 반영 전 상태를 유지한다. */
     @Test
     @DisplayName("Judge 종결 직후에는 테스트 판정과 결과 미반영을 함께 반환한다")
@@ -117,11 +162,10 @@ class ValidationProgressServiceTest {
     void dependencyFailure(int status) {
         server
             .expect(requestTo("http://judge/internal/v1/judge/validations/1"))
-            .andRespond(
-                withStatus(HttpStatus.valueOf(status))
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"problemRevisionId\":\"999\"}")
-            );
+            .andRespond(withStatus(HttpStatus.valueOf(status)).contentType(MediaType.APPLICATION_JSON).body("""
+                {"validationId":"1","problemRevisionId":"999","language":"java",
+                 "status":"RUNNING","tests":[]}
+                """));
         assertThatThrownBy(() -> service.read(1, 2))
             .isInstanceOfSatisfying(
                 ProblemException.class,

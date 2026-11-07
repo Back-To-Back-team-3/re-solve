@@ -1,7 +1,6 @@
 package com.backtoback.problem.problem.client;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
@@ -58,7 +57,13 @@ public class JudgeProgressClient {
             var result = http.get().uri("/internal/v1/judge/validations/{id}", id).retrieve().body(Progress.class);
             if (result == null || !id.equals(result.validationId()) || !revisionId.equals(result.problemRevisionId())
                 || !language.equals(result.language()) || result.tests() == null
-                || result.tests().stream().anyMatch(Objects::isNull) || result.status() == null
+                || result
+                    .tests()
+                    .stream()
+                    .anyMatch(
+                        test -> test == null || test.testOrder() <= 0 || (test.timeMs() != null && test.timeMs() < 0)
+                    )
+                || result.status() == null
                 || !Set
                     .of("QUEUED", "RUNNING", "RETRY_WAITING", "PASSED", "REJECTED", "ERROR")
                     .contains(result.status())) {
