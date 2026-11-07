@@ -21,7 +21,6 @@ import com.backtoback.problem.problem.dto.response.ContestProblemLinkResponse;
 import com.backtoback.problem.problem.dto.response.JudgingDataResponse;
 import com.backtoback.problem.problem.dto.response.JudgingValidationResponse;
 import com.backtoback.problem.problem.dto.response.ProblemContentResponse;
-import com.backtoback.problem.problem.dto.response.ProblemOperationResponse;
 import com.backtoback.problem.problem.dto.response.ProblemSummaryListResponse;
 import com.backtoback.problem.problem.service.InternalProblemService;
 
@@ -104,12 +103,4 @@ public class InternalProblemController {
         return internalProblemService.linkContestProblem(problemId, request);
     }
 
-    /** 문제 상태 작업의 원래 결과 스냅샷을 반환한다. (API 명세서 2.6.10) */
-    @GetMapping(PROBLEM_PATH + "/{problemId}/operations/{operationId}")
-    public ProblemOperationResponse getOperation(
-        @PathVariable @NotBlank(message = "문제 ID는 필수입니다.") String problemId,
-        @PathVariable @NotBlank(message = "작업 ID는 필수입니다.") String operationId
-    ) {
-        return internalProblemService.getOperation(problemId, operationId);
-    }
 }
