@@ -43,4 +43,5 @@ contest:
     enabled: ${CONTEST_EVENTS_ENABLED:false}
     publish-enabled: ${CONTEST_EVENTS_PUBLISH_ENABLED:false}
     topic-arn: ${CONTEST_EVENTS_TOPIC_ARN:}
+    submission-queue-url: ${JUDGE_SUBMISSION_QUEUE_URL:}
     queue-url: ${CONTEST_QUEUE_URL:}
