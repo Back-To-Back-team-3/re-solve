@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -25,6 +26,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -139,6 +141,8 @@ class ExamLifecycleIntegrationTest {
             .isEqualTo("ABSENT");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_participant_histories", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForList("SELECT event_type FROM outbox_events ORDER BY id", String.class))
+            .containsExactly("ExamStarted", "ExamClosed");
         assertThat(
             jdbc
                 .queryForObject(
@@ -153,11 +157,16 @@ class ExamLifecycleIntegrationTest {
     @DisplayName("종료 Outbox 저장 실패는 시작 전이와 결시 이력까지 롤백한다")
     void rollsBackBothTransitions() {
         // given
+        OutboxEventWriter target = AopTestUtils.getUltimateTargetObject(outbox);
         doThrow(new IllegalStateException("outbox failure"))
-            .when(outbox)
+            .when(target)
             .append(eq("EXAM"), eq("ExamClosed"), eq("v1"), any(), any(), any());
         // when & then
-        assertThatThrownBy(() -> service.transition(examId)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> service.transition(examId))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("outbox failure");
+        verify(target).append(eq("EXAM"), eq("ExamStarted"), eq("v1"), any(), any(), any());
+        verify(target).append(eq("EXAM"), eq("ExamClosed"), eq("v1"), any(), any(), any());
         assertThat(jdbc.queryForObject("SELECT status FROM exams WHERE id=?", String.class, examId))
             .isEqualTo("SCHEDULED");
         assertThat(jdbc.queryForObject("SELECT status FROM exam_participants WHERE exam_id=?", String.class, examId))
