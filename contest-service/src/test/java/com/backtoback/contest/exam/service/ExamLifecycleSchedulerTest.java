@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willReturn;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -27,7 +28,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
 
-import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.core.ExtensibleLockProvider;
 import net.javacrumbs.shedlock.core.SimpleLock;
 
 import com.backtoback.contest.exam.repository.ExamRepository;
@@ -43,7 +44,7 @@ class ExamLifecycleSchedulerTest {
     @Mock
     private ExamLifecycleService lifecycle;
     @Mock
-    private LockProvider locks;
+    private ExtensibleLockProvider locks;
     @Mock
     private SimpleLock lock;
 
@@ -53,9 +54,9 @@ class ExamLifecycleSchedulerTest {
     void continuesAfterFailure() {
         // given
         var due = LocalDateTime.parse("2026-01-01T00:00:00");
+        var candidates = List.of(candidate(1, due), candidate(2, due));
         given(locks.lock(any())).willReturn(Optional.of(lock));
-        given(exams.findLifecycleCandidates(any(), isNull(), eq(0L), any()))
-            .willReturn(List.of(candidate(1, due), candidate(2, due)));
+        given(exams.findLifecycleCandidates(any(), isNull(), eq(0L), any())).willReturn(candidates);
         doThrow(new IllegalStateException("failure")).when(lifecycle).transition(1L);
         var scheduler
             = new ExamLifecycleScheduler(exams, lifecycle, Clock.systemUTC(), new SimpleMeterRegistry(), locks);
@@ -81,11 +82,13 @@ class ExamLifecycleSchedulerTest {
     void resumesAfterFailedPageAndWraps() {
         var due = LocalDateTime.parse("2026-01-01T00:00:00");
         var firstPage = LongStream.rangeClosed(1, 100).mapToObj(id -> candidate(id, due)).toList();
+        var nextPage = List.of(candidate(101, due));
         given(locks.lock(any())).willReturn(Optional.of(lock));
-        given(exams.findLifecycleCandidates(any(), isNull(), eq(0L), any()))
-            .willReturn(firstPage, List.of(firstPage.getFirst()));
-        given(exams.findLifecycleCandidates(any(), eq(due), eq(100L), any())).willReturn(List.of(candidate(101, due)));
-        given(exams.findLifecycleCandidates(any(), eq(due), eq(101L), any())).willReturn(List.of());
+        willReturn(firstPage, List.of(firstPage.getFirst()))
+            .given(exams)
+            .findLifecycleCandidates(any(), isNull(), eq(0L), any());
+        willReturn(nextPage).given(exams).findLifecycleCandidates(any(), eq(due), eq(100L), any());
+        willReturn(List.of()).given(exams).findLifecycleCandidates(any(), eq(due), eq(101L), any());
         doAnswer(invocation -> {
             if (invocation.<Long>getArgument(0) <= 100) {
                 throw new IllegalStateException("failure");

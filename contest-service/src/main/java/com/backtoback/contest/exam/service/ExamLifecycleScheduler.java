@@ -17,6 +17,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import net.javacrumbs.shedlock.core.ExtensibleLockProvider;
 import net.javacrumbs.shedlock.core.LockConfiguration;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.support.KeepAliveLockProvider;
@@ -64,7 +65,10 @@ public class ExamLifecycleScheduler {
         this.lifecycle = lifecycle;
         this.clock = clock;
         this.metrics = metrics;
-        this.lifecycleLocks = new KeepAliveLockProvider(lockProvider, lockRenewals);
+        if (!(lockProvider instanceof ExtensibleLockProvider extensible)) {
+            throw new IllegalArgumentException("시험 배치에는 잠금 연장을 지원하는 공급자가 필요합니다.");
+        }
+        this.lifecycleLocks = new KeepAliveLockProvider(extensible, lockRenewals);
         Gauge
             .builder("scheduler.backlog.oldest.seconds", oldestBacklog, AtomicLong::get)
             .tag("job", JOB)
