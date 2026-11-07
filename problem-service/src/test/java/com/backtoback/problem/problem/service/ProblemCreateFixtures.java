@@ -10,7 +10,7 @@ import com.backtoback.problem.problem.dto.request.ProblemCreateRequest;
 import com.backtoback.problem.problem.dto.request.TestCaseRequest;
 
 /** 최초 등록 테스트에서 공유하는 최소 유효 입력. */
-final class ProblemCreateFixtures {
+public final class ProblemCreateFixtures {
     private ProblemCreateFixtures() {}
 
     /**
@@ -18,7 +18,7 @@ final class ProblemCreateFixtures {
      *
      * @return 기본 제한을 사용하는 등록 입력
      */
-    static ProblemCreateRequest request() {
+    public static ProblemCreateRequest request() {
         var type = new TypeSpec(TypeSpec.Kind.INT32, null, null, null, null);
         return new ProblemCreateRequest(
             ProblemScope.GENERAL,
