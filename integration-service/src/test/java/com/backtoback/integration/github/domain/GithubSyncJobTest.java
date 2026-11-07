@@ -149,4 +149,49 @@ class GithubSyncJobTest {
         assertThat(job.getNextRetryAt()).isNull();
         assertThat(job.getErrorMessage()).isEqualTo("User disconnected");
     }
+
+    @Test
+    @DisplayName("FAILED 또는 CANCELED 상태에서 resetForManualRetry 호출 시 PENDING으로 초기화되고 retryCount가 0이 된다")
+    void resetForManualRetryFromFailedAndCanceled() {
+        GithubConnection connection = createTestConnection();
+        GithubSyncJob job = GithubSyncJob.createPending(connection, 100L, 200L, "두 수의 합", 1);
+        job.markRunning();
+        job.markRetryWaiting(LocalDateTime.now().plusMinutes(1), "Temp error");
+        job.markFailed("Rate limit exceeded");
+
+        assertThat(job.isRetryableByManualRequest()).isTrue();
+        assertThat(job.isInProgressOrPending()).isFalse();
+
+        job.resetForManualRetry(connection);
+
+        assertThat(job.getStatus()).isEqualTo(GithubSyncJobStatus.PENDING);
+        assertThat(job.getRetryCount()).isZero();
+        assertThat(job.getNextRetryAt()).isNull();
+        assertThat(job.getErrorMessage()).isNull();
+        assertThat(job.isInProgressOrPending()).isTrue();
+
+        job.cancel("Disconnected");
+        assertThat(job.isRetryableByManualRequest()).isTrue();
+
+        job.resetForManualRetry(connection);
+        assertThat(job.getStatus()).isEqualTo(GithubSyncJobStatus.PENDING);
+        assertThat(job.getErrorMessage()).isNull();
+    }
+
+    @Test
+    @DisplayName("SUCCEEDED 또는 대기/실행 중 상태에서 resetForManualRetry 호출 시 IllegalStateException이 발생한다")
+    void resetForManualRetryInvalidStatusThrowsException() {
+        GithubConnection connection = createTestConnection();
+        GithubSyncJob job = GithubSyncJob.createPending(connection, 100L, 200L, "두 수의 합", 1);
+
+        assertThatThrownBy(() -> job.resetForManualRetry(connection)).isInstanceOf(IllegalStateException.class);
+
+        job.markRunning();
+        job.markSucceeded("sha123");
+
+        assertThat(job.isInProgressOrPending()).isFalse();
+        assertThat(job.isRetryableByManualRequest()).isFalse();
+        assertThatThrownBy(() -> job.resetForManualRetry(connection)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> job.resetForManualRetry(null)).isInstanceOf(IllegalArgumentException.class);
+    }
 }
