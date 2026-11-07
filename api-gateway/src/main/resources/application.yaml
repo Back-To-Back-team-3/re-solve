@@ -24,7 +24,7 @@ spring:
         - id: notification-service
           uri: ${NOTIFICATION_SERVICE_URL:http://notification-service:8080}
           predicates:
-            - Path=/api/v1/notifications/**
+            - Path=/api/v1/notifications/**, /api/v1/admin/notifications/**
 
         # member-service
         - id: member-service

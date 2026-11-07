@@ -495,6 +495,91 @@ class NotificationDeliveryServiceTest {
         assertThat(emitterRepository.findAllByMemberId(memberId)).isEmpty();
     }
 
+    @Test
+    @DisplayName("broadcast 호출 시 각 회원의 세션에 해당 회원의 알림이 전송된다")
+    void broadcastSendsToAllActiveSessions() {
+        // given
+        deliveryService.subscribe(101L, null);
+        deliveryService.subscribe(102L, null);
+
+        Notification notice1
+            = Notification
+                .builder()
+                .memberId(101L)
+                .sourceEventId("notice-1")
+                .type(NotificationType.SYSTEM_NOTICE)
+                .title("전체 공지")
+                .content("공지 내용입니다.")
+                .linkUrl("/notices/1")
+                .build();
+        ReflectionTestUtils.setField(notice1, "id", 1001L);
+
+        Notification notice2
+            = Notification
+                .builder()
+                .memberId(102L)
+                .sourceEventId("notice-1")
+                .type(NotificationType.SYSTEM_NOTICE)
+                .title("전체 공지")
+                .content("공지 내용입니다.")
+                .linkUrl("/notices/1")
+                .build();
+        ReflectionTestUtils.setField(notice2, "id", 1002L);
+
+        // when
+        int count = deliveryService.broadcast(java.util.Map.of(101L, notice1, 102L, notice2));
+
+        // then
+        assertThat(count).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("broadcast 전송 중 특정 세션에서 IOException 발생 시 해당 세션은 정리되고 정상 세션에는 전송이 완료된다")
+    void broadcastCleansUpFailedSessionAndDeliversToRemaining() {
+        // given
+        CapturingSseEmitter failingEmitter = new CapturingSseEmitter();
+        failingEmitter.setFailOnSend(true);
+        SseSession failingSession = SseSession.create("emitter-fail", 201L, failingEmitter, 1000L, 0L);
+        emitterRepository.save(failingSession);
+
+        CapturingSseEmitter successEmitter = new CapturingSseEmitter();
+        SseSession successSession = SseSession.create("emitter-success", 202L, successEmitter, 1000L, 0L);
+        emitterRepository.save(successSession);
+
+        Notification notice1
+            = Notification
+                .builder()
+                .memberId(201L)
+                .sourceEventId("notice-1")
+                .type(NotificationType.SYSTEM_NOTICE)
+                .title("전체 공지")
+                .content("공지 내용입니다.")
+                .linkUrl("/notices/1")
+                .build();
+        ReflectionTestUtils.setField(notice1, "id", 2001L);
+
+        Notification notice2
+            = Notification
+                .builder()
+                .memberId(202L)
+                .sourceEventId("notice-1")
+                .type(NotificationType.SYSTEM_NOTICE)
+                .title("전체 공지")
+                .content("공지 내용입니다.")
+                .linkUrl("/notices/1")
+                .build();
+        ReflectionTestUtils.setField(notice2, "id", 2002L);
+
+        // when
+        int count = deliveryService.broadcast(java.util.Map.of(201L, notice1, 202L, notice2));
+
+        // then: 성공 건수는 1이어야 하고, 실패한 세션은 정리되어야 함
+        assertThat(count).isEqualTo(1);
+        assertThat(emitterRepository.findAllByMemberId(201L)).isEmpty();
+        assertThat(emitterRepository.findAllByMemberId(202L)).hasSize(1);
+        assertThat(successEmitter.getSentNotificationIds()).contains("2002");
+    }
+
     /**
      * 리플렉션 없이 전송 이벤트 ID와 종료 상태를 캡처하는 테스트용 SseEmitter 서브클래스.
      */

@@ -34,7 +34,8 @@ import com.backtoback.notification.reminder.repository.NotificationReminderRepos
 class ExamReminderConcurrencyIntegrationTest {
 
     @Container
-    static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("notification_db");
+    static final MySQLContainer MYSQL
+        = new MySQLContainer("mysql:8.4").withDatabaseName("notification_db").withUrlParam("useAffectedRows", "true");
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
