@@ -31,6 +31,7 @@ import com.backtoback.contest.exam.repository.ExamParticipantRepository;
 import com.backtoback.contest.exam.repository.ExamProblemRepository;
 import com.backtoback.contest.exam.repository.ExamRepository;
 import com.backtoback.contest.exam.service.ExamSubmissionMessageSize.Payload;
+import com.backtoback.contest.exam.store.ExamSubmissionRequestStore;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
@@ -49,6 +50,7 @@ public class ExamAutoSubmissionService {
     private final ExamJudgementService judgements;
     private final EntityManager entityManager;
     private final OutboxEventWriter outbox;
+    private final ExamSubmissionRequestStore requestStore;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final Clock clock;
@@ -185,27 +187,29 @@ public class ExamAutoSubmissionService {
             case "CPP" -> "cpp";
             default -> throw new IllegalStateException("Unknown draft language");
         };
-        outbox
-            .append(
-                "EXAM_SUBMISSION",
-                "ExamSubmissionRequested",
-                "v1",
-                receipt,
-                correlation,
-                new Payload(
-                    participant.getExam().getId().toString(),
+        var metadata
+            = outbox
+                .append(
+                    "EXAM_SUBMISSION",
+                    "ExamSubmissionRequested",
+                    "v1",
                     receipt,
-                    participant.getId().toString(),
-                    participant.getMemberId().toString(),
-                    Long.toString(draft.problemId()),
-                    Long.toString(revision),
-                    language,
-                    draft.sourceCode(),
-                    Long.toString(draft.seq()),
-                    "AUTO",
-                    format(participant.getPersonalEndsAt())
-                )
-            );
+                    correlation,
+                    new Payload(
+                        participant.getExam().getId().toString(),
+                        receipt,
+                        participant.getId().toString(),
+                        participant.getMemberId().toString(),
+                        Long.toString(draft.problemId()),
+                        Long.toString(revision),
+                        language,
+                        draft.sourceCode(),
+                        Long.toString(draft.seq()),
+                        "AUTO",
+                        format(participant.getPersonalEndsAt())
+                    )
+                );
+        requestStore.preserve(Long.parseLong(receipt), metadata.eventId());
         return receipt;
     }
 

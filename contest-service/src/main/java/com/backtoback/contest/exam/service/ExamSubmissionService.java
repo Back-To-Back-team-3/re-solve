@@ -31,6 +31,7 @@ import com.backtoback.contest.exam.repository.ExamRepository;
 import com.backtoback.contest.exam.repository.MemberReplicaRepository;
 import com.backtoback.contest.exam.service.ExamSubmissionMessageSize.Payload;
 import com.backtoback.contest.exam.store.ExamSubmissionRateLimiter;
+import com.backtoback.contest.exam.store.ExamSubmissionRequestStore;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
@@ -51,6 +52,7 @@ public class ExamSubmissionService {
     private final ExamSubmissionMessageSize messageSize;
     private final ExamJudgementService judgements;
     private final OutboxEventWriter outbox;
+    private final ExamSubmissionRequestStore requestStore;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final Clock clock;
@@ -201,27 +203,29 @@ public class ExamSubmissionService {
         if (correlation == null) {
             correlation = "contest-" + UUID.randomUUID();
         }
-        outbox
-            .append(
-                "EXAM_SUBMISSION",
-                "ExamSubmissionRequested",
-                "v1",
-                Long.toString(receipt),
-                correlation,
-                new Payload(
-                    Long.toString(examId),
+        var metadata
+            = outbox
+                .append(
+                    "EXAM_SUBMISSION",
+                    "ExamSubmissionRequested",
+                    "v1",
                     Long.toString(receipt),
-                    participant.getId().toString(),
-                    Long.toString(member),
-                    Long.toString(problemId),
-                    pinned.getProblemRevisionId().toString(),
-                    request.language(),
-                    request.sourceCode(),
-                    Long.toString(seq),
-                    "MANUAL",
-                    format(now)
-                )
-            );
+                    correlation,
+                    new Payload(
+                        Long.toString(examId),
+                        Long.toString(receipt),
+                        participant.getId().toString(),
+                        Long.toString(member),
+                        Long.toString(problemId),
+                        pinned.getProblemRevisionId().toString(),
+                        request.language(),
+                        request.sourceCode(),
+                        Long.toString(seq),
+                        "MANUAL",
+                        format(now)
+                    )
+                );
+        requestStore.preserve(receipt, metadata.eventId());
         return new Response(
             Long.toString(receipt),
             "ACCEPTED",

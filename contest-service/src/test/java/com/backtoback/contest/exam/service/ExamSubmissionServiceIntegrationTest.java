@@ -16,17 +16,37 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 import com.backtoback.contest.exam.service.ExamDraftStore.SaveRequest;
+import com.backtoback.contest.exam.store.ExamSubmissionRequestStore;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
 /** 시험 기능의 저장 및 동시성 통합 검증이다. */
 class ExamSubmissionServiceIntegrationTest extends ExamIntegrationTestSupport {
+    @MockitoSpyBean
+    private ExamSubmissionRequestStore requestStore;
+
+    @Test
+    @DisplayName("최초 요청 보존에 실패하면 접수와 Outbox를 함께 롤백한다")
+    void requestSnapshotFailureRollsBackSubmission() {
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        ExamSubmissionRequestStore target = AopTestUtils.getUltimateTargetObject(requestStore);
+        doThrow(new IllegalStateException("snapshot failure"))
+            .when(target)
+            .preserve(org.mockito.ArgumentMatchers.anyLong(), any());
+        assertThatThrownBy(() -> submissions.submit(examId, "7", new ExamSubmissionRequest("101", "java", "코드", "1")))
+            .hasMessage("snapshot failure");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isZero();
+    }
+
     @Test
     @DisplayName("같은 접수 재요청은 종료와 정지 후에도 중복 저장하지 않는다")
     void submissionIsIdempotentAfterFinish() {
