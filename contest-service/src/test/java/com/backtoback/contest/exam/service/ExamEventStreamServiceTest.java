@@ -1,5 +1,6 @@
 package com.backtoback.contest.exam.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -14,6 +15,45 @@ import com.backtoback.contest.global.error.ContestException;
 
 /** 시험 결과 버전으로 전달된 재연결 위치를 확인한다. */
 class ExamEventStreamServiceTest {
+    @Test
+    @DisplayName("두 구독의 조회가 지연돼도 다른 구독의 다음 조회를 막지 않는다")
+    void slowSubscribersDoNotBlockAnotherRead() throws Exception {
+        var snapshots = mock(ExamEventSnapshotService.class);
+        var slowReads = new java.util.concurrent.CountDownLatch(2);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var freshRead = new java.util.concurrent.CountDownLatch(1);
+        var calls = new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>();
+        when(snapshots.read(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("7")))
+            .thenAnswer(invocation -> {
+                String exam = invocation.getArgument(0);
+                int count
+                    = calls
+                        .computeIfAbsent(exam, key -> new java.util.concurrent.atomic.AtomicInteger())
+                        .incrementAndGet();
+                if (count > 1 && !"57".equals(exam)) {
+                    slowReads.countDown();
+                    if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Read was not released");
+                    }
+                }
+                if (count > 1 && "57".equals(exam)) {
+                    freshRead.countDown();
+                }
+                return new ExamEventSnapshotService.Snapshot(exam, "CLOSED", count, OffsetDateTime.now(), count, count);
+            });
+        var stream = new ExamEventStreamService(snapshots);
+        try {
+            stream.subscribe("55", "7", null);
+            stream.subscribe("56", "7", null);
+            assertThat(slowReads.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            stream.subscribe("57", "7", null);
+            assertThat(freshRead.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        } finally {
+            release.countDown();
+            stream.close();
+        }
+    }
+
     private final ExamEventSnapshotService.Snapshot snapshot
         = new ExamEventSnapshotService.Snapshot("55", "CLOSED", 3, OffsetDateTime.now(), 1, 2);
 

@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** 시험 상태에 따른 SSE 집계의 공개 범위를 검증한다. */
 class ExamEventSnapshotServiceIntegrationTest extends ExamIntegrationTestSupport {
     @Test
     @DisplayName("전체 종료 전 SSE에는 본인 제출 진행률을 공개하지 않는다")

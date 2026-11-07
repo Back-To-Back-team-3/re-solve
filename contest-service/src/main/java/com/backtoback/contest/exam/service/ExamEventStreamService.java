@@ -2,7 +2,9 @@ package com.backtoback.contest.exam.service;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -23,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 public class ExamEventStreamService {
     private final ExamEventSnapshotService snapshots;
     private final ScheduledExecutorService executor = Executors.newScheduledThreadPool(2);
+    private final ExecutorService reads = Executors.newVirtualThreadPerTaskExecutor();
 
     /**
      * 최초 조회로 권한을 확인하고 재연결에는 현재 공개 상태를 다시 전송한다.
@@ -39,6 +42,7 @@ public class ExamEventStreamService {
         var emitter = new SseEmitter(60000L);
         var closed = new AtomicBoolean();
         var last = new AtomicReference<>(first);
+        var pending = new AtomicReference<Future<?>>();
         try {
             sendState(emitter, first);
             if (first.terminalCount() != null) {
@@ -52,20 +56,26 @@ public class ExamEventStreamService {
             if (closed.get()) {
                 return;
             }
-            try {
-                var current = snapshots.read(examId, memberId);
-                var previous = last.getAndSet(current);
-                if (!current.status().equals(previous.status())) {
-                    sendState(emitter, current);
-                }
-                if (current.terminalCount() != null
-                    && (current.revision() != previous.revision() || !current.status().equals(previous.status()))) {
-                    sendResult(emitter, current);
-                }
-            } catch (Exception failure) {
-                closed.set(true);
-                emitter.completeWithError(failure);
+            var previousRead = pending.get();
+            if (previousRead != null && !previousRead.isDone()) {
+                return;
             }
+            pending.set(reads.submit(() -> {
+                try {
+                    var current = snapshots.read(examId, memberId);
+                    var previous = last.getAndSet(current);
+                    if (!current.status().equals(previous.status())) {
+                        sendState(emitter, current);
+                    }
+                    if (current.terminalCount() != null
+                        && (current.revision() != previous.revision() || !current.status().equals(previous.status()))) {
+                        sendResult(emitter, current);
+                    }
+                } catch (Exception failure) {
+                    closed.set(true);
+                    emitter.completeWithError(failure);
+                }
+            }));
         }, 1, 1, TimeUnit.SECONDS);
         var heartbeat = executor.scheduleAtFixedRate(() -> {
             if (!closed.get()) {
@@ -81,6 +91,10 @@ public class ExamEventStreamService {
             closed.set(true);
             future.cancel(false);
             heartbeat.cancel(false);
+            var read = pending.get();
+            if (read != null) {
+                read.cancel(true);
+            }
         };
         emitter.onCompletion(cleanup);
         emitter.onTimeout(() -> {
@@ -164,5 +178,6 @@ public class ExamEventStreamService {
     @PreDestroy
     public void close() {
         executor.shutdownNow();
+        reads.shutdownNow();
     }
 }
