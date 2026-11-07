@@ -1,4 +1,4 @@
-package com.backtoback.problem.problem.service;
+package com.backtoback.problem.admin.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -29,12 +29,15 @@ import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.admin.dto.AdminProblemDetailResponse;
 import com.backtoback.problem.admin.dto.AdminProblemSearchRequest;
-import com.backtoback.problem.admin.service.AdminProblemQueryService;
-import com.backtoback.problem.admin.service.AdminProblemQueryStore;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.client.JudgeProgressClient;
 import com.backtoback.problem.problem.dto.request.ProblemRevisionRequest;
+import com.backtoback.problem.problem.service.ProblemAssetContent;
+import com.backtoback.problem.problem.service.ProblemAssetObjectReader;
+import com.backtoback.problem.problem.service.ProblemAssetObjectWriter;
+import com.backtoback.problem.problem.service.ProblemCreateFixtures;
+import com.backtoback.problem.problem.service.ProblemCreateService;
 
 /** 실제 DB에서 관리자 회차 선택·권한과 불변 원문 조회를 검증한다. */
 @SpringBootTest(
@@ -48,7 +51,7 @@ import com.backtoback.problem.problem.dto.request.ProblemRevisionRequest;
     }
 )
 @Testcontainers(disabledWithoutDocker = true)
-class AdminProblemQueryTest {
+class AdminProblemQueryServiceTest {
     @Container
     private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db");
     @Container
