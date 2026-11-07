@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -182,7 +183,9 @@ class ExamManagementUpdateTest {
         verify(problems).deleteForExam(55L);
         verify(problems).saveAll(any());
         verify(jdbc).update(anyString(), any(), any(), eq(55L));
-        verify(outbox).append(eq("EXAM"), eq("ExamUpdated"), eq("v1"), eq("55"), anyString(), any());
+        var payload = ArgumentCaptor.forClass(ExamManagementService.UpdatedPayload.class);
+        verify(outbox).append(eq("EXAM"), eq("ExamUpdated"), eq("v1"), eq("55"), anyString(), payload.capture());
+        assertThat(payload.getValue().targetMemberIds()).containsExactly("7", "9");
     }
 
     private ExamUpdateRequest request(String version) {
