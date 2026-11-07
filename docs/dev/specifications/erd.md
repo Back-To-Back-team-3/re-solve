@@ -2190,7 +2190,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `expected_judge_attempt` | INT | N | 재처리·실패 종결 대상 회차. CONTEST_CREATE·RESULT_REFINALIZE는 NULL |
 | `target_judge_attempt` | INT | N | B가 확인한 재처리 회차. EXAM_RETRY 외 또는 확인 전 NULL |
 | `expected_result_revision` | BIGINT | N | RESULT_REFINALIZE의 이전 버전. 다른 작업은 NULL |
-| `state` | VARCHAR(30) | Y | PENDING / SUCCEEDED / FAILED |
+| `state` | VARCHAR(30) | Y | PENDING / SUCCEEDED / FAILED. 원격 결과 미확인은 PENDING, 원격 실패가 확인된 경우만 FAILED |
 | `actor_member_id` | BIGINT | Y | 집행 회원 ID. 일반 관리자 작업은 ADMIN, EXAM_RETRY는 해당 시험 운영자도 허용 |
 | `reason` | VARCHAR(500) | Y | 불변 작업 사유 |
 | `response_json` | JSON | N | CONTEST_CREATE의 최초 종결 응답. 미종결 및 다른 작업은 NULL |
@@ -2209,7 +2209,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 항목 | 규칙 |
 | --- | --- |
-| 확정 차단 | PENDING/FAILED 재처리 작업의 원격 성공 여부가 불명확하면 최종 확정 보류. B 상태 조회·동일 operationId 재요청으로 SUCCEEDED 또는 확정 실패 종결 |
+| 확정 차단 | 원격 결과가 미확인인 PENDING 관리자 작업은 최종 확정을 보류한다. B 상태 조회·동일 operationId 재요청으로 SUCCEEDED 또는 확인된 FAILED로 종결하며, 확인된 FAILED 작업 자체는 확정을 차단하지 않는다. 제출이 FAILED이면 관리자 0점 종결 전까지 별도로 확정을 보류한다. |
 | 회차 저장 | judge_attempt는 마지막 반영 종결 회차. 원격 목표 회차는 target_judge_attempt에 저장 |
 | 재처리 응답 | 현재 judge_attempt < target_judge_attempt인 경우만 REQUESTED 전이. 이미 목표 이상 결과가 반영됐으면 상태·판정 유지. 늦은 성공 응답으로 결과를 되돌리지 않음 |
 | 대회 생성 | CONTEST_CREATE는 생성 operationId·요청 해시·정책 설정 관리자를 보존한다. 대회·고정 문제·PENDING 작업을 함께 저장하고 원격 연결은 커밋 후 수행한다. SUCCEEDED와 최초 응답을 함께 저장하며, SUCCEEDED 전에는 목록 노출·참가·입장·시작을 허용하지 않는다. 동일 ID 재요청은 같은 대회·고정 회차의 연결을 재개한다. 확정 실패는 대회 취소·FAILED·감사·취소 Outbox를 함께 저장하고 이미 생성된 B 연결은 이력으로 보존한다. |
