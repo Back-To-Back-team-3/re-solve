@@ -1,7 +1,7 @@
 # 이벤트 계약서 v1.0
 
 > 최종 수정일: 2026.10.07(수)
-> 
+>
 
 ---
 
@@ -79,7 +79,7 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 메시지 최대 크기 | SQS 256KB. 코드 64KB 상한으로 채점 요청도 범위 안 |
+| 메시지 최대 크기 | 직렬화한 공통 헤더와 업무 필드를 합쳐 256KiB 이하. 코드 64KiB 이하만으로 JSON 이스케이프 후 크기가 보장되지는 않는다. 시험 Draft·직접 제출의 추가 검사는 API §4.2.4·§4.2.5를 따른다. |
 | Outbox 보관 | `PUBLISHED` 후 7일, 일 1회 정리 배치 |
 | `processed_events` 보관 | 14일 (SQS 최대 보관 14일과 동일) |
 | DLQ 보관 | 14일 (`MessageRetentionPeriod` 최대) |
@@ -644,6 +644,8 @@ flowchart LR
 | `draftSeq` | string | C1 |  |
 | `submissionType` | string | C1 | `MANUAL` / `AUTO` |
 | `receivedAt` | string (date-time) | Y | 불변 접수 시각 (AUTO는 `personal_ends_at`) |
+
+- 시험 Draft 저장과 신규 직접 제출은 향후 자동 제출을 포함한 채점 요청의 공통 직렬화 결과가 헤더 포함 256KiB 이하인지 확인한다. 기존 초과 Draft는 원문을 보존하며 자동 제출의 접수·Outbox·종료 전이를 함께 롤백한다.
 
 | 소비자 | 처리 |
 | --- | --- |
