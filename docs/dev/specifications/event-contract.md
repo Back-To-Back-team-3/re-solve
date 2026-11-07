@@ -630,7 +630,7 @@ flowchart LR
 | `submissionType` | string | C1 | `MANUAL` / `AUTO` |
 | `receivedAt` | string (date-time) | Y | 불변 접수 시각 (AUTO는 `personal_ends_at`) |
 
-- 시험 Draft 저장과 신규 직접 제출은 향후 자동 제출을 포함한 채점 요청의 공통 직렬화 결과가 헤더 포함 256KiB 이하인지 확인한다. 기존 초과 Draft는 원문을 보존하며 자동 제출의 접수·Outbox·종료 전이를 함께 롤백한다.
+- 시험 Draft 저장과 신규 직접 제출은 향후 자동 제출을 포함한 채점 요청의 공통 직렬화 결과가 헤더 포함 256KiB 이하인지 확인한다. 기존 초과 Draft는 원문을 보존한 `FAILED` 자동 접수(`dispatch_failure_code=CODE_TOO_LARGE`, `judge_attempt=0`)와 참가 종료를 함께 저장한다. 해당 접수는 Judge 요청·Outbox를 만들지 않고, 관리자 0점 종결 전까지 결과 확정을 보류한다(API §4.2.6·§4.6.4).
 - 시험 접수는 최초 요청 메시지 전체를 접수와 함께 불변 보존한다. 원본 Outbox 삭제 후에도 대사에서 보존본과 접수 연결을 검증해 같은 `eventId`·헤더·본문으로 복원한다. 보존본과 원본이 모두 없는 기존 접수는 새 이벤트 ID를 만들지 않고 운영 오류로 남긴다 (DB §4.4.6, 스케줄러 §4.6).
 
 | 소비자 | 처리 |

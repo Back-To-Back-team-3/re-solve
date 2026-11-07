@@ -121,7 +121,7 @@ public class ContestSubmissionReconciliationScheduler {
     private java.util.List<Candidate> candidates(LocalDateTime cutoff, ExamSchedulerCursorStore.Cursor cursor) {
         String query
             = "SELECT s.id,s.received_at FROM exam_submissions s JOIN exams e ON e.id=s.exam_id "
-                + "WHERE e.status<>'FINALIZED' AND s.received_at<=? "
+                + "WHERE e.status<>'FINALIZED' AND s.received_at<=? AND s.dispatch_failure_code IS NULL "
                 + "AND (s.status IN ('ACCEPTED','REQUESTED') OR (s.status='FAILED' AND s.is_zero_confirmed=false)) ";
         if (cursor == null) {
             return jdbc

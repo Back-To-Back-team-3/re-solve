@@ -112,8 +112,8 @@ class ExamAutoSubmissionServiceIntegrationTest extends ExamIntegrationTestSuppor
     }
 
     @Test
-    @DisplayName("이벤트 크기를 초과한 기존 Draft는 자동 제출과 종료를 롤백한다")
-    void oversizedExistingDraftRollsBackFinish() {
+    @DisplayName("크기를 초과한 기존 Draft는 원문을 보존한 실패 접수로 종료하고 결과 확정을 보류한다")
+    void oversizedExistingDraftFinishesWithFailedReceipt() {
         // given
         store.save(store.prepare(examId, "7", "101", new SaveRequest("java", "정상 코드", "1")));
         var code = String.valueOf((char)1).repeat(50000);
@@ -135,14 +135,13 @@ class ExamAutoSubmissionServiceIntegrationTest extends ExamIntegrationTestSuppor
                     LocalDateTime.class,
                     participantId
                 );
-        // when & then
-        assertThatThrownBy(() -> autoSubmissions.finish(examId, "7"))
-            .isInstanceOf(ContestException.class)
-            .satisfies(
-                error -> assertThat(((ContestException)error).getErrorCode()).isEqualTo(ContestErrorCode.CODE_TOO_LARGE)
-            );
+        // when
+        var finished = autoSubmissions.finish(examId, "7");
+        var retry = autoSubmissions.finish(examId, "7");
+        // then
+        assertThat(finished.autoSubmissionIds()).hasSize(2).isEqualTo(retry.autoSubmissionIds());
         assertThat(jdbc.queryForObject("SELECT status FROM exam_participants WHERE id=?", String.class, participantId))
-            .isEqualTo("STARTED");
+            .isEqualTo("FINISHED");
         assertThat(
             jdbc
                 .queryForObject(
@@ -150,7 +149,7 @@ class ExamAutoSubmissionServiceIntegrationTest extends ExamIntegrationTestSuppor
                     LocalDateTime.class,
                     participantId
                 )
-        ).isEqualTo(before);
+        ).isBeforeOrEqualTo(before);
         assertThat(
             jdbc
                 .queryForObject(
@@ -159,8 +158,27 @@ class ExamAutoSubmissionServiceIntegrationTest extends ExamIntegrationTestSuppor
                     participantId
                 )
         ).isEqualTo(code);
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT source_code FROM exam_submissions WHERE problem_id=102", String.class))
+            .isEqualTo(code);
+        assertThat(jdbc.queryForObject("SELECT status FROM exam_submissions WHERE problem_id=102", String.class))
+            .isEqualTo("FAILED");
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT dispatch_failure_code='CODE_TOO_LARGE' AND judge_attempt=0 AND submission_id IS NULL "
+                        + "AND request_snapshot IS NULL AND is_zero_confirmed=false "
+                        + "FROM exam_submissions WHERE problem_id=102",
+                    Boolean.class
+                )
+        ).isTrue();
+        jdbc.update("UPDATE exams SET status='CLOSED',closed_at=? WHERE id=?", now, examId);
+        jdbc.update("UPDATE exam_submissions SET status='JUDGED',score=0 WHERE problem_id=101");
+        assertThat(finalization.finalizeExam(Long.parseLong(examId))).isFalse();
+        // 관리자 종결 처리 후의 저장 상태를 구성해 기존 확정 경로와 연결되는지 확인한다.
+        jdbc.update("UPDATE exam_submissions SET is_zero_confirmed=true,score=0 WHERE problem_id=102");
+        assertThat(finalization.finalizeExam(Long.parseLong(examId))).isTrue();
     }
 
     @Test

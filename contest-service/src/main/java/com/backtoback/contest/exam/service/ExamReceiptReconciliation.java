@@ -64,14 +64,15 @@ public class ExamReceiptReconciliation {
         var current
             = jdbc
                 .query(
-                    "SELECT s.status,s.problem_id,p.problem_revision_id,s.received_at "
+                    "SELECT s.status,s.problem_id,p.problem_revision_id,s.received_at,s.dispatch_failure_code "
                         + "FROM exam_submissions s JOIN exam_problems p ON p.exam_id=s.exam_id "
                         + "AND p.problem_id=s.problem_id " + "WHERE s.id=? AND s.exam_participant_id=? FOR UPDATE",
                     (rs, row) -> new Current(
                         rs.getString(1),
                         rs.getLong(2),
                         rs.getLong(3),
-                        rs.getObject(4, LocalDateTime.class)
+                        rs.getObject(4, LocalDateTime.class),
+                        rs.getString(5)
                     ),
                     receiptId,
                     participant.getId()
@@ -79,7 +80,8 @@ public class ExamReceiptReconciliation {
                 .stream()
                 .findFirst()
                 .orElseThrow();
-        if (exam.getStatus() == ExamStatus.FINALIZED || "JUDGED".equals(current.status())) {
+        if (exam.getStatus() == ExamStatus.FINALIZED || "JUDGED".equals(current.status())
+            || current.dispatchFailure() != null) {
             return;
         }
         if (remote.found() == null) {
@@ -266,6 +268,12 @@ public class ExamReceiptReconciliation {
     private record Owner(long exam, long member) {
     }
     /** 잠금 아래 확인한 접수 연결이다. */
-    private record Current(String status, long problem, long revision, LocalDateTime receivedAt) {
+    private record Current(
+        String status,
+        long problem,
+        long revision,
+        LocalDateTime receivedAt,
+        String dispatchFailure
+    ) {
     }
 }
