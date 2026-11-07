@@ -429,10 +429,10 @@
 | --- | --- |
 | 소유 서비스·패키지 | `contest-service` / `exam` |
 | 실행 방식 | `fixedDelay = 5초`, `initialDelay = 5초` |
-| 잠금 | ShedLock `ExamLifecycleScheduler`. §4.0 임대·행 잠금 순서 적용 |
+| 잠금 | ShedLock `ExamLifecycleScheduler`. 이 배치가 실행되는 동안 30초 임대를 주기적으로 갱신한다. §4.0 행 잠금 순서 적용 |
 | 한 회차 처리량 | 페이지당 100건, 20초 뒤 새 선정 중단. 남은 대상은 다음 회차 |
 | 트랜잭션 경계 | 시험 1건당 1트랜잭션 |
-| 대상 조회 | `SCHEDULED AND starts_at <= now` 또는 `IN_PROGRESS AND ends_at < now` |
+| 대상 조회 | `SCHEDULED AND starts_at <= now` 또는 `IN_PROGRESS AND ends_at < now`. 전이 시각·ID 순으로 마지막 시도 지점 뒤를 조회하고 끝에 도달하면 처음으로 돌아가 실패 대상도 재시도한다. 재기동 시 처음부터 조회한다. |
 | 상태 전이 | SCHEDULED → IN_PROGRESS → CLOSED. 미입장 활성 REGISTERED → ABSENT |
 | 발행 이벤트 | ExamStarted / ExamClosed |
 | 지표 | §4.0 공통 지표 및 대상 상태·회차·버전별 보류 원인 |

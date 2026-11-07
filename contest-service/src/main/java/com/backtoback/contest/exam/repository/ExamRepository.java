@@ -53,13 +53,29 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
     @Query("select exam from Exam exam where exam.id = :id")
     Optional<Exam> findForUpdate(@Param("id") Long id);
 
-    /** 시작 또는 종료 시각에 도달한 시험을 전이 시각과 ID 순서로 선정한다. */
-    @Query("""
-        select e.id from Exam e
-        where (e.status = com.backtoback.contest.exam.domain.ExamStatus.SCHEDULED and e.startsAt <= :now)
-           or (e.status = com.backtoback.contest.exam.domain.ExamStatus.IN_PROGRESS and e.endsAt < :now)
-        order by case when e.status = com.backtoback.contest.exam.domain.ExamStatus.SCHEDULED
-            then e.startsAt else e.endsAt end, e.id
-        """)
-    List<Long> findLifecycleCandidates(@Param("now") LocalDateTime now, Pageable pageable);
+    String LIFECYCLE_DUE = """
+        case when e.status = com.backtoback.contest.exam.domain.ExamStatus.SCHEDULED
+            then e.startsAt else e.endsAt end
+        """;
+
+    /** 전이 시각과 ID를 기준으로 이전 처리 지점 뒤의 시험을 선정한다. */
+    @Query(
+        "select e.id as id, " + LIFECYCLE_DUE + " as dueAt from Exam e "
+            + "where ((e.status = com.backtoback.contest.exam.domain.ExamStatus.SCHEDULED and e.startsAt <= :now) "
+            + "or (e.status = com.backtoback.contest.exam.domain.ExamStatus.IN_PROGRESS and e.endsAt < :now)) "
+            + "and (:afterDue is null or " + LIFECYCLE_DUE + " > :afterDue " + "or (" + LIFECYCLE_DUE
+            + " = :afterDue and e.id > :afterId)) " + "order by dueAt, e.id"
+    )
+    List<LifecycleCandidate> findLifecycleCandidates(
+        @Param("now") LocalDateTime now,
+        @Param("afterDue") LocalDateTime afterDue,
+        @Param("afterId") long afterId,
+        Pageable pageable
+    );
+
+    interface LifecycleCandidate {
+        long getId();
+
+        LocalDateTime getDueAt();
+    }
 }
