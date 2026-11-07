@@ -9,7 +9,9 @@ import org.springframework.stereotype.Component;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
+import com.backtoback.problem.problem.dto.request.ProblemContentRequest;
 import com.backtoback.problem.problem.dto.request.ProblemCreateRequest;
+import com.backtoback.problem.problem.dto.request.ProblemRevisionRequest;
 
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
@@ -37,13 +39,26 @@ public class ProblemCreateInput {
     }
 
     /**
+     * 대상 문제와 원래 버전을 포함해 새 회차 요청을 해시한다.
+     *
+     * @param problemId 대상 문제
+     * @param request 원래 전체 입력
+     * @return 새 회차 등록 전용 SHA-256 해시
+     */
+    public String hash(long problemId, ProblemRevisionRequest request) {
+        return ProblemAssetContent
+            .fromBytes(canonical.writeValueAsBytes(List.of("CREATE_REVISION", problemId, request)))
+            .sha256();
+    }
+
+    /**
      * 등록 입력과 UTF-8 테스트 크기를 확인하고 고정 실행 제한을 계산한다.
      *
      * @param request 등록 입력
      * @return 태그 식별자와 확정 실행 제한
      * @throws ProblemException 입력·함수·테스트·이미지 계약을 위반한 경우
      */
-    public Validated validate(ProblemCreateRequest request) {
+    public Validated validate(ProblemContentRequest request) {
         if (request == null || !validator.validate(request).isEmpty()) {
             throw new ProblemException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }

@@ -23,7 +23,9 @@ import com.backtoback.problem.global.config.SecurityConfiguration;
 import com.backtoback.problem.global.exception.ProblemExceptionHandler;
 import com.backtoback.problem.problem.config.ProblemCreateWebConfiguration;
 import com.backtoback.problem.problem.dto.request.ProblemCreateRequest;
+import com.backtoback.problem.problem.dto.request.ProblemRevisionRequest;
 import com.backtoback.problem.problem.dto.response.ProblemCreateResponse;
+import com.backtoback.problem.problem.dto.response.ProblemRevisionResponse;
 import com.backtoback.problem.problem.service.ProblemCreateBodyReader;
 import com.backtoback.problem.problem.service.ProblemCreateService;
 
@@ -34,6 +36,7 @@ import tools.jackson.databind.ObjectMapper;
 @Import(
     {
         SecurityConfiguration.class,
+        com.backtoback.common.web.logging.CorrelationIdFilter.class,
         ProblemCreateWebConfiguration.class,
         ProblemCreateBodyReader.class,
         GlobalExceptionHandler.class,
@@ -83,6 +86,88 @@ class AdminProblemControllerTest {
             .andExpect(jsonPath("$.data.revisionNumber").value(1))
             .andExpect(jsonPath("$.data.rowVersion").value(1));
         verify(service).create(8004L, "create", expectedBody, clientIp);
+    }
+
+    /**
+     * 새 회차 요청의 버전·원문·추적 ID·주소를 서비스에 전달하고 최초 응답을 반환한다.
+     *
+     * @throws Exception MVC 요청 실패
+     */
+    @Test
+    @DisplayName("관리자 새 회차는 원래 입력과 추적 ID를 전달하고 최초 회차 정보를 반환한다")
+    void revise() throws Exception {
+        String body = BODY.replace("\"scope\":\"GENERAL\"", "\"rowVersion\":6");
+        var expected = mapper.readValue(body, ProblemRevisionRequest.class);
+        given(service.revise(1L, 8004L, "revision", expected, "rev:1_test.id", "192.0.2.17"))
+            .willReturn(new ProblemRevisionResponse("20", 3, 7));
+        mvc.perform(post("/api/v1/admin/problems/1/revisions").with(request -> {
+            request.setRemoteAddr("192.0.2.17");
+            return request;
+        })
+            .header("X-User-Id", "8004")
+            .header("X-User-Role", "ADMIN")
+            .header("Idempotency-Key", "revision")
+            .header("X-Correlation-Id", "rev:1_test.id")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body)
+        )
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.problemRevisionId").value("20"))
+            .andExpect(jsonPath("$.data.revisionNumber").value(3))
+            .andExpect(jsonPath("$.data.rowVersion").value(7))
+            .andExpect(jsonPath("$.data.problemId").doesNotExist());
+        verify(service).revise(1L, 8004L, "revision", expected, "rev:1_test.id", "192.0.2.17");
+    }
+
+    /**
+     * 새 회차도 버전·알 수 없는 필드·본문 크기 제한을 적용한다.
+     *
+     * @param version 버전 필드를 대체할 JSON
+     * @throws Exception MVC 요청 실패
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "null",
+            "0",
+            "1.5",
+            "1,\"scope\":\"GENERAL\""
+        }
+    )
+    @DisplayName("새 회차의 잘못된 버전과 scope 입력은 서비스 호출 전에 거절한다")
+    void invalidRevision(String version) throws Exception {
+        mvc
+            .perform(
+                post("/api/v1/admin/problems/1/revisions")
+                    .header("X-User-Id", "8004")
+                    .header("X-User-Role", "ADMIN")
+                    .header("Idempotency-Key", "revision")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(BODY.replace("\"scope\":\"GENERAL\"", "\"rowVersion\":" + version))
+            )
+            .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
+
+    /**
+     * 새 회차 등록에서도 전체 본문 크기를 제한한다.
+     *
+     * @throws Exception MVC 요청 실패
+     */
+    @Test
+    @DisplayName("새 회차 HTTP 본문 8MiB 초과는 413으로 거절한다")
+    void oversizedRevision() throws Exception {
+        mvc
+            .perform(
+                post("/api/v1/admin/problems/1/revisions")
+                    .header("X-User-Id", "8004")
+                    .header("X-User-Role", "ADMIN")
+                    .header("Idempotency-Key", "revision")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(" ".repeat(8388609))
+            )
+            .andExpect(status().is(413));
+        verifyNoInteractions(service);
     }
 
     /**
