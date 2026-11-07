@@ -139,4 +139,33 @@ public class Problem extends BaseTimeEntity {
         }
     }
 
+    /**
+     * 원래 기대 상태를 확인하고 가드가 준비된 문제의 공개를 중단한다.
+     *
+     * @param expectedVersion 준비 요청의 원래 버전
+     * @param target 비공개 또는 보관 상태
+     * @throws ProblemException 버전 경합 또는 허용하지 않는 상태 전이
+     */
+    public void hide(int expectedVersion, ProblemVisibility target) {
+        validateHide(expectedVersion, target);
+        visibility = target;
+        rowVersion++;
+    }
+
+    /**
+     * 공개 중단의 상태·버전 조건을 확인한다.
+     *
+     * @param expectedVersion 기대 버전
+     * @param target 비공개 또는 보관
+     * @throws ProblemException 버전 경합 또는 허용하지 않는 상태 전이
+     */
+    public void validateHide(int expectedVersion, ProblemVisibility target) {
+        if (rowVersion != expectedVersion) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_VERSION_CONFLICT);
+        }
+        if (visibility == ProblemVisibility.ARCHIVED || target == ProblemVisibility.PUBLIC
+            || (target == ProblemVisibility.PRIVATE && visibility != ProblemVisibility.PUBLIC)) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION);
+        }
+    }
 }
