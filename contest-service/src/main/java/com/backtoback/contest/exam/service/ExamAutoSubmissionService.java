@@ -8,20 +8,22 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.MDC;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
+import com.backtoback.contest.exam.client.ExamContentClient;
 import com.backtoback.contest.exam.domain.ExamParticipant;
 import com.backtoback.contest.exam.domain.ExamParticipantHistory;
 import com.backtoback.contest.exam.domain.ExamParticipantStatus;
@@ -54,11 +56,13 @@ public class ExamAutoSubmissionService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final Clock clock;
+    private final ExamContentClient content;
 
     /** 본인 참가자를 잠가 수동 마감과 자동 제출을 즉시 처리한다. */
     public Response finish(String examId, String memberId) {
         long exam = id(examId);
         long member = id(memberId);
+        var languages = supportedLanguages(exam, member);
         return transactions.execute(status -> {
             var parent
                 = exams.findForUpdate(exam).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
@@ -77,13 +81,18 @@ public class ExamAutoSubmissionService {
             }
             var now = now();
             participant.shortenDeadline(now);
-            return response(participant, process(participant, now, member));
+            return response(participant, process(participant, now, member, languages));
         });
     }
 
     /** 스케줄러 후보의 부모와 참가를 다시 잠가 마감 3초 뒤에만 처리한다. */
-    @Transactional
     public boolean finishDue(long examId, long memberId, long participantId) {
+        var languages = supportedLanguages(examId, memberId);
+        return Boolean.TRUE
+            .equals(transactions.execute(status -> finishDueLocked(examId, memberId, participantId, languages)));
+    }
+
+    private boolean finishDueLocked(long examId, long memberId, long participantId, Map<Long, Languages> languages) {
         var exam = exams.findForUpdate(examId).orElse(null);
         if (exam == null || exam.getStatus() == ExamStatus.CANCELED) {
             return false;
@@ -101,11 +110,16 @@ public class ExamAutoSubmissionService {
             || participant.getPersonalEndsAt().plusSeconds(3).isAfter(now)) {
             return false;
         }
-        process(participant, now, null);
+        process(participant, now, null, languages);
         return true;
     }
 
-    private List<String> process(ExamParticipant participant, LocalDateTime now, Long actor) {
+    private List<String> process(
+        ExamParticipant participant,
+        LocalDateTime now,
+        Long actor,
+        Map<Long, Languages> languages
+    ) {
         var drafts
             = jdbc
                 .query(
@@ -128,7 +142,7 @@ public class ExamAutoSubmissionService {
                         participant.getId(),
                         draft.problemId()
                     );
-            if (draft.sourceCode().isEmpty() || draft.seq() <= last) {
+            if (draft.sourceCode().isBlank() || draft.seq() <= last) {
                 continue;
             }
             size.validate(draft.sourceCode());
@@ -137,6 +151,16 @@ public class ExamAutoSubmissionService {
                     .findByExamIdAndProblemId(participant.getExam().getId(), draft.problemId())
                     .orElseThrow(() -> new IllegalStateException("Draft problem is not pinned"))
                     .getProblemRevisionId();
+            var supported = languages.get(draft.problemId());
+            String language = switch (draft.language()) {
+                case "JAVA" -> "java";
+                case "PYTHON" -> "python3";
+                case "CPP" -> "cpp";
+                default -> "";
+            };
+            if (supported == null || supported.revision() != revision || !supported.names().contains(language)) {
+                throw new ContestException(ContestErrorCode.UNSUPPORTED_LANGUAGE);
+            }
             ids.add(append(participant, draft, revision, now));
             acceptedProblems.add(draft.problemId());
         }
@@ -151,6 +175,36 @@ public class ExamAutoSubmissionService {
             judgements.refreshProblem(participant.getExam().getId(), participant.getId(), problemId, now);
         }
         return ids;
+    }
+
+    /** 고정 회차의 원격 언어 조회는 부모·참가자 잠금을 얻기 전에 완료한다. */
+    private Map<Long, Languages> supportedLanguages(long examId, long memberId) {
+        var pinned
+            = jdbc
+                .query(
+                    """
+                        SELECT DISTINCT ep.problem_id,ep.problem_revision_id FROM exam_participants p
+                        JOIN exam_drafts d ON d.exam_participant_id=p.id
+                        JOIN exam_problems ep ON ep.exam_id=p.exam_id AND ep.problem_id=d.problem_id
+                        WHERE p.exam_id=? AND p.member_id=? AND p.status='STARTED'
+                          AND p.auto_submitted_at IS NULL
+                        """,
+                    (rs, row) -> new long[] {
+                        rs.getLong(1),
+                        rs.getLong(2)
+                    },
+                    examId,
+                    memberId
+                );
+        var languages = new HashMap<Long, Languages>();
+        for (var problem : pinned) {
+            languages
+                .put(problem[0], new Languages(problem[1], content.supportedLanguages(examId, problem[0], problem[1])));
+        }
+        return languages;
+    }
+
+    private record Languages(long revision, List<String> names) {
     }
 
     private String append(ExamParticipant participant, Draft draft, long revision, LocalDateTime now) {

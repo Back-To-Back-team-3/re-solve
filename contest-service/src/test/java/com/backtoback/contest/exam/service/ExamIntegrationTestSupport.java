@@ -61,6 +61,8 @@ public abstract class ExamIntegrationTestSupport {
     @MockitoBean
     protected ExamRankingCacheRebuildScheduler rankingCacheScheduler;
     @MockitoBean
+    protected ContestSubmissionReconciliationScheduler reconciliationScheduler;
+    @MockitoBean
     protected MemberReplicaService refresh;
     @MockitoBean
     protected ExamContentClient content;
@@ -166,6 +168,17 @@ public abstract class ExamIntegrationTestSupport {
                 );
         }
         given(refresh.refresh(7)).willReturn("ACTIVE");
+        org.mockito.Mockito
+            .lenient()
+            .when(
+                content
+                    .supportedLanguages(
+                        org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.anyLong()
+                    )
+            )
+            .thenReturn(java.util.List.of("java", "python3", "cpp"));
     }
 
 }

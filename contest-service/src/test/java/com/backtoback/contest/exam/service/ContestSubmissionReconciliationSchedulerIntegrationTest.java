@@ -38,6 +38,10 @@ class ContestSubmissionReconciliationSchedulerIntegrationTest extends ExamIntegr
         var ids = jdbc.queryForList("SELECT id FROM exam_submissions ORDER BY received_at,id", Long.class);
         var client = org.mockito.Mockito.mock(com.backtoback.contest.exam.client.ExamReceiptClient.class);
         var reconcile = org.mockito.Mockito.mock(ExamReceiptReconciliation.class);
+        org.mockito.Mockito
+            .doThrow(new IllegalStateException("remote failure"))
+            .when(client)
+            .find(org.mockito.ArgumentMatchers.anyLong());
         var scheduler
             = new ContestSubmissionReconciliationScheduler(
                 jdbc,

@@ -1,6 +1,8 @@
 package com.backtoback.contest.exam.store;
 
 import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,13 +17,14 @@ import lombok.RequiredArgsConstructor;
 public class ExamSchedulerCursorStore {
     private static final Logger log = LoggerFactory.getLogger(ExamSchedulerCursorStore.class);
     private final StringRedisTemplate redis;
+    private final Map<String, Cursor> localCursors = new ConcurrentHashMap<>();
 
     /** 저장소가 비어 있거나 사용할 수 없으면 처음부터 다시 순회한다. */
     public Cursor load(String job) {
         try {
             String value = redis.opsForValue().get(key(job));
             if (value == null) {
-                return null;
+                return localCursors.get(job);
             }
             String[] parts = value.split("\\|", -1);
             if (parts.length != 2) {
@@ -31,15 +34,18 @@ public class ExamSchedulerCursorStore {
             if (id <= 0) {
                 throw new IllegalArgumentException("Invalid cursor");
             }
-            return new Cursor(LocalDateTime.parse(parts[0]), id);
+            var cursor = new Cursor(LocalDateTime.parse(parts[0]), id);
+            localCursors.put(job, cursor);
+            return cursor;
         } catch (RuntimeException failure) {
             log.warn("스케줄러 순회 위치 조회 실패: job={}, type={}", job, failure.getClass().getSimpleName());
-            return null;
+            return localCursors.get(job);
         }
     }
 
     /** 처리한 마지막 대상의 시각과 ID를 기록한다. */
     public void save(String job, Cursor cursor) {
+        localCursors.put(job, cursor);
         try {
             redis.opsForValue().set(key(job), cursor.time() + "|" + cursor.id());
         } catch (RuntimeException failure) {
@@ -49,6 +55,7 @@ public class ExamSchedulerCursorStore {
 
     /** 한 바퀴를 마치면 다음 회차에 처음부터 다시 검사한다. */
     public void clear(String job) {
+        localCursors.remove(job);
         try {
             redis.delete(key(job));
         } catch (RuntimeException failure) {
