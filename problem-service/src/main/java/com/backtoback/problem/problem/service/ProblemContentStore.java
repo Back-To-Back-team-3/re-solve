@@ -42,6 +42,9 @@ public class ProblemContentStore {
      * @param revisionId 내부 고정 회차 또는 일반 조회 시 null
      * @param context 내부 열람 문맥 또는 일반 조회 시 null
      * @return 본문·공개 테스트 참조
+     * @throws ProblemException 식별자·문맥 오류는 {@code COMMON_INVALID_REQUEST}, 열람할 문제가 없으면
+     *     {@code PROBLEM_NOT_FOUND}, 회차 소속이 다르면 {@code PROBLEM_REVISION_NOT_FOUND},
+     *     고정 채점 자료 조회 실패는 {@code COMMON_DEPENDENCY_UNAVAILABLE}
      */
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
@@ -83,6 +86,8 @@ public class ProblemContentStore {
      * @param imageId 이미지
      * @param context 내부 문맥 또는 일반 조회 시 null
      * @return MIME과 불변 파일 참조
+     * @throws ProblemException 식별자·문맥 오류는 {@code COMMON_INVALID_REQUEST}, 이미지 열람 불가·연결 불일치는
+     *     {@code PROBLEM_NOT_FOUND}, 내부 회차 소속 불일치는 {@code PROBLEM_REVISION_NOT_FOUND}
      */
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
@@ -134,7 +139,7 @@ public class ProblemContentStore {
      * 호출 서비스가 권한을 확인한 문맥의 형식을 검사한다.
      *
      * @param context 내부 문맥
-     * @throws ProblemException 허용하지 않는 형식 또는 ID 범위
+     * @throws ProblemException 허용하지 않는 형식 또는 ID 범위이면 {@code COMMON_INVALID_REQUEST}
      */
     private void context(String context) {
         try {
