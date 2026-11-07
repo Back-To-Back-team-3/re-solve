@@ -45,7 +45,8 @@ public class ProblemHideStore {
      *
      * @param command 정규화 요청
      * @return 신규 또는 동일 키의 원래 작업
-     * @throws ProblemException 작성자·키·미종결 작업 충돌
+     * @throws ProblemException 문제 없음은 {@code PROBLEM_NOT_FOUND}, 작성자 불일치는 {@code AUTH_ACCESS_DENIED},
+     *     다른 본문의 동일 키는 {@code IDEMPOTENCY_KEY_CONFLICT}, 다른 미종결 작업은 {@code PROBLEM_VERSION_CONFLICT}
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ProblemStateOperation begin(Command command) {
@@ -97,7 +98,8 @@ public class ProblemHideStore {
      * @param command 원래 요청
      * @param rejection 원격 확정 거절, 준비 성공이면 null
      * @return 영속 종결 결과
-     * @throws ProblemException 없는 원래 작업
+     * @throws ProblemException 문제 없음은 {@code PROBLEM_NOT_FOUND}
+     * @throws java.util.NoSuchElementException 문제에 속하는 원래 작업이 없는 경우
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ProblemStateOperation finish(String operationId, Command command, Rejection rejection) {
@@ -174,7 +176,7 @@ public class ProblemHideStore {
      *
      * @param id 문제 ID
      * @return 잠근 문제
-     * @throws ProblemException 없는 문제
+     * @throws ProblemException 문제 없음은 {@code PROBLEM_NOT_FOUND}
      */
     private Problem lock(long id) {
         return problems

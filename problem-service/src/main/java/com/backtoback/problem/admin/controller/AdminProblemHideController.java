@@ -36,10 +36,10 @@ public class AdminProblemHideController {
      * @param key 원래 요청 멱등키
      * @param body 기대 버전
      * @param request 감사 주소를 읽을 HTTP 요청
-     * @return 최초 공개 성공 또는 확정 실패 응답
+     * @return 최초 비공개 성공 또는 확정 실패 응답
      */
     @PostMapping("/api/v1/admin/problems/{problemId}/unpublication")
-    public ResponseEntity<String> publish(
+    public ResponseEntity<String> unpublish(
         @PathVariable long problemId,
         @AuthenticationPrincipal GatewayUser user,
         @RequestHeader("Idempotency-Key") String key,

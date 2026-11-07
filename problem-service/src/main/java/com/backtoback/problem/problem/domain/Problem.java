@@ -144,7 +144,8 @@ public class Problem extends BaseTimeEntity {
      *
      * @param expectedVersion 준비 요청의 원래 버전
      * @param target 비공개 또는 보관 상태
-     * @throws ProblemException 버전 경합 또는 허용하지 않는 상태 전이
+     * @throws ProblemException 버전 경합 시 {@code PROBLEM_VERSION_CONFLICT}, 허용하지 않는 전이는
+     *     {@code PROBLEM_INVALID_STATE_TRANSITION}
      */
     public void hide(int expectedVersion, ProblemVisibility target) {
         validateHide(expectedVersion, target);
@@ -157,7 +158,8 @@ public class Problem extends BaseTimeEntity {
      *
      * @param expectedVersion 기대 버전
      * @param target 비공개 또는 보관
-     * @throws ProblemException 버전 경합 또는 허용하지 않는 상태 전이
+     * @throws ProblemException 버전 경합 시 {@code PROBLEM_VERSION_CONFLICT}, 허용하지 않는 전이는
+     *     {@code PROBLEM_INVALID_STATE_TRANSITION}
      */
     public void validateHide(int expectedVersion, ProblemVisibility target) {
         if (rowVersion != expectedVersion) {
