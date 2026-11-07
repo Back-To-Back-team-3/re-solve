@@ -1,6 +1,7 @@
 package com.backtoback.contest.exam.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -27,6 +28,12 @@ public interface ExamProblemRepository extends JpaRepository<ExamProblem, Long> 
 
         long getProblemCount();
     }
+
+    /** 시험에 고정된 문제와 회차를 조회한다. */
+    Optional<ExamProblem> findByExamIdAndProblemId(Long examId, Long problemId);
+
+    /** 시험 문제를 표시 순서대로 조회한다. */
+    List<ExamProblem> findByExamIdOrderByDisplayOrderAsc(Long examId);
 
     /** 기존 문제 행을 먼저 삭제해 같은 문제의 유일 키가 충돌하지 않게 한다. */
     @Modifying
