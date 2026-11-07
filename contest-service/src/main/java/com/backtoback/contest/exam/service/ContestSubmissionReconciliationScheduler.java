@@ -20,6 +20,7 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.client.ExamReceiptClient;
+import com.backtoback.contest.exam.store.ExamSchedulerCursorStore;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -117,7 +118,6 @@ public class ContestSubmissionReconciliationScheduler {
         }
     }
 
-    /** 마지막 처리 시각과 ID 다음부터 한 페이지를 선택한다. */
     private java.util.List<Candidate> candidates(LocalDateTime cutoff, ExamSchedulerCursorStore.Cursor cursor) {
         String query
             = "SELECT s.id,s.received_at FROM exam_submissions s JOIN exams e ON e.id=s.exam_id "
@@ -143,7 +143,6 @@ public class ContestSubmissionReconciliationScheduler {
             );
     }
 
-    /** 대사 후보의 식별자와 원래 접수 시각이다. */
     private record Candidate(long id, LocalDateTime receivedAt) {
     }
 }

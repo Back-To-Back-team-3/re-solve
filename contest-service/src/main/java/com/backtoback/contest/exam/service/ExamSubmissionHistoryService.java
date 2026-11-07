@@ -103,7 +103,6 @@ public class ExamSubmissionHistoryService {
         return !visible && "JUDGED".equals(status) ? "REQUESTED" : status;
     }
 
-    /** 점수는 소수 둘째 자리의 문자열로 반환한다. */
     private String score(BigDecimal value) {
         return value == null ? null : value.toPlainString();
     }
@@ -116,7 +115,6 @@ public class ExamSubmissionHistoryService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
 
-    /** 커서 형식이 잘못되면 요청 오류로 처리한다. */
     private Cursor decode(String encoded) {
         try {
             String[] parts = new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8).split(":", -1);
@@ -141,7 +139,6 @@ public class ExamSubmissionHistoryService {
         }
     }
 
-    /** 양의 BIGINT 문자열을 검증한다. */
     private long id(String value) {
         try {
             if (value == null || !value.matches("[1-9][0-9]*")) {
@@ -170,7 +167,6 @@ public class ExamSubmissionHistoryService {
         Integer totalCount
     ) {
     }
-    /** 조회 조건과 마지막 ID에 묶인 커서다. */
     private record Cursor(long exam, long participant, long problem, long revision, long id) {
     }
 }

@@ -188,12 +188,10 @@ public class ExamFinalizationService {
             ) > 0;
     }
 
-    /** 조건에 맞는 행 수를 읽는다. */
     private long count(String sql, long examId) {
         return jdbc.queryForObject(sql, Long.class, examId);
     }
 
-    /** 참가자의 각 문제에 대해 마지막 접수와 분석용 시각을 계산한다. */
     private Calculated calculate(Participant participant, List<Problem> problems, LocalDateTime now) {
         var results = new ArrayList<ProblemResult>();
         BigDecimal total = BigDecimal.ZERO.setScale(2);
@@ -277,12 +275,10 @@ public class ExamFinalizationService {
         );
     }
 
-    /** null을 허용하는 분석 시각을 변환한다. */
     private String formatNullable(LocalDateTime time) {
         return time == null ? null : format(time);
     }
 
-    /** 저장 시각을 이벤트 계약의 오프셋 문자열로 변환한다. */
     private String format(LocalDateTime time) {
         return DateTimeFormatter
             .ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx")
@@ -343,7 +339,6 @@ public class ExamFinalizationService {
         List<String> targetMemberIds
     ) {
     }
-    /** 활성 참가의 식별자와 상태다. */
     private record Participant(long id, long memberId, String status) {
     }
     /** 문제의 종결 접수다. */
@@ -357,7 +352,6 @@ public class ExamFinalizationService {
         LocalDateTime receivedAt
     ) {
     }
-    /** 정렬과 스냅샷에 필요한 참가 집계다. */
     private record Calculated(
         Participant participant,
         boolean ranked,

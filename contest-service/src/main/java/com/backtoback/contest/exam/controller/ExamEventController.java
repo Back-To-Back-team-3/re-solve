@@ -21,7 +21,7 @@ import lombok.RequiredArgsConstructor;
 public class ExamEventController {
     private final ExamEventStreamService streams;
 
-    /** API 명세서 §4.3.1의 서버 이벤트 스트림을 연다. */
+    /** 4.3.1 시험 결과 SSE — 재연결 시 현재 공개 상태를 복구한다 (API 명세서 4.3.1). */
     @GetMapping(
         value = "/api/v1/exams/{examId}/events",
         produces = MediaType.TEXT_EVENT_STREAM_VALUE

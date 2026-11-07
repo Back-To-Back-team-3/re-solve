@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
+import com.backtoback.contest.exam.store.ExamRankingCache;
+
 import lombok.RequiredArgsConstructor;
 
 /** 시험 결과 캐시를 DB의 현재 버전으로 주기적으로 복구한다. */

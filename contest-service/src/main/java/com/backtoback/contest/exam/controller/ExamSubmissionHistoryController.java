@@ -9,8 +9,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.web.security.user.GatewayUser;
+import com.backtoback.contest.exam.dto.ExamSubmissionHistoryResponse;
 import com.backtoback.contest.exam.service.ExamSubmissionHistoryService;
-import com.backtoback.contest.exam.service.ExamSubmissionHistoryService.Page;
 
 import lombok.RequiredArgsConstructor;
 
@@ -20,9 +20,9 @@ import lombok.RequiredArgsConstructor;
 public class ExamSubmissionHistoryController {
     private final ExamSubmissionHistoryService history;
 
-    /** API 명세서 §4.2.9의 공개 조건에 따라 이력을 조회한다. */
+    /** 4.2.9 내 시험 제출 내역 — 종료 전 채점 결과를 숨긴다 (API 명세서 4.2.9). */
     @GetMapping("/api/v1/exams/{examId}/submissions")
-    public ResponseEntity<ApiResponse<Page>> read(
+    public ResponseEntity<ApiResponse<ExamSubmissionHistoryResponse>> read(
         @PathVariable String examId,
         @AuthenticationPrincipal GatewayUser user,
         @RequestParam(required = false) String problemId,
@@ -30,6 +30,12 @@ public class ExamSubmissionHistoryController {
         @RequestParam(defaultValue = "20") int size
     ) {
         return ResponseEntity
-            .ok(ApiResponse.success(null, history.read(examId, user.userId(), problemId, after, size)));
+            .ok(
+                ApiResponse
+                    .success(
+                        null,
+                        ExamSubmissionHistoryResponse.from(history.read(examId, user.userId(), problemId, after, size))
+                    )
+            );
     }
 }

@@ -35,7 +35,6 @@ public class ExamJudgementHandlers {
         return handler("SubmissionFailed", true);
     }
 
-    /** 이벤트 종류별 입력을 공통 결과 처리로 전달한다. */
     private EventHandler handler(String type, boolean failed) {
         return new EventHandler() {
             /** 이벤트 종류를 반환한다. */
@@ -104,7 +103,6 @@ public class ExamJudgementHandlers {
         };
     }
 
-    /** 공백이 아닌 필수 문자열을 읽는다. */
     private String text(JsonNode payload, String field) {
         var value = payload.get(field);
         if (value == null || !value.isString() || value.asString().isBlank()) {
@@ -113,7 +111,6 @@ public class ExamJudgementHandlers {
         return value.asString();
     }
 
-    /** 손실 없이 표현 가능한 정수 필드를 읽는다. */
     private int number(JsonNode payload, String field) {
         var value = payload.get(field);
         if (value == null || !value.isIntegralNumber() || !value.canConvertToInt()) {
@@ -122,7 +119,6 @@ public class ExamJudgementHandlers {
         return value.asInt();
     }
 
-    /** 선택 측정값은 null 또는 정수만 받는다. */
     private Integer optionalNumber(JsonNode payload, String field) {
         var value = payload.get(field);
         return value == null || value.isNull() ? null : number(payload, field);

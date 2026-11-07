@@ -24,11 +24,13 @@ import com.backtoback.contest.exam.client.ExamContentClient;
 import com.backtoback.contest.exam.domain.ExamParticipant;
 import com.backtoback.contest.exam.domain.ExamParticipantStatus;
 import com.backtoback.contest.exam.domain.ExamStatus;
+import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 import com.backtoback.contest.exam.repository.ExamParticipantRepository;
 import com.backtoback.contest.exam.repository.ExamProblemRepository;
 import com.backtoback.contest.exam.repository.ExamRepository;
 import com.backtoback.contest.exam.repository.MemberReplicaRepository;
 import com.backtoback.contest.exam.service.ExamSubmissionMessageSize.Payload;
+import com.backtoback.contest.exam.store.ExamSubmissionRateLimiter;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
@@ -54,7 +56,7 @@ public class ExamSubmissionService {
     private final Clock clock;
 
     /** 기존 접수를 먼저 확인하고 신규 요청만 잠금 밖에서 의존 서비스를 조회한다. */
-    public Response submit(String examId, String memberId, Request request) {
+    public Response submit(String examId, String memberId, ExamSubmissionRequest request) {
         long exam = id(examId);
         long member = id(memberId);
         if (request == null || request.language() == null || request.sourceCode() == null) {
@@ -86,8 +88,7 @@ public class ExamSubmissionService {
         return transactions.execute(status -> accept(exam, member, problem, revision, seq, language, request));
     }
 
-    /** 부모와 참가자를 잠가 같은 접수의 본문을 비교한다. */
-    private Response existingLocked(long exam, long member, long problem, long seq, Request request) {
+    private Response existingLocked(long exam, long member, long problem, long seq, ExamSubmissionRequest request) {
         exams.findForUpdate(exam).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
         var participant = participant(exam, member);
         return existing(participant, problem, seq, request);
@@ -101,7 +102,7 @@ public class ExamSubmissionService {
         long revision,
         long seq,
         String language,
-        Request request
+        ExamSubmissionRequest request
     ) {
         var exam = exams.findForUpdate(examId).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
         var participant = participant(examId, member);
@@ -230,8 +231,7 @@ public class ExamSubmissionService {
         );
     }
 
-    /** 같은 참가·문제·순번의 접수가 있으면 본문 충돌을 구분한다. */
-    private Response existing(ExamParticipant participant, long problem, long seq, Request request) {
+    private Response existing(ExamParticipant participant, long problem, long seq, ExamSubmissionRequest request) {
         return jdbc
             .query(
                 "SELECT id,language,source_code,status,received_at FROM exam_submissions "
@@ -263,7 +263,6 @@ public class ExamSubmissionService {
             .orElse(null);
     }
 
-    /** 활성 참가 이력을 잠근다. */
     private ExamParticipant participant(long exam, long member) {
         return participants
             .findForUpdate(exam, member)
@@ -273,7 +272,6 @@ public class ExamSubmissionService {
             .orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_REGISTERED));
     }
 
-    /** 양의 BIGINT 문자열을 확인한다. */
     private long id(String value) {
         try {
             if (value == null || !value.matches("[1-9][0-9]*")) {
@@ -285,19 +283,14 @@ public class ExamSubmissionService {
         }
     }
 
-    /** DB 시간에 서비스 오프셋을 붙인다. */
     private OffsetDateTime offset(LocalDateTime value) {
         return value.atZone(ClockConfiguration.SERVICE_ZONE).toOffsetDateTime();
     }
 
-    /** 이벤트 시각을 마이크로초 단위로 직렬화한다. */
     private String format(LocalDateTime value) {
         return DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx").format(offset(value));
     }
 
-    /** 직접 제출 요청이다. */
-    public record Request(String problemId, String language, String sourceCode, String seq) {
-    }
     /** 접수 결과다. */
     public record Response(
         String examSubmissionId,
@@ -307,7 +300,6 @@ public class ExamSubmissionService {
         OffsetDateTime personalEndsAt
     ) {
     }
-    /** 문제의 최신 Draft다. */
     private record Draft(long seq, String language, String sourceCode) {
     }
 }

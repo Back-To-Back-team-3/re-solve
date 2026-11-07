@@ -1,4 +1,4 @@
-package com.backtoback.contest.exam.service;
+package com.backtoback.contest.exam.store;
 
 import java.util.List;
 

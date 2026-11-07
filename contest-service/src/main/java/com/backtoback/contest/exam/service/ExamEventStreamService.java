@@ -129,7 +129,6 @@ public class ExamEventStreamService {
             );
     }
 
-    /** 전체 종료 후 본인 제출 집계만 전송한다. */
     private void sendResult(SseEmitter emitter, ExamEventSnapshotService.Snapshot snapshot) throws IOException {
         String status = "FINALIZED".equals(snapshot.status()) ? "FINALIZED" : "PROVISIONAL";
         emitter
