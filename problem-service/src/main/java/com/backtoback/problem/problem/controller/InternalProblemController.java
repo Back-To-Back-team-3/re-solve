@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.backtoback.problem.problem.config.InternalProblemServiceCondition;
+import com.backtoback.problem.problem.config.InternalProblemStubCondition;
 import com.backtoback.problem.problem.dto.request.ContestProblemLinkRequest;
 import com.backtoback.problem.problem.dto.response.ContestProblemLinkResponse;
 import com.backtoback.problem.problem.dto.response.JudgingDataResponse;
@@ -29,7 +29,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Validated
 @RestController
-@Conditional(InternalProblemServiceCondition.class)
+@Conditional(InternalProblemStubCondition.class)
 @RequiredArgsConstructor
 public class InternalProblemController {
     private static final String PROBLEM_PATH = "/internal/v1/problems";
