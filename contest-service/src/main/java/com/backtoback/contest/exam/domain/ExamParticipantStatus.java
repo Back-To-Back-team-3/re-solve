@@ -6,11 +6,8 @@ package com.backtoback.contest.exam.domain;
  * <ul><li>도메인 및 데이터베이스 v1.0 / §4.4.3 시험 참가자: 참가 상태와 허용 전이</li></ul>
  */
 public enum ExamParticipantStatus {
-    // 등록만 했고 아직 입장하지 않은 상태다.
     REGISTERED,
-    // 최초 입장을 완료한 상태다.
     STARTED,
-    // 개인 시험이 종료된 상태다.
     FINISHED,
     // 전체 종료 시까지 입장하지 않은 상태다.
     ABSENT,
