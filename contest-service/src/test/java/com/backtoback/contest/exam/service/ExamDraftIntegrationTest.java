@@ -16,10 +16,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -274,5 +276,28 @@ class ExamDraftIntegrationTest {
                     .isEqualTo(ContestErrorCode.MEMBER_SUSPENDED)
             );
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isZero();
+    }
+
+    /** Redis의 시간 경계 전에는 마지막 요청을 확정하지 않는다. */
+    @Test
+    @DisplayName("버퍼 마감 전에 깨어나도 마감 직전의 마지막 요청을 선택한다")
+    void waitsForRedisDeadline() throws Exception {
+        // given
+        var timeScript = new DefaultRedisScript<Long>("""
+            local time = redis.call('TIME')
+            return tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000) + 1000
+            """, Long.class);
+        long due = redis.execute(timeScript, java.util.List.of());
+        String key = "exam:draft:buffer:" + participantId + ":slot:" + due;
+        redis.opsForHash().put(key, "last", "first");
+        try (var pool = Executors.newSingleThreadExecutor()) {
+            // when
+            var result
+                = pool.submit(() -> (String)ReflectionTestUtils.invokeMethod(buffer, "lastAfterDeadline", key, due));
+            assertThatThrownBy(() -> result.get(100, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            redis.opsForHash().put(key, "last", "last");
+            // then
+            assertThat(result.get(3, TimeUnit.SECONDS)).isEqualTo("last");
+        }
     }
 }

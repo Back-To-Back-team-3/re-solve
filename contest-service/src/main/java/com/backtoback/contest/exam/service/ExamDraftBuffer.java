@@ -47,6 +47,15 @@ public class ExamDraftBuffer {
         redis.call('SET', KEYS[1] .. ':lock', ARGV[1], 'PX', 120000)
         return 0
         """, Long.class);
+    private static final DefaultRedisScript<List> CLOSE_SLOT = new DefaultRedisScript<>("""
+        local time = redis.call('TIME')
+        local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+        local remaining = tonumber(ARGV[1]) - now
+        if remaining > 0 then return {remaining, ''} end
+        local last = redis.call('HGET', KEYS[1], 'last')
+        if not last then return {-1, ''} end
+        return {0, last}
+        """, List.class);
     private static final DefaultRedisScript<Long> RENEW = new DefaultRedisScript<>("""
         if redis.call('GET', KEYS[1] .. ':lock') ~= ARGV[1] then return 0 end
         return redis.call('PEXPIRE', KEYS[1] .. ':lock', 120000)
@@ -84,7 +93,7 @@ public class ExamDraftBuffer {
         String key = prefix + ":slot:" + due.longValue();
         waitMillis(delay.longValue());
         try {
-            String last = (String)redis.opsForHash().get(key, "last");
+            String last = lastAfterDeadline(key, due.longValue());
             if (last == null) {
                 throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
             }
@@ -126,6 +135,23 @@ public class ExamDraftBuffer {
             throw failure;
         } catch (RuntimeException failure) {
             throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
+        }
+    }
+
+    /** Redis 서버 시각으로 창 종료를 확인한 뒤 마지막 요청을 읽는다. */
+    private String lastAfterDeadline(String key, long due) {
+        for (;;) {
+            List<?> result = redis.execute(CLOSE_SLOT, List.of(key), Long.toString(due));
+            if (result == null || result.size() != 2 || !(result.get(0) instanceof Number remaining)) {
+                throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            }
+            if (remaining.longValue() < 0) {
+                throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            }
+            if (remaining.longValue() == 0) {
+                return (String)result.get(1);
+            }
+            waitMillis(remaining.longValue());
         }
     }
 
