@@ -11,7 +11,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.notification.admin.dto.request.AdminNotificationBroadcastRequest;
@@ -33,7 +32,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class AdminNotificationService {
 
     private static final ZoneId KST_ZONE = ZoneId.of("Asia/Seoul");
@@ -47,7 +45,8 @@ public class AdminNotificationService {
 
     /**
      * 발송 시점에 활성화된 SSE 연결 회원(및 발송 관리자)에게 시스템 공지 알림을 브로드캐스트하고 보관함에 저장한다.
-     * DB 트랜잭션 완료 후 트랜잭션 외부에서 SSE 네트워크 I/O를 수행하여 커넥션 점유를 방지한다.
+     * DB 저장은 {@code TransactionTemplate} 내부에서 안전하게 커밋하고, SSE 전송 네트워크 I/O는 트랜잭션 외부에서 수행해
+     * 커넥션 점유 및 롤백 격리를 방지하기 위해 메서드 레벨 트랜잭션을 걸지 않는다(컨벤션 매뉴얼 6.6).
      *
      * @param adminMemberId 관리자 회원 ID
      * @param request 공지 발송 요청 DTO
@@ -90,8 +89,11 @@ public class AdminNotificationService {
                     .build();
             map.put(adminMemberId, notificationRepository.save(adminNotification));
 
-            // 활성 회원별 개별 공지 알림 (각 회원 본인 ID가 할당됨)
+            // 활성 회원별 개별 공지 알림 (각 회원 본인 ID가 할당됨, 커밋 시점 탈퇴 회원 최종 방어)
             for (Long memberId : targetMemberIds) {
+                if (withdrawnMemberRepository != null && withdrawnMemberRepository.existsByMemberId(memberId)) {
+                    continue;
+                }
                 Notification memberNotice
                     = Notification
                         .builder()

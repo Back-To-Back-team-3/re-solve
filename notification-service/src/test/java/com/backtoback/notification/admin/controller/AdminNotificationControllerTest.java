@@ -25,6 +25,11 @@ import com.backtoback.notification.admin.dto.response.AdminNotificationBroadcast
 import com.backtoback.notification.admin.service.AdminNotificationService;
 import com.backtoback.notification.notification.domain.NotificationType;
 
+/**
+ * 관리자 공지 알림 브로드캐스트 컨트롤러 단위 테스트 (API 명세서 7.2.1).
+ * {@code NotificationServiceApplication}의 {@code JpaAuditingConfiguration} import로 인해
+ * {@code @WebMvcTest}가 JPA metamodel 오류로 실패하므로 standalone MockMvc로 작성한다(컨벤션 매뉴얼 6.7).
+ */
 class AdminNotificationControllerTest {
 
     private MockMvc mockMvc;
