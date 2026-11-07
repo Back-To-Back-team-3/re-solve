@@ -32,6 +32,21 @@ public class ProblemReadStore {
     private final JdbcTemplate jdbc;
 
     /**
+     * 회원별 해결 여부를 조회한다.
+     *
+     * @param problemId 문제
+     * @param memberId 회원
+     * @return 최초 AC가 존재하는지 여부
+     */
+    @Transactional(readOnly = true)
+    public boolean solved(long problemId, long memberId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+            SELECT EXISTS (SELECT 1 FROM member_problem_statuses
+            WHERE member_id=? AND problem_id=? AND is_solved=true)
+            """, Boolean.class, memberId, problemId));
+    }
+
+    /**
      * 일반 공개 문제의 사용 회차를 검색한다.
      *
      * @param member 조회 회원
