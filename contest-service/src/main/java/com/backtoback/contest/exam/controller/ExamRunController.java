@@ -9,10 +9,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.web.security.user.GatewayUser;
+import com.backtoback.contest.exam.client.ExamRunClient.CustomTest;
 import com.backtoback.contest.exam.client.ExamRunClient.Result;
+import com.backtoback.contest.exam.dto.ExamRunRequest;
 import com.backtoback.contest.exam.service.ExamRunService;
 import com.backtoback.contest.exam.service.ExamRunService.RunRequest;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /** 시험 참가자의 공개 예제와 사용자 입력 실행을 제공한다. */
@@ -27,8 +30,12 @@ public class ExamRunController {
         @PathVariable String examId,
         @PathVariable String problemId,
         @AuthenticationPrincipal GatewayUser user,
-        @RequestBody RunRequest request
+        @Valid @RequestBody ExamRunRequest request
     ) {
-        return ResponseEntity.ok(ApiResponse.success(null, service.run(examId, user.userId(), problemId, request)));
+        var tests
+            = request.customTests() == null ? null
+                : request.customTests().stream().map(test -> new CustomTest(test.args())).toList();
+        var input = new RunRequest(request.language(), request.sourceCode(), tests);
+        return ResponseEntity.ok(ApiResponse.success(null, service.run(examId, user.userId(), problemId, input)));
     }
 }

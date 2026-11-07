@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
@@ -26,10 +25,7 @@ public class ExamRunClient {
 
     /** Judge 주소와 요청 생성기를 보관한다. */
     @Autowired
-    public ExamRunClient(
-        RestClient.Builder builder,
-        @Value("${JUDGE_SERVICE_URL:http://judge-service:8080}") String baseUrl
-    ) {
+    public ExamRunClient(RestClient.Builder builder, ExamRunProperties properties) {
         this.clients = remaining -> {
             var factory
                 = new JdkClientHttpRequestFactory(
@@ -39,7 +35,7 @@ public class ExamRunClient {
                         .build()
                 );
             factory.setReadTimeout(Duration.ofNanos(remaining));
-            return builder.clone().baseUrl(baseUrl).requestFactory(factory).build();
+            return builder.clone().baseUrl(properties.baseUrl()).requestFactory(factory).build();
         };
     }
 
