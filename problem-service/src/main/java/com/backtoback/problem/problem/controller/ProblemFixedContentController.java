@@ -1,6 +1,6 @@
 package com.backtoback.problem.problem.controller;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.backtoback.problem.problem.config.InternalProblemServiceCondition;
 import com.backtoback.problem.problem.dto.response.ProblemContentResponse;
 import com.backtoback.problem.problem.service.ProblemContentService;
 
@@ -17,12 +18,7 @@ import lombok.RequiredArgsConstructor;
 /** 호출 서비스가 권한을 확인한 고정 회차 본문과 이미지를 제공한다. */
 @RestController
 @Profile("!internal-stub")
-@ConditionalOnProperty(
-    prefix = "problem.internal-api",
-    name = "enabled",
-    havingValue = "true",
-    matchIfMissing = true
-)
+@Conditional(InternalProblemServiceCondition.class)
 @RequiredArgsConstructor
 public class ProblemFixedContentController {
     private final ProblemContentService service;
