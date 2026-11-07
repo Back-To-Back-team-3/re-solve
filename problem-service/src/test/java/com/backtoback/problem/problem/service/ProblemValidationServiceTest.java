@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.time.Clock;
 import java.util.List;
@@ -44,6 +46,7 @@ import com.backtoback.common.event.store.JdbcOutboxStore;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
+import com.backtoback.problem.problem.client.JudgeProgressClient;
 import com.backtoback.problem.problem.config.ProblemMessagingConfiguration;
 import com.backtoback.problem.problem.config.ProblemMessagingProperties;
 import com.backtoback.problem.problem.dto.request.ProblemValidationRequest;
@@ -79,6 +82,8 @@ class ProblemValidationServiceTest {
     private ProblemValidationService service;
     @Autowired
     private ProblemValidationDataService data;
+    @Autowired
+    private ValidationProgressStore progressStore;
     @Autowired
     private JdbcTemplate jdbc;
     @MockitoBean
@@ -134,6 +139,22 @@ class ProblemValidationServiceTest {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             return objects.get(call.getArgument(1));
         });
+    }
+
+    /** 실제 저장소의 작성자 검사에서 다른 관리자를 거절하고 Judge 호출을 차단한다. */
+    @Test
+    @DisplayName("다른 관리자의 검증 진행 조회는 실제 작성자 검사에서 거절한다")
+    void rejectsOtherAuthorProgress() {
+        var problem = create(9199);
+        var accepted = accept(problem, 9199, UUID.randomUUID().toString(), REQUEST, null);
+        var judge = mock(JudgeProgressClient.class);
+        var progress = new ValidationProgressService(progressStore, judge);
+        assertThatThrownBy(() -> progress.read(Long.parseLong(accepted.validationId()), 9200))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                error -> assertThat(error.getErrorCode()).isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
+            );
+        verifyNoInteractions(judge);
     }
 
     /** 접수·감사·Outbox와 코드 원문·순서·최초 재응답을 함께 확인한다. */
