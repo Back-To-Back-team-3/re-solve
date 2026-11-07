@@ -1,11 +1,12 @@
 package com.backtoback.problem.problem.controller;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.backtoback.problem.problem.config.InternalProblemServiceCondition;
 import com.backtoback.problem.problem.dto.response.JudgingDataResponse;
 import com.backtoback.problem.problem.dto.response.JudgingValidationResponse;
 import com.backtoback.problem.problem.service.ProblemJudgingStore;
@@ -15,12 +16,7 @@ import lombok.RequiredArgsConstructor;
 /** Judge에 지정 회차의 사전 검증과 불변 채점 자료를 제공한다. */
 @RestController
 @Profile("!internal-stub")
-@ConditionalOnProperty(
-    prefix = "problem.internal-api",
-    name = "enabled",
-    havingValue = "true",
-    matchIfMissing = true
-)
+@Conditional(InternalProblemServiceCondition.class)
 @RequiredArgsConstructor
 public class ProblemJudgingController {
     private final ProblemJudgingStore store;
