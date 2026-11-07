@@ -24,6 +24,7 @@ Write a PR body from the actual changes and verification results only, and regis
 5. If files owned by another owner group changed, write the target, the reason, and a confirmation request line in the reviewer section. If you do not know the owner's GitHub account, leave it empty and ask the user.
 6. If a decision record is related, name the file in the reviewer section.
 7. Output the body and wait for approval. Register it on GitHub only after the user says to register it.
+8. (Stack PR only) After the PR is registered, ask the user to complete the Stack connection on GitHub ("Create stack / Add to stack" in the GitHub web UI). The PR base branch alone does not complete Stack registration.
 
 ## Output format
 
