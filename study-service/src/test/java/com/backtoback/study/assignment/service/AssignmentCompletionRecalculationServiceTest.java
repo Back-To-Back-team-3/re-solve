@@ -108,7 +108,8 @@ class AssignmentCompletionRecalculationServiceTest {
             .willReturn(CompletionType.ON_TIME);
         given(assignmentProblemRepository.findByAssignmentIdAndStatus(ASSIGNMENT_ID, AssignmentProblemStatus.ACTIVE))
             .willReturn(List.of(activeProblem));
-        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID)).willReturn(List.of());
+        given(completionRepository.findByAssignmentIdAndMemberIdWithForShare(ASSIGNMENT_ID, MEMBER_ID))
+            .willReturn(List.of());
 
         // when
         service.recalculate(ASSIGNMENT_ID, MEMBER_ID, PROBLEM_ID);
