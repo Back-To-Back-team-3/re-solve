@@ -74,6 +74,10 @@ public class InternalProblemStubService implements InternalProblemService {
         return new JudgingDataResponse(
             problemId,
             revisionId,
+            "개발용 문제",
+            1,
+            List.of("구현"),
+            List.of("1"),
             FUNCTION_SPEC,
             EXECUTION_LIMITS,
             SUPPORTED_LANGUAGES,
