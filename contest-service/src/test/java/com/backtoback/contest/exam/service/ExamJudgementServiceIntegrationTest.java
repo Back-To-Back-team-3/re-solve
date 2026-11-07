@@ -13,8 +13,58 @@ import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** 채점 결과의 연결·회차 검증과 마지막 제출 기준 점수를 검증한다. */
 class ExamJudgementServiceIntegrationTest extends ExamIntegrationTestSupport {
+    @Test
+    @DisplayName("시험 SubmissionFailed는 공통 소비 경로에서 한 번만 반영하고 승인한다")
+    void consumesFailureIdempotently() {
+        var receipt = submissions.submit(examId, "7", new ExamSubmissionRequest("101", "java", "코드", "1"));
+        var data = new java.util.HashMap<String, Object>();
+        data.put("context", "EXAM");
+        data.put("status", "FAILED");
+        data.put("examId", examId);
+        data.put("examSubmissionId", receipt.examSubmissionId());
+        data.put("submissionId", "9001");
+        data.put("userId", "7");
+        data.put("problemId", "101");
+        data.put("problemRevisionId", "1001");
+        data.put("judgeAttempt", 1);
+        data.put("errorCode", "SYSTEM_ERROR");
+        data.put("submittedAt", receipt.receivedAt().toString());
+        var metadata
+            = new EventMetadata(
+                java.util.UUID.randomUUID(),
+                "SubmissionFailed",
+                "v1",
+                java.time.OffsetDateTime.now(),
+                "9001",
+                "test"
+            );
+        String message = codec.serialize(metadata, data);
+        var acknowledged = new java.util.concurrent.atomic.AtomicInteger();
+
+        consumer.consume(message, acknowledged::incrementAndGet);
+        consumer.consume(message, acknowledged::incrementAndGet);
+
+        assertThat(acknowledged).hasValue(2);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT status FROM exam_submissions WHERE id=?",
+                    String.class,
+                    receipt.examSubmissionId()
+                )
+        ).isEqualTo("FAILED");
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM processed_events WHERE event_id=?",
+                    Integer.class,
+                    metadata.eventId().toString()
+                )
+        ).isEqualTo(1);
+    }
+
     @Test
     @DisplayName("채점 결과는 절사해 반영하고 같은 회차의 다른 판정은 거절한다")
     void consumesJudgementAndRejectsConflict() {
@@ -71,6 +121,7 @@ class ExamJudgementServiceIntegrationTest extends ExamIntegrationTestSupport {
                 )
         ).isEqualByComparingTo("16.66");
         data.put("verdict", "AC");
+        data.put("passedCount", 3);
         var conflicting
             = new EventMetadata(
                 java.util.UUID.randomUUID(),
