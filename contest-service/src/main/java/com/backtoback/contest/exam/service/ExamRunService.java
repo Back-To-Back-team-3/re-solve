@@ -79,14 +79,14 @@ public class ExamRunService {
                 .findByExamIdAndMemberIdAndStatusNot(examId, memberId, ExamParticipantStatus.CANCELED)
                 .orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_REGISTERED));
         var now = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE);
+        if (exam.getStatus() == ExamStatus.CANCELED) {
+            throw new ContestException(ContestErrorCode.EXAM_CANCELED);
+        }
         if (now.isBefore(exam.getStartsAt())) {
             throw new ContestException(ContestErrorCode.EXAM_NOT_STARTED);
         }
         if (participant.getEnteredAt() == null) {
             throw new ContestException(ContestErrorCode.EXAM_NOT_REGISTERED);
-        }
-        if (exam.getStatus() == ExamStatus.CANCELED) {
-            throw new ContestException(ContestErrorCode.EXAM_CANCELED);
         }
         if (participant.getStatus() != ExamParticipantStatus.STARTED || now.isAfter(participant.getPersonalEndsAt())
             || now.isAfter(exam.getEndsAt()) || exam.getStatus() == ExamStatus.CLOSED
