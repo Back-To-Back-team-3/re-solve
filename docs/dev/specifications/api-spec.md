@@ -4763,9 +4763,9 @@
 #### 4.1.2 스터디 시험 목록
 
 - **Method / URI:** `GET /api/v1/studies/{studyId}/exams`
-- **인증:** 로그인 필요 + `APPROVED` 구성원 또는 해당 시험에 등록한 본인
+- **인증:** 로그인 필요 + 현재 `APPROVED` 구성원 또는 해당 시험의 활성 참가자 본인
 - **대응 테이블:** `exams`, `exam_participants`
-- **설명:** 스터디 소속 시험 목록. 스터디 탈퇴 후에도 본인이 등록한 시험은 조회한다. 시작 전에는 문제 식별자·본문을 반환하지 않는다.
+- **설명:** 현재 `APPROVED` 구성원은 스터디의 모든 시험을 조회한다. 스터디 탈퇴자는 본인의 활성 참가가 있는 시험만 조회하며 취소 이력만 있으면 조회할 수 없다. 조회 권한이 없으면 403을 반환하고, 권한 범위에서 상태 필터·페이지에 맞는 시험이 없으면 200과 빈 페이지를 반환한다. 시작 전에는 문제 식별자·본문을 반환하지 않는다.
 - **요청 헤더:**
     
     
@@ -4794,7 +4794,7 @@
     | `content[].startsAt` | string (date-time) | 시작 시각 |
     | `content[].endsAt` | string (date-time) | 전체 종료 시각 |
     | `content[].problemCount` | integer | 편입된 문제 수 |
-    | `content[].myParticipantStatus` | string 또는 null | 본인 참가 상태. 미등록은 null |
+    | `content[].myParticipantStatus` | string 또는 null | 본인의 활성 참가 상태. 활성 참가가 없으면 null |
     | `page` · `size` · `totalElements` · `totalPages` · `hasNext` | — | 공통 목록 필드 |
     
     ```json
@@ -4823,14 +4823,14 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `EXAM_NOT_FOUND`(404)
+    - `AUTH_ACCESS_DENIED`(403)
 
 #### 4.1.3 시험 상세
 
 - **Method / URI:** `GET /api/v1/exams/{examId}`
-- **인증:** 로그인 필요 + 스터디 `APPROVED` 구성원 또는 활성 등록자
+- **인증:** 로그인 필요 + 현재 스터디 `APPROVED` 구성원 또는 해당 시험의 활성 참가자 본인
 - **대응 테이블:** `exams`, `exam_problems`, `exam_participants`
-- **설명:** 시작 전에는 문제 식별자·본문을 포함하지 않는다. 상세 조회만으로 입장을 기록하지 않는다.
+- **설명:** 스터디 탈퇴자도 해당 시험에 활성 참가가 있으면 조회할 수 있으며 취소 이력만 있으면 조회할 수 없다. 시작 전에는 문제 식별자·본문을 포함하지 않는다. 상세 조회만으로 입장을 기록하지 않는다.
 - **요청 헤더:**
     
     
