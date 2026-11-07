@@ -5,6 +5,8 @@ x-db-environment: &db-environment
   SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
   SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
   SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+  SERVER_SHUTDOWN: ${SERVER_SHUTDOWN:-graceful}
+  SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:-25s}
 
 x-db-redis-environment: &db-redis-environment
   <<: *db-environment
@@ -113,6 +115,8 @@ services:
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       JWT_SECRET: ${JWT_SECRET:-}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+      SERVER_SHUTDOWN: ${SERVER_SHUTDOWN:-graceful}
+      SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:-25s}
     depends_on:
       redis:
         condition: service_healthy
