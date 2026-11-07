@@ -21,7 +21,6 @@ public record ExamResponse(
     String totalScore,
     List<Problem> problems
 ) {
-    /** 저장된 시험과 문제를 공개 응답으로 변환한다. */
     public static ExamResponse from(Exam exam, List<ExamProblem> problems) {
         return new ExamResponse(
             exam.getId().toString(),
@@ -45,7 +44,6 @@ public record ExamResponse(
         String score,
         int displayOrder
     ) {
-        /** 저장된 문제를 응답으로 변환한다. */
         public static Problem from(ExamProblem problem) {
             return new Problem(
                 problem.getProblemId().toString(),

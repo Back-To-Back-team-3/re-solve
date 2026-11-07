@@ -95,7 +95,6 @@ public class ExamManagementService {
         }
     }
 
-    /** 현재 회원 상태와 스터디의 관리 권한을 확인한다. */
     private void authorize(long study, long member) {
         if (!"ACTIVE".equals(members.refresh(member))) {
             throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
@@ -118,7 +117,6 @@ public class ExamManagementService {
         }
     }
 
-    /** 입력의 범위와 중복을 확인한다. */
     private Selection validate(ExamCreateRequest request) {
         if (request == null || request.title() == null || request.title().isBlank() || request.title().length() > 200
             || !"FIXED".equals(request.mode()) || request.startsAt() == null || request.endsAt() == null
@@ -388,7 +386,6 @@ public class ExamManagementService {
     public record UpdatedProblem(String problemId, String problemRevisionId, String score, int displayOrder) {
     }
 
-    /** 저장할 고정 문제 목록을 요청 순서에서 구성한다. */
     private List<ExamProblem> pinProblems(Exam exam, ExamCreateRequest request, Map<Long, ProblemSummary> summaries) {
         var pinned = new ArrayList<ExamProblem>();
         for (var problem : request.problems()) {
