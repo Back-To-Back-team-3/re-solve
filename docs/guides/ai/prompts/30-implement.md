@@ -20,6 +20,7 @@ Implement a settled Issue scope one commit at a time, with approval for each com
 
 ## Steps — A. Plan
 
+0. (Stack PR only) If the user declares this is a Stack PR, follow `git-github.md` > `1.8 스택 브랜치 작업 규칙`: create the branch with the preceding branch as the base (`git switch -c <new-branch> <preceding-branch>`) and register the stack on GitHub ("Create stack / Add to stack"). Setting the base alone does not complete the Stack registration.
 1. Output only the implementation plan first.
     - Order commits so that each one compiles on its own: lower layers first. Put tests in the same commit as the code they test.
     - Follow `docs/guides/convention-build-manual.md` > `6. 코드 구조` for packages, class names, and layers.
