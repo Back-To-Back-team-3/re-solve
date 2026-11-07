@@ -22,7 +22,15 @@ import software.amazon.awssdk.services.sns.SnsClient;
 @Import(OutboxRelayConfiguration.class)
 public class ContestOutboxConfiguration {
     private static final Set<String> TOPIC_EVENTS
-        = Set.of("ExamUpdated", "ExamParticipantRegistered", "ExamParticipantCanceled");
+        = Set
+            .of(
+                "ExamUpdated",
+                "ExamParticipantRegistered",
+                "ExamParticipantCanceled",
+                "ExamStarted",
+                "ExamClosed",
+                "ExamCanceled"
+            );
 
     @Bean
     SnsClient contestSnsClient(AwsClientBuilderConfigurer configurer) {
