@@ -2,12 +2,13 @@ package com.backtoback.problem.problem.controller;
 
 import java.util.List;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.backtoback.problem.problem.config.InternalProblemServiceCondition;
 import com.backtoback.problem.problem.dto.response.ProblemSummaryListResponse;
 import com.backtoback.problem.problem.service.ProblemReadStore;
 
@@ -16,12 +17,7 @@ import lombok.RequiredArgsConstructor;
 /** 내부 편입 용도별 요약을 실제 저장 자료에서 제공한다. */
 @RestController
 @Profile("!internal-stub")
-@ConditionalOnProperty(
-    prefix = "problem.internal-api",
-    name = "enabled",
-    havingValue = "true",
-    matchIfMissing = true
-)
+@Conditional(InternalProblemServiceCondition.class)
 @RequiredArgsConstructor
 public class ProblemSummaryController {
     private final ProblemReadStore store;
