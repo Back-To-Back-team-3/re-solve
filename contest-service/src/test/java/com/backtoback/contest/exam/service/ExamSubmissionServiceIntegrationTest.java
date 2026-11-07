@@ -16,7 +16,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.AopTestUtils;
 
+import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 import com.backtoback.contest.exam.service.ExamDraftStore.SaveRequest;
@@ -69,12 +71,14 @@ class ExamSubmissionServiceIntegrationTest extends ExamIntegrationTestSupport {
     void rollsBackSubmissionWhenOutboxFails() {
         // given
         given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        OutboxEventWriter target = AopTestUtils.getUltimateTargetObject(outbox);
         doThrow(new IllegalStateException("outbox failure"))
-            .when(outbox)
+            .when(target)
             .append(anyString(), anyString(), anyString(), anyString(), anyString(), any());
         // when & then
         assertThatThrownBy(() -> submissions.submit(examId, "7", new ExamSubmissionRequest("101", "java", "코드", "1")))
-            .isInstanceOf(IllegalStateException.class);
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("outbox failure");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isZero();

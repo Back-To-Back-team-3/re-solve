@@ -14,7 +14,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.AopTestUtils;
 
+import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 
@@ -101,12 +103,14 @@ class ExamFinalizationServiceIntegrationTest extends ExamIntegrationTestSupport 
         autoSubmissions.finish(examId, "7");
         var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
         jdbc.update("UPDATE exams SET status='CLOSED',closed_at=? WHERE id=?", now, examId);
+        OutboxEventWriter target = AopTestUtils.getUltimateTargetObject(outbox);
         doThrow(new IllegalStateException("outbox failure"))
-            .when(outbox)
+            .when(target)
             .append(anyString(), anyString(), anyString(), anyString(), anyString(), any());
         // when & then
         assertThatThrownBy(() -> finalization.finalizeExam(Long.parseLong(examId)))
-            .isInstanceOf(IllegalStateException.class);
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("outbox failure");
         assertThat(jdbc.queryForObject("SELECT status FROM exams WHERE id=?", String.class, examId))
             .isEqualTo("CLOSED");
         assertThat(

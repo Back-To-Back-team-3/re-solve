@@ -64,9 +64,10 @@ class ExamResultQueryServiceIntegrationTest extends ExamIntegrationTestSupport {
         jdbc
             .update(
                 "INSERT INTO exam_participants (exam_id,member_id,status,participant_revision,registered_at,"
-                    + "total_score,is_ranked,last_valid_submitted_at,version,created_at,updated_at) "
-                    + "VALUES (?,8,'FINISHED',1,?,0,true,?,0,?,?)",
+                    + "personal_ends_at,total_score,is_ranked,last_valid_submitted_at,version,created_at,updated_at) "
+                    + "VALUES (?,8,'FINISHED',1,?,?,0,true,?,0,?,?)",
                 examId,
+                now,
                 now,
                 now,
                 now,
