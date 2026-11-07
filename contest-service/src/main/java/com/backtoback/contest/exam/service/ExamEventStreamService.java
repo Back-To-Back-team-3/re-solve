@@ -11,6 +11,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.contest.global.error.ContestException;
+
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 
@@ -32,6 +35,7 @@ public class ExamEventStreamService {
      */
     public SseEmitter subscribe(String examId, String memberId, String lastEventId) {
         var first = snapshots.read(examId, memberId);
+        validateCursor(lastEventId, first);
         var emitter = new SseEmitter(60000L);
         var closed = new AtomicBoolean();
         var last = new AtomicReference<>(first);
@@ -85,6 +89,22 @@ public class ExamEventStreamService {
         });
         emitter.onError(failure -> cleanup.run());
         return emitter;
+    }
+
+    /** 서로 다른 시험이나 미래 버전은 현재 시험의 유효한 재연결 위치가 아니다. */
+    static void validateCursor(String value, ExamEventSnapshotService.Snapshot snapshot) {
+        if (value == null) {
+            return;
+        }
+        try {
+            String[] parts = value.split(":", -1);
+            if (parts.length != 3 || !"EXAM".equals(parts[0]) || !snapshot.examId().equals(parts[1])
+                || !parts[2].matches("0|[1-9][0-9]*") || Long.parseLong(parts[2]) > snapshot.revision()) {
+                throw new IllegalArgumentException();
+            }
+        } catch (IllegalArgumentException failure) {
+            throw new ContestException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        }
     }
 
     /** 상태 변경은 공개 결과가 없는 시점에도 전송한다. */
