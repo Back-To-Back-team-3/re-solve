@@ -26,6 +26,7 @@ public class TagService {
     private final TagRepository tagRepository;
     private final TagCreationRecordService creationRecords;
     private final TagOrderService tagOrderService;
+    private final TagCreationWriter creationWriter;
 
     /**
      * 태그 ID로 조회해 내부 API(2.6.11)가 반환할 존재 응답을 만든다.
@@ -66,7 +67,8 @@ public class TagService {
     /**
      * 멱등키를 확인하고 지정한 순번에 태그를 등록한다.
      * 24시간 이내의 동일 요청은 최초 응답을 반환한다. 요청 순번을 보정한 위치에 삽입하고 기존 태그의 순번을 맞춘다.
-     * 순번 변경·태그 저장·요청 기록 완료를 같은 트랜잭션으로 처리한다.
+     * 사전 조회가 연결을 반환한 뒤 쓰기 서비스의 트랜잭션을 시작하므로 이 진입점은 트랜잭션을 만들지 않는다.
+     * 순번 변경·태그 저장·요청 기록 완료는 쓰기 서비스의 같은 트랜잭션으로 처리한다.
      *
      * @param adminId 요청한 관리자 ID
      * @param key 관리자별 중복 요청 식별 키
@@ -76,26 +78,12 @@ public class TagService {
      * @throws DataIntegrityViolationException 태그 이름이 중복된 경우; 전역 처리기에서 태그 중복 오류로 응답한다
      * @throws ProblemException 잠금 대기 시간이 초과되어 {@code PROBLEM_VERSION_CONFLICT}가 발생한 경우
      */
-    @Transactional
     public TagResponse create(String adminId, String key, TagCreateRequest request) {
         var replay = creationRecords.replay(adminId, key, request.name(), request.displayOrder());
         if (replay.isPresent()) {
             return replay.get();
         }
-        // DB 잠금을 보유한 채 Redis 잠금을 기다리지 않도록 공통 잠금을 먼저 획득한다.
-        tagOrderService.lock();
-        var savedRecord = creationRecords.lock(adminId, key, request.name(), request.displayOrder());
-        if (!savedRecord.matches(request.name(), request.displayOrder())) {
-            throw new ProblemException(CommonErrorCode.IDEMPOTENCY_KEY_CONFLICT);
-        }
-        if (savedRecord.getResultTagId() != null) {
-            return TagResponse.from(savedRecord);
-        }
-        int displayOrder = tagOrderService.makeRoomFor(request.displayOrder());
-        Tag tag = tagRepository.saveAndFlush(Tag.create(request.name().strip(), displayOrder));
-        TagResponse response = TagResponse.from(tag);
-        savedRecord.complete(tag.getId(), tag.getName(), tag.getDisplayOrder());
-        return response;
+        return creationWriter.create(adminId, key, request);
     }
 
     /**

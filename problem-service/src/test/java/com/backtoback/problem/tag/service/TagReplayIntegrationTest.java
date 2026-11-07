@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,7 +35,10 @@ import com.backtoback.problem.tag.dto.request.TagCreateRequest;
         "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
         "spring.cloud.aws.region.static=ap-northeast-2",
         "spring.cloud.aws.credentials.access-key=test",
-        "spring.cloud.aws.credentials.secret-key=test"
+        "spring.cloud.aws.credentials.secret-key=test",
+        "spring.datasource.hikari.maximum-pool-size=1",
+        "spring.datasource.hikari.minimum-idle=1",
+        "spring.datasource.hikari.connection-timeout=1000"
     }
 )
 @Testcontainers(disabledWithoutDocker = true)
@@ -86,6 +91,29 @@ class TagReplayIntegrationTest {
             assertThat(lock.isHeldByCurrentThread()).isTrue();
         } finally {
             lock.unlock();
+        }
+    }
+
+    /**
+     * 단일 DB 연결을 동시 재요청들이 순차 반환하며 처리하는지 확인한다.
+     *
+     * @throws Exception 동시 요청 실패 또는 시간 초과
+     */
+    @Test
+    @DisplayName("연결 풀이 하나여도 신규 등록과 동시 멱등 재요청이 연결 고갈 없이 완료된다")
+    void concurrentReplayWithSingleConnection() throws Exception {
+        String key = UUID.randomUUID().toString();
+        var request = new TagCreateRequest("태그-" + key, 0);
+        var first = service.create("admin", key, request);
+        var start = new CyclicBarrier(4);
+        try (var executor = Executors.newFixedThreadPool(4)) {
+            var responses = IntStream.range(0, 4).mapToObj(index -> executor.submit(() -> {
+                start.await(5, TimeUnit.SECONDS);
+                return service.create("admin", key, request);
+            })).toList();
+            for (var response : responses) {
+                assertThat(response.get(5, TimeUnit.SECONDS)).isEqualTo(first);
+            }
         }
     }
 

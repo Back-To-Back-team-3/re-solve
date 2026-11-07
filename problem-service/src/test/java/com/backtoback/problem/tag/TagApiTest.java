@@ -83,6 +83,7 @@ import com.backtoback.problem.tag.dto.request.TagUpdateRequest;
 import com.backtoback.problem.tag.repository.TagRepository;
 import com.backtoback.problem.tag.scheduler.TagCreationRecordCleanupScheduler;
 import com.backtoback.problem.tag.service.TagCreationRecordService;
+import com.backtoback.problem.tag.service.TagCreationWriter;
 import com.backtoback.problem.tag.service.TagOrderService;
 import com.backtoback.problem.tag.service.TagService;
 
@@ -438,6 +439,11 @@ class TagApiTest {
         assertThat(orders).containsExactlyElementsOf(hasExistingTag ? List.of(0, 1, 2) : List.of(0, 1));
     }
 
+    /**
+     * 서로 다른 Redis 클라이언트의 공통 잠금으로 생성 순번을 직렬화한다.
+     *
+     * @throws Exception 동시 생성 또는 Redis 클라이언트 종료 실패
+     */
     @Test
     @DisplayName("서로 다른 Redis 클라이언트의 태그 등록을 직렬화한다")
     void separateRedisClientsSerializeConcurrentTagCreation() throws Exception {
@@ -448,7 +454,12 @@ class TagApiTest {
                 = new TagService(
                     tags,
                     creationRecords,
-                    new TagOrderService(tags, new RedisTransactionLock(otherClient))
+                    new TagOrderService(tags, new RedisTransactionLock(otherClient)),
+                    new TagCreationWriter(
+                        tags,
+                        creationRecords,
+                        new TagOrderService(tags, new RedisTransactionLock(otherClient))
+                    )
                 );
             var transaction = new TransactionTemplate(transactionManager);
             // when
