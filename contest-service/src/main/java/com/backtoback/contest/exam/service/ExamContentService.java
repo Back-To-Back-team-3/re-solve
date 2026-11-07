@@ -79,7 +79,7 @@ public class ExamContentService {
                 .stream()
                 .filter(item -> item.problemId() == problem)
                 .findFirst()
-                .orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_PROBLEM_NOT_INCLUDED));
+                .orElseThrow(() -> new ContestException(ContestErrorCode.PROBLEM_NOT_FOUND));
         var source = content.content(exam, problem, pinned.revisionId());
         if (!imageIds(body(source)).contains(Long.toString(image))) {
             throw new ContestException(ContestErrorCode.PROBLEM_NOT_FOUND);

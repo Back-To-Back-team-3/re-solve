@@ -176,4 +176,21 @@ class ExamContentServiceTest {
             );
         verify(client, never()).image(55, 101, 1001, 702);
     }
+
+    /** 시험에 포함되지 않은 문제의 이미지는 문제 없음으로 처리한다. */
+    @Test
+    @DisplayName("시험에 없는 문제의 이미지는 404로 거절한다")
+    void rejectsImageOutsideExam() {
+        // given
+        participant.enter(LocalDateTime.parse("2026-01-01T08:00:00"));
+        given(problems.findByExamIdOrderByDisplayOrderAsc(55L)).willReturn(List.of());
+        // when & then
+        assertThatThrownBy(() -> service.image("55", "7", "101", "701"))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(ContestErrorCode.PROBLEM_NOT_FOUND)
+            );
+        verifyNoInteractions(client);
+    }
 }

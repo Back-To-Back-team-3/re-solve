@@ -22,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -31,6 +32,7 @@ import com.backtoback.contest.exam.domain.ExamMode;
 import com.backtoback.contest.exam.domain.ExamParticipant;
 import com.backtoback.contest.exam.domain.ExamParticipantStatus;
 import com.backtoback.contest.exam.domain.ExamProblem;
+import com.backtoback.contest.exam.domain.ExamStatus;
 import com.backtoback.contest.exam.repository.ExamParticipantRepository;
 import com.backtoback.contest.exam.repository.ExamProblemRepository;
 import com.backtoback.contest.exam.repository.ExamRepository;
@@ -127,5 +129,42 @@ class ExamRunServiceTest {
                 error -> assertThat(((ContestException)error).getErrorCode()).isEqualTo(ContestErrorCode.CODE_TOO_LARGE)
             );
         verifyNoInteractions(refresh, judge);
+    }
+
+    /** 취소된 시험은 시작 전이라도 Run을 취소 오류로 차단한다. */
+    @Test
+    @DisplayName("취소된 시험의 Run은 시작 시각 전에 취소 오류로 거절한다")
+    void rejectsCanceledExam() {
+        // given
+        var exam
+            = Exam
+                .create(
+                    12L,
+                    7L,
+                    "시험",
+                    ExamMode.FIXED,
+                    LocalDateTime.parse("2026-01-01T10:00:00"),
+                    LocalDateTime.parse("2026-01-01T11:00:00"),
+                    null,
+                    1
+                );
+        ReflectionTestUtils.setField(exam, "status", ExamStatus.CANCELED);
+        var participant = ExamParticipant.register(exam, 7, LocalDateTime.parse("2026-01-01T07:00:00"));
+        given(transactions.execute(any())).willAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(null);
+        });
+        given(exams.findById(55L)).willReturn(Optional.of(exam));
+        given(participants.findByExamIdAndMemberIdAndStatusNot(55L, 7L, ExamParticipantStatus.CANCELED))
+            .willReturn(Optional.of(participant));
+        // when & then
+        assertThatThrownBy(
+            () -> service.run("55", "7", "101", new ExamRunService.RunRequest("java", "code", List.of()))
+        )
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode()).isEqualTo(ContestErrorCode.EXAM_CANCELED)
+            );
+        verifyNoInteractions(judge);
     }
 }
