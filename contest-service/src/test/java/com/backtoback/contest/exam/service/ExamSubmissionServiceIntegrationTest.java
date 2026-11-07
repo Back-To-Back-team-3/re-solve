@@ -27,10 +27,43 @@ import com.backtoback.contest.exam.store.ExamSubmissionRequestStore;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** 직접 제출의 멱등성·경합과 접수·Outbox 롤백을 검증한다. */
 class ExamSubmissionServiceIntegrationTest extends ExamIntegrationTestSupport {
+    @org.springframework.beans.factory.annotation.Autowired
+    private jakarta.persistence.EntityManagerFactory entityManagerFactory;
     @MockitoSpyBean
     private ExamSubmissionRequestStore requestStore;
+
+    @Test
+    @DisplayName("OSIV에 남은 참가 엔티티가 있어도 잠금 뒤 완료된 수동 종료를 다시 읽는다")
+    void refreshesParticipantAfterConcurrentFinish() {
+        var requestManager = entityManagerFactory.createEntityManager();
+        org.springframework.transaction.support.TransactionSynchronizationManager
+            .bindResource(entityManagerFactory, new org.springframework.orm.jpa.EntityManagerHolder(requestManager));
+        try {
+            requestManager.find(com.backtoback.contest.exam.domain.ExamParticipant.class, participantId);
+            given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willAnswer(invocation -> {
+                jdbc
+                    .update(
+                        "UPDATE exam_participants SET status='FINISHED',personal_ends_at=NOW(6) WHERE id=?",
+                        participantId
+                    );
+                return java.util.List.of("java");
+            });
+
+            assertThatThrownBy(
+                () -> submissions.submit(examId, "7", new ExamSubmissionRequest("101", "java", "코드", "1"))
+            )
+                .isInstanceOf(ContestException.class)
+                .extracting("errorCode")
+                .isEqualTo(ContestErrorCode.EXAM_ALREADY_FINISHED);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .unbindResource(entityManagerFactory);
+            requestManager.close();
+        }
+    }
 
     @Test
     @DisplayName("최초 요청 보존에 실패하면 접수와 Outbox를 함께 롤백한다")
