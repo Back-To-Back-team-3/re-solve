@@ -12,18 +12,20 @@ import org.springframework.stereotype.Component;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
+import com.backtoback.problem.problem.dto.request.ProblemContentRequest;
 import com.backtoback.problem.problem.dto.request.ProblemCreateRequest;
+import com.backtoback.problem.problem.dto.request.ProblemRevisionRequest;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /** 전체 HTTP 본문을 제한된 크기로 읽고 외부 입력 오류를 공통 업무 오류로 변환한다. */
 @Component
-public class ProblemCreateBodyReader extends AbstractHttpMessageConverter<ProblemCreateRequest> {
+public class ProblemCreateBodyReader extends AbstractHttpMessageConverter<ProblemContentRequest> {
     private final ObjectMapper mapper;
 
     /**
-     * 최초 등록 JSON만 읽는 변환기를 생성한다.
+     * 최초·새 회차 등록 JSON을 읽는 변환기를 생성한다.
      *
      * @param mapper 애플리케이션 JSON 매퍼
      */
@@ -35,7 +37,7 @@ public class ProblemCreateBodyReader extends AbstractHttpMessageConverter<Proble
     /** {@inheritDoc} */
     @Override
     protected boolean supports(Class<?> type) {
-        return type == ProblemCreateRequest.class;
+        return type == ProblemCreateRequest.class || type == ProblemRevisionRequest.class;
     }
 
     /** {@inheritDoc} */
@@ -46,15 +48,15 @@ public class ProblemCreateBodyReader extends AbstractHttpMessageConverter<Proble
 
     /** {@inheritDoc} */
     @Override
-    protected ProblemCreateRequest readInternal(Class<? extends ProblemCreateRequest> type, HttpInputMessage message)
+    protected ProblemContentRequest readInternal(Class<? extends ProblemContentRequest> type, HttpInputMessage message)
         throws IOException {
-        return read(message.getBody());
+        return read(message.getBody(), type);
     }
 
     /** {@inheritDoc} */
     @Override
-    protected void writeInternal(ProblemCreateRequest request, HttpOutputMessage message) {
-        throw new UnsupportedOperationException("최초 등록 요청은 응답으로 쓰지 않습니다.");
+    protected void writeInternal(ProblemContentRequest request, HttpOutputMessage message) {
+        throw new UnsupportedOperationException("등록 요청은 응답으로 쓰지 않습니다.");
     }
 
     /**
@@ -66,13 +68,27 @@ public class ProblemCreateBodyReader extends AbstractHttpMessageConverter<Proble
      * @throws ProblemException 본문이 너무 크거나 JSON 형식이 올바르지 않은 경우
      */
     public ProblemCreateRequest read(InputStream stream) throws IOException {
+        return read(stream, ProblemCreateRequest.class);
+    }
+
+    /**
+     * 등록 종류에 맞춰 크기 제한과 엄격한 JSON 변환을 적용한다.
+     *
+     * @param stream HTTP 본문
+     * @param type 최초 또는 새 회차 요청 타입
+     * @param <T> 입력 타입
+     * @return 변환된 등록 입력
+     * @throws IOException 스트림 읽기에 실패한 경우
+     * @throws ProblemException 크기 초과는 {@code PROBLEM_REQUEST_TOO_LARGE}, 잘못된 JSON은 {@code COMMON_INVALID_REQUEST}
+     */
+    private <T extends ProblemContentRequest> T read(InputStream stream, Class<T> type) throws IOException {
         byte[] bytes = stream.readNBytes(8388609);
         if (bytes.length > 8388608) {
             throw new ProblemException(ProblemErrorCode.PROBLEM_REQUEST_TOO_LARGE);
         }
         try {
             return mapper
-                .readerFor(ProblemCreateRequest.class)
+                .readerFor(type)
                 .with(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .with(tools.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .without(tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT)
