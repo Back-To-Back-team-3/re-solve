@@ -33,8 +33,9 @@ import com.backtoback.problem.problem.client.JudgeProgressClient;
 import com.backtoback.problem.problem.dto.request.ProblemRevisionRequest;
 import com.backtoback.problem.problem.dto.request.ProblemValidationRequest;
 import com.backtoback.problem.problem.dto.response.JudgingDataResponse;
+import com.backtoback.problem.problem.dto.response.JudgingValidationResponse;
 
-/** 실제 DB에서 통과 사용 회차 검색과 목적별 편입 요약을 검증한다. */
+/** 실제 DB에서 고정 회차의 채점 자료와 문제 소속 검증을 확인한다. */
 @SpringBootTest(
     properties = {
         "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
@@ -125,7 +126,7 @@ class ProblemJudgingStoreTest {
                 );
         jdbc
             .update(
-                "UPDATE problem_validations SET result_status='PASSED',runtime_key='original',runner_version='v1'"
+                "UPDATE problem_validations SET result_status='PASSED',runtime_key=REPEAT('a',64),runner_version='v1'"
                     + " WHERE id=?",
                 accepted.validationId()
             );
@@ -155,13 +156,35 @@ class ProblemJudgingStoreTest {
         assertThat(response.problemDifficulty()).isEqualTo(1);
         assertThat(response.cases()).hasSize(2);
         assertThat(response.cases().get(1).isSample()).isFalse();
-        assertThat(response.executionProfiles().getFirst().runtimeKey()).isEqualTo("original");
+        assertThat(response.executionProfiles().getFirst().runtimeKey()).isEqualTo("a".repeat(64));
         jdbc.update("UPDATE problem_validations SET runtime_key=NULL WHERE id=?", accepted.validationId());
-        assertThatThrownBy(() -> queries.read(id, revision))
-            .isInstanceOfSatisfying(
-                ProblemException.class,
-                failure -> assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
-            );
+        assertThatThrownBy(() -> queries.read(id, revision)).isInstanceOfSatisfying(ProblemException.class, failure -> {
+            assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            assertThat(failure).hasCauseInstanceOf(IllegalStateException.class);
+            assertThat(failure.getCause()).hasMessage("통과 실행 환경이 없습니다.");
+        });
+    }
+
+    /** 버전 관리 미사용 파일도 연결 상태와 체크섬이 확인되면 조회한다. */
+    @Test
+    @DisplayName("버전 없는 연결 파일도 사전 검증과 채점 자료에 반환한다")
+    void unversionedAssets() {
+        var created = creates.create(9203, UUID.randomUUID().toString(), ProblemCreateFixtures.request(), null);
+        long id = Long.parseLong(created.problemId());
+        long revision = Long.parseLong(created.problemRevisionId());
+        jdbc.update("UPDATE problem_test_assets SET object_version=NULL WHERE problem_id=?", id);
+
+        var snapshot = queries.read(id, revision);
+        var data = JudgingDataResponse.from(snapshot);
+        var validationResponse = JudgingValidationResponse.from(snapshot);
+        assertThat(data.cases()).hasSize(2).allSatisfy(test -> {
+            assertThat(test.asset().objectVersion()).isNull();
+            assertThat(test.asset().objectKey()).isNotBlank();
+            assertThat(test.asset().sha256()).hasSize(64);
+        });
+        assertThat(validationResponse.totalCount()).isEqualTo(2);
+        assertThat(validationResponse.testAssetIds())
+            .containsExactlyElementsOf(data.cases().stream().map(test -> test.testAssetId()).toList());
     }
 
     /** 다른 문제의 회차 조회를 거부한다. */

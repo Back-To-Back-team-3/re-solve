@@ -5,6 +5,7 @@ import java.util.Map;
 
 import com.backtoback.problem.problem.service.ProblemJudgingStore.Snapshot;
 
+/** 고정 회차의 실행 조건·통과 환경과 원문 없는 채점 파일 참조. */
 public record JudgingDataResponse(
     String problemId,
     String problemRevisionId,
