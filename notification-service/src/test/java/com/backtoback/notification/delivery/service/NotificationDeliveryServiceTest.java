@@ -495,6 +495,32 @@ class NotificationDeliveryServiceTest {
         assertThat(emitterRepository.findAllByMemberId(memberId)).isEmpty();
     }
 
+    @Test
+    @DisplayName("broadcast 호출 시 활성화된 모든 세션에 알림이 전송된다")
+    void broadcastSendsToAllActiveSessions() {
+        // given
+        deliveryService.subscribe(101L, null);
+        deliveryService.subscribe(102L, null);
+
+        Notification notice
+            = Notification
+                .builder()
+                .memberId(1L)
+                .sourceEventId("notice-1")
+                .type(NotificationType.SYSTEM_NOTICE)
+                .title("전체 공지")
+                .content("공지 내용입니다.")
+                .linkUrl("/notices/1")
+                .build();
+        ReflectionTestUtils.setField(notice, "id", 999L);
+
+        // when
+        int count = deliveryService.broadcast(notice);
+
+        // then
+        assertThat(count).isEqualTo(2);
+    }
+
     /**
      * 리플렉션 없이 전송 이벤트 ID와 종료 상태를 캡처하는 테스트용 SseEmitter 서브클래스.
      */

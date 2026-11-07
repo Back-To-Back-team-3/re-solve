@@ -174,6 +174,60 @@ public class NotificationDeliveryService {
     }
 
     /**
+     * 현재 활성화된 모든 SSE 세션에 시스템 알림을 실시간 브로드캐스트 전송한다.
+     *
+     * @param notification 전송할 알림 엔티티
+     * @return 성공적으로 전송된 세션 수
+     */
+    public int broadcast(Notification notification) {
+        List<SseSession> sessions = emitterRepository.findAll();
+        if (sessions.isEmpty()) {
+            return 0;
+        }
+
+        NotificationEventResponse response = NotificationEventResponse.from(notification);
+        int deliveredCount = 0;
+
+        for (SseSession session : sessions) {
+            SseEmitter emitter = session.emitter();
+            synchronized (emitter) {
+                AtomicLong tracker = session.lastSentNotificationId();
+                if (notification.getId() != null && notification.getId() <= tracker.get()) {
+                    continue;
+                }
+
+                try {
+                    emitter
+                        .send(
+                            SseEmitter
+                                .event()
+                                .id(
+                                    notification.getId() != null ? String.valueOf(notification.getId())
+                                        : UUID.randomUUID().toString()
+                                )
+                                .name(EVENT_NOTIFICATION)
+                                .data(response)
+                        );
+                    if (notification.getId() != null) {
+                        tracker.set(Math.max(tracker.get(), notification.getId()));
+                    }
+                    deliveredCount++;
+                } catch (IOException | IllegalStateException exception) {
+                    log
+                        .debug(
+                            "브로드캐스트 SSE 전송 실패, 세션 정리: emitterId={}, memberId={}",
+                            session.emitterId(),
+                            session.memberId(),
+                            exception
+                        );
+                    cleanup(session.emitterId(), emitter, exception);
+                }
+            }
+        }
+        return deliveredCount;
+    }
+
+    /**
      * 탈퇴한 회원의 모든 활성 SSE 세션을 저장소에서 제거하고 정상 종료(complete) 처리한다 (이벤트 계약서 4.1 M3, 5.1).
      * 신규 구독(subscribe)의 탈퇴 여부 확인 및 세션 저장과 동일한 회원 생명주기 락 안에서 스냅샷을 조회해
      * 탈퇴 직전/도중 등록된 세션이 누락되어 활성 상태로 남는 경합을 방지한다.
