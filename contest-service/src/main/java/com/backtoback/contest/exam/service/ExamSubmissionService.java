@@ -35,6 +35,7 @@ import com.backtoback.contest.exam.store.ExamSubmissionRequestStore;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 
 /** 참가자 잠금으로 직접 제출의 멱등성과 Draft·접수·Outbox 원자성을 보장한다. */
@@ -56,6 +57,7 @@ public class ExamSubmissionService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final Clock clock;
+    private final EntityManager entityManager;
 
     /** 기존 접수를 먼저 확인하고 신규 요청만 잠금 밖에서 의존 서비스를 조회한다. */
     public Response submit(String examId, String memberId, ExamSubmissionRequest request) {
@@ -108,6 +110,9 @@ public class ExamSubmissionService {
     ) {
         var exam = exams.findForUpdate(examId).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
         var participant = participant(examId, member);
+        // OSIV에서 앞선 조회의 엔티티가 남아 있어도 부모·참가자 잠금 뒤의 DB 값을 사용한다.
+        entityManager.refresh(exam);
+        entityManager.refresh(participant);
         var now
             = LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MICROS), ClockConfiguration.SERVICE_ZONE);
         var old = existing(participant, problemId, seq, request);
