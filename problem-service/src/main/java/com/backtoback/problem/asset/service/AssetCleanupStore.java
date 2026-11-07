@@ -1,0 +1,205 @@
+package com.backtoback.problem.asset.service;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.backtoback.problem.asset.domain.AssetKind;
+
+import lombok.RequiredArgsConstructor;
+
+/** 파일 한 행의 삭제 선점과 S3 삭제 이후 정리를 별도 트랜잭션에서 수행한다. */
+@Service
+@RequiredArgsConstructor
+public class AssetCleanupStore {
+    private final JdbcTemplate jdbc;
+    private final Clock clock;
+
+    /**
+     * 네 파일 종류에서 복구·종료 확인·정리 후보를 합계 500건까지 조회한다.
+     *
+     * @return 잠금 없는 후보
+     */
+    @Transactional(
+        readOnly = true,
+        propagation = Propagation.REQUIRES_NEW
+    )
+    public List<Candidate> candidates() {
+        var parts = new ArrayList<String>();
+        var args = new ArrayList<Object>();
+        var now = LocalDateTime.now(clock);
+        for (var kind : AssetKind.values()) {
+            parts
+                .add(
+                    "SELECT '" + kind.name() + "' kind,id,created_at," + " CASE WHEN status='DELETING' THEN 0 "
+                        + "WHEN upload_finished_at IS NOT NULL THEN 1 ELSE 2 END priority" + " FROM " + kind.table()
+                        + " WHERE status='DELETING' OR "
+                        + "(status IN ('PENDING','DISCARDED') AND upload_finished_at<=?) OR "
+                        + "(status='PENDING' AND upload_finished_at IS NULL AND upload_expires_at<=?)"
+                );
+            args.add(now.minusHours(24));
+            args.add(now);
+        }
+        return jdbc
+            .query(
+                "SELECT kind,id FROM (" + String.join(" UNION ALL ", parts)
+                    + ") candidates ORDER BY priority,created_at,kind,id LIMIT 500",
+                (rs, row) -> new Candidate(AssetKind.valueOf(rs.getString("kind")), rs.getLong("id")),
+                args.toArray()
+            );
+    }
+
+    /**
+     * 잠긴 후보는 건너뛰며 종료·유예·참조를 확인해 DELETING을 커밋한다.
+     *
+     * @param candidate 후보
+     * @return 선점 결과와 불변 파일 정보
+     * @throws IllegalStateException LINKED 이외 상태의 참조 불일치
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Claim claim(Candidate candidate) {
+        var rows = lock(candidate);
+        if (rows.isEmpty()) {
+            return new Claim("skipped", null);
+        }
+        var file = rows.getFirst();
+        if ("LINKED".equals(file.status())) {
+            return new Claim("skipped", null);
+        }
+        requireUnreferenced(candidate);
+        if (file.finishedAt() == null) {
+            return new Claim("unconfirmed", null);
+        }
+        if (file.finishedAt().isAfter(LocalDateTime.now(clock).minusHours(24))) {
+            return new Claim("skipped", null);
+        }
+        if (!List.of("PENDING", "DISCARDED", "DELETING").contains(file.status())) {
+            return new Claim("skipped", null);
+        }
+        jdbc
+            .update(
+                "UPDATE " + candidate.kind().table() + " SET status='DELETING',updated_at=? WHERE id=?",
+                LocalDateTime.now(clock),
+                candidate.id()
+            );
+        return new Claim("claimed", file);
+    }
+
+    /**
+     * S3 삭제 뒤 동일 파일의 실제 참조를 다시 검사하고 파일 행만 삭제한다.
+     *
+     * @param expected 삭제한 파일의 불변 메타 정보
+     * @return 실제 DB 삭제 여부
+     * @throws IllegalStateException 상태·참조·객체 정보 불일치
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean complete(File expected) {
+        var rows = lock(expected.candidate());
+        if (rows.isEmpty()) {
+            return false;
+        }
+        var current = rows.getFirst();
+        if (!"DELETING".equals(current.status()) || !Objects.equals(expected.key(), current.key())
+            || !Objects.equals(expected.version(), current.version())
+            || !Objects.equals(expected.finishedAt(), current.finishedAt()) || current.finishedAt() == null
+            || !Objects.equals(expected.sha256(), current.sha256()) || expected.sizeBytes() != current.sizeBytes()) {
+            throw new IllegalStateException("삭제 파일의 상태·메타 정보가 변경되었습니다.");
+        }
+        requireUnreferenced(expected.candidate());
+        return jdbc
+            .update("DELETE FROM " + expected.candidate().kind().table() + " WHERE id=?", expected.candidate().id())
+            == 1;
+    }
+
+    /**
+     * 가장 오래 보존된 미연결·삭제 중 파일의 경과 초를 조회한다.
+     *
+     * @param deleting 삭제 중만 조회할지 여부
+     * @return 경과 초, 대상이 없으면 0
+     */
+    @Transactional(
+        readOnly = true,
+        propagation = Propagation.REQUIRES_NEW
+    )
+    public double oldestAge(boolean deleting) {
+        LocalDateTime oldest = null;
+        for (var kind : AssetKind.values()) {
+            var value
+                = jdbc
+                    .queryForObject(
+                        "SELECT MIN(created_at) FROM " + kind.table()
+                            + (deleting ? " WHERE status='DELETING'" : " WHERE status IN ('PENDING','DISCARDED')"),
+                        LocalDateTime.class
+                    );
+            if (value != null && (oldest == null || value.isBefore(oldest))) {
+                oldest = value;
+            }
+        }
+        return oldest == null ? 0 : Math.max(0, Duration.between(oldest, LocalDateTime.now(clock)).toSeconds());
+    }
+
+    /**
+     * 같은 파일에 대한 연결과 삭제를 직렬화한다.
+     *
+     * @param candidate 대상 파일
+     * @return 잠근 파일 또는 빈 목록
+     */
+    private List<File> lock(Candidate candidate) {
+        return jdbc
+            .query(
+                "SELECT status,object_key,object_version,upload_finished_at,sha256,size_bytes FROM "
+                    + candidate.kind().table() + " WHERE id=? FOR UPDATE SKIP LOCKED",
+                (rs, row) -> new File(
+                    candidate,
+                    rs.getString("status"),
+                    rs.getString("object_key"),
+                    rs.getString("object_version"),
+                    rs.getObject("upload_finished_at", LocalDateTime.class),
+                    rs.getString("sha256"),
+                    rs.getLong("size_bytes")
+                ),
+                candidate.id()
+            );
+    }
+
+    /**
+     * 과거 회차와 실패 검증 요청까지 모든 실제 참조를 확인한다.
+     *
+     * @param candidate 파일
+     * @throws IllegalStateException 실제 참조 존재
+     */
+    private void requireUnreferenced(Candidate candidate) {
+        var kind = candidate.kind();
+        if (!jdbc.queryForList(kind.reference(), Long.class, candidate.id()).isEmpty()
+            || (kind.additionalReference() != null
+                && !jdbc.queryForList(kind.additionalReference(), Long.class, candidate.id()).isEmpty())) {
+            throw new IllegalStateException("미연결 파일에 실제 참조가 존재합니다.");
+        }
+    }
+
+    /** 종류와 ID로 구별한 후보 파일이다. */
+    public record Candidate(AssetKind kind, long id) {
+    }
+    /** 삭제 전에 고정한 파일 정보다. */
+    public record File(
+        Candidate candidate,
+        String status,
+        String key,
+        String version,
+        LocalDateTime finishedAt,
+        String sha256,
+        long sizeBytes
+    ) {
+    }
+    /** 건너뜀·종료 미확인·삭제 선점 결과다. */
+    public record Claim(String outcome, File file) {
+    }
+}
