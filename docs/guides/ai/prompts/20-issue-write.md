@@ -23,7 +23,7 @@ Write an Issue body from a settled scope, and register it after the user approve
     - Propose corrections. Wait for approval before proceeding.
     - Do NOT assume the body is correct just because it exists.
 2. Follow `git-github.md` > `1.6 AI로 Issue·PR을 작성할 때`, and choose the template that fits the kind of work.
-3. Put only the settled scope in the body. Do not write implementation choices that are not decided. Do not write class names, method names, file names, or paths in the body.
+3. Put only the settled scope in the body. Do not write implementation choices that are not decided. Do not write implementation class names, method names, file names, or paths in the body; reference document paths required by Step 4 are exempt.
 4. Put the reference document locations and prerequisite Issue numbers in the reference section.
 5. Leave values not given in the inputs empty (due date, assignee, Issue numbers), and list them as questions outside the body.
 6. Outside the body, give one line on why you chose the priority and size.
