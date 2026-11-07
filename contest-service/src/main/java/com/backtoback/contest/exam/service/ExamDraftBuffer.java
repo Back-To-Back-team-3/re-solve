@@ -60,6 +60,10 @@ public class ExamDraftBuffer {
         if redis.call('GET', KEYS[1] .. ':lock') ~= ARGV[1] then return 0 end
         return redis.call('PEXPIRE', KEYS[1] .. ':lock', 120000)
         """, Long.class);
+    private static final DefaultRedisScript<Long> RECORD_STATUS = new DefaultRedisScript<>("""
+        redis.call('HSET', KEYS[1], 'status', ARGV[1])
+        return redis.call('EXPIRE', KEYS[1], 120)
+        """, Long.class);
     private static final DefaultRedisScript<Long> RELEASE = new DefaultRedisScript<>("""
         if redis.call('GET', KEYS[1] .. ':lock') ~= ARGV[1] then return 0 end
         local time = redis.call('TIME')
@@ -108,10 +112,10 @@ public class ExamDraftBuffer {
                 }, 30, 30, TimeUnit.SECONDS);
                 try {
                     var response = store.save(work);
-                    redis.opsForHash().put(key, "status", "done");
+                    redis.execute(RECORD_STATUS, List.of(key), "done");
                     return response;
                 } catch (RuntimeException failure) {
-                    redis.opsForHash().put(key, "status", "failed");
+                    redis.execute(RECORD_STATUS, List.of(key), "failed");
                     throw failure;
                 } finally {
                     renewal.cancel(false);

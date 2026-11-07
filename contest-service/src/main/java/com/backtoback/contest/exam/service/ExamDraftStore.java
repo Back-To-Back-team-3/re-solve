@@ -14,6 +14,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.contest.exam.domain.Exam;
 import com.backtoback.contest.exam.domain.ExamParticipant;
 import com.backtoback.contest.exam.domain.ExamParticipantStatus;
 import com.backtoback.contest.exam.domain.ExamStatus;
@@ -63,20 +64,7 @@ public class ExamDraftStore {
                 .findByExamIdAndMemberIdAndStatusNot(exam, member, ExamParticipantStatus.CANCELED)
                 .orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_REGISTERED));
         var now = localNow();
-        if (parent.getStatus() == ExamStatus.CANCELED) {
-            throw new ContestException(ContestErrorCode.EXAM_CANCELED);
-        }
-        if (now.isBefore(parent.getStartsAt())) {
-            throw new ContestException(ContestErrorCode.EXAM_NOT_STARTED);
-        }
-        if (participant.getEnteredAt() == null) {
-            throw new ContestException(ContestErrorCode.EXAM_NOT_REGISTERED);
-        }
-        if (participant.getStatus() != ExamParticipantStatus.STARTED || now.isAfter(participant.getPersonalEndsAt())
-            || now.isAfter(parent.getEndsAt()) || parent.getStatus() == ExamStatus.CLOSED
-            || parent.getStatus() == ExamStatus.FINALIZED) {
-            throw new ContestException(ContestErrorCode.EXAM_CLOSED);
-        }
+        validateWindow(parent, participant, now);
         String memberStatus
             = members
                 .findStatus(member)
@@ -108,20 +96,7 @@ public class ExamDraftStore {
                     .findFirst()
                     .orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_REGISTERED));
             var now = localNow();
-            if (parent.getStatus() == ExamStatus.CANCELED) {
-                throw new ContestException(ContestErrorCode.EXAM_CANCELED);
-            }
-            if (now.isBefore(parent.getStartsAt())) {
-                throw new ContestException(ContestErrorCode.EXAM_NOT_STARTED);
-            }
-            if (participant.getEnteredAt() == null) {
-                throw new ContestException(ContestErrorCode.EXAM_NOT_REGISTERED);
-            }
-            if (participant.getStatus() != ExamParticipantStatus.STARTED || now.isAfter(participant.getPersonalEndsAt())
-                || now.isAfter(parent.getEndsAt()) || parent.getStatus() == ExamStatus.CLOSED
-                || parent.getStatus() == ExamStatus.FINALIZED) {
-                throw new ContestException(ContestErrorCode.EXAM_CLOSED);
-            }
+            validateWindow(parent, participant, now);
             String memberStatus
                 = members
                     .findStatus(work.memberId())
@@ -161,12 +136,35 @@ public class ExamDraftStore {
     /** 버퍼에서 밀린 요청은 해당 문제의 DB 순번과 저장 시간을 읽는다. */
     public SaveResponse skipped(Work work) {
         return transactions.execute(status -> {
+            var parent
+                = exams
+                    .findById(work.examId())
+                    .orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
             var participant
                 = participants
                     .findById(work.participantId())
                     .orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_REGISTERED));
-            return response(false, latest(work.participantId(), work.problemId()), participant, localNow());
+            var now = localNow();
+            validateWindow(parent, participant, now);
+            return response(false, latest(work.participantId(), work.problemId()), participant, now);
         });
+    }
+
+    private void validateWindow(Exam exam, ExamParticipant participant, LocalDateTime now) {
+        if (exam.getStatus() == ExamStatus.CANCELED) {
+            throw new ContestException(ContestErrorCode.EXAM_CANCELED);
+        }
+        if (now.isBefore(exam.getStartsAt())) {
+            throw new ContestException(ContestErrorCode.EXAM_NOT_STARTED);
+        }
+        if (participant.getEnteredAt() == null) {
+            throw new ContestException(ContestErrorCode.EXAM_NOT_REGISTERED);
+        }
+        if (participant.getStatus() != ExamParticipantStatus.STARTED || now.isAfter(participant.getPersonalEndsAt())
+            || now.isAfter(exam.getEndsAt()) || exam.getStatus() == ExamStatus.CLOSED
+            || exam.getStatus() == ExamStatus.FINALIZED) {
+            throw new ContestException(ContestErrorCode.EXAM_CLOSED);
+        }
     }
 
     /** 종료 후에도 실제 입장자의 문제·언어별 저장본과 문제별 최대 순번을 반환한다. */

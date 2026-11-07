@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -160,10 +161,19 @@ class ExamDraftIntegrationTest {
     @DisplayName("같은 참가자의 버퍼에서 밀린 요청은 미저장 문제의 순번 0과 null 시각을 반환한다")
     void bufferKeepsLastRequest() throws Exception {
         // given
+        String prefix = "exam:draft:buffer:" + participantId;
+        var openSlot = new DefaultRedisScript<Long>("""
+            local time = redis.call('TIME')
+            local due = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000) + 3000
+            redis.call('SET', KEYS[1], string.format('%.0f', due), 'PX', 120000)
+            return due
+            """, Long.class);
+        long due = redis.execute(openSlot, List.of(prefix + ":due"));
+        String slot = prefix + ":slot:" + due;
         try (var pool = Executors.newFixedThreadPool(2)) {
             var first = pool.submit(() -> buffer.save(examId, "7", "102", new SaveRequest("java", "첫 코드", "1")));
             var end = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (redis.keys("exam:draft:buffer:" + participantId + ":slot:*").isEmpty()) {
+            while (!Boolean.TRUE.equals(redis.hasKey(slot))) {
                 if (System.nanoTime() >= end) {
                     throw new IllegalStateException("Buffer not created");
                 }
@@ -179,7 +189,24 @@ class ExamDraftIntegrationTest {
             assertThat(skipped.serverSeq()).isEqualTo("0");
             assertThat(skipped.savedAt()).isNull();
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isEqualTo(1);
+            assertThat(redis.getExpire(slot)).isPositive();
         }
+    }
+
+    @Test
+    @DisplayName("버퍼에서 밀린 요청도 개인 마감이 지나면 저장 가능 응답을 반환하지 않는다")
+    void skippedRequestRechecksDeadline() {
+        var work = store.prepare(examId, "7", "101", new SaveRequest("java", "코드", "1"));
+        jdbc
+            .update(
+                "UPDATE exam_participants SET personal_ends_at=DATE_SUB(NOW(6), INTERVAL 1 SECOND) WHERE id=?",
+                participantId
+            );
+
+        assertThatThrownBy(() -> store.skipped(work))
+            .isInstanceOf(ContestException.class)
+            .extracting("errorCode")
+            .isEqualTo(ContestErrorCode.EXAM_CLOSED);
     }
 
     /** 참가자 잠금 대기 중 마감이 지나면 새 저장을 거절한다. */
