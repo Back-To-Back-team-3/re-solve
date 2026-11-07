@@ -58,4 +58,27 @@ class ContestGuardClientTest {
         assertThatThrownBy(() -> client.prepare(operation)).isInstanceOf(ProblemException.class);
         server.verify();
     }
+
+    /** 오류 본문이 없으면 확정 거절로 저장하지 않는다. */
+    @Test
+    @DisplayName("빈 원격 오류 응답은 확정 거절이 아니라 의존 장애로 처리한다")
+    void emptyErrorResponse() {
+        var builder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(builder).build();
+        server
+            .expect(requestTo("/internal/v1/contest/guards/PROBLEM/1/prepare"))
+            .andRespond(withStatus(HttpStatus.CONFLICT));
+        var problem = Problem.create(1L, ProblemScope.GENERAL);
+        ReflectionTestUtils.setField(problem, "id", 1L);
+        var operation
+            = ProblemStateOperation.hide("op", problem, "key", "hash", 1, ProblemVisibility.ARCHIVED, "reason");
+        var client = new ContestGuardClient(builder.build(), JsonMapper.builder().build());
+        assertThatThrownBy(() -> client.prepare(operation))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode())
+                    .isEqualTo(com.backtoback.common.exception.CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+            );
+        server.verify();
+    }
 }
