@@ -116,8 +116,8 @@ class SubmissionJudgedConsumerServiceTest {
     }
 
     @Test
-    @DisplayName("첫 비AC이면 복제본을 저장하지 않고 재계산도 호출하지 않는다")
-    void consume_firstNonAc_skipsSaveAndRecalculation() {
+    @DisplayName("첫 비AC이면 복제본을 저장하고 재계산은 호출하지 않는다")
+    void consume_firstNonAc_savesReplicaAndSkipsRecalculation() {
         // given
         SubmissionJudgedPayload payload = payload("WA", 1);
         given(memberAcReplicaRepository.findBySubmissionId(Long.parseLong(SUBMISSION_ID))).willReturn(Optional.empty());
@@ -126,7 +126,10 @@ class SubmissionJudgedConsumerServiceTest {
         service.consume(payload);
 
         // then
-        verify(memberAcReplicaRepository, never()).save(any());
+        ArgumentCaptor<MemberAcReplica> captor = ArgumentCaptor.forClass(MemberAcReplica.class);
+        verify(memberAcReplicaRepository).save(captor.capture());
+        assertThat(captor.getValue().isAccepted()).isFalse();
+        assertThat(captor.getValue().getVerdict()).isEqualTo(JudgeVerdict.WA);
         verify(recalculationService, never()).recalculate(any(), any(), any());
     }
 
