@@ -1,23 +1,18 @@
-// =================================================================
 // 시나리오 3: 실시간 SSE 알림 스트림 구독 부하 테스트
-// 기준 문서: docs/dev/specifications/api-spec.md > 7.1.1
-// =================================================================
+// 기준 문서: docs/dev/specifications/api-spec.md > 7.1.1 알림 구독
 
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { CONFIG } from '../config.js';
+import { CONFIG, createHeaders } from '../config.js';
 
 export function testSseNotificationScenario() {
-    const memberId = CONFIG.TEST_MEMBER_ID;
+    const memberId = typeof __VU !== 'undefined' && __VU > 0 ? String(__VU) : String(CONFIG.TEST_MEMBER_ID);
 
-    const sseHeaders = {
-        'Accept': 'text/event-stream',
-        'X-User-Id': String(memberId),
-        'X-User-Role': 'USER',
-    };
+    // createHeaders를 기반으로 SSE 필수 헤더를 설정한다.
+    const sseHeaders = createHeaders(null, null, memberId);
+    sseHeaders['Accept'] = 'text/event-stream';
 
     // 1. SSE 구독 요청 (api-spec.md > 7.1.1 GET /api/v1/notifications/subscribe)
-    // k6는 HTTP 장기 연결 스트림을 테스트할 수 있도록 timeout 옵션 설정
     const res = http.get(
         `${CONFIG.BASE_URL}/api/v1/notifications/subscribe`,
         {
