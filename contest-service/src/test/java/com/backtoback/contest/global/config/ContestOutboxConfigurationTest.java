@@ -22,13 +22,18 @@ import com.backtoback.common.event.dto.OutboxEvent;
 
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
+import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 @ExtendWith(MockitoExtension.class)
 class ContestOutboxConfigurationTest {
     private static final String TOPIC_ARN = "arn:aws:sns:ap-northeast-2:000000000000:contest-events";
+    private static final String QUEUE_URL = "http://sqs-test/submissions";
 
     @Mock
     private SnsClient sns;
+    @Mock
+    private SqsClient sqs;
 
     @ParameterizedTest
     @ValueSource(
@@ -38,13 +43,15 @@ class ContestOutboxConfigurationTest {
             "ExamParticipantCanceled",
             "ExamStarted",
             "ExamClosed",
-            "ExamCanceled"
+            "ExamCanceled",
+            "ExamFinalized"
         }
     )
     @DisplayName("시험 설정 변경과 참가 이벤트를 지정한 SNS 토픽에 원본 그대로 발행한다")
     void publishesContestEvent(String eventType) {
         var resolver
-            = new ContestOutboxConfiguration().contestEventDestinationResolver(new ContestOutboxProperties(TOPIC_ARN));
+            = new ContestOutboxConfiguration()
+                .contestEventDestinationResolver(new ContestOutboxProperties(TOPIC_ARN, QUEUE_URL));
         var event = event(eventType);
 
         new AwsEventPublisher(sns, null, resolver).publish(event);
@@ -60,10 +67,25 @@ class ContestOutboxConfigurationTest {
     @DisplayName("발행 경로가 연결되지 않은 이벤트를 시험 SNS 토픽으로 보내지 않는다")
     void rejectsUnsupportedEvent() {
         var resolver
-            = new ContestOutboxConfiguration().contestEventDestinationResolver(new ContestOutboxProperties(TOPIC_ARN));
+            = new ContestOutboxConfiguration()
+                .contestEventDestinationResolver(new ContestOutboxProperties(TOPIC_ARN, QUEUE_URL));
 
-        assertThatThrownBy(() -> resolver.resolve(event("ExamSubmissionRequested")))
-            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> resolver.resolve(event("UnknownEvent"))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("시험 제출 요청은 Judge SQS 큐에 원본 메시지로 전송한다")
+    void sendsSubmissionToQueue() {
+        var resolver
+            = new ContestOutboxConfiguration()
+                .contestEventDestinationResolver(new ContestOutboxProperties(TOPIC_ARN, QUEUE_URL));
+        var event = event("ExamSubmissionRequested");
+        new AwsEventPublisher(sns, sqs, resolver).publish(event);
+
+        var request = ArgumentCaptor.forClass(SendMessageRequest.class);
+        verify(sqs).sendMessage(request.capture());
+        assertThat(request.getValue().queueUrl()).isEqualTo(QUEUE_URL);
+        assertThat(request.getValue().messageBody()).isEqualTo(event.message());
     }
 
     private OutboxEvent event(String eventType) {

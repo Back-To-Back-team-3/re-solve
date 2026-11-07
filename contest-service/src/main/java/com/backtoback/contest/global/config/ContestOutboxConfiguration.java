@@ -14,6 +14,7 @@ import com.backtoback.common.event.dto.EventDestination;
 
 import io.awspring.cloud.autoconfigure.core.AwsClientBuilderConfigurer;
 import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sqs.SqsClient;
 
 /** Contest의 시험 설정·참가 이벤트를 공통 Relay로 발행한다 (이벤트 계약서 §3, §4.4). */
 @Configuration(proxyBeanMethods = false)
@@ -29,7 +30,8 @@ public class ContestOutboxConfiguration {
                 "ExamParticipantCanceled",
                 "ExamStarted",
                 "ExamClosed",
-                "ExamCanceled"
+                "ExamCanceled",
+                "ExamFinalized"
             );
 
     @Bean
@@ -38,10 +40,18 @@ public class ContestOutboxConfiguration {
     }
 
     @Bean
+    SqsClient contestSqsClient(AwsClientBuilderConfigurer configurer) {
+        return configurer.configure(SqsClient.builder()).build();
+    }
+
+    @Bean
     EventDestinationResolver contestEventDestinationResolver(ContestOutboxProperties properties) {
         var destination = new EventDestination(EventDestination.Channel.SNS, properties.topicArn());
         return event -> {
             var metadata = event.metadata();
+            if ("v1".equals(metadata.schemaVersion()) && "ExamSubmissionRequested".equals(metadata.eventType())) {
+                return new EventDestination(EventDestination.Channel.SQS, properties.submissionQueueUrl());
+            }
             if (!"v1".equals(metadata.schemaVersion()) || !TOPIC_EVENTS.contains(metadata.eventType())) {
                 throw new IllegalArgumentException("지원하지 않는 Contest 발행 이벤트입니다.");
             }
