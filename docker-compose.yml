@@ -95,6 +95,7 @@ services:
       start_period: 15s
 
   api-gateway:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-api-gateway:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -122,6 +123,7 @@ services:
         condition: service_healthy
 
   member-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-member-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -147,6 +149,7 @@ services:
         condition: service_healthy
 
   problem-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-problem-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -163,6 +166,7 @@ services:
         condition: service_healthy
 
   judge-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-judge-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -187,6 +191,7 @@ services:
         condition: service_healthy
 
   contest-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-contest-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -202,6 +207,7 @@ services:
         condition: service_healthy
 
   study-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-study-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -214,6 +220,7 @@ services:
         condition: service_healthy
 
   notification-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-notification-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -227,6 +234,7 @@ services:
         condition: service_healthy
 
   integration-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-integration-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -245,6 +253,7 @@ services:
         condition: service_healthy
 
   ai-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-ai-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -259,6 +268,7 @@ services:
         condition: service_healthy
 
   analytics-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-analytics-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build

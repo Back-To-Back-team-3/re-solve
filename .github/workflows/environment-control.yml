@@ -101,29 +101,27 @@ jobs:
           SSH_EXTRA_OPTS: ${{ steps.params.outputs.extra_opts }}
           SSH_SERVICES: ${{ steps.params.outputs.target_services }}
           TARGET_ENV: ${{ steps.params.outputs.target_env }}
+          PROD_APP_DIR: ${{ secrets.PROD_APP_DIR }}
+          STAGING_APP_DIR: ${{ secrets.STAGING_APP_DIR }}
         with:
           host: ${{ steps.params.outputs.target_env == 'production' && secrets.PROD_EC2_HOST || secrets.STAGING_EC2_HOST }}
           username: ${{ steps.params.outputs.target_env == 'production' && secrets.PROD_EC2_USER || secrets.STAGING_EC2_USER }}
           key: ${{ steps.params.outputs.target_env == 'production' && secrets.PROD_EC2_SSH_KEY || secrets.STAGING_EC2_SSH_KEY }}
           port: 22
-          envs: SSH_ACTION,SSH_EXTRA_OPTS,SSH_SERVICES,TARGET_ENV
+          envs: SSH_ACTION,SSH_EXTRA_OPTS,SSH_SERVICES,TARGET_ENV,PROD_APP_DIR,STAGING_APP_DIR
           script: |
             set -eo pipefail
-            APP_DIR="${TARGET_ENV == 'production' && (secrets.PROD_APP_DIR || '/home/ubuntu/re-solve') || (secrets.STAGING_APP_DIR || '/home/ubuntu/re-solve')}"
             if [ "$TARGET_ENV" = "production" ]; then
               APP_DIR="${PROD_APP_DIR:-/home/ubuntu/re-solve}"
+              BRANCH="main"
             else
               APP_DIR="${STAGING_APP_DIR:-/home/ubuntu/re-solve}"
+              BRANCH="develop"
             fi
             cd "$APP_DIR"
 
-            echo "📥 저장소 코드 최신화 확인..."
+            echo "📥 저장소 코드 최신화 확인 ($BRANCH)..."
             git fetch origin
-            if [ "$TARGET_ENV" = "production" ]; then
-              BRANCH="main"
-            else
-              BRANCH="develop"
-            fi
             git checkout "$BRANCH"
             git pull origin "$BRANCH"
 
