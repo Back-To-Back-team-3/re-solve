@@ -40,6 +40,7 @@ public class ExamResultFinalizationScheduler {
     private final ExamFinalizationService finalization;
     private final Clock clock;
     private final MeterRegistry metrics;
+    private final ExamSchedulerCursorStore cursors;
     private final AtomicLong oldest = new AtomicLong();
 
     /** 확정 대기 시간 지표를 등록한다. */
@@ -47,12 +48,14 @@ public class ExamResultFinalizationScheduler {
         JdbcTemplate jdbc,
         ExamFinalizationService finalization,
         Clock clock,
-        MeterRegistry metrics
+        MeterRegistry metrics,
+        ExamSchedulerCursorStore cursors
     ) {
         this.jdbc = jdbc;
         this.finalization = finalization;
         this.clock = clock;
         this.metrics = metrics;
+        this.cursors = cursors;
         Gauge.builder("scheduler.backlog.oldest.seconds", oldest, AtomicLong::get).tag("job", JOB).register(metrics);
     }
 
@@ -69,41 +72,66 @@ public class ExamResultFinalizationScheduler {
         var sample = Timer.start(metrics);
         try {
             var now = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE);
-            var candidates
-                = jdbc
-                    .query(
-                        "SELECT id,closed_at FROM exams WHERE status='CLOSED' " + "ORDER BY closed_at,id LIMIT 100",
-                        (rs, row) -> new Candidate(rs.getLong(1), rs.getObject(2, LocalDateTime.class))
-                    );
+            var candidates = candidates(null);
             oldest
                 .set(
                     candidates.isEmpty() ? 0
                         : Math.max(0, Duration.between(candidates.getFirst().closedAt(), now).getSeconds())
                 );
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
-            for (var candidate : candidates) {
-                if (System.nanoTime() >= deadline) {
-                    break;
+            var cursor = cursors.load(JOB);
+            while (System.nanoTime() < deadline) {
+                candidates = cursor == null ? candidates : candidates(cursor);
+                if (candidates.isEmpty()) {
+                    cursors.clear(JOB);
+                    return;
                 }
-                metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
-                try {
-                    boolean completed = finalization.finalizeExam(candidate.id());
-                    metrics
-                        .counter("scheduler.items", "job", JOB, "result", completed ? "success" : "deferred")
-                        .increment();
-                } catch (RuntimeException failure) {
-                    metrics.counter("scheduler.items", "job", JOB, "result", "failure").increment();
-                    log
-                        .error(
-                            "시험 결과 확정 실패: examId={}, exceptionType={}",
-                            candidate.id(),
-                            failure.getClass().getSimpleName()
-                        );
+                for (var candidate : candidates) {
+                    if (System.nanoTime() >= deadline) {
+                        return;
+                    }
+                    metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
+                    try {
+                        boolean completed = finalization.finalizeExam(candidate.id());
+                        metrics
+                            .counter("scheduler.items", "job", JOB, "result", completed ? "success" : "deferred")
+                            .increment();
+                    } catch (RuntimeException failure) {
+                        metrics.counter("scheduler.items", "job", JOB, "result", "failure").increment();
+                        log
+                            .error(
+                                "시험 결과 확정 실패: examId={}, exceptionType={}",
+                                candidate.id(),
+                                failure.getClass().getSimpleName()
+                            );
+                    }
+                    cursor = new ExamSchedulerCursorStore.Cursor(candidate.closedAt(), candidate.id());
+                    cursors.save(JOB, cursor);
                 }
             }
         } finally {
             sample.stop(metrics.timer("scheduler.run.duration", "job", JOB));
         }
+    }
+
+    /** 마지막 종료 시각과 ID 다음부터 한 페이지를 선택한다. */
+    private java.util.List<Candidate> candidates(ExamSchedulerCursorStore.Cursor cursor) {
+        String query = "SELECT id,closed_at FROM exams WHERE status='CLOSED' ";
+        if (cursor == null) {
+            return jdbc
+                .query(
+                    query + "ORDER BY closed_at,id LIMIT 100",
+                    (rs, row) -> new Candidate(rs.getLong(1), rs.getObject(2, LocalDateTime.class))
+                );
+        }
+        return jdbc
+            .query(
+                query + "AND (closed_at>? OR (closed_at=? AND id>?)) ORDER BY closed_at,id LIMIT 100",
+                (rs, row) -> new Candidate(rs.getLong(1), rs.getObject(2, LocalDateTime.class)),
+                cursor.time(),
+                cursor.time(),
+                cursor.id()
+            );
     }
 
     /** 종료 시각 순으로 선정한 시험이다. */

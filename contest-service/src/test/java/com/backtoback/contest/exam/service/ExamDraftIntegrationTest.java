@@ -115,6 +115,8 @@ class ExamDraftIntegrationTest {
     @Autowired
     private ExamRankingCache rankingCache;
     @Autowired
+    private ExamSchedulerCursorStore schedulerCursors;
+    @Autowired
     private JdbcTemplate jdbc;
     @Autowired
     private StringRedisTemplate redis;
@@ -871,6 +873,92 @@ class ExamDraftIntegrationTest {
                 error -> assertThat(((ContestException)error).getErrorCode())
                     .isEqualTo(ContestErrorCode.RESULT_CURSOR_EXPIRED)
             );
+    }
+
+    /** 보류된 시험이 100건을 넘어도 뒤의 시험을 처리하고 저장된 위치에서 재개한다. */
+    @Test
+    @DisplayName("시험 확정 스케줄러는 보류된 앞 페이지와 재시작 위치를 넘어 순회한다")
+    void finalizationSchedulerContinuesAcrossPagesAndResume() {
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        jdbc.update("UPDATE exams SET status='CLOSED',closed_at=? WHERE id=?", now, examId);
+        for (int i = 0; i < 100; i++) {
+            jdbc
+                .update(
+                    "INSERT INTO exams (study_id,creator_id,title,mode,starts_at,ends_at,status,exam_revision,"
+                        + "total_score,result_revision,version,closed_at,created_at,updated_at) "
+                        + "VALUES (12,7,'시험','FIXED',?,?,'CLOSED',1,100,0,0,?,?,?)",
+                    now,
+                    now,
+                    now,
+                    now,
+                    now
+                );
+        }
+        var ids = jdbc.queryForList("SELECT id FROM exams ORDER BY closed_at,id", Long.class);
+        var finalizer = org.mockito.Mockito.mock(ExamFinalizationService.class);
+        var scheduler
+            = new ExamResultFinalizationScheduler(
+                jdbc,
+                finalizer,
+                java.time.Clock.systemUTC(),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+                schedulerCursors
+            );
+        String job = "ExamResultFinalizationScheduler";
+        schedulerCursors.save(job, new ExamSchedulerCursorStore.Cursor(now, ids.get(98)));
+        scheduler.run();
+        verify(finalizer, times(1)).finalizeExam(ids.get(99));
+        verify(finalizer, times(1)).finalizeExam(ids.get(100));
+        org.mockito.Mockito.reset(finalizer);
+        scheduler.run();
+        verify(finalizer, times(101)).finalizeExam(org.mockito.ArgumentMatchers.anyLong());
+        schedulerCursors.clear(job);
+    }
+
+    /** 해결되지 않은 접수도 한 번 시도 후 다음 페이지로 넘긴다. */
+    @Test
+    @DisplayName("접수 대사 스케줄러는 실패한 앞 페이지를 넘어 순회한다")
+    void reconciliationSchedulerContinuesAcrossPagesAndResume() {
+        var now
+            = LocalDateTime
+                .now(ClockConfiguration.SERVICE_ZONE)
+                .minusMinutes(2)
+                .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        for (int i = 1; i <= 101; i++) {
+            jdbc
+                .update(
+                    "INSERT INTO exam_submissions (exam_participant_id,exam_id,problem_id,draft_seq,language,"
+                        + "source_code,submission_type,received_at,status,is_zero_confirmed,created_at,updated_at) "
+                        + "VALUES (?,?,101,?,'JAVA','코드','MANUAL',?,'ACCEPTED',false,?,?)",
+                    participantId,
+                    examId,
+                    i,
+                    now,
+                    now,
+                    now
+                );
+        }
+        var ids = jdbc.queryForList("SELECT id FROM exam_submissions ORDER BY received_at,id", Long.class);
+        var client = org.mockito.Mockito.mock(com.backtoback.contest.exam.client.ExamReceiptClient.class);
+        var reconcile = org.mockito.Mockito.mock(ExamReceiptReconciliation.class);
+        var scheduler
+            = new ContestSubmissionReconciliationScheduler(
+                jdbc,
+                client,
+                reconcile,
+                java.time.Clock.systemUTC(),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+                schedulerCursors
+            );
+        String job = "ContestSubmissionReconciliationScheduler";
+        schedulerCursors.save(job, new ExamSchedulerCursorStore.Cursor(now, ids.get(98)));
+        scheduler.run();
+        verify(client, times(1)).find(ids.get(99));
+        verify(client, times(1)).find(ids.get(100));
+        org.mockito.Mockito.reset(client);
+        scheduler.run();
+        verify(client, times(101)).find(org.mockito.ArgumentMatchers.anyLong());
+        schedulerCursors.clear(job);
     }
 
     /** 원격 미확인은 보류하고 확정 실패한 관리자 작업은 차단하지 않는다. */
