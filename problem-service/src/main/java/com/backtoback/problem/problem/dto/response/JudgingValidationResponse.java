@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.backtoback.problem.problem.service.ProblemJudgingStore.Snapshot;
 
+/** Judge가 제출 조건을 검사하는 데 사용하는 문제 상태와 고정 회차의 통과 환경. */
 public record JudgingValidationResponse(
     String problemId,
     String problemRevisionId,

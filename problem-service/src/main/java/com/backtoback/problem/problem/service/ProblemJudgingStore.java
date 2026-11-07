@@ -41,7 +41,9 @@ public class ProblemJudgingStore {
      * @param problemId 문제
      * @param revisionId 고정 회차
      * @return 채점 스냅샷
-     * @throws ProblemException 식별자·소속 오류 또는 고정 자료 손상
+     * @throws ProblemException 식별자가 양수가 아니면 {@code COMMON_INVALID_REQUEST}, 문제가 없으면
+     *     {@code PROBLEM_NOT_FOUND}, 회차가 없거나 소속이 다르면 {@code PROBLEM_REVISION_NOT_FOUND},
+     *     고정 자료 조회·해석에 실패하면 {@code COMMON_DEPENDENCY_UNAVAILABLE}
      */
     @Transactional(readOnly = true)
     public Snapshot read(long problemId, long revisionId) {
@@ -69,8 +71,7 @@ public class ProblemJudgingStore {
             }
             var cases = entries.findByProblemRevisionIdOrderByTestOrder(revisionId).stream().map(entry -> {
                 var asset = assets.findById(entry.getTestAssetId()).orElseThrow();
-                if (asset.getStatus() != ProblemAssetStatus.LINKED || asset.getObjectVersion() == null
-                    || asset.getSha256() == null) {
+                if (asset.getStatus() != ProblemAssetStatus.LINKED || asset.getSha256() == null) {
                     throw new IllegalStateException("테스트 파일이 준비되지 않았습니다.");
                 }
                 return new Test(
@@ -114,7 +115,7 @@ public class ProblemJudgingStore {
                 profiles.values().stream().sorted(java.util.Comparator.comparing(Profile::language)).toList()
             );
         } catch (RuntimeException invalid) {
-            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, invalid);
         }
     }
 
