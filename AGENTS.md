@@ -35,6 +35,7 @@ The reference documents are written in Korean. Locations below keep the original
 
 ## 3. Scope and prohibitions
 
+- Do not expand the work beyond the scope of the current request. If a change outside the requested scope seems necessary, state the target and reason, and proceed only after the user approves.
 - Do not modify files outside the Issue scope. If a change outside the scope is needed, state the target and reason, and modify it only after the user approves.
 - Files owned by another owner group are read-only. If a change is needed, state the target and reason, and modify it only after the user replies that the owner has confirmed it.
 - Before each commit, show the changed file list and the commit message and get approval. Follow `docs/guides/git-github.md` > `1.2 커밋·Issue·PR 제목` for the subject.
