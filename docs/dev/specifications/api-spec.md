@@ -8556,7 +8556,7 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 외부 경로 | `/api/v1/notifications/**` |
+| 외부 경로 | `/api/v1/notifications/**`, `/api/v1/admin/notifications/**` |
 | 소유 테이블 | 스키마 `notification` (`notifications`, `notification_preferences`) |
 | 생성 책임 | 도메인은 이벤트만 발행하고 notification이 수신자·문구·이동 경로를 정한다 |
 | 중복 방지 | `(source_event_id, member_id, type)` 유일 제약 |
@@ -8576,6 +8576,7 @@
 | `LEVEL_CHANGED` | `TagLevelChanged` (진단 결과·승급·마스터·재채점 하향·쿨타임 해제) | `isLevelChangedEnabled` |
 | `HINT_READY` | `HintReady` | `isHintReadyEnabled` |
 | `GITHUB_SYNC_FAILED` | `GitHubSyncFailed` | `isGithubSyncEnabled` |
+| `SYSTEM_NOTICE` | 관리자 공지 발송 API (`POST /api/v1/admin/notifications/broadcast`) | 끌 수 없음 |
 
 ### 7.1 외부 API
 
@@ -8691,6 +8692,50 @@
       { "success": true, "message": null, "data": { "isExamContestEnabled": true, "isStudyApplicationEnabled": true, "isAssignmentEnabled": false, "isLevelChangedEnabled": true, "isHintReadyEnabled": true, "isGithubSyncEnabled": true } }
     ```
     
+
+### 7.2 관리자 API
+
+#### 7.2.1 시스템 전역 공지 알림 브로드캐스트
+
+- **Method / URI:** `POST /api/v1/admin/notifications/broadcast`
+- **인증:** 관리자 로그인 필요 (Gateway가 `X-User-Role: ADMIN` 검증)
+- **대응 테이블:** `notifications`
+- **설명:** 시스템 관리자가 전체 회원에게 실시간 SSE 공지 및 알림 보관함 저장 알림을 발송한다. 활성화된 모든 SSE 세션에 브로드캐스트되고, 전체 활성 회원의 알림 목록에 `SYSTEM_NOTICE` 타입으로 저장된다.
+- **요청 헤더:**
+    
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `X-User-Id` | Y | 관리자 회원 ID |
+    | `X-User-Role` | Y | `ADMIN` (Gateway 검증) |
+    
+- **요청 바디:**
+    
+    ```json
+    {
+      "title": "시스템 정기 점검 안내",
+      "content": "2026년 11월 8일 02:00 ~ 04:00 정기 점검이 진행될 예정입니다.",
+      "linkUrl": "/notices/1"
+    }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+    {
+      "success": true,
+      "message": "시스템 공지 알림이 성공적으로 발송되었습니다.",
+      "data": {
+        "notificationType": "SYSTEM_NOTICE",
+        "title": "시스템 정기 점검 안내",
+        "broadcastedAt": "2026-11-07T15:30:00.123456+09:00",
+        "deliveredSseCount": 15
+      }
+    }
+    ```
+    
+- **에러:**
+    - `COMMON_ACCESS_DENIED` (403): 관리자(`ADMIN`) 권한이 없는 경우
+    - `COMMON_INVALID_INPUT` (400): 제목이나 내용이 비어 있거나 유효하지 않은 경우
 
 ---
 
