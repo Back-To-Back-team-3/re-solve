@@ -19,7 +19,7 @@ class ContestMigrationUpgradeTest {
 
     /** 기존 시험·가드 데이터를 둔 채 요청 보존 컬럼까지 순서대로 적용한다. */
     @Test
-    @DisplayName("V7 데이터베이스에 V8부터 V16.2까지 추가 적용한다")
+    @DisplayName("V7 데이터베이스에 V8부터 V16.3까지 추가 적용한다")
     void migratesFromVersionSeven() throws Exception {
         // given
         Flyway
@@ -94,7 +94,7 @@ class ContestMigrationUpgradeTest {
                     )
         ) {
             assertThat(result.next()).isTrue();
-            assertThat(result.getInt(1)).isEqualTo(18);
+            assertThat(result.getInt(1)).isEqualTo(19);
         }
     }
 }

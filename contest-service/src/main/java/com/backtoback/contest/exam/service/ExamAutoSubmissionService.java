@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -44,6 +46,7 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class ExamAutoSubmissionService {
+    private static final Logger log = LoggerFactory.getLogger(ExamAutoSubmissionService.class);
     private final ExamRepository exams;
     private final ExamParticipantRepository participants;
     private final ExamProblemRepository problems;
@@ -145,7 +148,6 @@ public class ExamAutoSubmissionService {
             if (draft.sourceCode().isBlank() || draft.seq() <= last) {
                 continue;
             }
-            size.validate(draft.sourceCode());
             long revision
                 = problems
                     .findByExamIdAndProblemId(participant.getExam().getId(), draft.problemId())
@@ -161,7 +163,16 @@ public class ExamAutoSubmissionService {
             if (supported == null || supported.revision() != revision || !supported.names().contains(language)) {
                 throw new ContestException(ContestErrorCode.UNSUPPORTED_LANGUAGE);
             }
-            ids.add(append(participant, draft, revision, now));
+            String dispatchFailure = null;
+            try {
+                size.validate(draft.sourceCode());
+            } catch (ContestException failure) {
+                if (failure.getErrorCode() != ContestErrorCode.CODE_TOO_LARGE) {
+                    throw failure;
+                }
+                dispatchFailure = ContestErrorCode.CODE_TOO_LARGE.name();
+            }
+            ids.add(append(participant, draft, revision, now, dispatchFailure));
             acceptedProblems.add(draft.problemId());
         }
         participant.finish(now);
@@ -207,7 +218,14 @@ public class ExamAutoSubmissionService {
     private record Languages(long revision, List<String> names) {
     }
 
-    private String append(ExamParticipant participant, Draft draft, long revision, LocalDateTime now) {
+    /** 초과 원문을 자르지 않고 실패 접수로 남겨 참가 종료를 보장한다(API §4.2.6). */
+    private String append(
+        ExamParticipant participant,
+        Draft draft,
+        long revision,
+        LocalDateTime now,
+        String dispatchFailure
+    ) {
         var keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
             var statement
@@ -215,8 +233,8 @@ public class ExamAutoSubmissionService {
                     .prepareStatement(
                         "INSERT INTO exam_submissions "
                             + "(exam_participant_id,exam_id,problem_id,draft_seq,language,source_code,"
-                            + "submission_type,received_at,status,is_zero_confirmed,created_at,updated_at) "
-                            + "VALUES (?,?,?,?,?,?,'AUTO',?,'ACCEPTED',false,?,?)",
+                            + "submission_type,received_at,status,is_zero_confirmed,created_at,updated_at,"
+                            + "dispatch_failure_code,judge_attempt) " + "VALUES (?,?,?,?,?,?,'AUTO',?,?,false,?,?,?,?)",
                         Statement.RETURN_GENERATED_KEYS
                     );
             statement.setLong(1, participant.getId());
@@ -226,11 +244,24 @@ public class ExamAutoSubmissionService {
             statement.setString(5, draft.language());
             statement.setString(6, draft.sourceCode());
             statement.setTimestamp(7, Timestamp.valueOf(participant.getPersonalEndsAt()));
-            statement.setTimestamp(8, Timestamp.valueOf(now));
+            statement.setString(8, dispatchFailure == null ? "ACCEPTED" : "FAILED");
             statement.setTimestamp(9, Timestamp.valueOf(now));
+            statement.setTimestamp(10, Timestamp.valueOf(now));
+            statement.setString(11, dispatchFailure);
+            statement.setObject(12, dispatchFailure == null ? null : 0);
             return statement;
         }, keys);
         String receipt = keys.getKey().toString();
+        if (dispatchFailure != null) {
+            log
+                .warn(
+                    "시험 자동 제출 전달 불가: examId={}, receiptId={}, failureCode={}",
+                    participant.getExam().getId(),
+                    receipt,
+                    dispatchFailure
+                );
+            return receipt;
+        }
         String correlation = MDC.get(CorrelationIdFilter.MDC_KEY);
         if (correlation == null) {
             correlation = "contest-auto-" + UUID.randomUUID();

@@ -5428,7 +5428,7 @@
 
 #### 4.2.6 시험 수동 종료
 
-- 기존에 저장된 Draft가 채점 요청 이벤트 크기 제한을 넘으면 원문을 보존하고 종료 트랜잭션 전체를 롤백한다. 자동 접수·완료 표식·`FINISHED`를 부분 저장하지 않으며 재시도와 누락 감시는 스케줄러 §4.2를 따른다.
+- 기존에 저장된 Draft가 원문·채점 요청 이벤트 크기 제한을 넘으면 원문을 보존한 `AUTO` 접수를 `FAILED`로 기록하고 참가자를 종료한다. `dispatch_failure_code=CODE_TOO_LARGE`, `judge_attempt=0`, `is_zero_confirmed=false`이며 Judge 연결·요청 스냅샷·Outbox를 만들지 않는다. 정상 Draft의 접수·Outbox, 실패 접수, 완료 표식·`FINISHED`는 같은 트랜잭션에 저장한다. 관리자 0점 종결(§4.6.4) 전까지 결과 확정을 보류하며 코드를 자르거나 자동으로 0점을 확정하지 않는다.
 
 - **Method / URI:** `POST /api/v1/exams/{examId}/finish`
 - **인증:** 로그인 필요 + 입장 본인
@@ -5479,7 +5479,7 @@
     
 - **에러:**
     - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403)
-- **발행:** `ExamSubmissionRequested` — 자동 제출 문제별
+- **발행:** `ExamSubmissionRequested` — 크기 검사를 통과한 자동 제출 문제별
 
 #### 4.2.7 내 시험 결과
 
@@ -6955,6 +6955,8 @@
 - **에러:** `EXAM_NOT_FOUND`(404), `EXAM_SUBMISSION_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `REJUDGE_NOT_ALLOWED`(409), `IDEMPOTENCY_KEY_CONFLICT`(422)
 
 #### 4.6.4 실패 제출 종결 처리
+
+- 시험의 전달 전 크기 초과 실패(`dispatch_failure_code=CODE_TOO_LARGE`)도 종결 대상이다. Judge 제출이 없으므로 `expectedJudgeAttempt=0`으로 검증하고 Judge 재처리·대사는 호출하지 않는다. 원문과 실패 사유를 보존하며 나머지 잠금·재계산·감사 규칙은 동일하다.
 
 - **Method / URI:** `POST /api/v1/admin/contest-submissions/{context}/{receiptId}/resolution`
 - **인증:** `ADMIN`

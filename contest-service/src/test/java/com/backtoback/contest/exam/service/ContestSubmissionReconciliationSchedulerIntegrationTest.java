@@ -14,6 +14,40 @@ import com.backtoback.contest.exam.store.ExamSchedulerCursorStore;
 /** 스케줄러의 페이지 순회를 검증한다. */
 class ContestSubmissionReconciliationSchedulerIntegrationTest extends ExamIntegrationTestSupport {
     @Test
+    @DisplayName("전달 전 크기 초과 실패는 Judge 조회와 요청 복구를 반복하지 않는다")
+    void excludesPredispatchFailuresFromRemoteReconciliation() {
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).minusMinutes(2);
+        jdbc
+            .update(
+                "INSERT INTO exam_submissions (exam_participant_id,exam_id,problem_id,draft_seq,language,"
+                    + "source_code,submission_type,received_at,status,is_zero_confirmed,created_at,updated_at,"
+                    + "dispatch_failure_code,judge_attempt) VALUES (?,?,101,1,'JAVA','기존 코드','AUTO',?,'FAILED',"
+                    + "false,?,?,'CODE_TOO_LARGE',0)",
+                participantId,
+                examId,
+                now,
+                now,
+                now
+            );
+        var client = org.mockito.Mockito.mock(com.backtoback.contest.exam.client.ExamReceiptClient.class);
+        var reconcile = org.mockito.Mockito.mock(ExamReceiptReconciliation.class);
+        var scheduler
+            = new ContestSubmissionReconciliationScheduler(
+                jdbc,
+                client,
+                reconcile,
+                java.time.Clock.systemUTC(),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+                schedulerCursors
+            );
+        schedulerCursors.clear("ContestSubmissionReconciliationScheduler");
+
+        scheduler.run();
+
+        org.mockito.Mockito.verifyNoInteractions(client, reconcile);
+    }
+
+    @Test
     @DisplayName("접수 대사 스케줄러는 실패한 앞 페이지를 넘어 순회한다")
     void reconciliationSchedulerContinuesAcrossPagesAndResume() {
         var now
