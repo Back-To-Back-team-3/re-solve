@@ -1,6 +1,7 @@
 package com.backtoback.problem.tag.dto.response;
 
 import com.backtoback.problem.tag.domain.Tag;
+import com.backtoback.problem.tag.domain.TagCreationRecord;
 
 /** 태그의 문자열 ID·이름·현재 표시 순번을 담는 API 응답. */
 public record TagResponse(String tagId, String name, int displayOrder) {
@@ -12,5 +13,19 @@ public record TagResponse(String tagId, String name, int displayOrder) {
      */
     public static TagResponse from(Tag tag) {
         return new TagResponse(tag.getId().toString(), tag.getName(), tag.getDisplayOrder());
+    }
+
+    /**
+     * 완료된 멱등 기록을 최초 생성 당시의 응답으로 변환한다.
+     *
+     * @param record 최초 응답이 저장된 완료 기록
+     * @return 최초 생성 당시의 태그 응답
+     */
+    public static TagResponse from(TagCreationRecord record) {
+        return new TagResponse(
+            record.getResultTagId().toString(),
+            record.getResultName(),
+            record.getResultDisplayOrder()
+        );
     }
 }

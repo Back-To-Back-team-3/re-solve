@@ -1616,6 +1616,12 @@ class TagApiTest {
         assertTagSequence((String)tag.get("name"));
     }
 
+    /**
+     * 기록 잠금 획득 후의 시각으로 만료를 재확인하고 이전 응답을 비운다.
+     *
+     * @param isolation 잠금 대기 트랜잭션의 격리 수준
+     * @throws Exception 잠금 경합 또는 비동기 작업 실패
+     */
     @ParameterizedTest
     @EnumSource(
         value = Isolation.class,
@@ -1628,7 +1634,7 @@ class TagApiTest {
     @DisplayName("기록 잠금 대기 중 만료되면 잠금 획득 후 시각으로 새 요청을 처리한다")
     void expiryIsRecheckedAfterWaitingForRecordLock(Isolation isolation) throws Exception {
         // given
-        String originalId = create("expiry-wait", "기존 태그", 0);
+        create("expiry-wait", "기존 태그", 0);
         Instant beforeExpiry = Instant.parse("2026-10-13T23:59:59Z");
         Instant afterExpiry = Instant.parse("2026-10-14T00:00:01Z");
         var currentTime = new AtomicReference<>(beforeExpiry);
@@ -1650,7 +1656,7 @@ class TagApiTest {
                         .isEqualTo(isolation.name().replace('_', '-'));
                     connectionId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
                     started.countDown();
-                    return tagService.create("admin", "expiry-wait", new TagCreateRequest("새 태그", 1));
+                    return creationRecords.lock("admin", "expiry-wait", "새 태그", 1);
                 }));
                 awaitSignal(started);
                 // upsert가 실제 DB 잠금을 기다리는 동안 만료 경계를 넘긴다.
@@ -1661,13 +1667,14 @@ class TagApiTest {
             var response = pending.get(10, TimeUnit.SECONDS);
 
             // then
-            assertThat(response.tagId()).isNotEqualTo(originalId);
+            assertThat(response.getResultTagId()).isNull();
+            assertThat(response.matches("새 태그", 1)).isTrue();
             var record = jdbc.queryForMap("SELECT * FROM tag_creation_records");
             assertThat(record.get("request_name")).isEqualTo("새 태그");
-            assertThat(record.get("result_tag_id").toString()).isEqualTo(response.tagId());
+            assertThat(record.get("result_tag_id")).isNull();
             assertThat(jdbc.queryForObject("SELECT expires_at FROM tag_creation_records", LocalDateTime.class))
                 .isEqualTo(LocalDateTime.ofInstant(afterExpiry, clock.getZone()).plusHours(24));
-            assertTagSequence("기존 태그", "새 태그");
+            assertTagSequence("기존 태그");
         }
     }
 

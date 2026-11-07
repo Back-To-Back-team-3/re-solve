@@ -16,6 +16,15 @@ import jakarta.persistence.LockModeType;
 
 public interface TagCreationRecordRepository extends JpaRepository<TagCreationRecord, Long> {
     /**
+     * 관리자와 멱등키의 요청 기록을 잠금 없이 조회한다.
+     *
+     * @param adminId 요청한 관리자 ID
+     * @param idempotencyKey 관리자별 멱등키
+     * @return 저장된 요청 기록 또는 빈 Optional
+     */
+    Optional<TagCreationRecord> findByAdminIdAndIdempotencyKey(String adminId, String idempotencyKey);
+
+    /**
      * 관리자와 멱등키에 해당하는 요청 기록이 없으면 등록한다.
      * 동일 키가 있으면 기존 기록을 유지한다. 활성 쓰기 트랜잭션에서 호출한다.
      *

@@ -3,13 +3,17 @@ package com.backtoback.problem.tag.service;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.tag.domain.TagCreationRecord;
+import com.backtoback.problem.tag.dto.response.TagResponse;
 import com.backtoback.problem.tag.repository.TagCreationRecordRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -22,6 +26,35 @@ public class TagCreationRecordService {
 
     private final TagCreationRecordRepository creationRecords;
     private final Clock clock;
+
+    /**
+     * 유효한 완료 요청의 최초 응답을 공통 잠금 없이 조회한다.
+     * 쓰기 트랜잭션에 조회 스냅샷과 엔티티를 남기지 않도록 별도 트랜잭션에서 읽는다.
+     *
+     * @param adminId 요청한 관리자 ID
+     * @param key 관리자별 멱등키
+     * @param name 원본 요청 이름
+     * @param displayOrder 원본 요청 순번
+     * @return 완료된 최초 응답 또는 빈 Optional
+     * @throws ProblemException 유효한 기록과 요청 본문이 다르면 IDEMPOTENCY_KEY_CONFLICT
+     */
+    @Transactional(
+        readOnly = true,
+        propagation = Propagation.REQUIRES_NEW
+    )
+    public Optional<TagResponse> replay(String adminId, String key, String name, int displayOrder) {
+        var record = creationRecords.findByAdminIdAndIdempotencyKey(adminId, key).orElse(null);
+        if (record == null || record.isExpiredAt(LocalDateTime.now(clock))) {
+            return Optional.empty();
+        }
+        if (!record.matches(name, displayOrder)) {
+            throw new ProblemException(CommonErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+        }
+        if (record.getResultTagId() == null) {
+            return Optional.empty();
+        }
+        return Optional.of(TagResponse.from(record));
+    }
 
     /**
      * 태그 생성 요청을 잠그고 만료된 기록을 새 요청으로 갱신한다.
