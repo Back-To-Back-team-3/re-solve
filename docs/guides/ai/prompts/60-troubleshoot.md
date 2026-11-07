@@ -51,9 +51,10 @@ When to use: when presented with CodeRabbit review comments on a PR.
 2. For each comment, judge 해결 (address) or 철회 (decline — state why).
 3. Report all judgments in one pass. Wait for approval.
 4. After approval:
-    - 해결 items: make all fixes, show diff + commit message (`fix(<domain>): 코드래빗 피드백 반영`). Wait for commit approval.
+    - 해결 items: make all fixes, show the combined diff and a single commit message (`fix(<domain>): 코드래빗 피드백 반영`). Wait for approval to create one commit containing all fixes.
     - 철회 items: generate a reply draft per declined comment. Wait for approval before posting.
 5. Post approved replies only.
+6. After posting: check that all handled review threads are marked as resolved. If any thread remains open, ask the user to resolve it on GitHub — open threads may block Mergify Queue.
 
 ## Do not
 
