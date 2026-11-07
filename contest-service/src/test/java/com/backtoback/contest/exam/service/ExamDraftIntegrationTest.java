@@ -81,6 +81,8 @@ class ExamDraftIntegrationTest {
     @MockitoBean
     private ExamResultFinalizationScheduler finalizationScheduler;
     @MockitoBean
+    private ExamRankingCacheRebuildScheduler rankingCacheScheduler;
+    @MockitoBean
     private MemberReplicaService refresh;
     @MockitoBean
     private ExamContentClient content;
@@ -110,6 +112,10 @@ class ExamDraftIntegrationTest {
     private ExamSubmissionHistoryService submissionHistory;
     @Autowired
     private ExamFinalizationService finalization;
+    @Autowired
+    private ExamResultQueryService results;
+    @Autowired
+    private ExamRankingCache rankingCache;
     @Autowired
     private JdbcTemplate jdbc;
     @MockitoSpyBean
@@ -778,6 +784,90 @@ class ExamDraftIntegrationTest {
         });
         jdbc.update("UPDATE exams SET result_revision=result_revision+1 WHERE id=?", examId);
         assertThatThrownBy(() -> submissionHistory.read(examId, "7", null, page.nextCursor(), 1))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(ContestErrorCode.RESULT_CURSOR_EXPIRED)
+            );
+    }
+
+    /** 전체 종료 전 결과를 숨기고 확정 결과는 저장한 스냅샷에서 읽는다. */
+    @Test
+    @DisplayName("시험 결과는 종료 전 비공개이며 확정 후 스냅샷을 조회한다")
+    void resultsFollowVisibilityAndSnapshot() {
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        submissions.submit(examId, "7", new Request("101", "java", "코드", "1"));
+        assertThat(results.me(examId, "7").resultStatus()).isEqualTo("HIDDEN");
+        assertThat(results.me(examId, "7").problems()).isEmpty();
+        assertThatThrownBy(() -> results.standings(examId, "7", null, 20))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(ContestErrorCode.EXAM_RESULT_NOT_AVAILABLE)
+            );
+        jdbc.update("UPDATE exams SET status='CLOSED' WHERE id=?", examId);
+        var provisional = results.me(examId, "7");
+        assertThat(provisional.resultStatus()).isEqualTo("PROVISIONAL");
+        assertThat(provisional.problems().getFirst().pending()).isTrue();
+        jdbc.update("UPDATE exam_submissions SET status='FAILED',is_zero_confirmed=true WHERE exam_id=?", examId);
+        jdbc
+            .update(
+                "UPDATE exam_participants SET status='FINISHED',auto_submitted_at=NOW(6) WHERE id=?",
+                participantId
+            );
+        assertThat(finalization.finalizeExam(Long.parseLong(examId))).isTrue();
+        var fixed = results.me(examId, "7");
+        assertThat(fixed.resultStatus()).isEqualTo("FINALIZED");
+        assertThat(fixed.score()).isEqualTo("0.00");
+        assertThat(fixed.rank()).isEqualTo(1);
+        assertThat(fixed.problems().getFirst().pending()).isFalse();
+        jdbc.update("UPDATE exam_participants SET total_score=99 WHERE id=?", participantId);
+        assertThat(results.me(examId, "7").score()).isEqualTo("0.00");
+        assertThat(results.standings(examId, "7", null, 20).items().getFirst().score()).isEqualTo("0.00");
+    }
+
+    /** 순위 캐시는 버전 역행을 거절하고 다른 버전에는 적중하지 않는다. */
+    @Test
+    @DisplayName("순위 캐시는 버전이 같을 때만 조회하고 역행을 거절한다")
+    void rankingCacheRejectsOlderVersion() {
+        long exam = Long.parseLong(examId);
+        var newer = new ExamResultQueryService.Standing(participantId, "7", null, "20.00", 1, false);
+        var older = new ExamResultQueryService.Standing(participantId, "7", null, "10.00", 1, false);
+        rankingCache.replace(exam, 2, java.util.List.of(newer));
+        rankingCache.replace(exam, 1, java.util.List.of(older));
+        assertThat(rankingCache.read(exam, 1)).isNull();
+        assertThat(rankingCache.read(exam, 2)).containsExactly(newer);
+    }
+
+    /** 다른 사용자는 등록이나 활성 스터디 가입이 있어야 하며 버전이 바뀌면 커서가 만료된다. */
+    @Test
+    @DisplayName("시험 순위는 조회 권한과 결과 버전 커서를 확인한다")
+    void standingsRequireAuthorizationAndCurrentCursor() {
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
+        jdbc.update("UPDATE exams SET status='CLOSED' WHERE id=?", examId);
+        jdbc
+            .update(
+                "UPDATE exam_participants SET is_ranked=true,last_valid_submitted_at=? WHERE id=?",
+                now,
+                participantId
+            );
+        jdbc
+            .update(
+                "INSERT INTO exam_participants (exam_id,member_id,status,participant_revision,registered_at,"
+                    + "total_score,is_ranked,last_valid_submitted_at,version,created_at,updated_at) "
+                    + "VALUES (?,8,'FINISHED',1,?,0,true,?,0,?,?)",
+                examId,
+                now,
+                now,
+                now,
+                now
+            );
+        assertThatThrownBy(() -> results.standings(examId, "9", null, 1)).isInstanceOf(ContestException.class);
+        var page = results.standings(examId, "7", null, 1);
+        assertThat(page.hasMore()).isTrue();
+        assertThat(results.standings(examId, "7", page.nextCursor(), 1).items()).hasSize(1);
+        jdbc.update("UPDATE exams SET result_revision=result_revision+1 WHERE id=?", examId);
+        assertThatThrownBy(() -> results.standings(examId, "7", page.nextCursor(), 1))
             .isInstanceOf(ContestException.class)
             .satisfies(
                 error -> assertThat(((ContestException)error).getErrorCode())
