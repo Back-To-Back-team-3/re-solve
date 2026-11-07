@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import com.backtoback.problem.problem.domain.ProblemValidation;
 
@@ -26,4 +27,29 @@ public interface ProblemValidationRepository extends JpaRepository<ProblemValida
      * @return 검증 이력
      */
     List<ProblemValidation> findByProblemRevisionIdAndLanguage(Long revisionId, String language);
+
+    /**
+     * 문제의 최신 통과 회차 번호를 조회한다.
+     *
+     * @param problemId 문제 ID
+     * @return 최신 통과 회차 번호 또는 null
+     */
+    @Query("""
+        select max(r.revisionNumber) from ProblemRevision r, ProblemValidation v
+        where r.problemId=:problemId and r.id=v.problemRevisionId and v.resultStatus='PASSED'
+        """)
+    Integer currentNumber(long problemId);
+
+    /**
+     * 지정 회차의 통과 언어를 조회한다.
+     *
+     * @param revisionId 회차 ID
+     * @return 통과 언어 목록
+     */
+    @Query("""
+        select distinct v.language from ProblemValidation v where v.problemRevisionId=:revisionId
+        and v.resultStatus='PASSED' order by v.language
+        """)
+    List<String> languages(long revisionId);
+
 }

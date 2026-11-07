@@ -52,6 +52,9 @@ logging:
     org.hibernate.orm.jdbc.bind: INFO
 
 problem:
+  integration:
+    judge-url: ${JUDGE_SERVICE_URL:http://judge-service:8080}
+    topic-arn: ${PROBLEM_EVENTS_TOPIC_ARN:}
   messaging:
     validation-queue-url: ${PROBLEM_VALIDATION_QUEUE_URL:}
   image-storage:

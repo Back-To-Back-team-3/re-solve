@@ -158,6 +158,9 @@ services:
       <<: *db-redis-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/problem_db
       PROBLEM_VALIDATION_QUEUE_URL: ${PROBLEM_VALIDATION_QUEUE_URL:-}
+      PROBLEM_QUEUE_URL: ${PROBLEM_QUEUE_URL:-}
+      PROBLEM_EVENTS_TOPIC_ARN: ${PROBLEM_EVENTS_TOPIC_ARN:-}
+      JUDGE_SERVICE_URL: ${JUDGE_SERVICE_URL:-http://judge-service:8080}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
     depends_on:

@@ -130,7 +130,11 @@ GRAFANA_ADMIN_PASSWORD=
 
 ### Problem 검증 요청 발행
 
-`PROBLEM_VALIDATION_QUEUE_URL`은 필수이며, Judge가 수신하는 `problem-validation-queue`의 Standard SQS URL을 지정한다. Docker Compose로 실행할 때는 이 값을 `problem-service` 컨테이너의 환경변수로 전달해야 한다.
+`PROBLEM_VALIDATION_QUEUE_URL`은 필수이며, Judge가 수신하는 `problem-validation-queue`의 Standard SQS URL을 지정한다. Docker Compose로 실행할 때는 같은 URL을 Problem과 Judge에 전달한다. 로컬 예시는 컨테이너 내부의 LocalStack 주소이며 현재 초기화 스크립트는 이 검증 큐를 만들지 않으므로 발행 전 큐를 준비한다.
+
+검증 결과 수신을 연결할 때는 `PROBLEM_QUEUE_URL`에 기존 `problem-queue` URL을, `PROBLEM_EVENTS_TOPIC_ARN`에 `problem-events` SNS 토픽 ARN을 함께 전달한다. Study·Contest의 v2 수신 준비와 구독 필터·권한 확인 후 설정한다. 결과 큐 URL이 비어 있으면 수신기는 시작하지 않는다. 수신 활성화 전에는 `problem-queue`에 유입되는 필수 구독 종류마다 Problem 처리기가 배포됐는지 확인한다. 미구현 필수 이벤트는 소비 기록과 ACK를 남기지 않아 재수신되며, 최대 수신 횟수를 넘으면 처리기 배포 후 DLQ에서 재처리한다.
+
+관리자 진행 조회는 기본적으로 `http://judge-service:8080`을 호출한다. 주소가 다른 환경에서만 `JUDGE_SERVICE_URL`을 지정한다.
 
 ### Judge 검증 수신·실행·결과 이벤트 연결
 
@@ -144,7 +148,7 @@ GRAFANA_ADMIN_PASSWORD=
 - 활성화 전에 담당 A가 제공한 큐·토픽·구독 필터·DLQ·권한을 확인한다. 리스너는 없는 큐를 자동 생성하지 않는다.
 - 검증 요청은 DB 커밋 후 수동 ACK하며 ACK 배치를 끈다. 결과는 업무 트랜잭션의 Outbox 기록 후 공통 Relay로 발행한다.
 - AWS 리전·자격 증명·엔드포인트는 기존 설정을 사용한다. 로컬은 LocalStack, 운영은 서비스 실행 환경의 자격 증명 체인을 사용한다.
-- IDE 실행 시 환경변수를 전달한다. 현재 Compose에는 위 세 변수의 전달 설정이 없으므로 `.env`만 수정해서는 활성화되지 않는다. Compose·운영 배포의 변수 전달과 리소스 준비는 담당 A와 연결한다.
+- IDE 실행 시 환경변수를 전달한다. 현재 Compose는 Judge에 `PROBLEM_VALIDATION_QUEUE_URL`을 전달한다. `JUDGE_MESSAGING_ENABLED`와 `JUDGE_EVENTS_TOPIC_ARN`은 전달하지 않으므로 `.env`만 수정해서는 Judge 메시징을 활성화할 수 없다. Compose·운영 배포의 변수 전달과 리소스 준비는 담당 A와 연결한다.
 - 활성화하면 기존 대기 작업도 실행되므로 Problem 검증 자료 API와 Judge0 주소·사용 언어 활성화 설정을 함께 준비한다. 별도의 실행기 ON/OFF 환경변수는 사용하지 않는다.
 - 실행 동시성·대기열 조회·기한 초과 종결 기준은 정책 및 상태 §3.5를 따른다. 비활성 기간에도 작업 기한을 연장하지 않으며, 다시 활성화했을 때 기한이 지난 작업은 실행하지 않고 종결한다.
 

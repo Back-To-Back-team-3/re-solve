@@ -1,6 +1,8 @@
 package com.backtoback.problem.problem.domain;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
+import java.util.Set;
 
 import com.backtoback.common.jpa.entity.BaseTimeEntity;
 
@@ -136,6 +138,37 @@ public class ProblemValidation extends BaseTimeEntity {
      */
     public boolean hasPassed() {
         return "PASSED".equals(resultStatus);
+    }
+
+    /**
+     * 최초 종결 결과를 반영하고 동일 결과를 재수신하면 기존 값을 유지한다.
+     *
+     * @param status 종결 상태
+     * @param runtime 통과 환경
+     * @param runner 생성기 버전
+     * @param finished Judge 완료 시각
+     * @return 최초 반영 여부
+     * @throws IllegalArgumentException 종결 정보가 누락되거나 기존 결과와 상충하는 경우
+     */
+    public boolean complete(String status, String runtime, String runner, LocalDateTime finished) {
+        if (status == null || finished == null || !Set.of("PASSED", "ERROR", "REJECTED").contains(status)
+            || ("PASSED".equals(status)
+                ? runtime == null || !runtime.matches("[a-f0-9]{64}") || runner == null || runner.isBlank()
+                : runtime != null || runner != null)) {
+            throw new IllegalArgumentException("검증 종결 정보 불일치");
+        }
+        if (!isPending()) {
+            if (!resultStatus.equals(status) || !Objects.equals(runtimeKey, runtime)
+                || !Objects.equals(runnerVersion, runner) || !finishedAt.equals(finished)) {
+                throw new IllegalArgumentException("이미 반영한 검증 결과와 상충합니다.");
+            }
+            return false;
+        }
+        resultStatus = status;
+        runtimeKey = runtime;
+        runnerVersion = runner;
+        finishedAt = finished;
+        return true;
     }
 
 }
