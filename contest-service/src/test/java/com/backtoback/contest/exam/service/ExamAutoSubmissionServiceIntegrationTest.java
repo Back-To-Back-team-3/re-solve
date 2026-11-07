@@ -7,7 +7,9 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doThrow;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
@@ -140,19 +143,30 @@ class ExamAutoSubmissionServiceIntegrationTest extends ExamIntegrationTestSuppor
     void automaticSubmissionWaitsThreeSeconds() {
         // given
         store.save(store.prepare(examId, "7", "101", new SaveRequest("java", "코드", "1")));
-        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
-        jdbc.update("UPDATE exam_participants SET personal_ends_at=? WHERE id=?", now.minusSeconds(1), participantId);
-        // when
-        autoSubmissions.finishDue(Long.parseLong(examId), 7, participantId);
-        // then
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
-        var deadline = now.minusSeconds(4);
-        jdbc.update("UPDATE exam_participants SET personal_ends_at=? WHERE id=?", deadline, participantId);
-        autoSubmissions.finishDue(Long.parseLong(examId), 7, participantId);
-        autoSubmissions.finishDue(Long.parseLong(examId), 7, participantId);
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("SELECT received_at FROM exam_submissions", LocalDateTime.class))
-            .isEqualTo(deadline.truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+        ExamAutoSubmissionService target = AopTestUtils.getUltimateTargetObject(autoSubmissions);
+        Clock original = (Clock)ReflectionTestUtils.getField(target, "clock");
+        ReflectionTestUtils
+            .setField(
+                target,
+                "clock",
+                Clock.fixed(now.atZone(ClockConfiguration.SERVICE_ZONE).toInstant(), ClockConfiguration.SERVICE_ZONE)
+            );
+        try {
+            var deadline = now.minusSeconds(3).plusNanos(1000);
+            jdbc.update("UPDATE exam_participants SET personal_ends_at=? WHERE id=?", deadline, participantId);
+            assertThat(autoSubmissions.finishDue(Long.parseLong(examId), 7, participantId)).isFalse();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
+            deadline = now.minusSeconds(3);
+            jdbc.update("UPDATE exam_participants SET personal_ends_at=? WHERE id=?", deadline, participantId);
+            assertThat(autoSubmissions.finishDue(Long.parseLong(examId), 7, participantId)).isTrue();
+            assertThat(autoSubmissions.finishDue(Long.parseLong(examId), 7, participantId)).isFalse();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT received_at FROM exam_submissions", LocalDateTime.class))
+                .isEqualTo(deadline);
+        } finally {
+            ReflectionTestUtils.setField(target, "clock", original);
+        }
     }
 
     @Test
