@@ -39,7 +39,7 @@ public class JudgeProgressClient {
         try {
             return circuit.executeSupplier(() -> fetch(id, revisionId, language));
         } catch (CallNotPermittedException open) {
-            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, open);
         }
     }
 
@@ -77,11 +77,11 @@ public class JudgeProgressClient {
                     return null;
                 }
             } catch (JacksonException invalid) {
-                throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+                throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, invalid);
             }
-            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, missing);
         } catch (RestClientException failure) {
-            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
         }
     }
 
