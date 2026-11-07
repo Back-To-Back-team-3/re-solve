@@ -31,6 +31,14 @@ class ExamSubmissionMessageSizeTest {
         assertThatThrownBy(() -> size.validate("a".repeat(65537))).isInstanceOf(ContestException.class);
     }
 
+    @Test
+    @DisplayName("UTF-8 다중 바이트 원문은 문자 수 대신 바이트 경계로 제한한다")
+    void multibyteCodeLimit() {
+        String boundary = "가".repeat(21845) + "a";
+        assertThatCode(() -> size.validate(boundary)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> size.validate(boundary + "a")).isInstanceOf(ContestException.class);
+    }
+
     /** 제어 문자가 JSON에서 확장된 실제 메시지의 256KiB 경계를 확인한다. */
     @Test
     @DisplayName("최대 메타데이터에서 직렬화된 이벤트 256KiB까지 허용한다")

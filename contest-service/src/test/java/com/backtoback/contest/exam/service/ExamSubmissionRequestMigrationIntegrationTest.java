@@ -80,14 +80,23 @@ class ExamSubmissionRequestMigrationIntegrationTest extends ExamIntegrationTestS
                 try (var insert = connection.prepareStatement("INSERT INTO outbox_events VALUES (?,?,?,?,?,?,?,?,?)")) {
                     for (int i = 0; i < 3; i++) {
                         insert.setLong(1, i + 1);
-                        insert.setString(2, (String)original.get("event_id"));
+                        String eventId
+                            = i == 0 ? (String)original.get("event_id") : java.util.UUID.randomUUID().toString();
+                        long receiptId = i == 0 ? id : id + 1;
+                        var payload
+                            = (tools.jackson.databind.node.ObjectNode)new tools.jackson.databind.ObjectMapper()
+                                .readTree((String)original.get("payload"));
+                        payload.put("eventId", eventId);
+                        payload.put("aggregateId", Long.toString(receiptId));
+                        payload.put("examSubmissionId", Long.toString(receiptId));
+                        insert.setString(2, eventId);
                         insert.setString(3, (String)original.get("event_type"));
                         insert.setString(4, (String)original.get("schema_version"));
                         insert.setString(5, (String)original.get("aggregate_type"));
-                        insert.setString(6, Long.toString(i == 0 ? id : id + 1));
+                        insert.setString(6, Long.toString(receiptId));
                         insert.setString(7, (String)original.get("correlation_id"));
                         insert.setObject(8, original.get("occurred_at"));
-                        insert.setString(9, (String)original.get("payload"));
+                        insert.setString(9, payload.toString());
                         insert.executeUpdate();
                     }
                 }
