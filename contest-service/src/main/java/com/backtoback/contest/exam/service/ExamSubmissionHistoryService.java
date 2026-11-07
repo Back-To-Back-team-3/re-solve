@@ -9,6 +9,7 @@ import java.util.List;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.exception.CommonErrorCode;
@@ -31,7 +32,10 @@ public class ExamSubmissionHistoryService {
     private final JdbcTemplate jdbc;
 
     /** 커서의 시험·참가자·문제와 결과 버전을 확인하고 본인 이력만 읽는다. */
-    @Transactional(readOnly = true)
+    @Transactional(
+        readOnly = true,
+        isolation = Isolation.REPEATABLE_READ
+    )
     public Page read(String examId, String memberId, String problemId, String after, int size) {
         long exam = id(examId);
         long member = id(memberId);

@@ -11,7 +11,7 @@ import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
-/** 시험 기능의 저장 및 동시성 통합 검증이다. */
+/** 본인 제출 이력의 권한·공개 시점과 커서를 검증한다. */
 class ExamSubmissionHistoryServiceIntegrationTest extends ExamIntegrationTestSupport {
     @Test
     @DisplayName("제출 이력은 종료 전 판정을 숨기고 결과 변경 시 커서를 거절한다")

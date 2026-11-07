@@ -5,6 +5,7 @@ import java.time.OffsetDateTime;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.exception.CommonErrorCode;
@@ -28,7 +29,11 @@ public class ExamEventSnapshotService {
     private final Clock clock;
 
     /** 활성 참가자를 재검증하며 전체 종료 전에는 집계를 읽지 않는다. */
-    @Transactional(readOnly = true)
+    @Transactional(
+        readOnly = true,
+        isolation = Isolation.REPEATABLE_READ,
+        timeout = 5
+    )
     public Snapshot read(String examId, String memberId) {
         long exam = id(examId);
         long member = id(memberId);
