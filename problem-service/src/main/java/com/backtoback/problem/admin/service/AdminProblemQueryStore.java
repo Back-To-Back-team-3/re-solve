@@ -66,6 +66,8 @@ public class AdminProblemQueryStore {
      * @param size 페이지 크기
      * @param sort 회차 정렬
      * @return 회차 메타데이터
+     * @throws ProblemException 페이지·정렬·식별자가 잘못되면 {@code COMMON_INVALID_REQUEST},
+     *     문제가 없으면 {@code PROBLEM_NOT_FOUND}, 작성자가 아니면 {@code AUTH_ACCESS_DENIED}
      */
     @Transactional(readOnly = true)
     public Page<Summary> history(long problemId, long author, int page, int size, String sort) {
@@ -86,7 +88,9 @@ public class AdminProblemQueryStore {
      * @param revisionId 지정 회차 또는 최신 조회 시 null
      * @param author 작성자
      * @return 전체 원문 참조와 언어별 검증
-     * @throws ProblemException 문제·회차 없음 또는 작성 권한 없음
+     * @throws ProblemException 문제 식별자가 잘못되면 {@code COMMON_INVALID_REQUEST},
+     *     문제·회차가 없으면 {@code PROBLEM_NOT_FOUND}·{@code PROBLEM_REVISION_NOT_FOUND},
+     *     작성자가 아니면 {@code AUTH_ACCESS_DENIED}
      */
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,

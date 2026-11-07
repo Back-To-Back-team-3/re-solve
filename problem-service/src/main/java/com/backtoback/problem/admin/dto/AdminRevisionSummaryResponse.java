@@ -1,6 +1,7 @@
 package com.backtoback.problem.admin.dto;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import com.backtoback.problem.admin.service.AdminProblemQueryStore.Summary;
@@ -12,7 +13,7 @@ public record AdminRevisionSummaryResponse(
     String problemRevisionId,
     int revisionNumber,
     String title,
-    LocalDateTime publishedAt,
+    OffsetDateTime publishedAt,
     String currentProblemRevisionId,
     List<String> supportedLanguages
 ) {
@@ -28,7 +29,7 @@ public record AdminRevisionSummaryResponse(
             revision.getId().toString(),
             revision.getRevisionNumber(),
             revision.getTitle(),
-            revision.getCreatedAt(),
+            revision.getCreatedAt().atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
             value.current() == null ? null : value.current().toString(),
             value.languages()
         );

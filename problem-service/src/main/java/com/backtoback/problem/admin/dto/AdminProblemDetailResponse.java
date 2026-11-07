@@ -1,14 +1,15 @@
 package com.backtoback.problem.admin.dto;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
 import com.backtoback.problem.admin.service.AdminProblemQueryService.Content;
 import com.backtoback.problem.admin.service.AdminProblemQueryService.Language;
-import com.backtoback.problem.problem.client.JudgeProgressClient.TestResult;
 import com.backtoback.problem.problem.dto.FunctionSpec;
 import com.backtoback.problem.problem.dto.response.ExecutionLimitsResponse;
+import com.backtoback.problem.problem.dto.response.JudgeValidationProgressResponse.TestResult;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /** 작성자의 회차 원문과 검증 상태(API 명세서 §2.3.3·§2.3.5). */
@@ -21,7 +22,7 @@ public record AdminProblemDetailResponse(
     int rowVersion,
     String problemRevisionId,
     int revisionNumber,
-    LocalDateTime publishedAt,
+    OffsetDateTime publishedAt,
     String title,
     String description,
     String constraints,
@@ -55,7 +56,7 @@ public record AdminProblemDetailResponse(
             problem.getRowVersion(),
             revision.getId().toString(),
             revision.getRevisionNumber(),
-            revision.getCreatedAt(),
+            revision.getCreatedAt().atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
             revision.getTitle(),
             value.body().description(),
             value.body().constraints(),
