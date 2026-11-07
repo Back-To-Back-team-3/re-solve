@@ -4,9 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -21,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -39,6 +43,9 @@ import net.javacrumbs.shedlock.core.LockProvider;
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.contest.exam.repository.ExamRepository;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /** MySQL의 부모 잠금과 Outbox 트랜잭션 및 JDBC ShedLock을 확인한다. */
 @SpringBootTest(
@@ -77,6 +84,8 @@ class ExamLifecycleIntegrationTest {
     private TransactionTemplate transactions;
     @Autowired
     private LockProvider lockProvider;
+    @Autowired
+    private ExamRepository exams;
     private long examId;
 
     /** 시작과 종료가 지난 시험과 입장하지 않은 등록자를 저장한다. */
@@ -233,5 +242,72 @@ class ExamLifecycleIntegrationTest {
         } finally {
             first.unlock();
         }
+    }
+
+    @Test
+    @DisplayName("실제 시험 배치가 전이를 기다리는 동안 JDBC 잠금 임대를 갱신한다")
+    void lifecycleSchedulerRenewsItsJdbcLease() throws Exception {
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var transition = mock(ExamLifecycleService.class);
+        doAnswer(invocation -> {
+            started.countDown();
+            if (!release.await(50, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Transition was not released");
+            }
+            return null;
+        }).when(transition).transition(examId);
+        var running
+            = new ExamLifecycleScheduler(exams, transition, Clock.systemUTC(), new SimpleMeterRegistry(), lockProvider);
+        var config
+            = new LockConfiguration(Instant.now(), "ExamLifecycleScheduler", Duration.ofSeconds(30), Duration.ZERO);
+        long originalLeaseEnd = System.nanoTime() + TimeUnit.SECONDS.toNanos(32);
+        try (var pool = Executors.newSingleThreadExecutor()) {
+            var completion = pool.submit(running::run);
+            try {
+                assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+                var initial = lifecycleLockUntil();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(22);
+                while (!lifecycleLockUntil().isAfter(initial) && System.nanoTime() < deadline) {
+                    TimeUnit.MILLISECONDS.sleep(100);
+                }
+                assertThat(lifecycleLockUntil()).isAfter(initial);
+                while (System.nanoTime() < originalLeaseEnd) {
+                    TimeUnit.MILLISECONDS.sleep(100);
+                }
+                assertThat(lockProvider.lock(config)).isEmpty();
+            } finally {
+                release.countDown();
+            }
+            completion.get(5, TimeUnit.SECONDS);
+        } finally {
+            running.stopRenewals();
+        }
+        lockProvider
+            .lock(new LockConfiguration(Instant.now(), config.getName(), Duration.ofSeconds(30), Duration.ZERO))
+            .orElseThrow()
+            .unlock();
+    }
+
+    @Test
+    @DisplayName("전이 후보는 같은 시각에서도 마지막 시도 ID 다음부터 조회한다")
+    void lifecycleCandidatesContinueAfterCursor() {
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
+        var first = exams.findLifecycleCandidates(now, null, 0, PageRequest.of(0, 100));
+        assertThat(first).singleElement().satisfies(candidate -> assertThat(candidate.getId()).isEqualTo(examId));
+        var cursor = first.getFirst();
+        assertThat(exams.findLifecycleCandidates(now, cursor.getDueAt(), examId, PageRequest.of(0, 100))).isEmpty();
+        assertThat(exams.findLifecycleCandidates(now, cursor.getDueAt(), examId - 1, PageRequest.of(0, 100)))
+            .singleElement()
+            .satisfies(candidate -> assertThat(candidate.getId()).isEqualTo(examId));
+    }
+
+    private LocalDateTime lifecycleLockUntil() {
+        return jdbc
+            .queryForObject(
+                "SELECT lock_until FROM shedlock WHERE name = ?",
+                LocalDateTime.class,
+                "ExamLifecycleScheduler"
+            );
     }
 }
