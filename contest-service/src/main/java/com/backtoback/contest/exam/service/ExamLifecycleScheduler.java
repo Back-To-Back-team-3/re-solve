@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -27,6 +28,11 @@ import io.micrometer.core.instrument.Timer;
 
 /** 대상 시험을 한 회차에 최대 100건 선정해 각각 독립적으로 전이한다. */
 @Component
+@ConditionalOnProperty(
+    name = "spring.task.scheduling.enabled",
+    havingValue = "true",
+    matchIfMissing = true
+)
 @EnableScheduling
 @Import(SchedulerLockConfiguration.class)
 public class ExamLifecycleScheduler {
