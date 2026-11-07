@@ -20,7 +20,7 @@ Check changes against `docs/guides/ai/review-checklist.md`. Mode A is the author
 
 1. Look at `git diff --stat <base>...HEAD` — use `develop` for a normal PR and the preceding branch for a Stack PR — and choose the checklist sections that apply.
 2. Open the grounds document for each item and judge it as 통과, 미통과, 해당 없음, or 미확인. For 통과, give the file and line, or the command run and its result.
-3. Run the commands in section J. If you could not run a command, mark the item 미확인.
+3. Run the commands in section J and always run `./gradlew compileJava`, `./gradlew test`, and `./gradlew spotlessCheck`. All three are mandatory. If you could not run a command, mark the item 미확인 and record the reason in the 실행한 명령 table.
 4. For 미통과 items, propose a fix only. Do not change anything.
 5. Output the result and wait for approval.
 

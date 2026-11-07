@@ -31,7 +31,8 @@ replay_pid*
 
 # Skills (local only, not committed)
 .agents/
-.claude/skills/
+**/.claude/skills/
+**/.gemini/
 skills-lock.json
 
 # IntelliJ IDEA
