@@ -59,8 +59,10 @@ public class AssignmentCompletionRecalculationService {
         memberStatusRepository.findByAssignmentIdAndMemberIdWithLock(assignmentId, memberId);
 
         Optional<MemberAcReplica> basisAc = findBasisAc(assignment, memberId, problemId);
+        // FOR SHARE: REPEATABLE READ 스냅샷 우회, 직렬화 잠금 획득 후 최신 커밋을 반영한다(scheduler.md §5.0).
         Optional<AssignmentCompletion> existing
-            = completionRepository.findByAssignmentIdAndMemberIdAndProblemId(assignmentId, memberId, problemId);
+            = completionRepository
+                .findByAssignmentIdAndMemberIdAndProblemIdWithForShare(assignmentId, memberId, problemId);
 
         updateCompletion(assignment, memberId, problemId, basisAc, existing, now);
         syncMemberStatus(assignment, memberId, now);
