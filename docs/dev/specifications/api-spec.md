@@ -5608,7 +5608,7 @@
       "data": {
         "resultStatus": "PROVISIONAL",
         "resultRevision": "3",
-        "content": [
+        "items": [
           {
             "memberId": "7",
             "nickname": "kim-dev",
@@ -5617,11 +5617,8 @@
             "pending": false
           }
         ],
-        "page": 0,
-        "size": 20,
-        "totalElements": 12,
-        "totalPages": 1,
-        "hasNext": false
+        "nextCursor": null,
+        "hasMore": false
       }
     }
     ```
