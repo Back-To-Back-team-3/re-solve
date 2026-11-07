@@ -1,6 +1,7 @@
 package com.backtoback.problem.problem.service;
 
 import java.io.IOException;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -113,7 +114,7 @@ public class InternalProblemStubService implements InternalProblemService {
             contestOnly ? "대회 전용 두 수의 합" : "두 수의 합",
             1,
             List.of(new ProblemTagResponse("1", "구현")),
-            "2026-09-27T10:00:00+09:00",
+            OffsetDateTime.parse("2026-09-27T10:00:00+09:00"),
             contestOnly ? "## 문제\n두 정수 a와 b의 합을 반환하세요." : "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
             "- 입력 범위: -1000 <= a, b <= 1000",
             "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
