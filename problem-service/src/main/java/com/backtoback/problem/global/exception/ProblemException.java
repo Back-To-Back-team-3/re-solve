@@ -7,7 +7,23 @@ import com.backtoback.common.exception.ErrorCode;
  * 공통 또는 문제 서비스 오류 코드를 공통 예외 처리기에 전달한다. (컨벤션·빌드 매뉴얼 6.3 응답·예외)
  */
 public final class ProblemException extends BusinessException {
+    /**
+     * 오류 코드를 공통 예외 처리기에 전달한다.
+     *
+     * @param errorCode 응답에 사용할 오류 코드
+     */
     public ProblemException(ErrorCode errorCode) {
         super(errorCode);
+    }
+
+    /**
+     * 오류 코드와 원인 예외를 공통 예외 처리기에 전달한다.
+     *
+     * @param errorCode 응답에 사용할 오류 코드
+     * @param cause 오류를 일으킨 원인 예외
+     */
+    public ProblemException(ErrorCode errorCode, Throwable cause) {
+        super(errorCode);
+        initCause(cause);
     }
 }

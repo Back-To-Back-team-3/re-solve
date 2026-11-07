@@ -1,0 +1,22 @@
+CREATE TABLE problem_code_assets (
+ id BIGINT NOT NULL AUTO_INCREMENT,
+ problem_id BIGINT NOT NULL,
+ owner_id BIGINT NOT NULL,
+ status VARCHAR(30) NOT NULL,
+ object_key VARCHAR(500) COLLATE utf8mb4_bin NOT NULL,
+ object_version VARCHAR(200) NULL,
+ sha256 CHAR(64) COLLATE utf8mb4_bin NOT NULL,
+ size_bytes BIGINT NOT NULL,
+ upload_expires_at DATETIME(6) NOT NULL,
+ uploaded_at DATETIME(6) NULL,
+ upload_finished_at DATETIME(6) NULL,
+ failure_code VARCHAR(100) NULL,
+ created_at DATETIME(6) NOT NULL,
+ updated_at DATETIME(6) NOT NULL,
+ PRIMARY KEY (id),
+ CONSTRAINT fk_problem_code_assets_problem FOREIGN KEY (problem_id) REFERENCES problems(id),
+ CONSTRAINT uk_problem_code_assets_object_key UNIQUE (object_key),
+ INDEX idx_problem_code_assets_cleanup (status, upload_finished_at, id),
+ INDEX idx_problem_code_assets_status_created_at (status, created_at),
+ INDEX idx_problem_code_assets_problem (problem_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

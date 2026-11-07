@@ -42,14 +42,17 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.dto.request.ProblemCreateRequest;
 import com.backtoback.problem.problem.dto.response.ProblemCreateResponse;
 
 /** 실제 MySQL 트랜잭션에서 등록·멱등 경합·감사 및 파일 연결 롤백을 확인한다. */
+@MockitoBean(types = OutboxRelay.class)
 @SpringBootTest(
     properties = {
+        "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
         "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
         "spring.cloud.aws.region.static=ap-northeast-2",
         "spring.cloud.aws.credentials.access-key=test",

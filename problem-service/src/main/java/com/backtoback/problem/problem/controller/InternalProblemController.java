@@ -23,7 +23,6 @@ import com.backtoback.problem.problem.dto.response.JudgingValidationResponse;
 import com.backtoback.problem.problem.dto.response.ProblemContentResponse;
 import com.backtoback.problem.problem.dto.response.ProblemOperationResponse;
 import com.backtoback.problem.problem.dto.response.ProblemSummaryListResponse;
-import com.backtoback.problem.problem.dto.response.ValidationDataResponse;
 import com.backtoback.problem.problem.service.InternalProblemService;
 
 import jakarta.validation.Valid;
@@ -31,7 +30,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 
 /**
- * API 명세서 2.6.1~2.6.5·2.6.8~2.6.10의 내부 HTTP API를 제공한다.
+ * API 명세서 2.6.1~2.6.5·2.6.9~2.6.10의 내부 HTTP API를 제공한다.
  */
 @Validated
 @RestController
@@ -94,15 +93,6 @@ public class InternalProblemController {
         @RequestParam @NotBlank(message = "용도는 필수입니다.") String purpose
     ) {
         return internalProblemService.getSummaries(ids, purpose);
-    }
-
-    /** 관리자 검증 요청에 고정된 코드와 테스트 자료를 반환한다. (API 명세서 2.6.8) */
-    @GetMapping(PROBLEM_PATH + "/validations/{validationId}/data")
-    public ValidationDataResponse getValidationData(
-        @PathVariable @NotBlank(message = "검증 ID는 필수입니다.") String validationId,
-        @RequestHeader("X-Correlation-Id") @NotBlank(message = "상관관계 ID는 필수입니다.") String correlationId
-    ) {
-        return internalProblemService.getValidationData(validationId);
     }
 
     /** 대회 전용 문제 연결 요청의 고정 성공·충돌 결과를 반환한다. (API 명세서 2.6.9) */

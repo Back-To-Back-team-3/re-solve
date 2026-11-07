@@ -16,17 +16,21 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.problem.tag.domain.Tag;
 import com.backtoback.problem.tag.repository.TagRepository;
 
 /** 태그 존재 확인 내부 API(API 명세서 2.6.11)의 응답을 검증한다. */
+@MockitoBean(types = OutboxRelay.class)
 @SpringBootTest(
     properties = {
+        "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
         "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
         "spring.cloud.aws.region.static=ap-northeast-2",
         "spring.cloud.aws.credentials.access-key=test",
