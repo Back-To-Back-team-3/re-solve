@@ -117,4 +117,26 @@ public class Problem extends BaseTimeEntity {
         rowVersion++;
     }
 
+    /**
+     * 문제 잠금 아래 사용 회차가 확인된 문제를 공개한다.
+     *
+     * @param expectedVersion 원래 기대 버전
+     * @param now 잠금 획득 후 공개 시각
+     * @throws ProblemException 버전 불일치는 {@code PROBLEM_VERSION_CONFLICT},
+     *     공개할 수 없는 용도·상태는 {@code PROBLEM_INVALID_STATE_TRANSITION}
+     */
+    public void publish(int expectedVersion, LocalDateTime now) {
+        if (rowVersion != expectedVersion) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_VERSION_CONFLICT);
+        }
+        if (scope != ProblemScope.GENERAL || visibility != ProblemVisibility.PRIVATE) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION);
+        }
+        visibility = ProblemVisibility.PUBLIC;
+        rowVersion++;
+        if (publishedAt == null) {
+            publishedAt = now;
+        }
+    }
+
 }
