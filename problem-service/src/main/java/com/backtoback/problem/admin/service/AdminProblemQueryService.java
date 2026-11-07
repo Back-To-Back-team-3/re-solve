@@ -16,6 +16,7 @@ import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.client.JudgeProgressClient;
 import com.backtoback.problem.problem.config.ProblemImageStorageProperties;
 import com.backtoback.problem.problem.dto.FunctionSpec;
+import com.backtoback.problem.problem.dto.response.JudgeValidationProgressResponse;
 import com.backtoback.problem.problem.service.ProblemAssetContent;
 import com.backtoback.problem.problem.service.ProblemAssetObjectReader;
 import com.backtoback.problem.problem.service.ProblemValidationDataStore.File;
@@ -40,7 +41,9 @@ public class AdminProblemQueryService {
      * @param revisionId 고정 회차 또는 최신 조회 시 null
      * @param author 작성자
      * @return 전체 내용과 언어별 진행
-     * @throws ProblemException 원문이나 Judge 조회 실패 시 의존 장애
+     * @throws ProblemException 식별자가 잘못되면 {@code COMMON_INVALID_REQUEST}, 문제·회차가 없으면
+     *     {@code PROBLEM_NOT_FOUND}·{@code PROBLEM_REVISION_NOT_FOUND}, 작성자가 아니면
+     *     {@code AUTH_ACCESS_DENIED}, 원문이나 Judge 조회 실패 시 {@code COMMON_DEPENDENCY_UNAVAILABLE}
      */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public Content read(long problemId, Long revisionId, long author) {
@@ -84,8 +87,10 @@ public class AdminProblemQueryService {
                 tests,
                 languages
             );
+        } catch (ProblemException failure) {
+            throw failure;
         } catch (RuntimeException failure) {
-            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
         }
     }
 
@@ -110,7 +115,7 @@ public class AdminProblemQueryService {
                 .decode(ByteBuffer.wrap(bytes))
                 .toString();
         } catch (CharacterCodingException invalid) {
-            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            throw new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, invalid);
         }
     }
 
@@ -124,7 +129,11 @@ public class AdminProblemQueryService {
     public record Test(long id, boolean sample, StoredTest content) {
     }
     /** 코드와 최신 검증 진행. */
-    public record Language(AdminProblemQueryStore.Language local, String code, JudgeProgressClient.Progress progress) {
+    public record Language(
+        AdminProblemQueryStore.Language local,
+        String code,
+        JudgeValidationProgressResponse progress
+    ) {
     }
     /** 작성자가 조회한 고정 회차의 전체 내용. */
     public record Content(

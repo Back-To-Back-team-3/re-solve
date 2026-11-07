@@ -46,7 +46,7 @@ public record AdminProblemSearchRequest(
      * 허용 필드만 정렬하고 페이지 범위를 검증한다.
      *
      * @return 검증된 페이지 조건
-     * @throws ProblemException 필터나 페이지가 잘못된 경우
+     * @throws ProblemException 필터·페이지·정렬이 잘못되면 {@code COMMON_INVALID_REQUEST}
      */
     public PageRequest pageable() {
         int number = page == null ? 0 : page;

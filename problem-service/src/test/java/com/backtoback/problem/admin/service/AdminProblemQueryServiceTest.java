@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willAnswer;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,15 +31,22 @@ import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.admin.dto.AdminProblemDetailResponse;
 import com.backtoback.problem.admin.dto.AdminProblemSearchRequest;
+import com.backtoback.problem.admin.dto.AdminRevisionSummaryResponse;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.client.JudgeProgressClient;
 import com.backtoback.problem.problem.dto.request.ProblemRevisionRequest;
+import com.backtoback.problem.problem.dto.request.ProblemValidationRequest;
+import com.backtoback.problem.problem.dto.response.JudgeValidationProgressResponse;
+import com.backtoback.problem.problem.repository.ProblemValidationRepository;
 import com.backtoback.problem.problem.service.ProblemAssetContent;
 import com.backtoback.problem.problem.service.ProblemAssetObjectReader;
 import com.backtoback.problem.problem.service.ProblemAssetObjectWriter;
 import com.backtoback.problem.problem.service.ProblemCreateFixtures;
 import com.backtoback.problem.problem.service.ProblemCreateService;
+import com.backtoback.problem.problem.service.ProblemValidationService;
+
+import tools.jackson.databind.ObjectMapper;
 
 /** 실제 DB에서 관리자 회차 선택·권한과 불변 원문 조회를 검증한다. */
 @SpringBootTest(
@@ -56,6 +65,12 @@ class AdminProblemQueryServiceTest {
     private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("problem_db");
     @Container
     private static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7.4-alpine").withExposedPorts(6379);
+    @Autowired
+    private ObjectMapper mapper;
+    @Autowired
+    private ProblemValidationService validationService;
+    @Autowired
+    private ProblemValidationRepository validations;
     @Autowired
     private ProblemCreateService creates;
     @Autowired
@@ -142,6 +157,12 @@ class AdminProblemQueryServiceTest {
             queries.list(new AdminProblemSearchRequest("두 배", null, null, null, null, false, 0, 20, null)).getContent()
         ).anyMatch(item -> item.problem().getId() == id);
         var old = AdminProblemDetailResponse.from(details.read(id, Long.parseLong(first.problemRevisionId()), 9001));
+        assertThat(mapper.readTree(mapper.writeValueAsString(old)).get("publishedAt").asString()).endsWith("+09:00");
+        var historical
+            = AdminRevisionSummaryResponse
+                .from(queries.history(id, 9001, 0, 20, "revisionNumber,desc").getContent().getFirst());
+        assertThat(mapper.readTree(mapper.writeValueAsString(historical)).get("publishedAt").asString())
+            .endsWith("+09:00");
         assertThat(old.description()).isEqualTo("설명");
         assertThat(old.testCases()).hasSize(2);
         assertThat(old.testCases().get(1).isSample()).isFalse();
@@ -176,5 +197,122 @@ class AdminProblemQueryServiceTest {
                 ProblemException.class,
                 failure -> assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
             );
+        var storageFailure = new IllegalStateException("storage unavailable");
+        given(reader.read(anyString(), anyString(), anyString())).willThrow(storageFailure);
+        assertThatThrownBy(() -> details.read(id, null, 9002))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+            )
+            .hasCause(storageFailure);
+    }
+
+    /** 통과 코드는 보존하면서 최신 검증의 진행과 작성·사용 회차를 각각 조회한다. */
+    @Test
+    @DisplayName("통과 코드를 유지하고 최신 요청의 진행과 서로 다른 작성·사용 회차를 반환한다")
+    void passedCodeAndLatestProgress() {
+        var input = ProblemCreateFixtures.request();
+        var created = creates.create(9004, UUID.randomUUID().toString(), input, null);
+        long problemId = Long.parseLong(created.problemId());
+        long revisionId = Long.parseLong(created.problemRevisionId());
+        var passed
+            = validationService
+                .accept(
+                    problemId,
+                    revisionId,
+                    9004,
+                    UUID.randomUUID().toString(),
+                    new ProblemValidationRequest("java", "passed code"),
+                    "query224",
+                    null
+                );
+        var latest
+            = validationService
+                .accept(
+                    problemId,
+                    revisionId,
+                    9004,
+                    UUID.randomUUID().toString(),
+                    new ProblemValidationRequest("python3", "latest code"),
+                    "query224",
+                    null
+                );
+        var validation = validations.findById(Long.parseLong(passed.validationId())).orElseThrow();
+        validation.complete("PASSED", "a".repeat(64), "runner-test", LocalDateTime.of(2026, 11, 7, 12, 0));
+        validations.saveAndFlush(validation);
+        var progress
+            = new JudgeValidationProgressResponse(
+                latest.validationId(),
+                created.problemRevisionId(),
+                "python3",
+                "RUNNING",
+                List.of(),
+                null,
+                null
+            );
+        given(judge.read(latest.validationId(), created.problemRevisionId(), "python3")).willAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return progress;
+        });
+        var result = AdminProblemDetailResponse.from(details.read(problemId, revisionId, 9004));
+        assertThat(result.referenceSolutions())
+            .filteredOn(code -> code.language().equals("java"))
+            .singleElement()
+            .satisfies(code -> assertThat(code.sourceCode()).isEqualTo("passed code"));
+        assertThat(result.supportedLanguages()).containsExactly("java");
+        assertThat(result.referenceSolutions())
+            .filteredOn(code -> code.language().equals("python3"))
+            .singleElement()
+            .satisfies(code -> assertThat(code.sourceCode()).isEqualTo("latest code"));
+        assertThat(result.languageResults())
+            .filteredOn(item -> item.language().equals("java"))
+            .singleElement()
+            .satisfies(item -> assertThat(item.resultApplied()).isTrue());
+        assertThat(result.languageResults())
+            .filteredOn(item -> item.language().equals("python3"))
+            .singleElement()
+            .satisfies(item -> {
+                assertThat(item.validationId()).isEqualTo(latest.validationId());
+                assertThat(item.status()).isEqualTo("RUNNING");
+                assertThat(item.resultApplied()).isFalse();
+            });
+        given(judge.read(latest.validationId(), created.problemRevisionId(), "python3")).willReturn(null);
+        var requested = AdminProblemDetailResponse.from(details.read(problemId, revisionId, 9004));
+        assertThat(requested.languageResults())
+            .filteredOn(item -> item.language().equals("python3"))
+            .singleElement()
+            .satisfies(item -> {
+                assertThat(item.status()).isEqualTo("REQUESTED");
+                assertThat(item.tests()).isEmpty();
+            });
+        var next
+            = creates
+                .revise(
+                    problemId,
+                    9004,
+                    UUID.randomUUID().toString(),
+                    new ProblemRevisionRequest(
+                        1,
+                        "새 제목",
+                        "새 설명",
+                        input.constraints(),
+                        input.examples(),
+                        2,
+                        input.tagIds(),
+                        input.functionSpec(),
+                        input.executionLimits(),
+                        input.testCases()
+                    ),
+                    "query224",
+                    null
+                );
+        var newer = AdminProblemDetailResponse.from(details.read(problemId, null, 9004));
+        assertThat(newer.problemRevisionId()).isEqualTo(next.problemRevisionId());
+        assertThat(newer.currentProblemRevisionId()).isEqualTo(created.problemRevisionId());
+        assertThat(newer.supportedLanguages()).isEmpty();
+        var cause = new IllegalStateException("judge unavailable");
+        var failure = new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, cause);
+        given(judge.read(latest.validationId(), created.problemRevisionId(), "python3")).willThrow(failure);
+        assertThatThrownBy(() -> details.read(problemId, revisionId, 9004)).isSameAs(failure).hasCause(cause);
     }
 }
