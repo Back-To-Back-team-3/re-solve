@@ -4,6 +4,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,6 +74,36 @@ public class ExamContentClient {
         } catch (RuntimeException failure) {
             throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
         }
+    }
+
+    /** 고정 회차의 통과 언어를 원격 조회하며 누락된 응답은 장애로 처리한다. */
+    public List<String> supportedLanguages(long exam, long problem, long revision) {
+        try {
+            var result
+                = retry(
+                    () -> client
+                        .get()
+                        .uri("/internal/v1/problems/{p}/revisions/{r}/content", problem, revision)
+                        .header("X-Access-Context", "EXAM:" + exam)
+                        .retrieve()
+                        .body(LanguageContent.class)
+                );
+            if (result == null || !Long.toString(problem).equals(result.problemId())
+                || !Long.toString(revision).equals(result.problemRevisionId()) || result.supportedLanguages() == null
+                || result.supportedLanguages().isEmpty()
+                || !Set.of("java", "python3", "cpp").containsAll(result.supportedLanguages())
+                || result.supportedLanguages().stream().distinct().count() != result.supportedLanguages().size()) {
+                throw new IllegalStateException("Invalid fixed revision languages");
+            }
+            return List.copyOf(result.supportedLanguages());
+        } catch (RuntimeException failure) {
+            throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
+        }
+    }
+
+    /** 고정 회차 언어 확인에 필요한 응답 필드다. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record LanguageContent(String problemId, String problemRevisionId, List<String> supportedLanguages) {
     }
 
     /** Problem의 소속 검증을 거친 이미지와 MIME 타입을 반환한다. */

@@ -13,6 +13,7 @@ import com.backtoback.common.web.logging.HttpClientConfiguration;
 import com.backtoback.contest.exam.client.ExamDependencyProperties;
 import com.backtoback.contest.exam.client.ExamRunProperties;
 import com.backtoback.contest.exam.client.MemberClientProperties;
+import com.backtoback.contest.exam.config.ExamRankingCacheProperties;
 
 /**
  * contest-service에서 사용할 공통 MVC, 요청 추적, HTTP 호출, JPA 감사와 이벤트 저장 구성을 등록한다.
@@ -23,7 +24,8 @@ import com.backtoback.contest.exam.client.MemberClientProperties;
     {
         MemberClientProperties.class,
         ExamDependencyProperties.class,
-        ExamRunProperties.class
+        ExamRunProperties.class,
+        ExamRankingCacheProperties.class
     }
 )
 @Import(

@@ -5273,6 +5273,8 @@
 
 #### 4.2.4 시험 Draft 저장
 
+- 신규 저장은 원문 UTF-8 64KiB 이하여야 하고, 공통 직렬화기로 공통 헤더와 업무 필드를 합친 향후 채점 요청 이벤트도 최대 유효 필드 길이 기준 256KiB 이하여야 한다. 초과 시 `CODE_TOO_LARGE`(413)를 반환하고 기존 Draft는 보존한다. 클라이언트는 해당 코드를 서버 미저장 상태로 유지하고 오류를 표시한다. 이 전달 크기 조건은 Contest에 추가되는 제한이며 Judge의 원문 크기 제한과 별개다. 빈 Draft와 오래된 순번의 기존 처리 규칙은 유지한다.
+
 - **Method / URI:** `PUT /api/v1/exams/{examId}/drafts/{problemId}`
 - **인증:** 로그인 필요 + `ACTIVE`·`STARTED` 본인
 - **Rate Limit:** 참가자당 초당 1회 (초과 요청은 마지막 요청만 반영하는 서버 버퍼 처리)
@@ -5344,6 +5346,8 @@
     - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_PROBLEM_NOT_INCLUDED`(404), `MEMBER_SUSPENDED`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400), `COMMON_INVALID_REQUEST`(400), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 
 #### 4.2.5 시험 직접 제출
+
+- 신규 접수에는 §4.2.4의 원문·이벤트 크기 조건을 적용한다. 초과하면 `CODE_TOO_LARGE`(413)를 반환하고 기존 Draft·접수·Outbox를 보존한다. 이미 접수한 동일 본문 재요청은 새 크기 조건을 소급 적용하지 않고 기존 결과를 반환한다.
 
 - **Method / URI:** `POST /api/v1/exams/{examId}/submissions`
 - **인증:** 신규 접수는 `ACTIVE`·`STARTED` 등록 본인. 이미 접수한 동일 요청은 `FINISHED`·`SUSPENDED`에서도 반환
@@ -5419,6 +5423,8 @@
 
 #### 4.2.6 시험 수동 종료
 
+- 기존에 저장된 Draft가 원문·채점 요청 이벤트 크기 제한을 넘으면 원문을 보존한 `AUTO` 접수를 `FAILED`로 기록하고 참가자를 종료한다. `dispatch_failure_code=CODE_TOO_LARGE`, `judge_attempt=0`, `is_zero_confirmed=false`이며 Judge 연결·요청 스냅샷·Outbox를 만들지 않는다. 정상 Draft의 접수·Outbox, 실패 접수, 완료 표식·`FINISHED`는 같은 트랜잭션에 저장한다. 관리자 0점 종결(§4.6.4) 전까지 결과 확정을 보류하며 코드를 자르거나 자동으로 0점을 확정하지 않는다.
+
 - **Method / URI:** `POST /api/v1/exams/{examId}/finish`
 - **인증:** 로그인 필요 + 입장 본인
 - **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `exam_drafts`, `exam_submissions`, `outbox_events`
@@ -5468,7 +5474,7 @@
     
 - **에러:**
     - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403)
-- **발행:** `ExamSubmissionRequested` — 자동 제출 문제별
+- **발행:** `ExamSubmissionRequested` — 크기 검사를 통과한 자동 제출 문제별
 
 #### 4.2.7 내 시험 결과
 
@@ -5597,7 +5603,7 @@
       "data": {
         "resultStatus": "PROVISIONAL",
         "resultRevision": "3",
-        "content": [
+        "items": [
           {
             "memberId": "7",
             "nickname": "kim-dev",
@@ -5606,11 +5612,8 @@
             "pending": false
           }
         ],
-        "page": 0,
-        "size": 20,
-        "totalElements": 12,
-        "totalPages": 1,
-        "hasNext": false
+        "nextCursor": null,
+        "hasMore": false
       }
     }
     ```
@@ -6947,6 +6950,8 @@
 - **에러:** `EXAM_NOT_FOUND`(404), `EXAM_SUBMISSION_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `REJUDGE_NOT_ALLOWED`(409), `IDEMPOTENCY_KEY_CONFLICT`(422)
 
 #### 4.6.4 실패 제출 종결 처리
+
+- 시험의 전달 전 크기 초과 실패(`dispatch_failure_code=CODE_TOO_LARGE`)도 종결 대상이다. Judge 제출이 없으므로 `expectedJudgeAttempt=0`으로 검증하고 Judge 재처리·대사는 호출하지 않는다. 원문과 실패 사유를 보존하며 나머지 잠금·재계산·감사 규칙은 동일하다.
 
 - **Method / URI:** `POST /api/v1/admin/contest-submissions/{context}/{receiptId}/resolution`
 - **인증:** `ADMIN`

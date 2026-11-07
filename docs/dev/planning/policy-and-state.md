@@ -449,6 +449,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 잠정 결과 | 시험이 `CLOSED`가 되면 채점 진행률(종결 수/전체 수)과 함께 잠정 점수·순위를 시험 화면에 공개하고, 채점이 끝날 때마다 SSE로 갱신한다. 잠정 결과는 알림으로 보내지 않는다. |
 | 결과 확정 | 시험이 `CLOSED`이고 활성 참가자가 모두 `FINISHED`·`ABSENT`이며 실제 입장자의 자동 제출이 완료돼야 한다. `ACCEPTED`·`REQUESTED`와 미확인 원격 관리자 작업이 0건이고 미해결 `FAILED`가 없으면 DB 기준으로 점수·순위를 재계산해 `FINALIZED`로 전이한다(DB §6.4.2, 스케줄러 §4.3). Contest 접수의 `JUDGED`가 Judge 제출의 `COMPLETED`에 대응한다. 결과·결과 버전·불변 스냅샷·확정 이벤트 Outbox를 같은 트랜잭션에 저장하고 확정 결과를 공개한 뒤 알림을 보낸다. |
 | `FAILED` 제출 | 확정 시점에 `FAILED` 제출이 있으면 확정을 보류하고 관리자에게 알린다. 관리자가 재처리하거나 0점 확정을 사유와 함께 기록한 뒤 확정한다. |
+| 기존 초과 Draft | 전달 크기 제한을 넘는 기존 Draft는 원문·실패 사유를 보존한 `FAILED` 자동 접수로 참가 종료와 함께 저장한다. Judge 요청은 만들지 않고 자동으로 0점을 확정하지 않는다. 관리자 종결 전까지 시험 결과 확정을 보류한다(API §4.2.6·§4.6.4). |
 | 시험 순위 | 총점 내림차순 → 마지막 유효 제출 시각 오름차순. 모두 같으면 공동 순위 |
 | 분석 리포트(P3) | 문제별 정답률·제출 횟수, 개인별 제출 시점·판정 변화·최초 제출~최초 정답 경과시간(실제 풀이 시간으로 해석하지 않으며 기록이 없으면 "미산정"), 미해결·오답 문제를 다음 문제집 후보로 제공 |
 
@@ -839,7 +840,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | Outbox(`outbox_events`) | `PENDING → PUBLISHED`, `PENDING → FAILED → PENDING`(재시도) |
 | 시험(`exams`) | `SCHEDULED → IN_PROGRESS → CLOSED → FINALIZED`, <br>`SCHEDULED → CANCELED`, <br>`FINALIZED → FINALIZED`(관리자 재확정, 감사 로그) |
 | 시험 참가자(`exam_participants`) | `REGISTERED → STARTED → FINISHED`(수동 종료·자동 제출 완료), <br>`REGISTERED → ABSENT`(종료 시까지 미입장), <br>`REGISTERED → CANCELED`(시작 전 참가 취소) |
-| 시험 제출(`exam_submissions`) | `ACCEPTED → REQUESTED`(Outbox 발행) `→ JUDGED`(채점 결과 연결), `REQUESTED → FAILED`(연결된 제출 `FAILED`) |
+| 시험 제출(`exam_submissions`) | `ACCEPTED → REQUESTED`(Outbox 발행) `→ JUDGED`(채점 결과 연결), `REQUESTED → FAILED`(연결된 제출 `FAILED`). 기존 초과 Draft의 자동 제출은 전달 전 `FAILED`로 직접 생성 |
 | 대회(`contests`) | `SCHEDULED → RUNNING → ENDED → FINALIZED`, `SCHEDULED → CANCELED` |
 | 스터디(`studies`) | `RECRUITING ↔ ACTIVE`, `RECRUITING / ACTIVE → CLOSED`(예정·진행 중 시험이 없을 때만) |
 | 스터디 가입(`study_memberships`) | `PENDING → APPROVED / REJECTED / CANCELED / EXPIRED`, <br>`APPROVED → LEFT / REMOVED`(`INSTANT` 가입은 `APPROVED`로 바로 생성) |
