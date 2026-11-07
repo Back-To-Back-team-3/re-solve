@@ -125,12 +125,47 @@ public class NotificationDeliveryService {
      * @param notification 전송할 알림 엔티티
      */
     public void sendToMember(Long memberId, Notification notification) {
+        sendNotificationToMemberSessions(memberId, notification);
+    }
+
+    /**
+     * 회원별 알림 엔티티 맵을 기반으로 활성 SSE 세션에 브로드캐스트 전송한다.
+     * 각 회원의 세션에는 해당 회원의 고유 Notification ID를 가진 페이로드를 전달한다.
+     *
+     * @param noticesByMemberId 회원 ID별 알림 엔티티 맵
+     * @return 성공적으로 전송된 세션 수
+     */
+    public int broadcast(java.util.Map<Long, Notification> noticesByMemberId) {
+        if (noticesByMemberId == null || noticesByMemberId.isEmpty()) {
+            return 0;
+        }
+
+        int deliveredCount = 0;
+        for (java.util.Map.Entry<Long, Notification> entry : noticesByMemberId.entrySet()) {
+            Long memberId = entry.getKey();
+            Notification notification = entry.getValue();
+            deliveredCount += sendNotificationToMemberSessions(memberId, notification);
+        }
+        return deliveredCount;
+    }
+
+    /**
+     * 연결된 모든 활성 세션에 30초 주기 Heartbeat 이벤트를 전송한다.
+     */
+    public void broadcastHeartbeat() {
+        List<SseSession> allSessions = emitterRepository.findAll();
+        allSessions.forEach(this::sendHeartbeat);
+    }
+
+    private int sendNotificationToMemberSessions(Long memberId, Notification notification) {
         List<SseSession> sessions = emitterRepository.findAllByMemberId(memberId);
         if (sessions.isEmpty()) {
-            return;
+            return 0;
         }
 
         NotificationEventResponse response = NotificationEventResponse.from(notification);
+        int successCount = 0;
+
         for (SseSession session : sessions) {
             SseEmitter emitter = session.emitter();
             synchronized (emitter) {
@@ -151,6 +186,7 @@ public class NotificationDeliveryService {
                     if (notification.getId() != null) {
                         tracker.set(Math.max(tracker.get(), notification.getId()));
                     }
+                    successCount++;
                 } catch (IOException | IllegalStateException exception) {
                     log
                         .debug(
@@ -163,14 +199,7 @@ public class NotificationDeliveryService {
                 }
             }
         }
-    }
-
-    /**
-     * 연결된 모든 활성 세션에 30초 주기 Heartbeat 이벤트를 전송한다.
-     */
-    public void broadcastHeartbeat() {
-        List<SseSession> allSessions = emitterRepository.findAll();
-        allSessions.forEach(this::sendHeartbeat);
+        return successCount;
     }
 
     /**

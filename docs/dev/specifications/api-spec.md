@@ -195,6 +195,7 @@
 | study | 스터디 관리자 | `ADMIN` | — | D |
 | AI | 힌트 요청·조회 | 로그인 필요 (`SUSPENDED` 차단) | 본인 요청 | D |
 | notification | 알림·SSE·수신 설정 | 로그인 필요 | 본인 알림 | A |
+| notification | 관리자 공지 발송 | `ADMIN` | — | A |
 | integration | GitHub 연동·동기화 | 로그인 필요 (수동 동기화는 `SUSPENDED` 차단) | 본인 연동 | A |
 | 공통 | 내부 API `/internal/v1/**` | 내부 네트워크 | 수신 서비스 업무 규칙 검증 | 공통 |
 
@@ -8556,7 +8557,7 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 외부 경로 | `/api/v1/notifications/**` |
+| 외부 경로 | `/api/v1/notifications/**`, `/api/v1/admin/notifications/**` |
 | 소유 테이블 | 스키마 `notification` (`notifications`, `notification_preferences`) |
 | 생성 책임 | 도메인은 이벤트만 발행하고 notification이 수신자·문구·이동 경로를 정한다 |
 | 중복 방지 | `(source_event_id, member_id, type)` 유일 제약 |
@@ -8576,6 +8577,7 @@
 | `LEVEL_CHANGED` | `TagLevelChanged` (진단 결과·승급·마스터·재채점 하향·쿨타임 해제) | `isLevelChangedEnabled` |
 | `HINT_READY` | `HintReady` | `isHintReadyEnabled` |
 | `GITHUB_SYNC_FAILED` | `GitHubSyncFailed` | `isGithubSyncEnabled` |
+| `SYSTEM_NOTICE` | 관리자 공지 발송 API (`POST /api/v1/admin/notifications/broadcast`) | 끌 수 없음 |
 
 ### 7.1 외부 API
 
@@ -8691,6 +8693,73 @@
       { "success": true, "message": null, "data": { "isExamContestEnabled": true, "isStudyApplicationEnabled": true, "isAssignmentEnabled": false, "isLevelChangedEnabled": true, "isHintReadyEnabled": true, "isGithubSyncEnabled": true } }
     ```
     
+
+### 7.2 관리자 API
+
+#### 7.2.1 시스템 전역 공지 알림 브로드캐스트
+
+- **Method / URI:** `POST /api/v1/admin/notifications/broadcast`
+- **인증:** `ADMIN`
+- **Idempotency:** N (매 호출 시 신규 공지 발송)
+- **Rate Limit:** 관리자 호출 기준 분당 10회
+- **대응 테이블:** `notifications`
+- **설명:** 시스템 관리자가 발송 시점에 활성화된 SSE 연결 회원(및 발송 관리자)에게 실시간 공지 알림을 브로드캐스트하고, 알림 보관함에 `SYSTEM_NOTICE` 타입으로 저장한다.
+- **요청 헤더:**
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `X-User-Id` | Y | `1` | 관리자 회원 ID |
+    | `X-User-Role` | Y | `ADMIN` | Gateway 검증 관리자 권한 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:**
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `title` | string | Y | 공지 제목 (최대 200자) |
+    | `content` | string | Y | 공지 내용 (최대 500자) |
+    | `linkUrl` | string | N | 공지 상세 또는 이동 경로 URL (최대 500자) |
+
+    ```json
+    {
+      "title": "시스템 정기 점검 안내",
+      "content": "2026년 11월 8일 02:00 ~ 04:00 정기 점검이 진행될 예정입니다.",
+      "linkUrl": "/notices/1"
+    }
+    ```
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `data.notificationType` | string | Y | 알림 유형 (`SYSTEM_NOTICE`) |
+    | `data.title` | string | Y | 공지 제목 |
+    | `data.broadcastedAt` | string | Y | 발송 시각 (ISO 8601, 마이크로초 6자리 및 +09:00 오프셋) |
+    | `data.deliveredSseCount` | int | Y | 실시간 SSE 전송 성공 세션 수 |
+
+    ```json
+    {
+      "success": true,
+      "message": "시스템 공지 알림이 성공적으로 발송되었습니다.",
+      "data": {
+        "notificationType": "SYSTEM_NOTICE",
+        "title": "시스템 정기 점검 안내",
+        "broadcastedAt": "2026-11-07T15:30:00.123456+09:00",
+        "deliveredSseCount": 15
+      }
+    }
+    ```
+
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403): 관리자(`ADMIN`) 권한이 없는 경우
+    - `COMMON_INVALID_REQUEST`(400): 공지 제목이나 내용이 비어 있거나 글자수 제한을 초과한 경우
+- **동시성/멱등 보장:** 관리자별 호출 건마다 고유 `source_event_id`(`notice-{UUID}`)를 부여해 DB 유일 제약을 만족하며, 회원별로 저장된 Notification 엔티티를 독립적으로 전송한다.
+- **발행:** 없음 (알림 서비스 내부 완결)
+- **외부 의존:** 없음
+- **프론트 계약:** 실시간 SSE 이벤트(`notification`) 수신 시 팝업 토스트를 노출하며, 알림 보관함 목록(`GET /api/v1/notifications`)에서 개별 읽음 처리(`PATCH /api/v1/notifications/{id}/read`)가 가능하다.
+- **비고:** 발송 시점에 SSE로 연결되어 있는 활성 회원 및 관리자 본인에게 알림 행을 생성하고 실시간 전송하며, 오프라인 회원에게는 알림 복제본 테이블이 없어 전송되지 않는다.
 
 ---
 
@@ -8861,6 +8930,7 @@
 | judge | 3.2.1 ~ 3.2.5 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구 |
 | contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, `FAILED` 0점 확정, 결과 재확정 |
 | study | 5.6.1 ~ 5.6.2 | 스터디 강제 종료, AC 복제본 재동기화 |
+| notification | 7.2.1 | 시스템 전역 공지 알림 브로드캐스트 |
 
 ---
 
