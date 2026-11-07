@@ -90,3 +90,30 @@ groups:
         annotations:
           summary: "HTTP 5xx 응답률 급증: {{ $labels.application }}"
           description: "{{ $labels.application }} 서비스의 HTTP 5xx 에러율이 2분 동안 5%를 초과했습니다."
+
+      - alert: JudgeJobQueueAccumulation
+        expr: judge_jobs_pending_count > 50
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "채점 작업 대기열 적체 경보"
+          description: "채점 대기(PENDING) 작업이 2분 이상 50건을 초과했습니다. 현재 대기량: {{ $value }}"
+
+      - alert: JudgeJobQueueCriticalAccumulation
+        expr: judge_jobs_pending_count > 200
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "채점 작업 대기열 심각 적체 경보"
+          description: "채점 대기 작업이 1분 이상 200건을 초과했습니다. 채점 인스턴스(Judge0) 장애 또는 채점 스케줄러 병목 여부를 확인하세요. 현재 대기량: {{ $value }}"
+
+      - alert: OutboxRelayCriticalAccumulation
+        expr: outbox_pending_count > 500
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox Relay 심각 적체 경보"
+          description: "Outbox 미발행(PENDING) 이벤트가 500건을 초과했습니다. Outbox Relay 워커 및 브로커 상태를 즉시 점검하세요. 현재 건수: {{ $value }}"

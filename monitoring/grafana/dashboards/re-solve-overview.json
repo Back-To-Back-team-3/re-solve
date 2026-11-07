@@ -259,7 +259,7 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 6
       },
@@ -313,8 +313,8 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 6
       },
       "id": 7,
@@ -337,6 +337,55 @@
         }
       ],
       "title": "Outbox PENDING 적체 추이",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "대기 건수",
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "11.1.0",
+      "targets": [
+        {
+          "expr": "judge_jobs_pending_count",
+          "legendFormat": "Judge Jobs PENDING",
+          "refId": "A"
+        }
+      ],
+      "title": "채점 대기열 (judge_jobs) 적체 추이",
       "type": "timeseries"
     },
     {
