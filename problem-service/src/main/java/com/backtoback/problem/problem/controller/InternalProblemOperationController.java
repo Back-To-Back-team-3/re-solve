@@ -1,10 +1,12 @@
 package com.backtoback.problem.problem.controller;
 
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.backtoback.problem.problem.config.InternalProblemServiceCondition;
 import com.backtoback.problem.problem.dto.response.ProblemOperationResponse;
 import com.backtoback.problem.problem.service.ProblemOperationService;
 
@@ -13,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 /** Contest가 대사할 원래 상태 작업을 내부 네트워크에 제공한다. */
 @RestController
 @Profile("!internal-stub")
+@Conditional(InternalProblemServiceCondition.class)
 @RequiredArgsConstructor
 public class InternalProblemOperationController {
     private final ProblemOperationService service;
