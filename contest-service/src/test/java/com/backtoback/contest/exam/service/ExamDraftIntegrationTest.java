@@ -101,6 +101,10 @@ class ExamDraftIntegrationTest {
     @Autowired
     private ExamJudgementService judgements;
     @Autowired
+    private ExamEventSnapshotService eventSnapshots;
+    @Autowired
+    private ExamSubmissionHistoryService submissionHistory;
+    @Autowired
     private JdbcTemplate jdbc;
     @Autowired
     private StringRedisTemplate redis;
@@ -709,6 +713,69 @@ class ExamDraftIntegrationTest {
                     receipt.examSubmissionId()
                 )
         ).isEqualTo("ACCEPTED");
+    }
+
+    /** 개인 종료만으로 SSE에 채점 진행률을 노출하지 않는다. */
+    @Test
+    @DisplayName("전체 종료 전 SSE에는 본인 제출 진행률을 공개하지 않는다")
+    void hidesEventProgressBeforeExamClose() {
+        // given
+        jdbc.update("UPDATE exam_participants SET status='FINISHED' WHERE id=?", participantId);
+        // when
+        var hidden = eventSnapshots.read(examId, "7");
+        // then
+        assertThat(hidden.terminalCount()).isNull();
+        assertThat(hidden.totalSubmissionCount()).isNull();
+        jdbc.update("UPDATE exams SET status='CLOSED' WHERE id=?", examId);
+        var visible = eventSnapshots.read(examId, "7");
+        assertThat(visible.terminalCount()).isZero();
+        assertThat(visible.totalSubmissionCount()).isZero();
+    }
+
+    /** 전체 종료 전 판정을 숨기고 변경된 결과 버전으로 이전 커서를 무효화한다. */
+    @Test
+    @DisplayName("제출 이력은 종료 전 판정을 숨기고 결과 변경 시 커서를 거절한다")
+    void submissionHistoryHidesResultsAndExpiresCursor() {
+        // given
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        var first = submissions.submit(examId, "7", new Request("101", "java", "첫 코드", "1"));
+        transactions
+            .executeWithoutResult(
+                status -> judgements
+                    .apply(
+                        new ExamJudgementService.Result(
+                            Long.parseLong(examId),
+                            Long.parseLong(first.examSubmissionId()),
+                            9001,
+                            7,
+                            101,
+                            1001,
+                            1,
+                            "JUDGED",
+                            "AC",
+                            3,
+                            3,
+                            first.receivedAt()
+                        )
+                    )
+            );
+        submissions.submit(examId, "7", new Request("101", "java", "두 번째 코드", "2"));
+        // when
+        var page = submissionHistory.read(examId, "7", null, null, 1);
+        var secondPage = submissionHistory.read(examId, "7", null, page.nextCursor(), 1);
+        // then
+        assertThat(secondPage.items()).singleElement().satisfies(item -> {
+            assertThat(item.status()).isEqualTo("REQUESTED");
+            assertThat(item.verdict()).isNull();
+            assertThat(item.score()).isNull();
+        });
+        jdbc.update("UPDATE exams SET result_revision=result_revision+1 WHERE id=?", examId);
+        assertThatThrownBy(() -> submissionHistory.read(examId, "7", null, page.nextCursor(), 1))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(ContestErrorCode.RESULT_CURSOR_EXPIRED)
+            );
     }
 
     /** 동일 창의 뒤 요청만 저장하고 밀린 다른 문제는 0과 null을 반환한다. */
