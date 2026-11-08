@@ -2,7 +2,10 @@ package com.backtoback.contest.exam.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doAnswer;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,6 +26,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
@@ -69,7 +73,7 @@ class ExamDraftIntegrationTest {
     private ExamDraftBuffer buffer;
     @Autowired
     private JdbcTemplate jdbc;
-    @Autowired
+    @MockitoSpyBean
     private StringRedisTemplate redis;
     @Autowired
     private TransactionTemplate transactions;
@@ -160,7 +164,7 @@ class ExamDraftIntegrationTest {
     /** 동일 창의 뒤 요청만 저장하고 밀린 다른 문제는 0과 null을 반환한다. */
     @Test
     @DisplayName("같은 참가자의 버퍼에서 밀린 요청은 미저장 문제의 순번 0과 null 시각을 반환한다")
-    void bufferKeepsLastRequest() {
+    void bufferKeepsLastRequest() throws Exception {
         // given
         String prefix = "exam:draft:buffer:" + participantId;
         var openSlot = new DefaultRedisScript<Long>("""
@@ -171,33 +175,60 @@ class ExamDraftIntegrationTest {
             """, Long.class);
         long due = redis.execute(openSlot, List.of(prefix + ":due"));
         String slot = prefix + ":slot:" + due;
-        var first = store.prepare(examId, "7", "102", new SaveRequest("java", "첫 코드", "1"));
-        var last = store.prepare(examId, "7", "101", new SaveRequest("java", "마지막", "1"));
-        var enqueue = bufferScript("ENQUEUE", List.class);
-        var close = bufferScript("CLOSE_SLOT", List.class);
+        RedisScript<List> enqueue = bufferScript("ENQUEUE");
+        RedisScript<List> close = bufferScript("CLOSE_SLOT");
+        var firstEnqueued = new CountDownLatch(1);
+        var bothEnqueued = new CountDownLatch(2);
+        var closeWindow = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            List<?> registered = (List<?>)invocation.callRealMethod();
+            assertThat(((Number)registered.getFirst()).longValue()).isEqualTo(due);
+            firstEnqueued.countDown();
+            bothEnqueued.countDown();
+            if (!closeWindow.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("버퍼 마감 제어 대기 초과");
+            }
+            return List.of(due, 0L);
+        }).when(redis).execute(eq(enqueue), eq(List.of(prefix)), anyString());
+        // 등록과 저장은 실제 Redis를 사용하고, 두 요청 등록 뒤 마감 시각만 앞당긴다.
+        doAnswer(invocation -> redis.execute(close, List.of(slot), "0"))
+            .when(redis)
+            .execute(eq(close), eq(List.of(slot)), eq(Long.toString(due)));
 
-        List<?> firstSlot = redis.execute(enqueue, List.of(prefix), "first");
-        List<?> lastSlot = redis.execute(enqueue, List.of(prefix), "last");
-        assertThat(firstSlot.getFirst()).isEqualTo(due);
-        assertThat(lastSlot.getFirst()).isEqualTo(due);
-        List<?> closed = redis.execute(close, List.of(slot), "0");
-        assertThat(closed.get(1)).isEqualTo("last");
-
-        var saved = store.save(last);
-        redis.execute(bufferScript("RECORD_STATUS", Long.class), List.of(slot), "done");
-        var skipped = store.skipped(first);
-
-        assertThat(saved.applied()).isTrue();
-        assertThat(skipped.applied()).isFalse();
-        assertThat(skipped.serverSeq()).isEqualTo("0");
-        assertThat(skipped.savedAt()).isNull();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isEqualTo(1);
-        assertThat(redis.getExpire(slot)).isPositive();
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            // when
+            var first = pool.submit(() -> buffer.save(examId, "7", "102", new SaveRequest("java", "첫 코드", "1")));
+            try {
+                assertThat(firstEnqueued.await(5, TimeUnit.SECONDS)).isTrue();
+                var last = pool.submit(() -> buffer.save(examId, "7", "101", new SaveRequest("java", "마지막", "1")));
+                assertThat(bothEnqueued.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isZero();
+                assertThat(first.isDone()).isFalse();
+                assertThat(last.isDone()).isFalse();
+                closeWindow.countDown();
+                var saved = last.get(5, TimeUnit.SECONDS);
+                var skipped = first.get(5, TimeUnit.SECONDS);
+                // then
+                assertThat(saved.applied()).isTrue();
+                assertThat(saved.serverSeq()).isEqualTo("1");
+                assertThat(saved.savedAt()).isNotNull();
+                assertThat(skipped.applied()).isFalse();
+                assertThat(skipped.serverSeq()).isEqualTo("0");
+                assertThat(skipped.savedAt()).isNull();
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isEqualTo(1);
+                assertThat(jdbc.queryForObject("SELECT problem_id FROM exam_drafts", Long.class)).isEqualTo(101L);
+                assertThat(jdbc.queryForObject("SELECT source_code FROM exam_drafts", String.class)).isEqualTo("마지막");
+                assertThat(redis.opsForHash().get(slot, "status")).isEqualTo("done");
+                assertThat(redis.getExpire(slot)).isPositive();
+            } finally {
+                closeWindow.countDown();
+            }
+        }
     }
 
-    private <T> DefaultRedisScript<T> bufferScript(String field, Class<T> resultType) {
-        var script = (RedisScript<?>)ReflectionTestUtils.getField(ExamDraftBuffer.class, field);
-        return new DefaultRedisScript<>(script.getScriptAsString(), resultType);
+    @SuppressWarnings("unchecked")
+    private <T> RedisScript<T> bufferScript(String field) {
+        return (RedisScript<T>)ReflectionTestUtils.getField(ExamDraftBuffer.class, field);
     }
 
     @Test
