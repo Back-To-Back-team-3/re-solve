@@ -132,7 +132,8 @@ public class ExamRetryStore {
             return current;
         }
         var receipt = receipt(current.examId(), current.receiptId());
-        if (receipt.attempt() != null && receipt.attempt() > current.expectedAttempt()) {
+        if (!CommonErrorCode.IDEMPOTENCY_KEY_CONFLICT.name().equals(errorCode) && receipt.attempt() != null
+            && receipt.attempt() > current.expectedAttempt()) {
             return current;
         }
         jdbc

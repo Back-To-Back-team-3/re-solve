@@ -7,9 +7,14 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import java.nio.charset.StandardCharsets;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.client.HttpClientErrorException;
@@ -77,9 +82,18 @@ class ExamRetryRecoveryIntegrationTest extends ExamIntegrationTestSupport {
         verify(client, times(2)).retry(eq(9001L), any());
     }
 
-    @Test
-    @DisplayName("본문이 없는 409 응답은 미실행 확정 근거로 삼지 않는다")
-    void malformedConflictRemainsPending() {
+    /** HTTP 상태와 오류 코드가 모두 확정 거절을 나타낼 때만 작업을 종결한다. */
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "409,,PENDING",
+            "422,OTHER_ERROR,PENDING",
+            "422,IDEMPOTENCY_KEY_CONFLICT,FAILED"
+        }
+    )
+    @DisplayName("확정된 멱등 충돌은 실패로 종결하고 불명확한 응답은 보류한다")
+    void reconcilesOnlyConfirmedRejections(int status, String code, String expected) {
+        // given
         var submitted = submissions.submit(examId, "7", new ExamSubmissionRequest("101", "java", "코드", "1"));
         long receipt = Long.parseLong(submitted.examSubmissionId());
         transactions
@@ -102,8 +116,20 @@ class ExamRetryRecoveryIntegrationTest extends ExamIntegrationTestSupport {
                         )
                     )
             );
-        given(client.retry(eq(9001L), any())).willThrow(new HttpClientErrorException(HttpStatus.CONFLICT));
+        String body = code == null ? "" : "{\"success\":false,\"error\":{\"code\":\"%s\"}}".formatted(code);
+        given(client.retry(eq(9001L), any()))
+            .willThrow(
+                HttpClientErrorException
+                    .create(
+                        HttpStatus.valueOf(status),
+                        "",
+                        HttpHeaders.EMPTY,
+                        body.getBytes(StandardCharsets.UTF_8),
+                        StandardCharsets.UTF_8
+                    )
+            );
 
+        // when
         var response
             = retry
                 .request(
@@ -113,7 +139,12 @@ class ExamRetryRecoveryIntegrationTest extends ExamIntegrationTestSupport {
                     new ExamRetryRequest("unknown-conflict", 1, "재처리")
                 );
 
-        assertThat(response.state()).isEqualTo("PENDING");
-        assertThat(retryStore.require("unknown-conflict").state()).isEqualTo("PENDING");
+        // then
+        assertThat(response.state()).isEqualTo(expected);
+        var stored = retryStore.require("unknown-conflict");
+        assertThat(stored.state()).isEqualTo(expected);
+        assertThat(stored.lastError()).isEqualTo(code);
+        assertThat(jdbc.queryForObject("SELECT judge_attempt FROM exam_submissions WHERE id=?", Integer.class, receipt))
+            .isEqualTo(1);
     }
 }
