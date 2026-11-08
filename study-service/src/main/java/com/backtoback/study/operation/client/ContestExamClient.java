@@ -47,11 +47,12 @@ public class ContestExamClient {
             ContestExamResponse response;
             try {
                 response = contest.get().uri(uriBuilder -> {
-                    var b = uriBuilder.path("/internal/v1/contest/studies/{studyId}/exams").queryParam("size", 20);
+                    var uriSpec
+                        = uriBuilder.path("/internal/v1/contest/studies/{studyId}/exams").queryParam("size", 20);
                     if (currentCursor != null) {
-                        b = b.queryParam("after", currentCursor);
+                        uriSpec = uriSpec.queryParam("after", currentCursor);
                     }
-                    return b.build(studyId);
+                    return uriSpec.build(studyId);
                 }).retrieve().body(ContestExamResponse.class);
             } catch (RestClientException exception) {
                 throw new StudyException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
