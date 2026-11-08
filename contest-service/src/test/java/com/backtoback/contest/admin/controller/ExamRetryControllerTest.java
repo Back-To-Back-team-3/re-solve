@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -57,6 +58,24 @@ class ExamRetryControllerTest {
             )
             .andExpect(status().isAccepted())
             .andExpect(jsonPath("$.data.state").value("PENDING"));
+    }
+
+    @Test
+    @DisplayName("끝에 공백이 있는 새 작업 ID는 재처리를 요청하기 전에 거절한다")
+    void retryRejectsTrailingWhitespace() throws Exception {
+        // when & then
+        mvc
+            .perform(
+                post("/api/v1/exams/55/submissions/4001/retry")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                        {"operationId":"op ","expectedJudgeAttempt":1,"reason":"재처리"}
+                        """)
+            )
+            .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
     }
 
     @Test

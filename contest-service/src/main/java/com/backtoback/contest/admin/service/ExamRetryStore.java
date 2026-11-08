@@ -54,9 +54,10 @@ public class ExamRetryStore {
         var pending
             = jdbc
                 .queryForObject(
-                    "SELECT COUNT(*) FROM contest_admin_operations WHERE context='EXAM' AND receipt_id=? "
-                        + "AND operation_type='EXAM_RETRY' AND state='PENDING'",
+                    "SELECT COUNT(*) FROM contest_admin_operations WHERE context='EXAM' "
+                        + "AND context_id=? AND receipt_id=? " + "AND operation_type='EXAM_RETRY' AND state='PENDING'",
                     Long.class,
+                    examId,
                     receiptId
                 );
         if (pending != null && pending > 0) {

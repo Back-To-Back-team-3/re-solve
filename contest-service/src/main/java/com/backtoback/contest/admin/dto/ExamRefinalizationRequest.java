@@ -8,6 +8,10 @@ import jakarta.validation.constraints.Size;
 /** 재확정할 이전 결과 버전과 관리자 사유다. */
 public record ExamRefinalizationRequest(
     @NotNull
+    @Pattern(
+        regexp = "(?sU).*\\S",
+        message = "작업 ID 끝에 공백을 사용할 수 없습니다."
+    )
     @Size(
         min = 1,
         max = 100
