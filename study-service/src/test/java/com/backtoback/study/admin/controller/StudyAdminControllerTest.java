@@ -1,4 +1,4 @@
-package com.backtoback.study.operation.controller;
+package com.backtoback.study.admin.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
