@@ -11,60 +11,74 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 
-/** 재기동과 인스턴스 변경 뒤에도 스케줄러가 남은 페이지부터 순회하게 한다. */
+/** 순회 위치를 Redis에 공유하고 장애 중 미반영된 위치와 초기화를 복구 때 반영한다. */
 @Component
 @RequiredArgsConstructor
 public class ExamSchedulerCursorStore {
     private static final Logger log = LoggerFactory.getLogger(ExamSchedulerCursorStore.class);
     private final StringRedisTemplate redis;
-    private final Map<String, Cursor> localCursors = new ConcurrentHashMap<>();
+    private final Map<String, CursorState> localCursors = new ConcurrentHashMap<>();
 
-    /** 저장소가 비어 있거나 사용할 수 없으면 처음부터 다시 순회한다. */
+    /** 미반영 상태는 공유 저장소보다 우선하며 동기화 실패 중에도 로컬 위치를 반환한다. */
     public Cursor load(String job) {
-        try {
-            String value = redis.opsForValue().get(key(job));
-            if (value == null) {
-                return localCursors.get(job);
+        var state = localCursors.compute(job, (name, local) -> {
+            if (local != null && local.pending()) {
+                return synchronize(name, local);
             }
-            String[] parts = value.split("\\|", -1);
-            if (parts.length != 2) {
-                throw new IllegalArgumentException("Invalid cursor");
+            try {
+                String value = redis.opsForValue().get(key(name));
+                if (value == null) {
+                    return local;
+                }
+                String[] parts = value.split("\\|", -1);
+                if (parts.length != 2) {
+                    throw new IllegalArgumentException("Invalid cursor");
+                }
+                long id = Long.parseLong(parts[1]);
+                if (id <= 0) {
+                    throw new IllegalArgumentException("Invalid cursor");
+                }
+                return new CursorState(new Cursor(LocalDateTime.parse(parts[0]), id), false);
+            } catch (RuntimeException failure) {
+                log.warn("스케줄러 순회 위치 조회 실패: job={}, type={}", name, failure.getClass().getSimpleName());
+                return local;
             }
-            long id = Long.parseLong(parts[1]);
-            if (id <= 0) {
-                throw new IllegalArgumentException("Invalid cursor");
-            }
-            var cursor = new Cursor(LocalDateTime.parse(parts[0]), id);
-            localCursors.put(job, cursor);
-            return cursor;
-        } catch (RuntimeException failure) {
-            log.warn("스케줄러 순회 위치 조회 실패: job={}, type={}", job, failure.getClass().getSimpleName());
-            return localCursors.get(job);
-        }
+        });
+        return state == null ? null : state.cursor();
     }
 
-    /** 처리한 마지막 대상의 시각과 ID를 기록한다. */
+    /** 처리 위치를 로컬에 보존하고 Redis 반영에 실패하면 다음 조회에서 재시도한다. */
     public void save(String job, Cursor cursor) {
-        localCursors.put(job, cursor);
-        try {
-            redis.opsForValue().set(key(job), cursor.time() + "|" + cursor.id());
-        } catch (RuntimeException failure) {
-            log.warn("스케줄러 순회 위치 저장 실패: job={}, type={}", job, failure.getClass().getSimpleName());
-        }
+        localCursors.compute(job, (name, local) -> synchronize(name, new CursorState(cursor, true)));
     }
 
-    /** 한 바퀴를 마치면 다음 회차에 처음부터 다시 검사한다. */
+    /** 미반영 초기화도 보존해 복구 후 이전 Redis 위치가 다시 나타나지 않게 한다. */
     public void clear(String job) {
-        localCursors.remove(job);
+        localCursors.compute(job, (name, local) -> synchronize(name, new CursorState(null, true)));
+    }
+
+    /** 같은 작업의 조회·저장·초기화는 맵의 작업별 연산 안에서 순서대로 반영한다. */
+    private CursorState synchronize(String job, CursorState state) {
         try {
-            redis.delete(key(job));
+            if (state.cursor() == null) {
+                redis.delete(key(job));
+            } else {
+                var cursor = state.cursor();
+                redis.opsForValue().set(key(job), cursor.time() + "|" + cursor.id());
+            }
+            return new CursorState(state.cursor(), false);
         } catch (RuntimeException failure) {
-            log.warn("스케줄러 순회 위치 초기화 실패: job={}, type={}", job, failure.getClass().getSimpleName());
+            log.warn("스케줄러 순회 위치 동기화 실패: job={}, type={}", job, failure.getClass().getSimpleName());
+            return state;
         }
     }
 
     private String key(String job) {
         return "contest:scheduler:cursor:" + job;
+    }
+
+    /** {@code null} 위치는 초기화이며 {@code pending}은 Redis 반영 재시도가 필요하다는 뜻이다. */
+    private record CursorState(Cursor cursor, boolean pending) {
     }
 
     /** 시각과 식별자 순서의 마지막 처리 위치다. */
