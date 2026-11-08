@@ -2,6 +2,7 @@ package com.backtoback.study.operation.service;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -28,6 +29,9 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class StudyClosePersistService {
+
+    private static final DateTimeFormatter CLOSED_AT_FORMAT
+        = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx");
 
     private final StudyRepository studyRepository;
     private final StudyMembershipRepository studyMembershipRepository;
@@ -99,7 +103,11 @@ public class StudyClosePersistService {
                 "v1",
                 String.valueOf(studyId),
                 correlationId,
-                new StudyClosedPayload(studyId, studyVersion, now.atOffset(ZoneOffset.of("+09:00")))
+                new StudyClosedPayload(
+                    studyId,
+                    studyVersion,
+                    CLOSED_AT_FORMAT.format(now.atOffset(ZoneOffset.of("+09:00")))
+                )
             );
     }
 }
