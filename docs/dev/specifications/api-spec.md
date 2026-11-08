@@ -182,7 +182,7 @@
 | judge | 채점 관리자 | `ADMIN` | 재채점은 `EXAM` 장애 실패 건만 | B |
 | contest | 시험 생성·수정·취소 | 로그인 필요 (`SUSPENDED` 차단) | 해당 스터디 `LEADER`·`MANAGER` (study 동기 조회) | C |
 | contest | 시험 참가·응시·결과 | 로그인 필요 (`SUSPENDED` 차단) | 등록 참가자, 등록 시 스터디 `APPROVED` 구성원 | C |
-| contest | 시험 실패 재처리·작업 조회 | 로그인 필요 | `ADMIN` 또는 해당 시험 스터디 현재 `LEADER`·`MANAGER` | C |
+| contest | 시험 실패 재처리·작업 조회 | 로그인 필요 | 재처리는 `ADMIN` 또는 현재 `LEADER`·`MANAGER`. 작업 조회는 `ADMIN` 또는 해당 시험 운영자의 본인 `EXAM_RETRY` | C |
 | contest | 대회 조회·순위 | 공개 | — | C |
 | contest | 대회 참가·응시 | 로그인 필요 (`SUSPENDED` 차단) | 등록·실제 입장 참가자 | C |
 | contest | 시험·대회 관리자 | `ADMIN` | — | C |
@@ -6888,7 +6888,7 @@
 
 #### 4.6.3 실패 시험 제출 재처리
 
-- **Method / URI:** `POST /api/v1/admin/exam-submissions/{examSubmissionId}/retry`
+- **Method / URI:** `POST /api/v1/exams/{examId}/submissions/{examSubmissionId}/retry`
 - **인증:** `ADMIN` 또는 해당 시험 스터디의 현재 `LEADER`·`MANAGER`. C가 최종 검증.
 - **대응 테이블:** `exams`, `exam_submissions`, `contest_admin_operations`, `audit_logs`
 - **설명:** `EXAM`·`FAILED` 및 부모 `FINALIZED` 전만. §4.8.5의 `POST /internal/v1/judge/submissions/{submissionId}/retry`로 새 회차 요청. `contest_admin_operations`를 먼저 `PENDING` 저장 후 원격 호출. 이 작업이 남으면 결과 확정을 보류.
@@ -6903,7 +6903,8 @@
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `examSubmissionId` | string | Y | — | Path · 식별자 문자열 |
+    | `examId` | string | Y | — | Path · 시험 ID 문자열 |
+    | `examSubmissionId` | string | Y | — | Path · 해당 시험의 접수 ID 문자열 |
 - **요청 본문:**
     
     
@@ -7172,8 +7173,8 @@
 
 #### 4.6.7 관리자 작업 상태 조회
 
-- **Method / URI:** `GET /api/v1/admin/contest-operations/{operationId}`
-- **인증:** `ADMIN` 또는 본인이 요청한 `EXAM_RETRY` 작업의 현재 시험 운영자. C가 작업 소유자·시험·D 구성원 권한 재검증.
+- **Method / URI:** `GET /api/v1/admin/contest-operations/{operationId}` / `GET /api/v1/exams/{examId}/operations/{operationId}`
+- **인증:** 관리자 경로는 `ADMIN` 전용. 시험 경로는 해당 시험 스터디의 현재 `LEADER`·`MANAGER` 전용이며 본인이 요청한 해당 시험의 `EXAM_RETRY` 작업만 조회한다. C가 작업 소유자·시험·D 구성원 권한을 재검증한다.
 - **대응 테이블:** `contest_admin_operations`
 - **설명:** 관리자 작업 상태 조회
 - **요청 헤더:**
@@ -7187,6 +7188,7 @@
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
+    | `examId` | string | 시험 경로에서 Y | — | Path · 시험 ID 문자열 |
     | `operationId` | string | Y | — | Path · 호출자 생성 멱등 작업 ID. 1~100자 |
 - **요청 본문:** 없음
 - **응답 헤더:**
@@ -8962,7 +8964,7 @@
 | member | 1.6.1 ~ 1.6.3 | 회원 목록, 정지·해제, 권한 변경 |
 | problem | 2.3.1 ~ 2.3.11, 2.4, 2.5.2 ~ 2.5.4 | 문제 등록·회차·공개·비공개·보관·검증, 이미지, 태그 |
 | judge | 3.2.1 ~ 3.2.5 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구 |
-| contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, `FAILED` 0점 확정, 결과 재확정 |
+| contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, 시험 실패 재처리·작업 조회, `FAILED` 0점 확정, 결과 재확정. 시험 운영자 경로는 §4.6.3·§4.6.7 참조 |
 | study | 5.6.1 ~ 5.6.2 | 스터디 강제 종료, AC 복제본 재동기화 |
 | notification | 7.2.1 | 시스템 전역 공지 알림 브로드캐스트 |
 
