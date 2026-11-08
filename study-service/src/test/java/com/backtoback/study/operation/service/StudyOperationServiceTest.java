@@ -101,7 +101,7 @@ class StudyOperationServiceTest {
     }
 
     private StudyMembership memberMembership() {
-        StudyMembership m
+        StudyMembership membership
             = StudyMembership
                 .apply(
                     STUDY_ID,
@@ -112,12 +112,12 @@ class StudyOperationServiceTest {
                     null,
                     LocalDateTime.now()
                 );
-        ReflectionTestUtils.setField(m, "id", TARGET_MEMBERSHIP_ID);
-        return m;
+        ReflectionTestUtils.setField(membership, "id", TARGET_MEMBERSHIP_ID);
+        return membership;
     }
 
     private StudyMembership managerMembership() {
-        StudyMembership m
+        StudyMembership membership
             = StudyMembership
                 .apply(
                     STUDY_ID,
@@ -128,8 +128,8 @@ class StudyOperationServiceTest {
                     null,
                     LocalDateTime.now()
                 );
-        ReflectionTestUtils.setField(m, "id", TARGET_MEMBERSHIP_ID);
-        return m;
+        ReflectionTestUtils.setField(membership, "id", TARGET_MEMBERSHIP_ID);
+        return membership;
     }
 
     @Test
