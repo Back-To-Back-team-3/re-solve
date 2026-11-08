@@ -86,4 +86,40 @@ public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecific
         @Param("capacity") int capacity,
         @Param("isAutoReopen") boolean isAutoReopen
     );
+
+    /**
+     * 운영진 임명 시 manager_count를 조건부 증가한다(API 명세서 §5.3.2 임명).
+     * manager_count &lt; 2인 경우에만 증가하며 version을 1 올린다.
+     * 0이면 호출자가 STUDY_MANAGER_LIMIT_EXCEEDED를 던져야 한다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE studies SET manager_count = manager_count + 1, version = version + 1, updated_at = NOW(6) "
+            + "WHERE id = :studyId AND manager_count < 2",
+        nativeQuery = true
+    )
+    int incrementManagerCountIfNotFull(@Param("studyId") Long studyId);
+
+    /**
+     * 운영진 해제 시 manager_count를 감소한다(API 명세서 §5.3.2 해제). version을 1 올린다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE studies SET manager_count = manager_count - 1, version = version + 1, updated_at = NOW(6) "
+            + "WHERE id = :studyId",
+        nativeQuery = true
+    )
+    void decrementManagerCount(@Param("studyId") Long studyId);
+
+    /**
+     * manager_count 변경 없이 version만 증가한다(API 명세서 §5.3.3 MANAGER 대상 위임).
+     * MANAGER에게 위임하면 net manager_count가 0이지만 스터디 상태 변경으로 version은 올린다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE studies SET version = version + 1, updated_at = NOW(6) WHERE id = :studyId",
+        nativeQuery = true
+    )
+    void bumpVersion(@Param("studyId") Long studyId);
+
 }
