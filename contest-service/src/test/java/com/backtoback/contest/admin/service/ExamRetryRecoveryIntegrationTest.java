@@ -92,7 +92,7 @@ class ExamRetryRecoveryIntegrationTest extends ExamIntegrationTestSupport {
         }
     )
     @DisplayName("확정된 멱등 충돌은 실패로 종결하고 불명확한 응답은 보류한다")
-    void reconcilesOnlyConfirmedRejections(int status, String code, String expected) {
+    void reconcilesOnlyConfirmedRejections(int httpStatus, String code, String expected) {
         // given
         var submitted = submissions.submit(examId, "7", new ExamSubmissionRequest("101", "java", "코드", "1"));
         long receipt = Long.parseLong(submitted.examSubmissionId());
@@ -121,7 +121,7 @@ class ExamRetryRecoveryIntegrationTest extends ExamIntegrationTestSupport {
             .willThrow(
                 HttpClientErrorException
                     .create(
-                        HttpStatus.valueOf(status),
+                        HttpStatus.valueOf(httpStatus),
                         "",
                         HttpHeaders.EMPTY,
                         body.getBytes(StandardCharsets.UTF_8),
