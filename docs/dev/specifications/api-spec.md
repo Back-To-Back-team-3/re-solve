@@ -7385,9 +7385,9 @@
 - **비고:**
     - **MEMBER:** 자원 잠금 아래 실제 입장한 미확정 시험·대회가 있으면 WITHDRAWAL_BLOCKED_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 등록·입장을 차단한다.
     - **STUDY:** PREPARED와 신규 시험 생성 차단을 저장한다.
-    - 모든 SCHEDULED 시험을 동일 취소 계약으로 취소하고 등록자에게 알린다.
-    - 취소 이벤트의 `reason`은 `스터디 종료 준비로 시험이 취소되었습니다.`이다. 같은 operationId의 재요청에는 최초에 취소한 `canceledExamIds`를 보존해 반환한다. `ready`와 `blockingExamIds`는 현재 시험 상태를 조회한다.
-    - 아직 시간상 진행 중인 시험이 있으면 202·ready=false·blockingExamIds 반환; 재요청 시 종료를 확인한다.
+    - 모든 SCHEDULED 시험을 동일 취소 계약으로 취소하고 등록자에게 알린다. 취소 이벤트의 `reason`은 `스터디 종료 준비로 시험이 취소되었습니다.`이다.
+    - 같은 `operationId`로 재요청하면 최초 `canceledExamIds`를 반환하고 현재 시험 상태로 `ready`와 `blockingExamIds`를 계산한다.
+    - 아직 시간상 진행 중인 시험이 있으면 202와 함께 `ready=false` 및 `blockingExamIds`를 반환한다.
     - 모든 시험이 CLOSED/FINALIZED/CANCELED면 ready=true. 아직 미확정인 CLOSED 시험은 차단하지 않는다.
     - **PROBLEM:** SCHEDULED 또는 시간상 진행 중인 시험·대회에 포함되면 PROBLEM_IN_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 문제 편입을 막는다.
     - EXAM_ONLY 종료공개와 고정 회차 채점은 가드와 분리한다.
@@ -7443,7 +7443,8 @@
     - **complete:** 소유 서비스가 자기 DB 상태를 변경한 뒤 호출한다.
     - 가드 operationId 일치와 expectedSourceVersion보다 큰 결과 버전을 확인해 operation_result=COMMITTED로 종결한다. source_version은 기존값과 결과 버전 중 큰 값으로 보존한다. PROBLEM은 최신 source_status가 결과보다 큰 버전의 PUBLIC이고 GENERAL 재공개인 경우에만 OPEN, 그 외 BLOCKED로 반영한다. PROBLEM complete의 버전은 Problem COMMITTED 결과와 같아야 하며, cancel은 원래 기대 버전을 사용하고 원천 상태를 증가시키지 않는다.
     - STUDY는 ready=true일 때만 완료한다.
-    - MemberWithdrawn/StudyClosed/ProblemStateChanged도 같은 완료 처리를 복구한다.
+    - `StudyClosed`와 `ProblemStateChanged`는 같은 완료 처리를 복구한다.
+    - `MemberWithdrawn`은 탈퇴 상태와 원천 버전을 반영한다. `PREPARED`인 회원 가드는 유지하며, 대사로 복구할 때는 §1.7.3에서 같은 `operationId`의 `COMMITTED` 결과와 완료 버전을 확인한 뒤 종결한다.
     - **cancel:** 소유 서비스가 작업을 실행하지 않았음(`ABORTED`)을 확정한 뒤 취소한다. OPEN에서 준비한 작업은 OPEN으로 복귀한다. PROBLEM의 BLOCKED에서 후속 보관을 준비했으면 prepared_from_state=BLOCKED로 복원하고 operation_result=ABORTED를 보존한다.
     - 반복 complete/cancel은 같은 operationResult와 상태를 반환한다. 취소는 현재 작업의 ABORTED 확인과 원래 기대 버전을 요구한다. 더 최신 원천 상태가 있으면 GENERAL·PUBLIC만 OPEN, PRIVATE·ARCHIVED는 BLOCKED이며, 그 외에는 준비 전 상태로 복원한다. 원천 버전은 감소시키지 않는다.
     - 이미 완료된 작업은 취소 불가(409 OPERATION_ALREADY_COMPLETED). 스터디 준비로 취소된 시험을 자동 복원하지 않는다.

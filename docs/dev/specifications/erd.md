@@ -2154,7 +2154,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 완료 버전 | complete.sourceVersion > expected_source_version·현재 operation_id 일치 확인. source_version은 max(저장값, 결과 버전)으로 보존하며 더 최신 원천 상태로 최종 차단 판단 |
 | 복구 | TTL로 자동 해제하지 않음. PENDING·404·조회 실패·결과 불명은 PREPARED 유지. COMMITTED만 complete, ABORTED만 cancel. 조회 결과 뒤 가드 잠금 안에서 현재 operationId·버전 재확인. API §4.7.3·§4.7.4 / 스케줄러 §4.7 |
 | 후속 문제 작업 | 다른 PREPARED 작업은 점유 충돌. PROBLEM_HIDE는 OPEN·BLOCKED에서 새 작업을 준비할 수 있으며 prepared_from_state를 저장한다. 확정 취소는 이전 상태로 복원하고 ABORTED를 보존한다. 더 최신 원천 상태가 있으면 PUBLIC의 GENERAL만 OPEN, PRIVATE·ARCHIVED는 BLOCKED로 유지한다. 다른 PREPARED 작업은 원천 이벤트로 취소하지 않음 |
-| 스터디 준비 결과 | 동일 STUDY_CLOSE 작업의 최초 취소 시험 ID 목록은 `contest_study_guard_preparations`에 영속 보존한다. 재요청의 `ready`와 `blockingExamIds`는 현재 상태로 조회한다. |
+| 스터디 준비 결과 | 동일 `STUDY_CLOSE` 작업의 최초 취소 시험 ID 목록을 §4.4.16.1에 보존한다. 재요청 응답은 API §4.7.3을 따른다. |
 
 #### 4.4.16.1 스터디 가드 준비 결과 (`contest_study_guard_preparations`)
 
@@ -2170,7 +2170,13 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `prepared_at` | DATETIME(6) | Y | 최초 준비 시각 |
 | `created_at` | DATETIME(6) | Y | 최초 준비 시각 |
 
-`uk_contest_study_guard_preparations_study_operation`은 `(study_id, operation_id)`를 유일하게 보장한다. 결과는 자동 삭제하지 않는다.
+**제약 및 인덱스**
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `uk_contest_study_guard_preparations_study_operation` | `(study_id, operation_id)` | 같은 스터디 작업의 최초 준비 결과를 한 행으로 보존 |
+
+- 준비 결과는 자동 삭제하지 않는다.
 
 #### 4.4.17 회원 정보 복제본 (`member_replicas`)
 
