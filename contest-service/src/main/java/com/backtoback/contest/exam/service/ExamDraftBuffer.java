@@ -119,10 +119,7 @@ public class ExamDraftBuffer {
                     throw failure;
                 } finally {
                     renewal.cancel(false);
-                    Long released = redis.execute(RELEASE, List.of(prefix), token);
-                    if (!Long.valueOf(1).equals(released)) {
-                        throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
-                    }
+                    release(prefix, token);
                 }
             }
             for (;;) {
@@ -139,6 +136,18 @@ public class ExamDraftBuffer {
             throw failure;
         } catch (RuntimeException failure) {
             throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, failure);
+        }
+    }
+
+    /** 커밋된 저장 결과나 원래 실패를 잠금 정리 오류로 덮지 않는다. */
+    private void release(String prefix, String token) {
+        try {
+            Long released = redis.execute(RELEASE, List.of(prefix), token);
+            if (!Long.valueOf(1).equals(released)) {
+                log.warn("Draft 버퍼 잠금 해제 시 소유 잠금을 확인하지 못함");
+            }
+        } catch (RuntimeException failure) {
+            log.warn("Draft 버퍼 잠금 해제 실패", failure);
         }
     }
 
