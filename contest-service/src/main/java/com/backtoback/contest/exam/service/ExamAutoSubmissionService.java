@@ -32,7 +32,6 @@ import com.backtoback.contest.exam.domain.ExamParticipantStatus;
 import com.backtoback.contest.exam.domain.ExamStatus;
 import com.backtoback.contest.exam.repository.ExamParticipantHistoryRepository;
 import com.backtoback.contest.exam.repository.ExamParticipantRepository;
-import com.backtoback.contest.exam.repository.ExamProblemRepository;
 import com.backtoback.contest.exam.repository.ExamRepository;
 import com.backtoback.contest.exam.service.ExamSubmissionMessageSize.Payload;
 import com.backtoback.contest.exam.store.ExamSubmissionRequestStore;
@@ -49,7 +48,6 @@ public class ExamAutoSubmissionService {
     private static final Logger log = LoggerFactory.getLogger(ExamAutoSubmissionService.class);
     private final ExamRepository exams;
     private final ExamParticipantRepository participants;
-    private final ExamProblemRepository problems;
     private final ExamParticipantHistoryRepository histories;
     private final ExamSubmissionMessageSize size;
     private final ExamJudgementService judgements;
@@ -123,36 +121,13 @@ public class ExamAutoSubmissionService {
         Long actor,
         Map<Long, Languages> languages
     ) {
-        var drafts
-            = jdbc
-                .query(
-                    "SELECT d.problem_id,d.language,d.source_code,d.seq FROM exam_drafts d "
-                        + "WHERE d.exam_participant_id=? AND d.seq=(SELECT MAX(x.seq) FROM exam_drafts x "
-                        + "WHERE x.exam_participant_id=d.exam_participant_id AND x.problem_id=d.problem_id) "
-                        + "ORDER BY d.problem_id",
-                    (rs, row) -> new Draft(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getLong(4)),
-                    participant.getId()
-                );
         var ids = new ArrayList<String>();
         var acceptedProblems = new ArrayList<Long>();
-        for (var draft : drafts) {
-            Long last
-                = jdbc
-                    .queryForObject(
-                        "SELECT COALESCE(MAX(draft_seq),0) FROM exam_submissions "
-                            + "WHERE exam_participant_id=? AND problem_id=?",
-                        Long.class,
-                        participant.getId(),
-                        draft.problemId()
-                    );
-            if (draft.sourceCode().isBlank() || draft.seq() <= last) {
-                continue;
+        for (var draft : pendingDrafts(participant.getExam().getId(), participant.getMemberId())) {
+            if (draft.revision() == null) {
+                throw new IllegalStateException("Draft problem is not pinned");
             }
-            long revision
-                = problems
-                    .findByExamIdAndProblemId(participant.getExam().getId(), draft.problemId())
-                    .orElseThrow(() -> new IllegalStateException("Draft problem is not pinned"))
-                    .getProblemRevisionId();
+            long revision = draft.revision();
             var supported = languages.get(draft.problemId());
             String language = switch (draft.language()) {
                 case "JAVA" -> "java";
@@ -192,29 +167,52 @@ public class ExamAutoSubmissionService {
         return ids;
     }
 
-    /** 고정 회차의 원격 언어 조회는 부모·참가자 잠금을 얻기 전에 완료한다. */
+    /** 원격 조회 전과 참가자 잠금 후에 같은 기준으로 최신 미접수 Draft를 고른다. */
+    private List<Draft> pendingDrafts(long examId, long memberId) {
+        return jdbc
+            .query(
+                """
+                    SELECT d.problem_id,d.language,d.source_code,d.seq,ep.problem_revision_id
+                    FROM exam_participants p
+                    JOIN exam_drafts d ON d.exam_participant_id=p.id
+                    LEFT JOIN exam_problems ep ON ep.exam_id=p.exam_id AND ep.problem_id=d.problem_id
+                    WHERE p.exam_id=? AND p.member_id=? AND p.status='STARTED' AND p.auto_submitted_at IS NULL
+                      AND d.seq=(SELECT MAX(x.seq) FROM exam_drafts x
+                                 WHERE x.exam_participant_id=p.id AND x.problem_id=d.problem_id)
+                      AND NOT EXISTS (SELECT 1 FROM exam_submissions s
+                                      WHERE s.exam_participant_id=p.id AND s.problem_id=d.problem_id
+                                        AND s.draft_seq>=d.seq)
+                    ORDER BY d.problem_id
+                    """,
+                (rs, row) -> new Draft(
+                    rs.getLong(1),
+                    rs.getString(2),
+                    rs.getString(3),
+                    rs.getLong(4),
+                    rs.getObject(5, Long.class)
+                ),
+                examId,
+                memberId
+            )
+            .stream()
+            .filter(draft -> !draft.sourceCode().isBlank())
+            .toList();
+    }
+
+    /** 실제 자동 접수 후보의 고정 회차만 부모·참가자 잠금 전에 조회한다. */
     private Map<Long, Languages> supportedLanguages(long examId, long memberId) {
-        var pinned
-            = jdbc
-                .query(
-                    """
-                        SELECT DISTINCT ep.problem_id,ep.problem_revision_id FROM exam_participants p
-                        JOIN exam_drafts d ON d.exam_participant_id=p.id
-                        JOIN exam_problems ep ON ep.exam_id=p.exam_id AND ep.problem_id=d.problem_id
-                        WHERE p.exam_id=? AND p.member_id=? AND p.status='STARTED'
-                          AND p.auto_submitted_at IS NULL
-                        """,
-                    (rs, row) -> new long[] {
-                        rs.getLong(1),
-                        rs.getLong(2)
-                    },
-                    examId,
-                    memberId
-                );
         var languages = new HashMap<Long, Languages>();
-        for (var problem : pinned) {
-            languages
-                .put(problem[0], new Languages(problem[1], content.supportedLanguages(examId, problem[0], problem[1])));
+        for (var draft : pendingDrafts(examId, memberId)) {
+            if (draft.revision() != null) {
+                languages
+                    .put(
+                        draft.problemId(),
+                        new Languages(
+                            draft.revision(),
+                            content.supportedLanguages(examId, draft.problemId(), draft.revision())
+                        )
+                    );
+            }
         }
         return languages;
     }
@@ -357,6 +355,6 @@ public class ExamAutoSubmissionService {
         List<String> autoSubmissionIds
     ) {
     }
-    private record Draft(long problemId, String language, String sourceCode, long seq) {
+    private record Draft(long problemId, String language, String sourceCode, long seq, Long revision) {
     }
 }

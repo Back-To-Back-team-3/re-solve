@@ -34,14 +34,43 @@ class ExamAutoSubmissionServiceIntegrationTest extends ExamIntegrationTestSuppor
     @MockitoSpyBean
     private ExamSubmissionRequestStore requestStore;
 
-    @Test
-    @DisplayName("최신 공백 Draft는 이전 코드를 자동 제출하지 않고 종료한다")
-    void latestBlankDraftSuppressesEarlierCode() {
+    /** 지원 언어 조회가 실패할 상황에서도 접수할 Draft가 없으면 종료한다. */
+    @ParameterizedTest
+    @ValueSource(
+        booleans = {
+            false,
+            true
+        }
+    )
+    @DisplayName("공백과 이미 접수된 최신 Draft는 수동·자동 종료에서 언어 조회를 건너뛴다")
+    void finishSkipsBlankAndSubmittedDrafts(boolean automatic) {
+        // given
         store.save(store.prepare(examId, "7", "101", new SaveRequest("java", "이전", "1")));
         store.save(store.prepare(examId, "7", "101", new SaveRequest("java", " \n\t", "2")));
+        store.save(store.prepare(examId, "7", "102", new SaveRequest("java", "접수한 코드", "1")));
+        submissions.submit(examId, "7", new ExamSubmissionRequest("102", "java", "접수한 코드", "1"));
+        doThrow(new IllegalStateException("Problem unavailable"))
+            .when(content)
+            .supportedLanguages(anyLong(), anyLong(), anyLong());
 
-        assertThat(autoSubmissions.finish(examId, "7").autoSubmissionIds()).isEmpty();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
+        // when
+        if (automatic) {
+            var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
+            jdbc
+                .update(
+                    "UPDATE exam_participants SET personal_ends_at=? WHERE id=?",
+                    now.minusSeconds(4),
+                    participantId
+                );
+            assertThat(autoSubmissions.finishDue(Long.parseLong(examId), 7, participantId)).isTrue();
+        } else {
+            assertThat(autoSubmissions.finish(examId, "7").autoSubmissionIds()).isEmpty();
+        }
+
+        // then
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM exam_participants WHERE id=?", String.class, participantId))
+            .isEqualTo("FINISHED");
     }
 
     @ParameterizedTest
