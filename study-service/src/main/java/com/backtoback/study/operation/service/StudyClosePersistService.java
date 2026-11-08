@@ -38,9 +38,13 @@ public class StudyClosePersistService {
 
     /**
      * 스터디 종료 연쇄 효과를 트랜잭션 안에서 원자적으로 적용한다(API 명세서 §5.3.4).
+     * 잠금 순서: quota → study (가입 승인과 동일, 교착 방지).
      */
     @Transactional
     public void doCloseStudy(Long studyId, String correlationId, LocalDateTime now) {
+        // ① quota 먼저 (잠금 순서: quota → study)
+        decrementApprovedMemberQuotas(studyId);
+        // ② study
         int rows = studyRepository.closeStudyIfNotClosed(studyId);
         if (rows == 0) {
             throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
@@ -52,6 +56,7 @@ public class StudyClosePersistService {
 
     /**
      * 관리자 강제 종료 연쇄 효과를 트랜잭션 안에서 원자적으로 적용한다(API 명세서 §5.6.1).
+     * 잠금 순서: quota → study (가입 승인과 동일, 교착 방지).
      */
     @Transactional
     public void doForceCloseStudy(
@@ -63,6 +68,9 @@ public class StudyClosePersistService {
         String correlationId,
         LocalDateTime now
     ) {
+        // ① quota 먼저 (잠금 순서: quota → study)
+        decrementApprovedMemberQuotas(studyId);
+        // ② study
         int rows = studyRepository.closeStudyIfNotClosed(studyId);
         if (rows == 0) {
             throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
@@ -73,14 +81,17 @@ public class StudyClosePersistService {
         auditLogRepository.save(AuditLog.forceStudyClosed(actorId, studyId, beforeStateJson, reason, clientIp, now));
     }
 
-    private void applyCloseEffects(Long studyId, Long studyVersion, String correlationId, LocalDateTime now) {
-        studyMembershipRepository.cancelPendingMemberships(studyId);
-        assignmentRepository.closeActiveAssignments(studyId);
+    private void decrementApprovedMemberQuotas(Long studyId) {
         List<Long> memberIds
             = studyMembershipRepository.findMemberIdsByStudyIdAndStatus(studyId, MembershipStatus.APPROVED);
         if (!memberIds.isEmpty()) {
             studyMemberQuotaRepository.decrementActiveCountBatch(memberIds);
         }
+    }
+
+    private void applyCloseEffects(Long studyId, Long studyVersion, String correlationId, LocalDateTime now) {
+        studyMembershipRepository.cancelPendingMemberships(studyId);
+        assignmentRepository.closeActiveAssignments(studyId);
         outboxEventWriter
             .append(
                 "study",
