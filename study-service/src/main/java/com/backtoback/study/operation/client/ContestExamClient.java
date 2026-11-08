@@ -52,7 +52,7 @@ public class ContestExamClient {
                     )
                     .retrieve()
                     .body(ContestExamResponse.class);
-            if (response == null) {
+            if (response == null || response.items() == null) {
                 throw new StudyException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
             }
             return !response.items().isEmpty() || response.hasMore();
