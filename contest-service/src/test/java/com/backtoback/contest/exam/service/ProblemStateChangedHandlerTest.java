@@ -306,6 +306,25 @@ class ProblemStateChangedHandlerTest {
                 message(
                     UUID.randomUUID().toString(),
                     99202,
+                    4,
+                    "GENERAL",
+                    "PRIVATE",
+                    "\"92\"",
+                    "1",
+                    "[\"java\"]",
+                    "\"current\""
+                ),
+                mock(Runnable.class)
+            );
+        // then
+        assertThat(row(99202).get("state")).isEqualTo("PREPARED");
+        assertThat(row(99202).get("operation_result")).isEqualTo("PENDING");
+        // when
+        consumer
+            .consume(
+                message(
+                    UUID.randomUUID().toString(),
+                    99202,
                     5,
                     "GENERAL",
                     "PUBLIC",

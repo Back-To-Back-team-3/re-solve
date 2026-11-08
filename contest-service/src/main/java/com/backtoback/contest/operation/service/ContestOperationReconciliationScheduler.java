@@ -160,22 +160,20 @@ public class ContestOperationReconciliationScheduler {
     }
 
     private void reconcileGuards(LocalDateTime cutoff, long deadline) {
-        String cursorKey = JOB + ":GUARDS";
-        var cursor = cursors.load(cursorKey);
         while (System.nanoTime() < deadline) {
-            var candidates = guardCandidates(cutoff, cursor);
+            var candidates = guardCandidates(cutoff);
             if (candidates.isEmpty()) {
-                cursors.clear(cursorKey);
                 return;
             }
             for (var candidate : candidates) {
                 if (System.nanoTime() >= deadline) {
                     return;
                 }
-                cursor = new ExamSchedulerCursorStore.Cursor(candidate.updatedAt(), candidate.id());
-                cursors.save(cursorKey, cursor);
-                metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
                 try {
+                    if (!markGuardAttempt(candidate, cutoff)) {
+                        continue;
+                    }
+                    metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
                     boolean applied
                         = "MEMBER".equals(candidate.type())
                             ? memberGuards
@@ -204,12 +202,24 @@ public class ContestOperationReconciliationScheduler {
         }
     }
 
-    private java.util.List<GuardCandidate> guardCandidates(
-        LocalDateTime cutoff,
-        ExamSchedulerCursorStore.Cursor cursor
-    ) {
+    /** 이번에 확인한 가드를 뒤로 보내 신규 유입 중에도 앞서 실패한 항목이 다시 선정되게 한다. */
+    private boolean markGuardAttempt(GuardCandidate candidate, LocalDateTime cutoff) {
+        var attemptedAt = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE);
+        return jdbc
+            .update(
+                "UPDATE contest_resource_guards SET updated_at=? WHERE id=? AND operation_id=? "
+                    + "AND version=? AND updated_at<=? AND state='PREPARED' AND operation_result='PENDING'",
+                attemptedAt,
+                candidate.id(),
+                candidate.operationId(),
+                candidate.version(),
+                cutoff
+            ) == 1;
+    }
+
+    private java.util.List<GuardCandidate> guardCandidates(LocalDateTime cutoff) {
         String query
-            = "SELECT id,resource_type,resource_id,operation_id,expected_source_version,updated_at "
+            = "SELECT id,resource_type,resource_id,operation_id,expected_source_version,version "
                 + "FROM contest_resource_guards WHERE ((resource_type='MEMBER' AND operation_type='WITHDRAWAL') "
                 + "OR (resource_type='STUDY' AND operation_type='STUDY_CLOSE') "
                 + "OR (resource_type='PROBLEM' AND operation_type='PROBLEM_HIDE')) "
@@ -221,20 +231,9 @@ public class ContestOperationReconciliationScheduler {
                 rs.getLong(3),
                 rs.getString(4),
                 rs.getLong(5),
-                rs.getObject(6, LocalDateTime.class)
+                rs.getLong(6)
             );
-        if (cursor == null) {
-            return jdbc.query(query + "ORDER BY updated_at,id LIMIT 100", mapper, cutoff);
-        }
-        return jdbc
-            .query(
-                query + "AND (updated_at>? OR (updated_at=? AND id>?)) " + "ORDER BY updated_at,id LIMIT 100",
-                mapper,
-                cutoff,
-                cursor.time(),
-                cursor.time(),
-                cursor.id()
-            );
+        return jdbc.query(query + "ORDER BY updated_at,id LIMIT 100", mapper, cutoff);
     }
 
     private java.util.List<Candidate> candidates(LocalDateTime cutoff, ExamSchedulerCursorStore.Cursor cursor) {
@@ -266,7 +265,7 @@ public class ContestOperationReconciliationScheduler {
         long resourceId,
         String operationId,
         long expectedVersion,
-        LocalDateTime updatedAt
+        long version
     ) {
     }
 }

@@ -297,7 +297,12 @@ public class ContestGuardWorkflowService {
         if ("PROBLEM".equals(type) && guard.sourceVersion() > (complete ? source : guard.expectedVersion())) {
             next = "GENERAL".equals(guard.scope()) && "PUBLIC".equals(guard.status()) ? "OPEN" : "BLOCKED";
         }
-        long latest = Math.max(guard.sourceVersion(), source);
+        if (!complete && "MEMBER".equals(type) && guard.sourceVersion() > guard.expectedVersion()) {
+            next = "BLOCKED";
+        }
+        // 문제 취소 버전으로 회차·언어 스냅샷의 버전을 올리면 이후 같은 버전의 이벤트가 무시된다.
+        long latest
+            = !complete && "PROBLEM".equals(type) ? guard.sourceVersion() : Math.max(guard.sourceVersion(), source);
         jdbc
             .update(
                 "UPDATE contest_resource_guards SET state=?,operation_result=?,source_version=?,"

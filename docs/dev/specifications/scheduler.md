@@ -673,7 +673,7 @@
 2. 성공 목표를 targetJudgeAttempt에 저장한다. 마지막 반영 judge_attempt보다 큰 목표일 때만 REQUESTED·is_zero_confirmed=false로 전이하고 judge_attempt는 유지한다. 이미 목표 이상 결과가 반영됐으면 상태·판정을 보존한다.
 3. 확인된 작업 SUCCEEDED·감사 로그를 함께 저장한다. B가 동일 작업 미실행 실패를 확정하면 FAILED·마지막 오류로 종결한다. 타임아웃·5xx·조회 실패는 미실행 증거가 아니다.
 4. CONTEST_CREATE는 같은 대회·고정 회차·선택 버전·설정 관리자로 미확인 B 연결을 재요청한다. 전체 확인은 SUCCEEDED, 확정 거절·미완료 상태의 시작 시각 경과는 대회 CANCELED·FAILED·감사·취소 Outbox로 함께 종결한다. 해당 작업 SUCCEEDED 전에는 대회를 노출·참가·시작시키지 않는다.
-5. 가드 소유 서비스 작업 상태를 조회한다. COMMITTED이면 complete 규칙, ABORTED이면 준비 전 상태와 결과를 보존하는 cancel 규칙을 적용한다. PENDING·404·통신 실패는 PREPARED를 유지한다.
+5. 오래 갱신되지 않은 가드부터 선정하고, 원격 조회 전에 확인 시각을 기록한다. 미확인 가드도 다음 회차에서 다시 선정되며 신규 유입이 기존 항목의 재조회를 막지 않는다. 가드 소유 서비스 작업 상태를 조회한다. COMMITTED이면 complete 규칙, ABORTED이면 준비 전 상태와 결과를 보존하는 cancel 규칙을 적용한다. PENDING·404·통신 실패는 PREPARED를 유지한다.
 6. 가드 잠금 뒤 operationId·sourceVersion을 다시 비교한다. 새 작업·새 버전을 이전 응답으로 덮어쓰지 않는다. 동일 완료·취소는 멱등이다.
 7. STUDY 준비로 취소한 예정 시험은 ABORTED여도 자동 복원하지 않는다. 진행 시험은 원래 마감까지 종료 처리를 계속한다. 가드 자동 해제 TTL을 두지 않는다.
 
