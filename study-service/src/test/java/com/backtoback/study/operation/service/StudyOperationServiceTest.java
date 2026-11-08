@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.time.Clock;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -36,6 +38,7 @@ import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.Study;
 import com.backtoback.study.membership.domain.StudyMembership;
+import com.backtoback.study.membership.domain.StudyMembershipHistory;
 import com.backtoback.study.membership.domain.StudyStatus;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
@@ -514,7 +517,15 @@ class StudyOperationServiceTest {
         assertThat(result.leaderMembershipId()).isEqualTo(String.valueOf(TARGET_MEMBERSHIP_ID));
         verify(studyRepository, never()).incrementManagerCountIfNotFull(anyLong());
         verify(studyRepository).bumpVersion(STUDY_ID);
-        verify(historyRepository, never()).save(null);
+        ArgumentCaptor<StudyMembershipHistory> historyCaptor = ArgumentCaptor.forClass(StudyMembershipHistory.class);
+        verify(historyRepository, times(2)).save(historyCaptor.capture());
+        List<StudyMembershipHistory> saved = historyCaptor.getAllValues();
+        assertThat(saved.get(0).getMembershipId()).isEqualTo(LEADER_MEMBERSHIP_ID);
+        assertThat(saved.get(0).getFromRole()).isEqualTo(MembershipRole.LEADER);
+        assertThat(saved.get(0).getToRole()).isEqualTo(MembershipRole.MANAGER);
+        assertThat(saved.get(1).getMembershipId()).isEqualTo(TARGET_MEMBERSHIP_ID);
+        assertThat(saved.get(1).getFromRole()).isEqualTo(MembershipRole.MANAGER);
+        assertThat(saved.get(1).getToRole()).isEqualTo(MembershipRole.LEADER);
     }
 
     @Test
