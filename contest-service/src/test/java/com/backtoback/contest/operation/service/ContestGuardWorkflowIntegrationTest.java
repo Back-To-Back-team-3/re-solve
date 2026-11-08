@@ -20,6 +20,9 @@ import com.backtoback.contest.exam.dto.GuardFinishRequest;
 import com.backtoback.contest.exam.dto.GuardPrepareRequest;
 import com.backtoback.contest.exam.repository.ContestResourceGuardRepository;
 import com.backtoback.contest.exam.service.ExamIntegrationTestSupport;
+import com.backtoback.contest.exam.service.ProblemSnapshotService;
+import com.backtoback.contest.exam.service.ProblemSnapshotService.Snapshot;
+import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
 /** 자원 준비와 시험 취소 결과의 영속성을 확인한다. */
@@ -28,6 +31,10 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
     private ContestGuardWorkflowService workflow;
     @Autowired
     private ContestResourceGuardRepository guards;
+    @Autowired
+    private MemberGuardTransitions memberTransitions;
+    @Autowired
+    private ProblemSnapshotService snapshots;
 
     /** 공유 테스트 DB에 남은 같은 자원의 가드와 준비 이력을 지운다. */
     @BeforeEach
@@ -121,6 +128,51 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         assertThat(canceled.operationResult()).isEqualTo("ABORTED");
     }
 
+    /** 직접 취소도 대사 경로와 같은 탈퇴 차단을 유지한다. */
+    @Test
+    @DisplayName("최신 탈퇴 이벤트를 관찰한 회원 가드는 직접 취소 후에도 차단한다")
+    void memberCancelKeepsObservedWithdrawal() {
+        // given
+        jdbc.update("UPDATE exams SET status='FINALIZED' WHERE id=?", examId);
+        workflow.prepare("MEMBER", "7", new GuardPrepareRequest("member-op", "WITHDRAWAL", "4"));
+        transactions.executeWithoutResult(status -> memberTransitions.observeWithdrawal(7, 5));
+
+        // when
+        var canceled = workflow.finish("MEMBER", "7", new GuardFinishRequest("member-op", "4", "취소"), false);
+
+        // then
+        assertThat(canceled.state()).isEqualTo("BLOCKED");
+        assertThat(canceled.operationResult()).isEqualTo("ABORTED");
+        assertThat(canceled.sourceVersion()).isEqualTo("5");
+    }
+
+    /** 취소의 기대 버전과 실제 문제 스냅샷의 버전을 구분한다. */
+    @Test
+    @DisplayName("숨김 취소 후 기대 버전과 같은 문제 스냅샷을 반영한다")
+    void problemCancelKeepsSnapshotVersion() {
+        // given
+        jdbc.update("UPDATE exams SET status='CLOSED' WHERE id=?", examId);
+        var original = new Snapshot(101, 4, "GENERAL", "PUBLIC", 1001L, 1, List.of("java"), null);
+        transactions.executeWithoutResult(status -> snapshots.apply(original));
+        workflow.prepare("PROBLEM", "101", new GuardPrepareRequest("problem-op", "PROBLEM_HIDE", "5"));
+
+        // when
+        var canceled = workflow.finish("PROBLEM", "101", new GuardFinishRequest("problem-op", "5", "취소"), false);
+        var updated = new Snapshot(101, 5, "GENERAL", "PUBLIC", 1002L, 2, List.of("java"), null);
+        transactions.executeWithoutResult(status -> snapshots.apply(updated));
+
+        // then
+        assertThat(canceled.sourceVersion()).isEqualTo("4");
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT source_revision_id FROM contest_resource_guards "
+                        + "WHERE resource_type='PROBLEM' AND resource_id=101",
+                    Long.class
+                )
+        ).isEqualTo(1002L);
+    }
+
     /** 더 최신 공개 이벤트와 늦은 완료 요청의 버전 순서를 대조한다. */
     @Test
     @DisplayName("문제 완료는 더 최신 공개 버전을 보존하고 원래 결과 회차만 허용한다")
@@ -200,16 +252,39 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
                     workflow.prepare("PROBLEM", "103", new GuardPrepareRequest("race", "PROBLEM_HIDE", "4"));
                     return false;
                 } catch (ContestException expected) {
-                    return true;
+                    return expected.getErrorCode() == ContestErrorCode.PROBLEM_IN_ACTIVE_EXAM;
                 }
             });
-            release.countDown();
+            try {
+                assertThat(waitForGuardInsert()).isTrue();
+                assertThat(prepare.isDone()).isFalse();
+            } finally {
+                release.countDown();
+            }
             enrollment.get(10, TimeUnit.SECONDS);
             assertThat(prepare.get(10, TimeUnit.SECONDS)).isTrue();
         } finally {
             release.countDown();
             jdbc.update("DELETE FROM contest_resource_guards WHERE resource_type='PROBLEM' AND resource_id=103");
         }
+    }
+
+    /** 편입 트랜잭션이 잠금을 가진 동안 준비 세션의 가드 INSERT가 실행 중인지 확인한다. */
+    private boolean waitForGuardInsert() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        do {
+            var processes = jdbc.queryForList("SHOW FULL PROCESSLIST");
+            if (processes
+                .stream()
+                .anyMatch(
+                    row -> row.get("Info") instanceof String sql
+                        && sql.startsWith("INSERT INTO contest_resource_guards")
+                )) {
+                return true;
+            }
+            Thread.sleep(20);
+        } while (System.nanoTime() < deadline);
+        return false;
     }
 
     /** 작업 ID가 일치하는 종료 이벤트만 준비를 완료하는지 확인한다. */
