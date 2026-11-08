@@ -3,15 +3,20 @@ package com.backtoback.problem.asset.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 
 import java.sql.DriverManager;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,10 +33,14 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
+import net.javacrumbs.shedlock.core.LockConfiguration;
+import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.core.SimpleLock;
+
 import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.problem.asset.domain.AssetKind;
 
-/** 실제 MySQL에서 일반 제출의 소비 기록과 집계의 원자성·동시성을 검증한다. */
+/** 실제 MySQL에서 파일 삭제 선점·실패 복구와 연결 경합을 검증한다. */
 @SpringBootTest(
     properties = {
         "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
@@ -77,6 +86,8 @@ class AssetCleanupServiceTest {
     private JdbcTemplate jdbc;
     @Autowired
     private Clock clock;
+    @Autowired
+    private LockProvider locks;
     @MockitoBean
     private OutboxRelay relay;
 
@@ -95,23 +106,40 @@ class AssetCleanupServiceTest {
                     LocalDateTime.now(clock).minusHours(23),
                     recent.id()
                 );
-            assertThat(service.clean(old)).isEqualTo("deleted");
-            assertThat(service.clean(pending)).isEqualTo("unconfirmed");
-            assertThat(service.clean(linked)).isEqualTo("skipped");
-            assertThat(service.clean(recent)).isEqualTo("skipped");
+            assertThat(service.clean(old, new AssetCleanupBudget(clock))).isEqualTo("deleted");
+            assertThat(service.clean(pending, new AssetCleanupBudget(clock))).isEqualTo("unconfirmed");
+            assertThat(service.clean(linked, new AssetCleanupBudget(clock))).isEqualTo("skipped");
+            assertThat(service.clean(recent, new AssetCleanupBudget(clock))).isEqualTo("skipped");
             assertThat(exists(old)).isFalse();
             assertThat(exists(pending)).isTrue();
         }
     }
 
-    /** 후보 제한은 테이블별이 아니라 전체 파일 종류에 적용한다. */
+    /** 실패한 500건의 재시도 가능성을 유지하면서 미처리 후보가 선정되는지 검증한다. */
     @Test
-    @DisplayName("한 회차 후보는 네 테이블 합계 500건을 넘지 않는다")
+    @DisplayName("500건의 실패 후보를 재시도하면서 뒤쪽 미처리 파일도 다음 회차에 선정한다")
     void candidateLimit() {
         for (int index = 0; index < 501; index++) {
-            asset(AssetKind.values()[index % 4], "DISCARDED", true);
+            var candidate = asset(AssetKind.values()[index % 4], "DISCARDED", true);
+            jdbc
+                .update(
+                    "UPDATE " + candidate.kind().table() + " SET updated_at='2000-01-01 00:00:00' WHERE id=?",
+                    candidate.id()
+                );
         }
-        assertThat(store.candidates()).hasSize(500);
+        willThrow(new IllegalStateException("S3 unavailable")).given(objects).delete(any(), any(), any(), any());
+        var first = store.candidates();
+        assertThat(first).hasSize(500);
+        for (var candidate : first) {
+            assertThatThrownBy(() -> service.clean(candidate, new AssetCleanupBudget(clock)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("S3 unavailable");
+            assertThat(state(candidate)).isEqualTo("DELETING");
+        }
+        var next = store.candidates();
+        assertThat(next).hasSize(500);
+        assertThat(next.getFirst()).isNotIn(first);
+        assertThat(next).containsAnyElementsOf(first);
     }
 
     /** S3 삭제 이후 DB 실패도 같은 DELETING에서 다시 시작한다. */
@@ -119,19 +147,55 @@ class AssetCleanupServiceTest {
     @DisplayName("S3 장애와 삭제 후 DB 장애는 DELETING을 유지하고 다음 실행에서 복구한다")
     void restartRecovery() {
         var candidate = asset(AssetKind.CODE, "DISCARDED", true);
-        doThrow(new IllegalStateException("S3 timeout")).when(objects).delete(any(), any(), any());
-        assertThatThrownBy(() -> service.clean(candidate)).isInstanceOf(IllegalStateException.class);
+        willThrow(new IllegalStateException("S3 timeout")).given(objects).delete(any(), any(), any(), any());
+        assertThatThrownBy(() -> service.clean(candidate, new AssetCleanupBudget(clock)))
+            .isInstanceOf(IllegalStateException.class);
         assertThat(state(candidate)).isEqualTo("DELETING");
         reset(objects);
         var target = AopTestUtils.<AssetCleanupStore>getUltimateTargetObject(storeSpy);
-        doAnswer(call -> {
+        willAnswer(call -> {
             throw new DataAccessResourceFailureException("DB unavailable");
-        }).when(target).complete(any());
-        assertThatThrownBy(() -> service.clean(candidate)).isInstanceOf(DataAccessResourceFailureException.class);
+        }).given(target).complete(any());
+        assertThatThrownBy(() -> service.clean(candidate, new AssetCleanupBudget(clock)))
+            .isInstanceOf(DataAccessResourceFailureException.class);
         assertThat(state(candidate)).isEqualTo("DELETING");
         reset(target);
-        assertThat(service.clean(candidate)).isEqualTo("deleted");
+        assertThat(service.clean(candidate, new AssetCleanupBudget(clock))).isEqualTo("deleted");
         assertThat(exists(candidate)).isFalse();
+    }
+
+    /** 실제 DB 잠금이 만료돼 재선점된 경우 이전 실행은 DB 삭제로 진행하지 않는다. */
+    @Test
+    @DisplayName("S3 응답 전에 다른 실행이 잠금을 얻으면 이전 실행의 DB 정리를 중단하고 재개한다")
+    void stopsAfterLeaseExpires() {
+        var candidate = asset(AssetKind.CODE, "DISCARDED", true);
+        var pausedClock = mock(Clock.class);
+        var start = Instant.now(clock);
+        given(pausedClock.instant()).willReturn(start);
+        var budget = new AssetCleanupBudget(pausedClock);
+        String name = "cleanup-expiry-" + java.util.UUID.randomUUID();
+        var configuration = new LockConfiguration(start, name, Duration.ofMinutes(30), Duration.ZERO);
+        assertThat(locks.lock(configuration)).isPresent();
+        var nextOwner = new AtomicReference<SimpleLock>();
+        willAnswer(call -> {
+            jdbc.update("UPDATE shedlock SET lock_until=NOW(3)-INTERVAL 1 SECOND WHERE name=?", name);
+            nextOwner.set(locks.lock(configuration).orElseThrow());
+            given(pausedClock.instant()).willReturn(start.plus(Duration.ofMinutes(31)));
+            return null;
+        }).given(objects).delete(any(), any(), any(), any());
+        try {
+            assertThatThrownBy(() -> service.clean(candidate, budget)).isInstanceOf(IllegalStateException.class);
+            assertThat(nextOwner.get()).isNotNull();
+            assertThat(state(candidate)).isEqualTo("DELETING");
+            reset(objects);
+            assertThat(service.clean(candidate, new AssetCleanupBudget(clock))).isEqualTo("deleted");
+            assertThat(exists(candidate)).isFalse();
+        } finally {
+            if (nextOwner.get() != null) {
+                nextOwner.get().unlock();
+            }
+            jdbc.update("DELETE FROM shedlock WHERE name=?", name);
+        }
     }
 
     /** 실제 연결 참조는 상태가 잘못 저장돼 있어도 보호한다. */
@@ -175,10 +239,14 @@ class AssetCleanupServiceTest {
             VALUES(1,1,'java',?,'MANUAL',repeat('a',64),'FAILED',now(6),now(6))
             """, code.id());
         assertThatThrownBy(() -> store.claim(code)).isInstanceOf(IllegalStateException.class);
-        verify(objects, never()).delete(any(), any(), any());
+        verify(objects, never()).delete(any(), any(), any(), any());
     }
 
-    /** 선점은 실제 다른 연결 트랜잭션의 잠금에 대기하지 않는다. */
+    /**
+     * 선점은 실제 다른 연결 트랜잭션의 잠금에 대기하지 않는다.
+     *
+     * @throws Exception 연결 트랜잭션 준비 또는 검증 실패
+     */
     @Test
     @DisplayName("연결 트랜잭션이 잠근 파일은 건너뛰고 커밋 뒤 실제 참조를 보존한다")
     void realLockRace() throws Exception {
@@ -191,7 +259,7 @@ class AssetCleanupServiceTest {
                 statement.setLong(1, candidate.id());
                 statement.executeQuery().close();
             }
-            assertThat(service.clean(candidate)).isEqualTo("skipped");
+            assertThat(service.clean(candidate, new AssetCleanupBudget(clock))).isEqualTo("skipped");
             try (var statement = connection.prepareStatement("""
                 INSERT INTO problem_body_images(body_asset_id,image_id,created_at) VALUES(1,?,now(6))
                 """)) {
@@ -204,7 +272,7 @@ class AssetCleanupServiceTest {
             }
             connection.commit();
         }
-        assertThat(service.clean(candidate)).isEqualTo("skipped");
+        assertThat(service.clean(candidate, new AssetCleanupBudget(clock))).isEqualTo("skipped");
         assertThat(exists(candidate)).isTrue();
     }
 
@@ -212,7 +280,23 @@ class AssetCleanupServiceTest {
     @Test
     @DisplayName("DELETING은 신규 연결을 거부하고 최종 정리도 새 참조가 있으면 롤백한다")
     void deletingProtection() {
+        var linkable = asset(AssetKind.IMAGE, "PENDING", true);
+        jdbc
+            .update(
+                "UPDATE problem_images SET problem_id=NULL,upload_expires_at=? WHERE id=?",
+                LocalDateTime.now(clock).minusHours(24),
+                linkable.id()
+            );
+        var before = imageRepository.findById(linkable.id()).orElseThrow();
+        before.linkToProblem(1L, 1L);
+        assertThat(before.getProblemId()).isEqualTo(1L);
         var candidate = asset(AssetKind.IMAGE, "PENDING", true);
+        jdbc
+            .update(
+                "UPDATE problem_images SET problem_id=NULL,upload_expires_at=? WHERE id=?",
+                LocalDateTime.now(clock).minusHours(24),
+                candidate.id()
+            );
         var file = store.claim(candidate).file();
         var image = imageRepository.findById(candidate.id()).orElseThrow();
         assertThatThrownBy(() -> image.linkToProblem(1L, 1L)).isInstanceOf(IllegalStateException.class);

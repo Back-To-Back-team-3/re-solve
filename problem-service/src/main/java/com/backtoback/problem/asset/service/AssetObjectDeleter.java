@@ -1,6 +1,5 @@
 package com.backtoback.problem.asset.service;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -28,16 +27,17 @@ public class AssetObjectDeleter {
      * @param bucket 저장 버킷
      * @param key 삭제 선점된 불변 키
      * @param knownVersion 저장 당시 버전
+     * @param budget 전체 정리 회차의 공유 실행 예산
      * @throws RuntimeException S3 실패·부분 삭제·불완전한 버전 목록
      */
-    public void delete(String bucket, String key, String knownVersion) {
+    public void delete(String bucket, String key, String knownVersion, AssetCleanupBudget budget) {
         var versioning
             = s3
                 .getBucketVersioning(
                     GetBucketVersioningRequest
                         .builder()
                         .bucket(bucket)
-                        .overrideConfiguration(config -> config.apiCallTimeout(Duration.ofSeconds(10)))
+                        .overrideConfiguration(config -> config.apiCallTimeout(budget.requestTimeout()))
                         .build()
                 );
         if (versioning.status() == null && knownVersion == null) {
@@ -47,12 +47,12 @@ public class AssetObjectDeleter {
                         .builder()
                         .bucket(bucket)
                         .key(key)
-                        .overrideConfiguration(config -> config.apiCallTimeout(Duration.ofSeconds(10)))
+                        .overrideConfiguration(config -> config.apiCallTimeout(budget.requestTimeout()))
                         .build()
                 );
             return;
         }
-        var versions = versions(bucket, key);
+        var versions = versions(bucket, key, budget);
         for (int start = 0; start < versions.size(); start += 1000) {
             var batch = versions.subList(start, Math.min(start + 1000, versions.size()));
             var result
@@ -62,14 +62,14 @@ public class AssetObjectDeleter {
                             .builder()
                             .bucket(bucket)
                             .delete(Delete.builder().objects(batch).quiet(true).build())
-                            .overrideConfiguration(config -> config.apiCallTimeout(Duration.ofSeconds(10)))
+                            .overrideConfiguration(config -> config.apiCallTimeout(budget.requestTimeout()))
                             .build()
                     );
             if (!result.errors().isEmpty()) {
                 throw new IllegalStateException("파일의 일부 S3 버전을 삭제하지 못했습니다.");
             }
         }
-        if (!versions(bucket, key).isEmpty()) {
+        if (!versions(bucket, key, budget).isEmpty()) {
             throw new IllegalStateException("삭제 후 S3 버전이 남아 있습니다.");
         }
     }
@@ -79,10 +79,11 @@ public class AssetObjectDeleter {
      *
      * @param bucket 저장 버킷
      * @param key 불변 키
+     * @param budget 전체 정리 회차의 공유 실행 예산
      * @return 실제 삭제할 버전
      * @throws IllegalStateException 과도하거나 불완전한 버전 목록
      */
-    private List<ObjectIdentifier> versions(String bucket, String key) {
+    private List<ObjectIdentifier> versions(String bucket, String key, AssetCleanupBudget budget) {
         var objects = new ArrayList<ObjectIdentifier>();
         String keyMarker = null;
         String versionMarker = null;
@@ -100,7 +101,7 @@ public class AssetObjectDeleter {
                             .keyMarker(keyMarker)
                             .versionIdMarker(versionMarker)
                             .maxKeys(1000)
-                            .overrideConfiguration(config -> config.apiCallTimeout(Duration.ofSeconds(10)))
+                            .overrideConfiguration(config -> config.apiCallTimeout(budget.requestTimeout()))
                             .build()
                     );
             result

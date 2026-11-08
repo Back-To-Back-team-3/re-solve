@@ -30,7 +30,8 @@ public class AssetCleanupStore {
      */
     @Transactional(
         readOnly = true,
-        propagation = Propagation.REQUIRES_NEW
+        propagation = Propagation.REQUIRES_NEW,
+        timeout = 10
     )
     public List<Candidate> candidates() {
         var parts = new ArrayList<String>();
@@ -39,7 +40,8 @@ public class AssetCleanupStore {
         for (var kind : AssetKind.values()) {
             parts
                 .add(
-                    "SELECT '" + kind.name() + "' kind,id,created_at," + " CASE WHEN status='DELETING' THEN 0 "
+                    "SELECT '" + kind.name() + "' kind,id,created_at,updated_at,"
+                        + " CASE WHEN status='DELETING' THEN 0 "
                         + "WHEN upload_finished_at IS NOT NULL THEN 1 ELSE 2 END priority" + " FROM " + kind.table()
                         + " WHERE status='DELETING' OR "
                         + "(status IN ('PENDING','DISCARDED') AND upload_finished_at<=?) OR "
@@ -51,10 +53,35 @@ public class AssetCleanupStore {
         return jdbc
             .query(
                 "SELECT kind,id FROM (" + String.join(" UNION ALL ", parts)
-                    + ") candidates ORDER BY priority,created_at,kind,id LIMIT 500",
+                    + ") candidates ORDER BY updated_at,priority,created_at,kind,id LIMIT 500",
                 (rs, row) -> new Candidate(AssetKind.valueOf(rs.getString("kind")), rs.getLong("id")),
                 args.toArray()
             );
+    }
+
+    /**
+     * 시도 시각을 별도 커밋해 반복 실패·종료 미확인 파일이 다음 후보를 막지 않게 한다.
+     * 업로드 종료·유예 시각과 실패 분류는 변경하지 않는다.
+     *
+     * @param candidate 선정된 파일
+     * @return 잠금을 획득하고 시도 순서를 갱신했는지 여부
+     */
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        timeout = 10
+    )
+    public boolean recordAttempt(Candidate candidate) {
+        var rows = lock(candidate);
+        if (rows.isEmpty() || "LINKED".equals(rows.getFirst().status())) {
+            return false;
+        }
+        jdbc
+            .update(
+                "UPDATE " + candidate.kind().table() + " SET updated_at=? WHERE id=?",
+                LocalDateTime.now(clock),
+                candidate.id()
+            );
+        return true;
     }
 
     /**
@@ -64,7 +91,10 @@ public class AssetCleanupStore {
      * @return 선점 결과와 불변 파일 정보
      * @throws IllegalStateException LINKED 이외 상태의 참조 불일치
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        timeout = 10
+    )
     public Claim claim(Candidate candidate) {
         var rows = lock(candidate);
         if (rows.isEmpty()) {
@@ -100,7 +130,10 @@ public class AssetCleanupStore {
      * @return 실제 DB 삭제 여부
      * @throws IllegalStateException 상태·참조·객체 정보 불일치
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        timeout = 10
+    )
     public boolean complete(File expected) {
         var rows = lock(expected.candidate());
         if (rows.isEmpty()) {
@@ -127,7 +160,8 @@ public class AssetCleanupStore {
      */
     @Transactional(
         readOnly = true,
-        propagation = Propagation.REQUIRES_NEW
+        propagation = Propagation.REQUIRES_NEW,
+        timeout = 10
     )
     public double oldestAge(boolean deleting) {
         LocalDateTime oldest = null;

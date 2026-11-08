@@ -3,13 +3,21 @@ package com.backtoback.problem.asset.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.BucketVersioningStatus;
@@ -26,16 +34,17 @@ import software.amazon.awssdk.services.s3.model.S3Error;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 /** 실제 버전 삭제와 불명확한 응답 보존을 검증한다. */
+@ExtendWith(MockitoExtension.class)
 class AssetObjectDeleterTest {
     /** 키가 같은 버전·삭제 마커만 제거하고 접두사가 같은 다른 파일은 보존한다. */
     @Test
     @DisplayName("페이지를 넘겨 정확한 키의 모든 버전과 삭제 마커만 삭제한다")
     void removesExactVersions() {
         var s3 = mock(S3Client.class);
-        when(s3.getBucketVersioning(any(GetBucketVersioningRequest.class)))
-            .thenReturn(GetBucketVersioningResponse.builder().status(BucketVersioningStatus.ENABLED).build());
-        when(s3.listObjectVersions(any(ListObjectVersionsRequest.class)))
-            .thenReturn(
+        given(s3.getBucketVersioning(any(GetBucketVersioningRequest.class)))
+            .willReturn(GetBucketVersioningResponse.builder().status(BucketVersioningStatus.ENABLED).build());
+        given(s3.listObjectVersions(any(ListObjectVersionsRequest.class)))
+            .willReturn(
                 ListObjectVersionsResponse
                     .builder()
                     .isTruncated(true)
@@ -44,7 +53,7 @@ class AssetObjectDeleterTest {
                     .versions(ObjectVersion.builder().key("key").versionId("v1").build())
                     .build()
             )
-            .thenReturn(
+            .willReturn(
                 ListObjectVersionsResponse
                     .builder()
                     .isTruncated(false)
@@ -55,9 +64,13 @@ class AssetObjectDeleterTest {
                     .deleteMarkers(DeleteMarkerEntry.builder().key("key").versionId("marker").build())
                     .build()
             )
-            .thenReturn(ListObjectVersionsResponse.builder().isTruncated(false).build());
-        when(s3.deleteObjects(any(DeleteObjectsRequest.class))).thenReturn(DeleteObjectsResponse.builder().build());
-        new AssetObjectDeleter(s3).delete("bucket", "key", "v2");
+            .willReturn(ListObjectVersionsResponse.builder().isTruncated(false).build());
+        given(s3.deleteObjects(any(DeleteObjectsRequest.class))).willReturn(DeleteObjectsResponse.builder().build());
+        new AssetObjectDeleter(s3).delete("bucket", "key", "v2", new AssetCleanupBudget(Clock.systemUTC()));
+        var pages = ArgumentCaptor.forClass(ListObjectVersionsRequest.class);
+        verify(s3, times(3)).listObjectVersions(pages.capture());
+        assertThat(pages.getAllValues().get(1).keyMarker()).isEqualTo("key");
+        assertThat(pages.getAllValues().get(1).versionIdMarker()).isEqualTo("v1");
         var request = ArgumentCaptor.forClass(DeleteObjectsRequest.class);
         verify(s3).deleteObjects(request.capture());
         assertThat(request.getValue().delete().objects())
@@ -71,14 +84,15 @@ class AssetObjectDeleterTest {
     @DisplayName("버전 미사용 파일의 삭제는 반복 가능하지만 권한 오류는 전달한다")
     void unversionedAndFailure() {
         var s3 = mock(S3Client.class);
-        when(s3.getBucketVersioning(any(GetBucketVersioningRequest.class)))
-            .thenReturn(GetBucketVersioningResponse.builder().build());
+        given(s3.getBucketVersioning(any(GetBucketVersioningRequest.class)))
+            .willReturn(GetBucketVersioningResponse.builder().build());
         var deleter = new AssetObjectDeleter(s3);
-        deleter.delete("bucket", "key", null);
+        deleter.delete("bucket", "key", null, new AssetCleanupBudget(Clock.systemUTC()));
         verify(s3).deleteObject(any(DeleteObjectRequest.class));
-        when(s3.deleteObject(any(DeleteObjectRequest.class)))
-            .thenThrow(S3Exception.builder().statusCode(403).message("denied").build());
-        assertThatThrownBy(() -> deleter.delete("bucket", "key", null)).isInstanceOf(S3Exception.class);
+        given(s3.deleteObject(any(DeleteObjectRequest.class)))
+            .willThrow(S3Exception.builder().statusCode(403).message("denied").build());
+        assertThatThrownBy(() -> deleter.delete("bucket", "key", null, new AssetCleanupBudget(Clock.systemUTC())))
+            .isInstanceOf(S3Exception.class);
     }
 
     /** HTTP 성공이어도 부분 삭제 오류가 있으면 DB 정리로 진행하지 않는다. */
@@ -86,18 +100,54 @@ class AssetObjectDeleterTest {
     @DisplayName("버전 삭제 부분 실패는 성공으로 처리하지 않는다")
     void partialFailure() {
         var s3 = mock(S3Client.class);
-        when(s3.getBucketVersioning(any(GetBucketVersioningRequest.class)))
-            .thenReturn(GetBucketVersioningResponse.builder().status(BucketVersioningStatus.SUSPENDED).build());
-        when(s3.listObjectVersions(any(ListObjectVersionsRequest.class)))
-            .thenReturn(
+        given(s3.getBucketVersioning(any(GetBucketVersioningRequest.class)))
+            .willReturn(GetBucketVersioningResponse.builder().status(BucketVersioningStatus.SUSPENDED).build());
+        given(s3.listObjectVersions(any(ListObjectVersionsRequest.class)))
+            .willReturn(
                 ListObjectVersionsResponse
                     .builder()
                     .versions(ObjectVersion.builder().key("key").versionId("null").build())
                     .build()
             );
-        when(s3.deleteObjects(any(DeleteObjectsRequest.class)))
-            .thenReturn(DeleteObjectsResponse.builder().errors(S3Error.builder().code("AccessDenied").build()).build());
-        assertThatThrownBy(() -> new AssetObjectDeleter(s3).delete("bucket", "key", null))
-            .isInstanceOf(IllegalStateException.class);
+        given(s3.deleteObjects(any(DeleteObjectsRequest.class)))
+            .willReturn(DeleteObjectsResponse.builder().errors(S3Error.builder().code("AccessDenied").build()).build());
+        assertThatThrownBy(
+            () -> new AssetObjectDeleter(s3).delete("bucket", "key", null, new AssetCleanupBudget(Clock.systemUTC()))
+        ).isInstanceOf(IllegalStateException.class);
     }
+
+    /** 전체 예산이 소진되면 같은 파일의 다음 페이지나 삭제를 시작하지 않는다. */
+    @Test
+    @DisplayName("S3 응답 도중 잠금 기한을 지나면 후속 버전 조회와 삭제를 중단한다")
+    void stopsAfterDeadline() {
+        var clock = mock(Clock.class);
+        var now = Instant.parse("2026-11-09T00:00:00Z");
+        given(clock.instant()).willReturn(now);
+        var budget = new AssetCleanupBudget(clock);
+        var s3 = mock(S3Client.class);
+        given(s3.getBucketVersioning(any(GetBucketVersioningRequest.class))).willAnswer(call -> {
+            given(clock.instant()).willReturn(now.plus(Duration.ofMinutes(31)));
+            return GetBucketVersioningResponse.builder().status(BucketVersioningStatus.ENABLED).build();
+        });
+        assertThatThrownBy(() -> new AssetObjectDeleter(s3).delete("bucket", "key", "v1", budget))
+            .isInstanceOf(IllegalStateException.class);
+        verify(s3, never()).listObjectVersions(any(ListObjectVersionsRequest.class));
+        verify(s3, never()).deleteObjects(any(DeleteObjectsRequest.class));
+    }
+
+    /** 최종 구간의 HTTP 호출이 잔여 예산을 넘지 않도록 한다. */
+    @Test
+    @DisplayName("잔여 예산이 10초 미만이면 S3 호출 제한도 함께 줄인다")
+    void capsTimeoutByRemainingBudget() {
+        var clock = mock(Clock.class);
+        var now = Instant.parse("2026-11-09T00:00:00Z");
+        given(clock.instant()).willReturn(now);
+        var budget = new AssetCleanupBudget(clock);
+        given(clock.instant()).willReturn(now.plusSeconds(898));
+        assertThat(budget.requestTimeout()).isEqualTo(Duration.ofSeconds(2));
+        assertThatThrownBy(budget::requireDatabaseTime).isInstanceOf(IllegalStateException.class);
+        given(clock.instant()).willReturn(now.plusSeconds(900).minusNanos(1));
+        assertThatThrownBy(budget::requestTimeout).isInstanceOf(IllegalStateException.class);
+    }
+
 }
