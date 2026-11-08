@@ -175,13 +175,16 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
 
     /**
      * 역할을 직접 갱신한다(API 명세서 §5.3.2 임명·해제).
+     * LEADER 역할은 갱신하지 않는다. 0이면 위임 경쟁으로 대상이 LEADER가 된 것이므로
+     * 호출자가 STUDY_MEMBERSHIP_NOT_FOUND를 던져야 한다.
      */
     @Modifying(clearAutomatically = true)
     @Query(
-        value = "UPDATE study_memberships SET role = :role, updated_at = NOW(6) WHERE id = :membershipId",
+        value = "UPDATE study_memberships SET role = :role, updated_at = NOW(6) "
+            + "WHERE id = :membershipId AND role != 'LEADER'",
         nativeQuery = true
     )
-    void updateRole(@Param("membershipId") Long membershipId, @Param("role") String role);
+    int updateRole(@Param("membershipId") Long membershipId, @Param("role") String role);
 
     /**
      * LEADER 조건부 강등(API 명세서 §5.3.3 강등 단계). role = 'LEADER'인 경우에만 'MANAGER'로 변경한다.

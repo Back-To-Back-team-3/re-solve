@@ -337,6 +337,7 @@ class StudyOperationServiceTest {
             membershipRepository.findByIdAndStudyIdAndStatus(TARGET_MEMBERSHIP_ID, STUDY_ID, MembershipStatus.APPROVED)
         ).willReturn(Optional.of(memberMembership()));
         given(studyRepository.incrementManagerCountIfNotFull(STUDY_ID)).willReturn(1);
+        given(membershipRepository.updateRole(TARGET_MEMBERSHIP_ID, "MANAGER")).willReturn(1);
 
         // when
         StudyRoleChangeResponse result
@@ -361,6 +362,7 @@ class StudyOperationServiceTest {
         given(
             membershipRepository.findByIdAndStudyIdAndStatus(TARGET_MEMBERSHIP_ID, STUDY_ID, MembershipStatus.APPROVED)
         ).willReturn(Optional.of(managerMembership()));
+        given(membershipRepository.updateRole(TARGET_MEMBERSHIP_ID, "MEMBER")).willReturn(1);
 
         // when
         StudyRoleChangeResponse result
@@ -392,6 +394,29 @@ class StudyOperationServiceTest {
             .isInstanceOfSatisfying(
                 StudyException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_MANAGER_LIMIT_EXCEEDED)
+            );
+    }
+
+    @Test
+    @DisplayName("§5.3.2 위임 완료로 대상이 LEADER가 된 뒤 updateRole 0행이면 STUDY_MEMBERSHIP_NOT_FOUND 예외를 던진다")
+    void changeRole_updateRoleRows0_throwsMembershipNotFound() {
+        // given
+        StudyRoleChangeRequest request = new StudyRoleChangeRequest(MembershipRole.MEMBER);
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+        given(
+            membershipRepository
+                .findByStudyIdAndRoleAndStatus(STUDY_ID, MembershipRole.LEADER, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(leaderMembership));
+        given(
+            membershipRepository.findByIdAndStudyIdAndStatus(TARGET_MEMBERSHIP_ID, STUDY_ID, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(managerMembership()));
+        given(membershipRepository.updateRole(TARGET_MEMBERSHIP_ID, "MEMBER")).willReturn(0);
+
+        // when & then
+        assertThatThrownBy(() -> studyOperationService.changeRole(STUDY_ID, TARGET_MEMBERSHIP_ID, LEADER_ID, request))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND)
             );
     }
 

@@ -153,9 +153,15 @@ public class StudyOperationService {
             if (rows == 0) {
                 throw new StudyException(StudyErrorCode.STUDY_MANAGER_LIMIT_EXCEEDED);
             }
-            membershipRepository.updateRole(membershipId, MembershipRole.MANAGER.name());
+            int updated = membershipRepository.updateRole(membershipId, MembershipRole.MANAGER.name());
+            if (updated == 0) {
+                throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND);
+            }
         } else {
-            membershipRepository.updateRole(membershipId, MembershipRole.MEMBER.name());
+            int updated = membershipRepository.updateRole(membershipId, MembershipRole.MEMBER.name());
+            if (updated == 0) {
+                throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND);
+            }
             studyRepository.decrementManagerCount(studyId);
         }
 
