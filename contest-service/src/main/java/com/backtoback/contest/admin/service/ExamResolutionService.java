@@ -11,6 +11,7 @@ import java.util.HexFormat;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.exception.CommonErrorCode;
@@ -44,7 +45,7 @@ public class ExamResolutionService {
 
     /**
      * 부모·참가자·접수 잠금 아래 실패 접수를 0점으로 종결하고 점수와 감사를 저장한다.
-     * 전달 전 크기 초과 접수는 Judge 연결 없이 회차 0으로 검증한다.
+     * 전달 전 크기 초과·지원 불가 언어 접수는 Judge 연결 없이 회차 0으로 검증한다.
      *
      * @param context 처리 문맥. 시험만 허용한다.
      * @param receiptId 시험 접수 ID
@@ -53,7 +54,7 @@ public class ExamResolutionService {
      * @return 종결된 접수와 결과 버전
      * @throws ContestException 권한·상태·회차 또는 멱등 요청이 일치하지 않는 경우
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ExamResolutionResponse resolve(
         String context,
         String receiptId,
@@ -91,6 +92,7 @@ public class ExamResolutionService {
                     request.reason()
                 )
             );
+        // 시험 잠금을 기다리는 사이 커밋된 같은 작업을 문장 단위 읽기로 확인한다.
         var existing = operation(request.operationId());
         if (existing != null) {
             verify(existing, "EXAM_ZERO_CONFIRM", hash);
@@ -133,7 +135,8 @@ public class ExamResolutionService {
         if (exam.getStatus() == ExamStatus.FINALIZED || !"FAILED".equals(stored.status()) || stored.resolved()
             || stored.attempt() != request.expectedJudgeAttempt()
             || (stored.attempt() == 0
-                && (stored.submissionId() != null || !"CODE_TOO_LARGE".equals(stored.dispatchFailure())))
+                && (stored.submissionId() != null || !("CODE_TOO_LARGE".equals(stored.dispatchFailure())
+                    || "UNSUPPORTED_LANGUAGE".equals(stored.dispatchFailure()))))
             || (stored.attempt() > 0 && stored.submissionId() == null)) {
             throw new ContestException(ContestErrorCode.REJUDGE_NOT_ALLOWED);
         }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 
@@ -15,6 +16,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.util.AopTestUtils;
 
@@ -26,6 +30,7 @@ import com.backtoback.contest.admin.dto.ExamRefinalizationRequest;
 import com.backtoback.contest.admin.dto.ExamResolutionRequest;
 import com.backtoback.contest.admin.dto.ExamRetryRequest;
 import com.backtoback.contest.exam.service.ExamIntegrationTestSupport;
+import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
 /** 실패 접수 종결과 재확정의 DB 원자성·멱등성을 검증한다. */
@@ -36,23 +41,74 @@ class ExamResolutionServiceIntegrationTest extends ExamIntegrationTestSupport {
     private ExamRetryStore retryStore;
     private final GatewayUser admin = new GatewayUser("7", UserRole.ADMIN);
 
-    /** Judge에 전달되지 않은 실패는 원문과 실패 사유를 보존한 채 회차 0으로 종결한다. */
-    @Test
-    @DisplayName("전달 전 초과 Draft를 Judge 없이 0점 종결하고 동일 작업은 중복 처리하지 않는다")
-    void resolvesUndispatchedFailure() {
-        long receipt = failedReceipt(0, "CODE_TOO_LARGE");
+    /** 실제 자동 접수와 관리자 종결을 거쳐 확정하며 종결 상태를 DB에서 직접 설정하지 않는다. */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "CODE_TOO_LARGE",
+            "UNSUPPORTED_LANGUAGE"
+        }
+    )
+    @DisplayName("전달 전 크기·언어 실패 Draft는 관리자 0점 종결 후 시험을 확정하고 재요청에도 중복하지 않는다")
+    void resolvesUndispatchedFailureAndFinalizes(String failureCode) {
+        // given
+        boolean unsupported = "UNSUPPORTED_LANGUAGE".equals(failureCode);
+        String code = unsupported ? "지원 불가 원문" : String.valueOf((char)1).repeat(50000);
+        String language = unsupported ? "CPP" : "JAVA";
+        if (unsupported) {
+            given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        }
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
+        jdbc
+            .update(
+                "INSERT INTO exam_drafts (exam_participant_id,problem_id,language,source_code,seq,saved_at,"
+                    + "version,created_at,updated_at) VALUES (?,101,?,?,1,?,0,?,?)",
+                participantId,
+                language,
+                code,
+                now,
+                now,
+                now
+            );
+        // when
+        var finished = autoSubmissions.finish(examId, "7");
+        assertThat(finished.autoSubmissionIds()).hasSize(1);
+        long receipt = Long.parseLong(finished.autoSubmissionIds().getFirst());
+        jdbc.update("UPDATE exams SET status='CLOSED',closed_at=? WHERE id=?", now, examId);
+        assertThat(finalization.finalizeExam(Long.parseLong(examId))).isFalse();
         var request = new ExamResolutionRequest("zero-op", "ZERO_CONFIRM", 0, "장애 종결");
         var first = service.resolve("EXAM", Long.toString(receipt), admin, request);
-        jdbc.update("UPDATE exams SET result_revision=result_revision+1 WHERE id=?", examId);
+        assertThat(finalization.finalizeExam(Long.parseLong(examId))).isTrue();
         var repeated = service.resolve("EXAM", Long.toString(receipt), admin, request);
-
+        // then
         assertThat(first.resolved()).isTrue();
         assertThat(repeated.resultRevision()).isEqualTo(first.resultRevision());
+        assertThat(jdbc.queryForObject("SELECT status FROM exams WHERE id=?", String.class, examId))
+            .isEqualTo("FINALIZED");
+        assertThat(jdbc.queryForObject("SELECT source_code FROM exam_submissions WHERE id=?", String.class, receipt))
+            .isEqualTo(code);
+        assertThat(jdbc.queryForObject("SELECT language FROM exam_submissions WHERE id=?", String.class, receipt))
+            .isEqualTo(language);
         assertThat(jdbc.queryForObject("SELECT score FROM exam_submissions WHERE id=?", BigDecimal.class, receipt))
             .isEqualByComparingTo("0.00");
         assertThat(
+            jdbc.queryForObject("SELECT total_score FROM exam_participants WHERE id=?", BigDecimal.class, participantId)
+        ).isEqualByComparingTo("0.00");
+        assertThat(
             jdbc.queryForObject("SELECT dispatch_failure_code FROM exam_submissions WHERE id=?", String.class, receipt)
-        ).isEqualTo("CODE_TOO_LARGE");
+        ).isEqualTo(failureCode);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM outbox_events WHERE event_type='ExamSubmissionRequested'",
+                    Long.class
+                )
+        ).isZero();
+        assertThat(
+            jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events WHERE event_type='ExamFinalized'", Long.class)
+        ).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM result_snapshots WHERE context_id=?", Long.class, examId))
+            .isEqualTo(1);
         assertThat(
             jdbc
                 .queryForObject(
@@ -70,6 +126,46 @@ class ExamResolutionServiceIntegrationTest extends ExamIntegrationTestSupport {
                     new ExamResolutionRequest("zero-op", "ZERO_CONFIRM", 0, "다른 사유")
                 )
         ).isInstanceOf(ContestException.class);
+    }
+
+    /** 회차 0 허용 확대가 미확인 실패나 Judge 연결이 있는 접수의 검증을 완화하지 않게 한다. */
+    @ParameterizedTest
+    @CsvSource(
+        value = {
+            "NULL,NULL",
+            "UNKNOWN,NULL",
+            "CODE_TOO_LARGE,9001",
+            "UNSUPPORTED_LANGUAGE,9001"
+        },
+        nullValues = "NULL"
+    )
+    @DisplayName("회차 0에서 허용되지 않은 실패 사유나 Judge 연결이 있으면 종결을 거절한다")
+    void rejectsInvalidUndispatchedFailure(String failureCode, Long submissionId) {
+        // given
+        long receipt = failedReceipt(0, failureCode);
+        jdbc.update("UPDATE exam_submissions SET submission_id=? WHERE id=?", submissionId, receipt);
+        // when & then
+        assertThatThrownBy(
+            () -> service
+                .resolve(
+                    "EXAM",
+                    Long.toString(receipt),
+                    admin,
+                    new ExamResolutionRequest("invalid-zero", "ZERO_CONFIRM", 0, "종결")
+                )
+        ).isInstanceOf(ContestException.class).extracting("errorCode").isEqualTo(ContestErrorCode.REJUDGE_NOT_ALLOWED);
+        assertThat(
+            jdbc.queryForObject("SELECT is_zero_confirmed FROM exam_submissions WHERE id=?", Boolean.class, receipt)
+        ).isFalse();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM contest_admin_operations", Long.class)).isZero();
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM audit_logs WHERE action='EXAM_ZERO_CONFIRM' AND target_id=?",
+                    Long.class,
+                    Long.toString(receipt)
+                )
+        ).isZero();
     }
 
     /** 미확인 재처리가 있는 동안 0점 종결로 확정 차단을 해제하지 않는다. */
@@ -113,12 +209,19 @@ class ExamResolutionServiceIntegrationTest extends ExamIntegrationTestSupport {
         ).isFalse();
     }
 
-    /** 실패 접수가 마지막 제출이 아니면 그 뒤의 유효 점수를 유지한다. */
-    @Test
-    @DisplayName("이전 실패를 0점 종결해도 마지막 유효 제출의 점수를 유지한다")
-    void olderFailureDoesNotReplaceLatestScore() {
+    /** 종결한 실패 접수가 가장 최근일 때 그 접수의 0점을 집계한다. */
+    @ParameterizedTest
+    @ValueSource(
+        booleans = {
+            false,
+            true
+        }
+    )
+    @DisplayName("0점 종결 시 가장 최근 유효 제출의 점수를 집계한다")
+    void zeroConfirmationUsesLatestValidReceipt(boolean failureIsLatest) {
+        // given
         long receipt = failedReceipt(1, null);
-        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).plusSeconds(1);
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).plusSeconds(failureIsLatest ? -1 : 1);
         jdbc
             .update(
                 "INSERT INTO exam_submissions (exam_participant_id,exam_id,problem_id,draft_seq,language,"
@@ -132,6 +235,7 @@ class ExamResolutionServiceIntegrationTest extends ExamIntegrationTestSupport {
                 now
             );
 
+        // when
         service
             .resolve(
                 "EXAM",
@@ -140,9 +244,27 @@ class ExamResolutionServiceIntegrationTest extends ExamIntegrationTestSupport {
                 new ExamResolutionRequest("older-zero", "ZERO_CONFIRM", 1, "종결")
             );
 
+        // then
+        long judged
+            = jdbc
+                .queryForObject(
+                    "SELECT id FROM exam_submissions WHERE submission_id=9002 AND exam_id=?",
+                    Long.class,
+                    examId
+                );
+        var result
+            = jdbc
+                .queryForMap(
+                    "SELECT last_valid_exam_submission_id,score FROM exam_problem_results "
+                        + "WHERE exam_participant_id=? AND problem_id=101",
+                    participantId
+                );
+        assertThat(((Number)result.get("last_valid_exam_submission_id")).longValue())
+            .isEqualTo(failureIsLatest ? receipt : judged);
+        assertThat((BigDecimal)result.get("score")).isEqualByComparingTo(failureIsLatest ? "0.00" : "50.00");
         assertThat(
             jdbc.queryForObject("SELECT total_score FROM exam_participants WHERE id=?", BigDecimal.class, participantId)
-        ).isEqualByComparingTo("50.00");
+        ).isEqualByComparingTo(failureIsLatest ? "0.00" : "50.00");
     }
 
     /** 재확정은 이전 스냅샷을 보존하고 같은 작업의 재요청에 원래 생성 버전을 반환한다. */

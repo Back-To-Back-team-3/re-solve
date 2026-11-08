@@ -6959,7 +6959,7 @@
 
 #### 4.6.4 실패 제출 종결 처리
 
-- 시험의 전달 전 크기 초과 실패(`dispatch_failure_code=CODE_TOO_LARGE`)도 종결 대상이다. Judge 제출이 없으므로 `expectedJudgeAttempt=0`으로 검증하고 Judge 재처리·대사는 호출하지 않는다. 원문과 실패 사유를 보존하며 나머지 잠금·재계산·감사 규칙은 동일하다.
+- 시험의 전달 전 크기 초과·지원 불가 언어 실패(`dispatch_failure_code=CODE_TOO_LARGE`·`UNSUPPORTED_LANGUAGE`)도 종결 대상이다. Judge 제출이 없으므로 `expectedJudgeAttempt=0`으로 검증하고 Judge 재처리·대사는 호출하지 않는다. 원문·언어·실패 사유를 보존하며 나머지 잠금·재계산·감사 규칙은 동일하다. 회차 0에서는 이 두 실패 사유와 Judge 연결 없음이 모두 확인돼야 하며, 종결 후 기존 시험 확정 경로로 진행한다.
 
 - **Method / URI:** `POST /api/v1/admin/contest-submissions/{context}/{receiptId}/resolution`
 - **인증:** `ADMIN`
