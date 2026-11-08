@@ -47,6 +47,7 @@ public class ContestGuardWorkflowService {
     private final OutboxEventWriter outbox;
     private final ObjectMapper mapper;
     private final Clock clock;
+    private final ContestGuardHistory history;
 
     /**
      * 신규 편입과 같은 가드 행을 잠그고 기존 사용을 검사한다.
@@ -98,6 +99,23 @@ public class ContestGuardWorkflowService {
                 true
             );
         }
+        if (!"STUDY".equals(type)) {
+            var historical = history.find(type, resource, request.operationId());
+            if (historical != null) {
+                if (!hash.equals(historical.hash())) {
+                    throw new ContestException(CommonErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+                }
+                return preparation(
+                    request.operationId(),
+                    historical.state(),
+                    historical.operationResult(),
+                    historical.preparedAt(),
+                    List.of(),
+                    List.of(),
+                    false
+                );
+            }
+        }
         if ("PREPARED".equals(guard.state())) {
             throw new ContestException(ContestErrorCode.CONTEST_OPERATION_BLOCKED);
         }
@@ -128,7 +146,7 @@ public class ContestGuardWorkflowService {
             .update(
                 "UPDATE contest_resource_guards SET operation_id=?,operation_type=?,expected_source_version=?,"
                     + "request_hash=?,prepared_from_state=state,state='PREPARED',"
-                    + "operation_result='PENDING',prepared_at=?,"
+                    + "operation_result='PENDING',prepared_at=?,prepared_snapshot_version=snapshot_version,"
                     + "version=version+1,updated_at=? WHERE resource_type=? AND resource_id=?",
                 request.operationId(),
                 request.operationType(),
@@ -188,7 +206,16 @@ public class ContestGuardWorkflowService {
         validateResource(type);
         guards.lockAll(List.of(new Resource(type, resource)));
         var guard = guard(type, resource);
-        return finishLocked(type, resource, request.operationId(), source, complete, guard);
+        return finishLocked(
+            type,
+            resource,
+            request.operationId(),
+            source,
+            complete,
+            guard,
+            ContestGuardHistory.Path.DIRECT,
+            request.reason()
+        );
     }
 
     /**
@@ -227,13 +254,22 @@ public class ContestGuardWorkflowService {
         if (!complete && !"ABORTED".equals(result.state())) {
             return false;
         }
-        finishLocked(type, resource, operationId, version(result.sourceVersion()), complete, current);
+        finishLocked(
+            type,
+            resource,
+            operationId,
+            version(result.sourceVersion()),
+            complete,
+            current,
+            ContestGuardHistory.Path.RECONCILIATION,
+            null
+        );
         return true;
     }
 
     /**
      * 스터디 종료 이벤트가 현재 준비 작업과 일치하면 완료를 복구한다.
-     * 다른 작업이 준비 중이면 덮어쓰지 않고, 준비 중이 아닐 때 더 최신 종료 버전은 신규 생성을 차단한다.
+     * 다른 준비 작업은 유지하면서 종료 사실을 저장해 뒤늦은 취소가 신규 생성을 열지 않게 한다.
      *
      * @param studyId 종료된 스터디 ID
      * @param operationId 이벤트의 작업 ID. 없는 경우 {@code null}
@@ -248,12 +284,23 @@ public class ContestGuardWorkflowService {
             && "STUDY_CLOSE".equals(current.operationType()) && "PREPARED".equals(current.state())
             && "PENDING".equals(current.result()) && current.expectedVersion() != null
             && sourceVersion > current.expectedVersion()) {
-            finishLocked("STUDY", studyId, operationId, sourceVersion, true, current);
-        } else if (!"PREPARED".equals(current.state()) && sourceVersion > current.sourceVersion()) {
+            finishLocked(
+                "STUDY",
+                studyId,
+                operationId,
+                sourceVersion,
+                true,
+                current,
+                ContestGuardHistory.Path.EVENT,
+                null
+            );
+        } else if (sourceVersion > current.sourceVersion()
+            || (sourceVersion == current.sourceVersion() && !"CLOSED".equals(current.status()))) {
             jdbc
                 .update(
-                    "UPDATE contest_resource_guards SET state='BLOCKED',source_version=?,"
-                        + "version=version+1,updated_at=? WHERE resource_type='STUDY' AND resource_id=?",
+                    "UPDATE contest_resource_guards SET state=IF(state='PREPARED',state,'BLOCKED'),source_version=?,"
+                        + "source_status='CLOSED',version=version+1,updated_at=? "
+                        + "WHERE resource_type='STUDY' AND resource_id=?",
                     sourceVersion,
                     now(),
                     studyId
@@ -267,7 +314,9 @@ public class ContestGuardWorkflowService {
         String operationId,
         long source,
         boolean complete,
-        Guard guard
+        Guard guard,
+        ContestGuardHistory.Path path,
+        String reason
     ) {
         if (!operationId.equals(guard.operationId())) {
             throw new ContestException(ContestErrorCode.OPERATION_NOT_CURRENT);
@@ -294,8 +343,15 @@ public class ContestGuardWorkflowService {
             throw new ContestException(ContestErrorCode.CONTEST_OPERATION_BLOCKED);
         }
         String next = complete ? "BLOCKED" : guard.previousState();
-        if ("PROBLEM".equals(type) && guard.sourceVersion() > (complete ? source : guard.expectedVersion())) {
+        if ("PROBLEM".equals(type) && guard.snapshotVersion() != null
+            && guard.snapshotVersion() >= guard.sourceVersion()
+            && (complete ? guard.snapshotVersion() > source
+                : guard.snapshotVersion() >= guard.expectedVersion() && (guard.preparedSnapshotVersion() == null
+                    || guard.snapshotVersion() > guard.preparedSnapshotVersion()))) {
             next = "GENERAL".equals(guard.scope()) && "PUBLIC".equals(guard.status()) ? "OPEN" : "BLOCKED";
+        }
+        if (!complete && "STUDY".equals(type) && "CLOSED".equals(guard.status())) {
+            next = "BLOCKED";
         }
         if (!complete && "MEMBER".equals(type) && guard.sourceVersion() > guard.expectedVersion()) {
             next = "BLOCKED";
@@ -325,6 +381,7 @@ public class ContestGuardWorkflowService {
                     operationId
                 );
         }
+        history.record(type, resource, path, reason, now());
         return new GuardCompletionResponse(operationId, next, outcome, Long.toString(latest));
     }
 
@@ -416,8 +473,9 @@ public class ContestGuardWorkflowService {
         return jdbc
             .queryForObject(
                 "SELECT operation_id,request_hash,expected_source_version,state,prepared_from_state,"
-                    + "operation_result,source_version,source_scope,source_status,prepared_at,operation_type "
-                    + "FROM contest_resource_guards " + "WHERE resource_type=? AND resource_id=? FOR UPDATE",
+                    + "operation_result,source_version,source_scope,source_status,prepared_at,operation_type,"
+                    + "snapshot_version,prepared_snapshot_version " + "FROM contest_resource_guards "
+                    + "WHERE resource_type=? AND resource_id=? FOR UPDATE",
                 (rs, row) -> new Guard(
                     rs.getString(1),
                     rs.getString(2),
@@ -429,7 +487,9 @@ public class ContestGuardWorkflowService {
                     rs.getString(8),
                     rs.getString(9),
                     rs.getObject(10, LocalDateTime.class),
-                    rs.getString(11)
+                    rs.getString(11),
+                    rs.getObject(12, Long.class),
+                    rs.getObject(13, Long.class)
                 ),
                 type,
                 resource
@@ -522,7 +582,9 @@ public class ContestGuardWorkflowService {
         String scope,
         String status,
         LocalDateTime preparedAt,
-        String operationType
+        String operationType,
+        Long snapshotVersion,
+        Long preparedSnapshotVersion
     ) {
     }
     private record StudyHistory(

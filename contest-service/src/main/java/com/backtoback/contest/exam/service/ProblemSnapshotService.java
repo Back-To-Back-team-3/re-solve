@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.repository.ContestResourceGuardRepository;
 import com.backtoback.contest.exam.repository.ContestResourceGuardRepository.Resource;
+import com.backtoback.contest.operation.service.ContestGuardHistory;
 
 import lombok.RequiredArgsConstructor;
 
@@ -31,6 +32,7 @@ public class ProblemSnapshotService {
     private final ContestResourceGuardRepository guards;
     private final JdbcTemplate jdbc;
     private final Clock clock;
+    private final ContestGuardHistory history;
 
     /** 문제 상태 이벤트의 검증된 원천 스냅샷이다. */
     public record Snapshot(
@@ -82,7 +84,8 @@ public class ProblemSnapshotService {
         String operationResult = (String)row.get("operation_result");
         String operationId = (String)row.get("operation_id");
         Number expected = (Number)row.get("expected_source_version");
-        boolean newer = snapshot.sourceVersion() > storedVersion;
+        Number snapshotVersion = (Number)row.get("snapshot_version");
+        boolean newer = snapshotVersion == null || snapshot.sourceVersion() > snapshotVersion.longValue();
         if (newer && "ARCHIVED".equals(storedStatus) && !"ARCHIVED".equals(snapshot.visibility())) {
             throw new IllegalStateException("Archived problem cannot be restored");
         }
@@ -99,11 +102,11 @@ public class ProblemSnapshotService {
                 && ("PRIVATE".equals(snapshot.visibility()) || "ARCHIVED".equals(snapshot.visibility()));
         if (complete) {
             state
-                = "GENERAL".equals(latestScope) && "PUBLIC".equals(latestStatus)
-                    && Math.max(storedVersion, snapshot.sourceVersion()) > snapshot.sourceVersion() ? "OPEN"
-                        : "BLOCKED";
+                = "GENERAL".equals(latestScope) && "PUBLIC".equals(latestStatus) && snapshotVersion != null
+                    && snapshotVersion.longValue() >= storedVersion
+                    && snapshotVersion.longValue() > snapshot.sourceVersion() ? "OPEN" : "BLOCKED";
             operationResult = "COMMITTED";
-        } else if (newer && !"PREPARED".equals(state)) {
+        } else if (newer && snapshot.sourceVersion() >= storedVersion && !"PREPARED".equals(state)) {
             if ("ARCHIVED".equals(snapshot.visibility())
                 || ("GENERAL".equals(snapshot.scope()) && "PRIVATE".equals(snapshot.visibility()))) {
                 state = "BLOCKED";
@@ -124,10 +127,12 @@ public class ProblemSnapshotService {
                     .collect(java.util.stream.Collectors.joining(",", "[", "]"));
             jdbc
                 .update(
-                    "UPDATE contest_resource_guards SET source_version = ?, source_status = ?, source_scope = ?, "
+                    "UPDATE contest_resource_guards SET source_version = ?, snapshot_version = ?, "
+                        + "source_status = ?, source_scope = ?, "
                         + "source_revision_id = ?, source_revision_number = ?, source_supported_languages = ?, "
                         + "state = ?, operation_result = ?, version = version + 1, updated_at = ? "
                         + "WHERE resource_type = 'PROBLEM' AND resource_id = ?",
+                    Math.max(storedVersion, snapshot.sourceVersion()),
                     snapshot.sourceVersion(),
                     snapshot.visibility(),
                     snapshot.scope(),
@@ -149,6 +154,16 @@ public class ProblemSnapshotService {
                     operationResult,
                     LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE),
                     snapshot.problemId()
+                );
+        }
+        if (complete) {
+            history
+                .record(
+                    "PROBLEM",
+                    snapshot.problemId(),
+                    ContestGuardHistory.Path.EVENT,
+                    null,
+                    LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE)
                 );
         }
     }

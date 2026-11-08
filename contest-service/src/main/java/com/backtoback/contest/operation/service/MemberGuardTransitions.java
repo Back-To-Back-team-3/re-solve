@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 public class MemberGuardTransitions {
     private final JdbcTemplate jdbc;
     private final Clock clock;
+    private final ContestGuardHistory history;
 
     /** 탈퇴 이벤트는 원천 버전과 차단을 보존하되 작업 성공으로 추정하지 않는다. */
     @Transactional(propagation = Propagation.MANDATORY)
@@ -99,6 +100,14 @@ public class MemberGuardTransitions {
                 Math.max(guard.sourceVersion(), version),
                 LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE),
                 memberId
+            );
+        history
+            .record(
+                "MEMBER",
+                memberId,
+                ContestGuardHistory.Path.RECONCILIATION,
+                null,
+                LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE)
             );
         return true;
     }
