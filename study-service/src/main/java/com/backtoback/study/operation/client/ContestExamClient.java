@@ -55,7 +55,12 @@ public class ContestExamClient {
             if (response == null || response.items() == null) {
                 throw new StudyException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
             }
-            return !response.items().isEmpty() || response.hasMore();
+            boolean hasActiveInItems
+                = response
+                    .items()
+                    .stream()
+                    .anyMatch(i -> "SCHEDULED".equals(i.status()) || "IN_PROGRESS".equals(i.status()));
+            return hasActiveInItems || response.hasMore();
         } catch (RestClientException exception) {
             throw new StudyException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
