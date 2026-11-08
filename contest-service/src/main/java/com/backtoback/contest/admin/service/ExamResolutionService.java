@@ -137,15 +137,16 @@ public class ExamResolutionService {
             || (stored.attempt() > 0 && stored.submissionId() == null)) {
             throw new ContestException(ContestErrorCode.REJUDGE_NOT_ALLOWED);
         }
-        Long pending
+        var pending
             = jdbc
-                .queryForObject(
-                    "SELECT COUNT(*) FROM contest_admin_operations WHERE context='EXAM' "
-                        + "AND receipt_id=? AND operation_type='EXAM_RETRY' AND state='PENDING'",
+                .queryForList(
+                    "SELECT id FROM contest_admin_operations WHERE context='EXAM' AND context_id=? "
+                        + "AND receipt_id=? AND operation_type='EXAM_RETRY' AND state='PENDING' FOR UPDATE",
                     Long.class,
+                    owner.exam(),
                     receipt
                 );
-        if (pending != null && pending > 0) {
+        if (!pending.isEmpty()) {
             throw new ContestException(ContestErrorCode.REJUDGE_NOT_ALLOWED);
         }
         claim(
