@@ -7386,6 +7386,7 @@
     - **MEMBER:** 자원 잠금 아래 실제 입장한 미확정 시험·대회가 있으면 WITHDRAWAL_BLOCKED_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 등록·입장을 차단한다.
     - **STUDY:** PREPARED와 신규 시험 생성 차단을 저장한다.
     - 모든 SCHEDULED 시험을 동일 취소 계약으로 취소하고 등록자에게 알린다.
+    - 취소 이벤트의 `reason`은 `스터디 종료 준비로 시험이 취소되었습니다.`이다. 같은 operationId의 재요청에는 최초에 취소한 `canceledExamIds`를 보존해 반환한다. `ready`와 `blockingExamIds`는 현재 시험 상태를 조회한다.
     - 아직 시간상 진행 중인 시험이 있으면 202·ready=false·blockingExamIds 반환; 재요청 시 종료를 확인한다.
     - 모든 시험이 CLOSED/FINALIZED/CANCELED면 ready=true. 아직 미확정인 CLOSED 시험은 차단하지 않는다.
     - **PROBLEM:** SCHEDULED 또는 시간상 진행 중인 시험·대회에 포함되면 PROBLEM_IN_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 문제 편입을 막는다.

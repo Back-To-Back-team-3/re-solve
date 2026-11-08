@@ -288,7 +288,7 @@ class ProblemStateChangedHandlerTest {
                 message(
                     UUID.randomUUID().toString(),
                     99202,
-                    3,
+                    4,
                     "GENERAL",
                     "PRIVATE",
                     "\"92\"",
@@ -324,7 +324,7 @@ class ProblemStateChangedHandlerTest {
                 message(
                     UUID.randomUUID().toString(),
                     99202,
-                    4,
+                    3,
                     "GENERAL",
                     "PRIVATE",
                     "\"92\"",

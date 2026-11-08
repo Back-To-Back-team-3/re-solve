@@ -95,7 +95,7 @@ public class ProblemSnapshotService {
             = "PREPARED".equals(state) && "PENDING".equals(operationResult)
                 && "PROBLEM_HIDE".equals(row.get("operation_type")) && snapshot.operationId() != null
                 && snapshot.operationId().equals(operationId) && expected != null
-                && snapshot.sourceVersion() > expected.longValue()
+                && expected.longValue() < Long.MAX_VALUE && snapshot.sourceVersion() == expected.longValue() + 1
                 && ("PRIVATE".equals(snapshot.visibility()) || "ARCHIVED".equals(snapshot.visibility()));
         if (complete) {
             state

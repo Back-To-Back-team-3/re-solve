@@ -27,7 +27,7 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 
-/** 미확인 시험 재처리 작업을 같은 식별자로 다시 확인한다 (스케줄러 §4.7). */
+/** 미확인 시험 재처리와 자원 준비 작업을 원래 식별자로 대사한다 (스케줄러 §4.7). */
 @Component
 @ConditionalOnProperty(
     name = "spring.task.scheduling.enabled",
@@ -42,16 +42,21 @@ public class ContestOperationReconciliationScheduler {
     private final JdbcTemplate jdbc;
     private final ExamRetryStore store;
     private final ExamRetryService retry;
+    private final MemberGuardReconciliation memberGuards;
+    private final ResourceGuardReconciliation resourceGuards;
     private final Clock clock;
     private final MeterRegistry metrics;
     private final ExamSchedulerCursorStore cursors;
     private final AtomicLong oldest = new AtomicLong();
+    private boolean memberFirst;
 
     /** 미확인 작업의 지표와 대사 의존성을 등록한다. */
     public ContestOperationReconciliationScheduler(
         JdbcTemplate jdbc,
         ExamRetryStore store,
         ExamRetryService retry,
+        MemberGuardReconciliation memberGuards,
+        ResourceGuardReconciliation resourceGuards,
         Clock clock,
         MeterRegistry metrics,
         ExamSchedulerCursorStore cursors
@@ -59,6 +64,8 @@ public class ContestOperationReconciliationScheduler {
         this.jdbc = jdbc;
         this.store = store;
         this.retry = retry;
+        this.memberGuards = memberGuards;
+        this.resourceGuards = resourceGuards;
         this.clock = clock;
         this.metrics = metrics;
         this.cursors = cursors;
@@ -86,48 +93,148 @@ public class ContestOperationReconciliationScheduler {
                             + "WHERE context='EXAM' AND operation_type='EXAM_RETRY' AND state='PENDING'",
                         rs -> rs.next() ? rs.getObject(1, LocalDateTime.class) : null
                     );
+            var guardOldest
+                = jdbc
+                    .query(
+                        "SELECT MIN(prepared_at) FROM contest_resource_guards "
+                            + "WHERE state='PREPARED' AND operation_result='PENDING'",
+                        rs -> rs.next() ? rs.getObject(1, LocalDateTime.class) : null
+                    );
+            if (guardOldest != null && (oldestTime == null || guardOldest.isBefore(oldestTime))) {
+                oldestTime = guardOldest;
+            }
             oldest.set(oldestTime == null ? 0 : Math.max(0, Duration.between(oldestTime, now).getSeconds()));
             if (oldest.get() >= Duration.ofMinutes(10).getSeconds()) {
-                log.warn("시험 재처리 미확인 작업 장기 보류: oldestSeconds={}", oldest.get());
+                log.warn("미확인 작업 장기 보류: oldestSeconds={}", oldest.get());
             }
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
-            var cursor = cursors.load(JOB);
-            while (System.nanoTime() < deadline) {
-                var candidates = candidates(cutoff, cursor);
-                if (candidates.isEmpty()) {
-                    cursors.clear(JOB);
-                    return;
-                }
-                for (var candidate : candidates) {
-                    if (System.nanoTime() >= deadline) {
-                        return;
-                    }
-                    cursor = new ExamSchedulerCursorStore.Cursor(candidate.updatedAt(), candidate.id());
-                    cursors.save(JOB, cursor);
-                    metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
-                    try {
-                        var operation = store.require(candidate.operationId());
-                        if (!"PENDING".equals(operation.state()) || operation.updatedAt().isAfter(cutoff)) {
-                            metrics.counter("scheduler.items", "job", JOB, "result", "skipped").increment();
-                            continue;
-                        }
-                        var result = retry.reconcile(operation);
-                        String state = "PENDING".equals(result.state()) ? "pending" : "success";
-                        metrics.counter("scheduler.items", "job", JOB, "result", state).increment();
-                    } catch (RuntimeException failure) {
-                        metrics.counter("scheduler.items", "job", JOB, "result", "failure").increment();
-                        log
-                            .error(
-                                "관리자 작업 대사 실패: operationId={}, exceptionType={}",
-                                candidate.operationId(),
-                                failure.getClass().getSimpleName()
-                            );
-                    }
-                }
+            boolean first = memberFirst;
+            memberFirst = !memberFirst;
+            if (first) {
+                reconcileGuards(cutoff, deadline);
+            }
+            reconcileRetries(cutoff, deadline);
+            if (!first) {
+                reconcileGuards(cutoff, deadline);
             }
         } finally {
             sample.stop(metrics.timer("scheduler.run.duration", "job", JOB));
         }
+    }
+
+    private void reconcileRetries(LocalDateTime cutoff, long deadline) {
+        var cursor = cursors.load(JOB);
+        while (System.nanoTime() < deadline) {
+            var candidates = candidates(cutoff, cursor);
+            if (candidates.isEmpty()) {
+                cursors.clear(JOB);
+                return;
+            }
+            for (var candidate : candidates) {
+                if (System.nanoTime() >= deadline) {
+                    return;
+                }
+                cursor = new ExamSchedulerCursorStore.Cursor(candidate.updatedAt(), candidate.id());
+                cursors.save(JOB, cursor);
+                metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
+                try {
+                    var operation = store.require(candidate.operationId());
+                    if (!"PENDING".equals(operation.state()) || operation.updatedAt().isAfter(cutoff)) {
+                        metrics.counter("scheduler.items", "job", JOB, "result", "skipped").increment();
+                        continue;
+                    }
+                    var result = retry.reconcile(operation);
+                    String state = "PENDING".equals(result.state()) ? "pending" : "success";
+                    metrics.counter("scheduler.items", "job", JOB, "result", state).increment();
+                } catch (RuntimeException failure) {
+                    metrics.counter("scheduler.items", "job", JOB, "result", "failure").increment();
+                    log
+                        .error(
+                            "관리자 작업 대사 실패: operationId={}, exceptionType={}",
+                            candidate.operationId(),
+                            failure.getClass().getSimpleName()
+                        );
+                }
+            }
+        }
+    }
+
+    private void reconcileGuards(LocalDateTime cutoff, long deadline) {
+        String cursorKey = JOB + ":GUARDS";
+        var cursor = cursors.load(cursorKey);
+        while (System.nanoTime() < deadline) {
+            var candidates = guardCandidates(cutoff, cursor);
+            if (candidates.isEmpty()) {
+                cursors.clear(cursorKey);
+                return;
+            }
+            for (var candidate : candidates) {
+                if (System.nanoTime() >= deadline) {
+                    return;
+                }
+                cursor = new ExamSchedulerCursorStore.Cursor(candidate.updatedAt(), candidate.id());
+                cursors.save(cursorKey, cursor);
+                metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
+                try {
+                    boolean applied
+                        = "MEMBER".equals(candidate.type())
+                            ? memberGuards
+                                .reconcile(candidate.resourceId(), candidate.operationId(), candidate.expectedVersion())
+                            : resourceGuards
+                                .reconcile(
+                                    candidate.type(),
+                                    candidate.resourceId(),
+                                    candidate.operationId(),
+                                    candidate.expectedVersion()
+                                );
+                    metrics
+                        .counter("scheduler.items", "job", JOB, "result", applied ? "success" : "pending")
+                        .increment();
+                } catch (RuntimeException failure) {
+                    metrics.counter("scheduler.items", "job", JOB, "result", "failure").increment();
+                    log
+                        .warn(
+                            "자원 작업 대사 미확인: resourceType={}, resourceId={}, exceptionType={}",
+                            candidate.type(),
+                            candidate.resourceId(),
+                            failure.getClass().getSimpleName()
+                        );
+                }
+            }
+        }
+    }
+
+    private java.util.List<GuardCandidate> guardCandidates(
+        LocalDateTime cutoff,
+        ExamSchedulerCursorStore.Cursor cursor
+    ) {
+        String query
+            = "SELECT id,resource_type,resource_id,operation_id,expected_source_version,updated_at "
+                + "FROM contest_resource_guards WHERE ((resource_type='MEMBER' AND operation_type='WITHDRAWAL') "
+                + "OR (resource_type='STUDY' AND operation_type='STUDY_CLOSE') "
+                + "OR (resource_type='PROBLEM' AND operation_type='PROBLEM_HIDE')) "
+                + "AND state='PREPARED' AND operation_result='PENDING' AND updated_at<=? ";
+        org.springframework.jdbc.core.RowMapper<GuardCandidate> mapper
+            = (rs, row) -> new GuardCandidate(
+                rs.getLong(1),
+                rs.getString(2),
+                rs.getLong(3),
+                rs.getString(4),
+                rs.getLong(5),
+                rs.getObject(6, LocalDateTime.class)
+            );
+        if (cursor == null) {
+            return jdbc.query(query + "ORDER BY updated_at,id LIMIT 100", mapper, cutoff);
+        }
+        return jdbc
+            .query(
+                query + "AND (updated_at>? OR (updated_at=? AND id>?)) " + "ORDER BY updated_at,id LIMIT 100",
+                mapper,
+                cutoff,
+                cursor.time(),
+                cursor.time(),
+                cursor.id()
+            );
     }
 
     private java.util.List<Candidate> candidates(LocalDateTime cutoff, ExamSchedulerCursorStore.Cursor cursor) {
@@ -151,5 +258,15 @@ public class ContestOperationReconciliationScheduler {
     }
 
     private record Candidate(long id, String operationId, LocalDateTime updatedAt) {
+    }
+
+    private record GuardCandidate(
+        long id,
+        String type,
+        long resourceId,
+        String operationId,
+        long expectedVersion,
+        LocalDateTime updatedAt
+    ) {
     }
 }
