@@ -5428,7 +5428,7 @@
 
 #### 4.2.6 시험 수동 종료
 
-- 기존에 저장된 Draft가 원문·채점 요청 이벤트 크기 제한을 넘으면 원문을 보존한 `AUTO` 접수를 `FAILED`로 기록하고 참가자를 종료한다. `dispatch_failure_code=CODE_TOO_LARGE`, `judge_attempt=0`, `is_zero_confirmed=false`이며 Judge 연결·요청 스냅샷·Outbox를 만들지 않는다. 정상 Draft의 접수·Outbox, 실패 접수, 완료 표식·`FINISHED`는 같은 트랜잭션에 저장한다. 관리자 0점 종결(§4.6.4) 전까지 결과 확정을 보류하며 코드를 자르거나 자동으로 0점을 확정하지 않는다.
+- 기존 Draft가 원문·채점 요청 이벤트 크기 제한을 넘거나 고정 회차가 지원하지 않는 언어이면 원문·언어·사유를 보존한 `AUTO` 접수를 `FAILED`로 기록하고 참가자를 종료한다. `dispatch_failure_code`는 각각 `CODE_TOO_LARGE`·`UNSUPPORTED_LANGUAGE`이며, `judge_attempt=0`, `is_zero_confirmed=false`로 Judge 연결·요청 스냅샷·Outbox를 만들지 않는다. 정상 Draft의 접수·Outbox, 실패 접수, 완료 표식·`FINISHED`는 같은 트랜잭션에 저장한다. 관리자 0점 종결(§4.6.4) 전까지 결과 확정을 보류하며 코드를 자르거나 이전 코드로 대체하거나 자동으로 0점을 확정하지 않는다. 지원 언어 조회 결과가 없거나 잠금 후 고정 회차와 일치하지 않으면 종료를 롤백하고 재시도로 다시 확인한다.
 
 - **Method / URI:** `POST /api/v1/exams/{examId}/finish`
 - **인증:** 로그인 필요 + 입장 본인
@@ -5479,7 +5479,8 @@
     
 - **에러:**
     - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403)
-- **발행:** `ExamSubmissionRequested` — 크기 검사를 통과한 자동 제출 문제별
+    - `UNSUPPORTED_LANGUAGE`(400) / 조회한 지원 언어 결과가 없거나 잠금 후 고정 회차와 일치하지 않는 경우. 기존 Draft의 언어 불일치는 위 실패 접수로 보존한다.
+- **발행:** `ExamSubmissionRequested` — 언어·크기 검사를 통과한 자동 제출 문제별
 
 #### 4.2.7 내 시험 결과
 

@@ -160,17 +160,21 @@ public class ExamAutoSubmissionService {
                 case "CPP" -> "cpp";
                 default -> "";
             };
-            if (supported == null || supported.revision() != revision || !supported.names().contains(language)) {
+            if (supported == null || supported.revision() != revision) {
                 throw new ContestException(ContestErrorCode.UNSUPPORTED_LANGUAGE);
             }
             String dispatchFailure = null;
-            try {
-                size.validate(draft.sourceCode());
-            } catch (ContestException failure) {
-                if (failure.getErrorCode() != ContestErrorCode.CODE_TOO_LARGE) {
-                    throw failure;
+            if (!supported.names().contains(language)) {
+                dispatchFailure = ContestErrorCode.UNSUPPORTED_LANGUAGE.name();
+            } else {
+                try {
+                    size.validate(draft.sourceCode());
+                } catch (ContestException failure) {
+                    if (failure.getErrorCode() != ContestErrorCode.CODE_TOO_LARGE) {
+                        throw failure;
+                    }
+                    dispatchFailure = ContestErrorCode.CODE_TOO_LARGE.name();
                 }
-                dispatchFailure = ContestErrorCode.CODE_TOO_LARGE.name();
             }
             ids.add(append(participant, draft, revision, now, dispatchFailure));
             acceptedProblems.add(draft.problemId());
@@ -218,7 +222,7 @@ public class ExamAutoSubmissionService {
     private record Languages(long revision, List<String> names) {
     }
 
-    /** 초과 원문을 자르지 않고 실패 접수로 남겨 참가 종료를 보장한다(API §4.2.6). */
+    /** 전달할 수 없는 Draft도 원문·실패 사유를 보존해 참가 종료를 보장한다(API §4.2.6). */
     private String append(
         ExamParticipant participant,
         Draft draft,

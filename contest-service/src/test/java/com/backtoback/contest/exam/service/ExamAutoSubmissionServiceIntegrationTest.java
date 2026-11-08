@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -42,17 +44,94 @@ class ExamAutoSubmissionServiceIntegrationTest extends ExamIntegrationTestSuppor
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
     }
 
-    @Test
-    @DisplayName("고정 회차가 지원하지 않는 기존 Draft는 접수와 종료를 롤백한다")
-    void rejectsUnsupportedPinnedLanguage() {
-        store.save(store.prepare(examId, "7", "101", new SaveRequest("cpp", "기존", "1")));
+    @ParameterizedTest
+    @ValueSource(
+        booleans = {
+            false,
+            true
+        }
+    )
+    @DisplayName("지원하지 않는 기존 Draft도 수동·자동 종료에서 원문을 보존한 실패 접수로 종료한다")
+    void unsupportedDraftFinishesWithFailedReceipt(boolean automatic) {
+        // given
+        store.save(store.prepare(examId, "7", "101", new SaveRequest("cpp", "기존 코드", "1")));
+        store.save(store.prepare(examId, "7", "102", new SaveRequest("java", "정상 코드", "1")));
         given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
+        // when
+        if (automatic) {
+            jdbc
+                .update(
+                    "UPDATE exam_participants SET personal_ends_at=? WHERE id=?",
+                    now.minusSeconds(4),
+                    participantId
+                );
+            assertThat(autoSubmissions.finishDue(Long.parseLong(examId), 7, participantId)).isTrue();
+            assertThat(autoSubmissions.finishDue(Long.parseLong(examId), 7, participantId)).isFalse();
+        } else {
+            var first = autoSubmissions.finish(examId, "7");
+            assertThat(first.autoSubmissionIds()).hasSize(2);
+            assertThat(autoSubmissions.finish(examId, "7").autoSubmissionIds()).isEqualTo(first.autoSubmissionIds());
+        }
+        // then
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT source_code FROM exam_drafts WHERE problem_id=101", String.class))
+            .isEqualTo("기존 코드");
+        assertThat(jdbc.queryForObject("SELECT source_code FROM exam_submissions WHERE problem_id=101", String.class))
+            .isEqualTo("기존 코드");
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT status='FAILED' AND dispatch_failure_code='UNSUPPORTED_LANGUAGE' AND judge_attempt=0 "
+                        + "AND submission_id IS NULL AND request_snapshot IS NULL AND is_zero_confirmed=false "
+                        + "FROM exam_submissions WHERE problem_id=101",
+                    Boolean.class
+                )
+        ).isTrue();
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT status='FINISHED' AND auto_submitted_at IS NOT NULL FROM exam_participants WHERE id=?",
+                    Boolean.class,
+                    participantId
+                )
+        ).isTrue();
+        jdbc.update("UPDATE exams SET status='CLOSED',closed_at=? WHERE id=?", now, examId);
+        jdbc.update("UPDATE exam_submissions SET status='JUDGED',score=0 WHERE problem_id=102");
+        assertThat(finalization.finalizeExam(Long.parseLong(examId))).isFalse();
+    }
 
+    @ParameterizedTest
+    @ValueSource(
+        booleans = {
+            false,
+            true
+        }
+    )
+    @DisplayName("언어 조회 후 Draft가 추가되거나 고정 회차가 바뀌면 접수와 종료를 롤백한다")
+    void changedDraftOrRevisionRollsBackFinish(boolean missingLanguages) {
+        // given
+        store.save(store.prepare(examId, "7", "101", new SaveRequest("java", "코드", "1")));
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willAnswer(invocation -> {
+            if (missingLanguages) {
+                store.save(store.prepare(examId, "7", "102", new SaveRequest("java", "추가 코드", "1")));
+            } else {
+                jdbc
+                    .update(
+                        "UPDATE exam_problems SET problem_revision_id=2001 WHERE exam_id=? AND problem_id=101",
+                        examId
+                    );
+            }
+            return java.util.List.of("java");
+        });
+        // when & then
         assertThatThrownBy(() -> autoSubmissions.finish(examId, "7"))
             .isInstanceOf(ContestException.class)
             .extracting("errorCode")
             .isEqualTo(ContestErrorCode.UNSUPPORTED_LANGUAGE);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT status FROM exam_participants WHERE id=?", String.class, participantId))
             .isEqualTo("STARTED");
     }

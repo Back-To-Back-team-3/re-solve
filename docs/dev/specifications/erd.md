@@ -1868,12 +1868,12 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `language` | VARCHAR(30) | Y | JAVA / PYTHON / CPP |
 | `source_code` | MEDIUMTEXT | Y | 채점 요청 이벤트에 담을 코드 |
 | `request_snapshot` | JSON | N | 최초 채점 요청의 공통 헤더와 전체 업무 필드. 접수·Outbox와 함께 저장하고 변경하지 않는다. 기존 원본이 없는 접수는 NULL |
-| `dispatch_failure_code` | VARCHAR(100) | N | 기존 초과 Draft의 전달 전 실패 사유 `CODE_TOO_LARGE`. 원문 보존·FAILED 자동 접수이며 Judge 요청·Outbox를 만들지 않는다. 일반 접수는 NULL |
+| `dispatch_failure_code` | VARCHAR(100) | N | 기존 Draft의 전달 전 실패 사유. 크기 초과는 `CODE_TOO_LARGE`, 고정 회차의 지원 불가 언어는 `UNSUPPORTED_LANGUAGE`. 원문·언어 보존·FAILED 자동 접수이며 Judge 요청·Outbox를 만들지 않는다. 일반 접수는 NULL |
 | `submission_type` | VARCHAR(30) | Y | `MANUAL` / `AUTO` |
 | `received_at` | DATETIME(6) | Y | 접수 시각 (자동 제출은 `personal_ends_at`) |
 | `status` | VARCHAR(30) | Y | `ACCEPTED` / `REQUESTED` / `JUDGED` / `FAILED` |
 | `submission_id` | BIGINT | N | NULL 허용: 채점 연결 전 (외부 참조) |
-| `judge_attempt` | INT | N | NULL 허용: 종결 결과 반영 전. 전달 전 크기 초과 실패는 0. 마지막 반영 회차; 재처리 요청·QUEUED 응답으로 증가시키지 않음 |
+| `judge_attempt` | INT | N | NULL 허용: 종결 결과 반영 전. 전달 전 크기 초과·언어 불일치 실패는 0. 마지막 반영 회차; 재처리 요청·QUEUED 응답으로 증가시키지 않음 |
 | `verdict` | VARCHAR(30) | N | NULL 허용: 채점 전 |
 | `passed_count` | INT | N | NULL 허용: 채점 전 |
 | `total_count` | INT | N | NULL 허용: 채점 전 |
@@ -2922,7 +2922,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 멱등 재요청 | 같은 시험 제출 seq 또는 같은 대회 Idempotency-Key의 재요청은 기존 본문과 같으면 마감 후에도 기존 접수 결과를 반환한다. 본문이 다르면 422 IDEMPOTENCY_KEY_CONFLICT이며 새 제출을 만들지 않는다. | — |
 | Draft 순번 | 시험 Draft seq는 참가자·문제의 모든 언어에서 공통 증가한다. 참가자 잠금 아래 최대 seq와 비교하며 같거나 작으면 저장하지 않고 applied=false와 서버 최대 seq를 반환한다. 이미 접수된 같은 seq·다른 본문은 422 IDEMPOTENCY_KEY_CONFLICT다. 접수 기록이 없는 신규 직접 제출이 서버 최대 seq보다 작거나, 같은 seq인데 최신 Draft의 언어·코드와 다르면 409 DRAFT_SEQ_CONFLICT다. | — |
 | 자동 제출 대상 | 자동 제출은 참가자·문제별 최대 seq의 비어 있지 않은 Draft만 사용한다. 최신 Draft가 비어 있으면 이전 언어의 오래된 코드를 대신 제출하지 않는다. 마지막 접수 제출 seq보다 큰 경우만 생성한다. | — |
-| 자동 제출 원자성 | 자동 제출·Outbox·auto_submitted_at·FINISHED 전이는 같은 트랜잭션이다. 기존 초과 Draft는 원문·실패 사유를 보존한 FAILED 자동 접수로 저장하며 해당 Outbox는 만들지 않는다. 저장 실패는 전부 롤백하고 다음 실행에서 다시 처리한다. ABSENT·CANCELED 참가자는 자동 제출하지 않는다. | — |
+| 자동 제출 원자성 | 자동 제출·Outbox·auto_submitted_at·FINISHED 전이는 같은 트랜잭션이다. 크기 초과 또는 고정 회차의 지원 불가 언어인 기존 Draft는 원문·언어·실패 사유를 보존한 FAILED 자동 접수로 저장하며 해당 Outbox는 만들지 않는다. 지원 언어 조회 결과가 없거나 잠금 후 고정 회차와 일치하지 않으면 전체를 롤백한다. 저장 실패도 전부 롤백하고 다음 실행에서 다시 처리한다. ABSENT·CANCELED 참가자는 자동 제출하지 않는다. | — |
 | 수동 종료 | 수동 종료는 참가자 잠금 안에서 personal_ends_at을 확정하고 저장·신규 직접 제출을 차단한다. 기존 재요청 반환은 허용한다. | — |
 
 #### 6.4.2 채점·순위·확정
