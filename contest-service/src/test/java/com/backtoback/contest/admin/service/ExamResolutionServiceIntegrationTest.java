@@ -16,7 +16,9 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.util.AopTestUtils;
 
+import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.common.web.security.user.UserRole;
@@ -218,9 +220,10 @@ class ExamResolutionServiceIntegrationTest extends ExamIntegrationTestSupport {
         jdbc.update("UPDATE exams SET status='CLOSED',closed_at=? WHERE id=?", now, examId);
         assertThat(finalization.finalizeExam(Long.parseLong(examId))).isTrue();
         long previous = jdbc.queryForObject("SELECT result_revision FROM exams WHERE id=?", Long.class, examId);
+        OutboxEventWriter target = AopTestUtils.getUltimateTargetObject(outbox);
         try {
             doThrow(new IllegalStateException("outbox failure"))
-                .when(outbox)
+                .when(target)
                 .append(anyString(), anyString(), anyString(), anyString(), anyString(), any());
             assertThatThrownBy(
                 () -> service
@@ -229,9 +232,9 @@ class ExamResolutionServiceIntegrationTest extends ExamIntegrationTestSupport {
                         admin,
                         new ExamRefinalizationRequest("rollback-op", Long.toString(previous), "사유")
                     )
-            ).isInstanceOf(IllegalStateException.class);
+            ).isInstanceOf(IllegalStateException.class).hasMessage("outbox failure");
         } finally {
-            reset(outbox);
+            reset(target);
         }
         assertThat(jdbc.queryForObject("SELECT result_revision FROM exams WHERE id=?", Long.class, examId))
             .isEqualTo(previous);
@@ -280,6 +283,45 @@ class ExamResolutionServiceIntegrationTest extends ExamIntegrationTestSupport {
             });
             start.countDown();
             assertThat(retry.get(10, TimeUnit.SECONDS)).isNotEqualTo(resolution.get(10, TimeUnit.SECONDS));
+        }
+    }
+
+    /** 먼저 생성된 읽기 스냅샷이 있어도 이후 커밋된 재처리는 종결을 차단한다. */
+    @Test
+    @DisplayName("오래된 스냅샷으로 시작한 종결도 커밋된 재처리를 확인한다")
+    void committedRetryBlocksResolutionAfterSnapshot() throws Exception {
+        long receipt = failedReceipt(1, null);
+        var snapshotReady = new CountDownLatch(1);
+        var retryCommitted = new CountDownLatch(1);
+        try (var pool = Executors.newSingleThreadExecutor()) {
+            var resolution = pool.submit(() -> transactions.execute(status -> {
+                jdbc.queryForObject("SELECT exam_id FROM exam_submissions WHERE id=?", Long.class, receipt);
+                snapshotReady.countDown();
+                try {
+                    if (!retryCommitted.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("retry did not commit");
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+                return service
+                    .resolve(
+                        "EXAM",
+                        Long.toString(receipt),
+                        admin,
+                        new ExamResolutionRequest("snapshot-zero", "ZERO_CONFIRM", 1, "종결")
+                    );
+            }));
+            try {
+                assertThat(snapshotReady.await(10, TimeUnit.SECONDS)).isTrue();
+                retryStore
+                    .prepare(Long.parseLong(examId), receipt, 7, new ExamRetryRequest("snapshot-retry", 1, "재처리"));
+            } finally {
+                retryCommitted.countDown();
+            }
+            assertThatThrownBy(() -> resolution.get(10, TimeUnit.SECONDS))
+                .hasRootCauseInstanceOf(ContestException.class);
         }
     }
 
