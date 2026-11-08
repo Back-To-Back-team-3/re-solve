@@ -77,11 +77,27 @@ class ExamRetryStoreIntegrationTest extends ExamIntegrationTestSupport {
                 submitted.receivedAt()
             );
         transactions.executeWithoutResult(status -> judgements.apply(judged));
+        var closedAt = LocalDateTime.now(com.backtoback.common.time.ClockConfiguration.SERVICE_ZONE);
+        jdbc
+            .update(
+                "UPDATE exam_participants SET status='FINISHED',finished_at=?,auto_submitted_at=? WHERE id=?",
+                closedAt,
+                closedAt,
+                participantId
+            );
+        jdbc.update("UPDATE exams SET status='CLOSED',closed_at=? WHERE id=?", closedAt, examId);
+
+        // 선도착 판정을 반영했어도 원격 작업이 미종결이면 확정할 수 없다.
+        assertThat(store.require("op-2").state()).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT status FROM exam_submissions WHERE id=?", String.class, receipt))
+            .isEqualTo("JUDGED");
+        assertThat(finalization.finalizeExam(Long.parseLong(examId))).isFalse();
 
         var operation = store.succeeded("op-2", 2);
 
         assertThat(operation.state()).isEqualTo("SUCCEEDED");
         assertThat(operation.targetAttempt()).isEqualTo(2);
+        assertThat(finalization.finalizeExam(Long.parseLong(examId))).isTrue();
         assertThat(jdbc.queryForObject("SELECT status FROM exam_submissions WHERE id=?", String.class, receipt))
             .isEqualTo("JUDGED");
         assertThat(jdbc.queryForObject("SELECT judge_attempt FROM exam_submissions WHERE id=?", Integer.class, receipt))

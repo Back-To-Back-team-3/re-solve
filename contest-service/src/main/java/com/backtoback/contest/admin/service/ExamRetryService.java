@@ -99,7 +99,8 @@ public class ExamRetryService {
                     );
         } catch (RestClientResponseException failure) {
             String code = errorCode(failure);
-            if (failure.getStatusCode().value() == 409 && code != null) {
+            int status = failure.getStatusCode().value();
+            if ((status == 409 && code != null) || (status == 422 && "IDEMPOTENCY_KEY_CONFLICT".equals(code))) {
                 return store.rejected(operation.id(), code);
             }
             log.warn("시험 재처리 응답 미확인: operationId={}, status={}", operation.id(), failure.getStatusCode().value());
