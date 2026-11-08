@@ -12,6 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Cache Gradle wrapper
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper/dists
+          key: gradle-wrapper-${{ hashFiles('**/gradle/wrapper/gradle-wrapper.properties') }}
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -78,6 +84,12 @@ jobs:
           - integration-service
     steps:
       - uses: actions/checkout@v6
+
+      - name: Cache Gradle wrapper
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper/dists
+          key: gradle-wrapper-${{ hashFiles('**/gradle/wrapper/gradle-wrapper.properties') }}
 
       - name: 변경 여부 확인
         id: check
