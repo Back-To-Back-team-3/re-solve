@@ -6910,7 +6910,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
     | `expectedJudgeAttempt` | integer | Y | 처리 대상 종결 채점 회차 |
     | `reason` | string | Y | 조치 사유. 1~500자 |
     
@@ -6983,7 +6983,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
     | `action` | string | Y | 문맥 검증·관리 조치 종류. 해당 허용 값 적용 |
     | `expectedJudgeAttempt` | integer | Y | 처리 대상 종결 채점 회차 |
     | `reason` | string | Y | 조치 사유. 1~500자 |
@@ -7060,7 +7060,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
     | `expectedResultRevision` | string | Y | 재확정 대상의 이전 결과 버전 문자열 |
     | `reason` | string | Y | 조치 사유. 1~500자 |
     
