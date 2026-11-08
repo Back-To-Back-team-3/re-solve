@@ -5074,7 +5074,9 @@
     ```
     
 - **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 시험 식별자·버전·사유 유효성 검증 실패
     - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFICATION_CLOSED`(409), `EXAM_REVISION_CONFLICT`(409)
+    - `CONTEST_DEPENDENCY_UNAVAILABLE`(503) / 현재 스터디 관리자 권한 확인에 필요한 외부 의존 조회 실패 또는 불완전한 응답
 - **발행:** `ExamCanceled` — 취소 시각·사유·활성 등록자 ID 스냅샷 포함
 
 ### 4.2 외부 API — 시험 참가·Draft·제출·결과
