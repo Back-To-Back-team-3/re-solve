@@ -63,4 +63,27 @@ public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecific
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM Study s WHERE s.id = :id")
     Optional<Study> findByIdWithLock(@Param("id") Long id);
+
+    /**
+     * 설정 수정: version·status·member_count 조건을 원자적으로 검증하고 갱신한다(API 명세서 §5.3.1).
+     * {@code capacity} 파라미터는 SET과 WHERE 절에서 모두 쓰이며, WHERE 절의 {@code member_count <= :capacity}는
+     * 현재 구성원 수가 새 정원을 초과하는 경우 UPDATE가 발생하지 않게 막는다.
+     * 0이면 호출자가 재조회로 STUDY_ALREADY_CLOSED / STUDY_UPDATE_CONFLICT / STUDY_CAPACITY_TOO_SMALL 중
+     * 적절한 오류를 선택해야 한다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE studies " + "SET description = :description, join_type = :joinType, "
+            + "capacity = :capacity, is_auto_reopen = :isAutoReopen, " + "version = version + 1, updated_at = NOW(6) "
+            + "WHERE id = :studyId AND version = :version " + "AND status <> 'CLOSED' AND member_count <= :capacity",
+        nativeQuery = true
+    )
+    int updateSettings(
+        @Param("studyId") Long studyId,
+        @Param("version") Long version,
+        @Param("description") String description,
+        @Param("joinType") String joinType,
+        @Param("capacity") int capacity,
+        @Param("isAutoReopen") boolean isAutoReopen
+    );
 }
