@@ -8,10 +8,14 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -62,6 +66,8 @@ class StudyOperationServiceTest {
     private StudyMembershipRepository membershipRepository;
     @Mock
     private StudyMembershipHistoryRepository historyRepository;
+    @Mock
+    private Clock clock;
 
     @InjectMocks
     private StudyOperationService studyOperationService;
@@ -88,6 +94,10 @@ class StudyOperationServiceTest {
                     LocalDateTime.now()
                 );
         ReflectionTestUtils.setField(leaderMembership, "id", LEADER_MEMBERSHIP_ID);
+
+        // history 기록 경로를 거치지 않는 테스트에서도 주입된 Clock이 있어야 하므로 lenient로 등록한다.
+        lenient().when(clock.instant()).thenReturn(Instant.parse("2026-11-08T09:00:00Z"));
+        lenient().when(clock.getZone()).thenReturn(ZoneId.of("Asia/Seoul"));
     }
 
     private StudyMembership memberMembership() {

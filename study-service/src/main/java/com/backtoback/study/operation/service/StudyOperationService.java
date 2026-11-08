@@ -1,12 +1,15 @@
 package com.backtoback.study.operation.service;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.membership.domain.JoinType;
@@ -38,6 +41,7 @@ public class StudyOperationService {
     private final StudyRepository studyRepository;
     private final StudyMembershipRepository membershipRepository;
     private final StudyMembershipHistoryRepository historyRepository;
+    private final Clock clock;
 
     /**
      * 스터디 설정을 수정한다(API 명세서 §5.3.1). {@code LEADER}만 호출할 수 있다.
@@ -163,7 +167,9 @@ public class StudyOperationService {
                         request.role(),
                         requesterId,
                         null,
-                        LocalDateTime.now()
+                        LocalDateTime
+                            .ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE)
+                            .truncatedTo(ChronoUnit.MICROS)
                     )
             );
 
@@ -212,7 +218,8 @@ public class StudyOperationService {
             studyRepository.incrementManagerCountForDelegation(studyId);
         }
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
         historyRepository
             .save(
                 StudyMembershipHistory
