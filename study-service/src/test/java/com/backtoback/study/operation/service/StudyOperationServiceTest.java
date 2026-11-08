@@ -428,6 +428,29 @@ class StudyOperationServiceTest {
     }
 
     @Test
+    @DisplayName("§5.3.2 요청 역할이 LEADER이면 STUDY_LEADER_ROLE_CHANGE_NOT_ALLOWED 예외를 던진다")
+    void changeRole_requestRoleIsLeader_throwsLeaderRoleChangeNotAllowed() {
+        // given
+        StudyRoleChangeRequest request = new StudyRoleChangeRequest(MembershipRole.LEADER);
+
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+        given(
+            membershipRepository
+                .findByStudyIdAndRoleAndStatus(STUDY_ID, MembershipRole.LEADER, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(leaderMembership));
+        given(
+            membershipRepository.findByIdAndStudyIdAndStatus(TARGET_MEMBERSHIP_ID, STUDY_ID, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(memberMembership()));
+
+        // when & then
+        assertThatThrownBy(() -> studyOperationService.changeRole(STUDY_ID, TARGET_MEMBERSHIP_ID, LEADER_ID, request))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_LEADER_ROLE_CHANGE_NOT_ALLOWED)
+            );
+    }
+
+    @Test
     @DisplayName("§5.3.2 같은 역할로 요청하면 histories를 기록하지 않고 멱등 응답을 반환한다")
     void changeRole_sameRole_idempotentNoHistory() {
         // given

@@ -141,6 +141,9 @@ public class StudyOperationService {
         if (target.getRole() == MembershipRole.LEADER) {
             throw new StudyException(StudyErrorCode.STUDY_LEADER_ROLE_CHANGE_NOT_ALLOWED);
         }
+        if (request.role() == MembershipRole.LEADER) {
+            throw new StudyException(StudyErrorCode.STUDY_LEADER_ROLE_CHANGE_NOT_ALLOWED);
+        }
         if (target.getRole() == request.role()) {
             return new StudyRoleChangeResponse(String.valueOf(membershipId), request.role().name());
         }
