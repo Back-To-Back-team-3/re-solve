@@ -1,5 +1,6 @@
 package com.backtoback.study.membership.repository;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -48,4 +49,15 @@ public interface StudyMemberQuotaRepository extends JpaRepository<StudyMemberQuo
         nativeQuery = true
     )
     void decrementIfAboveZero(@Param("memberId") Long memberId);
+
+    /**
+     * member_id 목록에 해당하는 쿼터의 active_count를 일괄 감소한다(API 명세서 §5.3.4 스터디 종료 연쇄).
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE study_member_quotas SET active_count = active_count - 1, updated_at = NOW(6) "
+            + "WHERE member_id IN :memberIds",
+        nativeQuery = true
+    )
+    void decrementActiveCountBatch(@Param("memberIds") List<Long> memberIds);
 }

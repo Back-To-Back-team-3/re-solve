@@ -169,6 +169,26 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
     );
 
     /**
+     * 지정 스터디의 모든 PENDING 신청을 CANCELED로 일괄 전이한다(API 명세서 §5.3.4 스터디 종료 연쇄).
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE study_memberships SET status = 'CANCELED', expires_at = NULL, updated_at = NOW(6) "
+            + "WHERE study_id = :studyId AND status = 'PENDING'",
+        nativeQuery = true
+    )
+    void cancelPendingMemberships(@Param("studyId") Long studyId);
+
+    /**
+     * 지정 스터디의 특정 상태 구성원 memberId 목록을 반환한다(API 명세서 §5.3.4 쿼터 반환).
+     */
+    @Query("SELECT m.memberId FROM StudyMembership m WHERE m.studyId = :studyId AND m.status = :status")
+    List<Long> findMemberIdsByStudyIdAndStatus(
+        @Param("studyId") Long studyId,
+        @Param("status") MembershipStatus status
+    );
+
+    /**
      * id·studyId·status 조건으로 가입 행을 조회한다(API 명세서 §5.3.2·§5.3.3 대상 멤버십 조회).
      */
     Optional<StudyMembership> findByIdAndStudyIdAndStatus(Long id, Long studyId, MembershipStatus status);

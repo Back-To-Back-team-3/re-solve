@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,14 +23,19 @@ import com.backtoback.study.membership.domain.StudyStatus;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
+import com.backtoback.study.operation.client.ContestExamClient;
+import com.backtoback.study.operation.dto.ForceCloseRequest;
 import com.backtoback.study.operation.dto.LeaderDelegationRequest;
 import com.backtoback.study.operation.dto.LeaderDelegationResponse;
+import com.backtoback.study.operation.dto.StudyCloseResponse;
 import com.backtoback.study.operation.dto.StudyRoleChangeRequest;
 import com.backtoback.study.operation.dto.StudyRoleChangeResponse;
 import com.backtoback.study.operation.dto.StudyUpdateRequest;
 import com.backtoback.study.operation.dto.StudyUpdateResponse;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 스터디 운영 명령 서비스 (API 명세서 §5.3).
@@ -42,6 +48,9 @@ public class StudyOperationService {
     private final StudyMembershipRepository membershipRepository;
     private final StudyMembershipHistoryRepository historyRepository;
     private final Clock clock;
+    private final ContestExamClient contestExamClient;
+    private final StudyClosePersistService studyClosePersistService;
+    private final ObjectMapper objectMapper;
 
     /**
      * 스터디 설정을 수정한다(API 명세서 §5.3.1). {@code LEADER}만 호출할 수 있다.
@@ -267,5 +276,88 @@ public class StudyOperationService {
             );
 
         return new LeaderDelegationResponse(String.valueOf(request.targetMembershipId()));
+    }
+
+    /**
+     * 스터디장이 스터디를 종료한다(API 명세서 §5.3.4). {@code LEADER}만 호출할 수 있다.
+     * 진행 중인 시험이 있으면 종료를 거부한다. HTTP 호출 이후 트랜잭션을 열기 위해 @Transactional을 붙이지 않는다.
+     *
+     * @throws StudyException STUDY_NOT_FOUND, STUDY_ALREADY_CLOSED, AUTH_ACCESS_DENIED, STUDY_ACTIVE_EXAM_EXISTS
+     */
+    public StudyCloseResponse closeStudy(Long studyId, Long requesterId, String correlationId) {
+        Study study
+            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        if (study.getStatus() == StudyStatus.CLOSED) {
+            throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
+        }
+        StudyMembership leader
+            = membershipRepository
+                .findByStudyIdAndRoleAndStatus(studyId, MembershipRole.LEADER, MembershipStatus.APPROVED)
+                .orElseThrow(() -> new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED));
+        if (!leader.getMemberId().equals(requesterId)) {
+            throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        if (contestExamClient.hasActiveExams(studyId)) {
+            throw new StudyException(StudyErrorCode.STUDY_ACTIVE_EXAM_EXISTS);
+        }
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+        return studyClosePersistService.doCloseStudy(studyId, study.getVersion(), correlationId, now);
+    }
+
+    /**
+     * 관리자가 스터디를 강제 종료한다(API 명세서 §5.6.1).
+     * HTTP 호출 이후 트랜잭션을 열기 위해 @Transactional을 붙이지 않는다.
+     *
+     * @throws StudyException STUDY_NOT_FOUND, STUDY_ALREADY_CLOSED, STUDY_ACTIVE_EXAM_EXISTS
+     */
+    public StudyCloseResponse forceCloseStudy(
+        Long studyId,
+        Long actorId,
+        ForceCloseRequest request,
+        String clientIp,
+        String correlationId
+    ) {
+        Study study
+            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        if (study.getStatus() == StudyStatus.CLOSED) {
+            throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
+        }
+        if (contestExamClient.hasActiveExams(studyId)) {
+            throw new StudyException(StudyErrorCode.STUDY_ACTIVE_EXAM_EXISTS);
+        }
+        LocalDateTime now
+            = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
+        return studyClosePersistService
+            .doForceCloseStudy(
+                studyId,
+                actorId,
+                study.getVersion(),
+                buildBeforeStateJson(study),
+                request.reason(),
+                clientIp,
+                correlationId,
+                now
+            );
+    }
+
+    private String buildBeforeStateJson(Study study) {
+        try {
+            return objectMapper
+                .writeValueAsString(
+                    Map
+                        .of(
+                            "studyId",
+                            study.getId(),
+                            "status",
+                            study.getStatus().name(),
+                            "memberCount",
+                            study.getMemberCount()
+                        )
+                );
+        } catch (JacksonException e) {
+            return "{\"studyId\":" + study.getId() + ",\"status\":\"" + study.getStatus().name() + "\",\"memberCount\":"
+                + study.getMemberCount() + "}";
+        }
     }
 }
