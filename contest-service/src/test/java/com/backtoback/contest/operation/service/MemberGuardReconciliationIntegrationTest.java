@@ -61,6 +61,11 @@ class MemberGuardReconciliationIntegrationTest extends ExamIntegrationTestSuppor
 
     @AfterEach
     void removeGuard() {
+        jdbc
+            .update(
+                "DELETE FROM contest_guard_operation_history WHERE resource_type='MEMBER' AND resource_id=?",
+                MEMBER_ID
+            );
         jdbc.update("DELETE FROM contest_resource_guards WHERE resource_type='MEMBER' AND resource_id=?", MEMBER_ID);
     }
 
@@ -74,6 +79,14 @@ class MemberGuardReconciliationIntegrationTest extends ExamIntegrationTestSuppor
         assertThat(state()).isEqualTo("BLOCKED");
         assertThat(result()).isEqualTo("COMMITTED");
         assertThat(version()).isEqualTo(5);
+        assertThat(
+            jdbc
+                .queryForMap(
+                    "SELECT resolution_path,reason FROM contest_guard_operation_history "
+                        + "WHERE resource_type='MEMBER' AND resource_id=? AND operation_id='member-op'",
+                    MEMBER_ID
+                )
+        ).containsEntry("resolution_path", "RECONCILIATION").containsEntry("reason", null);
     }
 
     @Test

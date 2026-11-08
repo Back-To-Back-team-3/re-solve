@@ -13,6 +13,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import com.backtoback.common.time.ClockConfiguration;
@@ -39,6 +41,7 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
     /** 공유 테스트 DB에 남은 같은 자원의 가드와 준비 이력을 지운다. */
     @BeforeEach
     void clearGuards() {
+        jdbc.update("DELETE FROM contest_guard_operation_history WHERE resource_id IN (7,12,101)");
         jdbc.update("DELETE FROM contest_study_guard_preparations WHERE study_id=12");
         jdbc.update("DELETE FROM contest_resource_guards WHERE resource_type='STUDY' AND resource_id=12");
         jdbc.update("DELETE FROM contest_resource_guards WHERE resource_type='MEMBER' AND resource_id=7");
@@ -173,6 +176,127 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         ).isEqualTo(1002L);
     }
 
+    /** 현재 가드가 다른 작업을 보유해도 과거 작업을 다시 준비하지 않는다. */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "MEMBER",
+            "PROBLEM"
+        }
+    )
+    @DisplayName("취소된 회원·문제 작업의 지연 요청은 기존 결과를 반환한다")
+    void replayDoesNotReopenAbortedOperation(String type) {
+        // given
+        boolean member = "MEMBER".equals(type);
+        String id = member ? "7" : "101";
+        String operationType = member ? "WITHDRAWAL" : "PROBLEM_HIDE";
+        jdbc.update("UPDATE exams SET status='FINALIZED' WHERE id=?", examId);
+        var first = new GuardPrepareRequest("first", operationType, "4");
+        workflow.prepare(type, id, first);
+        workflow.finish(type, id, new GuardFinishRequest("first", "4", "원래 사유"), false);
+        workflow.prepare(type, id, new GuardPrepareRequest("second", operationType, "4"));
+        workflow.finish(type, id, new GuardFinishRequest("second", "4", "두 번째 사유"), false);
+
+        // when
+        var replay = workflow.prepare(type, id, first);
+
+        // then
+        assertThat(replay.operationResult()).isEqualTo("ABORTED");
+        assertThat(replay.ready()).isFalse();
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT operation_id FROM contest_resource_guards WHERE resource_type=? AND resource_id=?",
+                    String.class,
+                    type,
+                    id
+                )
+        ).isEqualTo("second");
+        assertThat(
+            jdbc
+                .queryForMap(
+                    "SELECT resolution_path,reason FROM contest_guard_operation_history "
+                        + "WHERE resource_type=? AND resource_id=? AND operation_id='first'",
+                    type,
+                    id
+                )
+        ).containsEntry("resolution_path", "DIRECT").containsEntry("reason", "원래 사유");
+    }
+
+    /** 다른 종료 통지는 현재 작업을 종결하지 않지만 취소 뒤 스터디를 다시 열지 못하게 한다. */
+    @Test
+    @DisplayName("다른 스터디 종료 이벤트를 준비 중 관찰하면 취소 뒤에도 차단을 유지한다")
+    void observedStudyClosureSurvivesCancellation() {
+        // given
+        jdbc.update("UPDATE exams SET status='CLOSED' WHERE id=?", examId);
+        var request = new GuardPrepareRequest("study-op", "STUDY_CLOSE", "4");
+        workflow.prepare("STUDY", "12", request);
+
+        // when
+        workflow.studyClosed(12, null, 5);
+        assertThat(workflow.prepare("STUDY", "12", request).operationResult()).isEqualTo("PENDING");
+        var canceled = workflow.finish("STUDY", "12", new GuardFinishRequest("study-op", "4", "취소"), false);
+
+        // then
+        assertThat(canceled.state()).isEqualTo("BLOCKED");
+        assertThat(canceled.operationResult()).isEqualTo("ABORTED");
+        assertThat(canceled.sourceVersion()).isEqualTo("5");
+    }
+
+    /** 취소와 늦은 완료 스냅샷의 상태·버전 비교 기준을 구분한다. */
+    @Test
+    @DisplayName("준비 중 반영된 같은 기대 버전의 공개 스냅샷은 취소 뒤 가드를 연다")
+    void cancelUsesSnapshotAtExpectedVersion() {
+        // given
+        jdbc.update("UPDATE exams SET status='CLOSED' WHERE id=?", examId);
+        applyProblemSnapshot(4, "PRIVATE", 1001L);
+        workflow.prepare("PROBLEM", "101", new GuardPrepareRequest("problem-op", "PROBLEM_HIDE", "5"));
+        applyProblemSnapshot(5, "PUBLIC", 1002L);
+
+        // when
+        var canceled = workflow.finish("PROBLEM", "101", new GuardFinishRequest("problem-op", "5", "취소"), false);
+
+        // then
+        assertThat(canceled.state()).isEqualTo("OPEN");
+        assertThat(canceled.sourceVersion()).isEqualTo("5");
+    }
+
+    /** 완료 통지보다 오래된 공개 스냅샷은 정보만 보존하고 차단을 해제하지 않는다. */
+    @Test
+    @DisplayName("문제 완료 통지가 먼저 와도 늦은 스냅샷을 버리지 않고 차단을 보존한다")
+    void completionAndSnapshotVersionsAreIndependent() {
+        // given
+        jdbc.update("UPDATE exams SET status='CLOSED' WHERE id=?", examId);
+        applyProblemSnapshot(4, "PUBLIC", 1001L);
+        workflow.prepare("PROBLEM", "101", new GuardPrepareRequest("problem-op", "PROBLEM_HIDE", "5"));
+        workflow.finish("PROBLEM", "101", new GuardFinishRequest("problem-op", "6", "완료"), true);
+
+        // when & then
+        applyProblemSnapshot(5, "PUBLIC", 1002L);
+        assertThat(problemVersions())
+            .containsEntry("state", "BLOCKED")
+            .containsEntry("source_version", 6L)
+            .containsEntry("snapshot_version", 5L);
+        applyProblemSnapshot(6, "PRIVATE", 1003L);
+        assertThat(problemVersions())
+            .containsEntry("state", "BLOCKED")
+            .containsEntry("snapshot_version", 6L)
+            .containsEntry("source_revision_id", 1003L);
+    }
+
+    private void applyProblemSnapshot(long version, String visibility, long revision) {
+        var snapshot = new Snapshot(101, version, "GENERAL", visibility, revision, 1, List.of("java"), null);
+        transactions.executeWithoutResult(status -> snapshots.apply(snapshot));
+    }
+
+    private java.util.Map<String, Object> problemVersions() {
+        return jdbc
+            .queryForMap(
+                "SELECT state,source_version,snapshot_version,source_revision_id FROM contest_resource_guards "
+                    + "WHERE resource_type='PROBLEM' AND resource_id=101"
+            );
+    }
+
     /** 더 최신 공개 이벤트와 늦은 완료 요청의 버전 순서를 대조한다. */
     @Test
     @DisplayName("문제 완료는 더 최신 공개 버전을 보존하고 원래 결과 회차만 허용한다")
@@ -181,7 +305,7 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         workflow.prepare("PROBLEM", "101", new GuardPrepareRequest("problem-op", "PROBLEM_HIDE", "4"));
         jdbc
             .update(
-                "UPDATE contest_resource_guards SET source_version=8,source_scope='GENERAL',"
+                "UPDATE contest_resource_guards SET source_version=8,snapshot_version=8,source_scope='GENERAL',"
                     + "source_status='PUBLIC' WHERE resource_type='PROBLEM' AND resource_id=101"
             );
 

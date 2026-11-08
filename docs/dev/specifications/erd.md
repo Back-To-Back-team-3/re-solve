@@ -2123,9 +2123,11 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `state` | VARCHAR(30) | Y | OPEN / PREPARED / BLOCKED |
 | `prepared_from_state` | VARCHAR(30) | N | OPEN / BLOCKED. 최초 prepare 전만 NULL, 해당 작업의 복원 상태 |
 | `operation_result` | VARCHAR(30) | N | PENDING / COMMITTED / ABORTED. 최초 작업 전만 NULL, 종결 뒤 보존 |
-| `source_status` | VARCHAR(30) | N | PROBLEM의 최신 원천 visibility. 상태 스냅샷 수신 전 또는 다른 자원은 NULL |
+| `source_status` | VARCHAR(30) | N | PROBLEM의 최신 스냅샷 visibility 또는 STUDY에서 관찰한 CLOSED. 상태를 관찰하기 전에는 NULL |
 | `source_scope` | VARCHAR(30) | N | 같은 원천 버전의 PROBLEM scope. 다른 자원은 NULL |
-| `source_version` | BIGINT | Y | 기본 0. 소유 서비스 상태 이벤트의 순서 값 |
+| `source_version` | BIGINT | Y | 기본 0. 관찰한 원천 상태·완료 버전의 최댓값 |
+| `snapshot_version` | BIGINT | N | PROBLEM에서 적용한 전체 스냅샷 버전. 미수신 또는 기존 값의 근거가 불명확하면 NULL |
+| `prepared_snapshot_version` | BIGINT | N | 현재 문제 작업을 준비할 때 적용돼 있던 스냅샷 버전 |
 | `source_revision_id` | BIGINT | N | 최신 PROBLEM 사용 회차 ID. 수신 전 또는 사용 회차가 없으면 NULL |
 | `source_revision_number` | INT | N | 최신 사용 회차 번호. 사용 회차 ID가 NULL이면 NULL |
 | `source_supported_languages` | JSON | N | 최신 사용 회차의 통과 언어 배열. 미수신·다른 자원은 NULL, 사용 회차가 없으면 빈 배열 |
@@ -2178,6 +2180,20 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 - 준비 결과는 자동 삭제하지 않는다.
 
+#### 4.4.16.2 가드 작업 종결 이력 (`contest_guard_operation_history`)
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| resource_type·resource_id·operation_id | VARCHAR(30)·BIGINT·VARCHAR(100) | Y | 작업 식별 복합 PK. ID 후행 공백을 구분해 원문 보존 |
+| request_hash·prepared_at | CHAR(64)·DATETIME(6) | N | 준비 해시와 시각 |
+| state·operation_result | VARCHAR(30) | Y | 종결 가드 상태와 COMMITTED / ABORTED 결과 |
+| source_version | BIGINT | Y | 종결 시 가드 원천 버전 |
+| resolution_path | VARCHAR(30) | N | DIRECT / RECONCILIATION / EVENT. 마이그레이션 이전 결과는 NULL |
+| reason | VARCHAR(500) | N | 직접 호출에서 수신한 사유 |
+| resolved_at | DATETIME(6) | N | 종결 시각. 마이그레이션 이전 결과는 NULL |
+
+가드 상태와 같은 트랜잭션에 저장한다. 회원·문제의 이전 작업 prepare 재요청은 해시와 결과를 이력에서 확인한다.
+
 #### 4.4.17 회원 정보 복제본 (`member_replicas`)
 
 - 구조·인덱스·반영 조건은 공통 §3.5와 동일하다. contest-service DB에 저장하며 회원 상태 검증 결과와 회원 정보 이벤트로 갱신한다.
@@ -2206,7 +2222,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
-| `operation_id` | VARCHAR(100) `_bin` | Y | 호출자 생성 멱등 작업 ID |
+| `operation_id` | VARCHAR(100) `utf8mb4_0900_bin` | Y | 호출자 생성 멱등 작업 ID. 기존 ID의 후행 공백 보존 |
 | `operation_type` | VARCHAR(30) | Y | CONTEST_CREATE / EXAM_RETRY / EXAM_ZERO_CONFIRM / CONTEST_VOID_CONFIRM / RESULT_REFINALIZE |
 | `context` | VARCHAR(30) | Y | EXAM / CONTEST |
 | `context_id` | BIGINT | Y | 부모 시험·대회 ID (문맥별 논리 연결) |
@@ -3186,6 +3202,7 @@ contest-service/src/main/resources/db/migration/
   V16_2__examsubmission_preserve_request.sql
   V16_3__examsubmission_add_dispatch_failure.sql
   V16_4__guard_create_study_guard_preparations.sql
+  V16_5__guard_preserve_operation_history_and_snapshot_versions.sql
   V17__contest_create_contests.sql                (P2 착수 시)
   V18__contest_create_contest_problems.sql        (P2 착수 시)
   V19__contest_create_contest_participants.sql    (P2 착수 시)

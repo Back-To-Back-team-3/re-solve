@@ -19,7 +19,7 @@ class ContestMigrationUpgradeTest {
 
     /** 기존 시험·가드 데이터를 둔 채 요청 보존 컬럼까지 순서대로 적용한다. */
     @Test
-    @DisplayName("V7 데이터베이스에 V8부터 V16.4까지 추가 적용한다")
+    @DisplayName("V7 데이터베이스에 V8부터 V16.5까지 추가 적용한다")
     void migratesFromVersionSeven() throws Exception {
         // given
         Flyway
@@ -55,6 +55,17 @@ class ContestMigrationUpgradeTest {
                     "INSERT INTO contest_resource_guards "
                         + "(resource_type, resource_id, state, created_at, updated_at) "
                         + "VALUES ('PROBLEM', 1, 'OPEN', NOW(6), NOW(6))"
+                );
+            statement
+                .executeUpdate(
+                    "UPDATE contest_resource_guards SET operation_id='old-op',operation_result='ABORTED',"
+                        + "request_hash=REPEAT('a',64) WHERE resource_type='PROBLEM' AND resource_id=1"
+                );
+            statement
+                .executeUpdate(
+                    "INSERT INTO contest_admin_operations (operation_id,operation_type,context,context_id,"
+                        + "request_hash,state,actor_member_id,reason,created_at,updated_at) "
+                        + "VALUES ('legacy ','EXAM_RETRY','EXAM',1,REPEAT('b',64),'PENDING',2,'기존 작업',NOW(6),NOW(6))"
                 );
         }
         // when
@@ -94,7 +105,7 @@ class ContestMigrationUpgradeTest {
                     )
         ) {
             assertThat(result.next()).isTrue();
-            assertThat(result.getInt(1)).isEqualTo(20);
+            assertThat(result.getInt(1)).isEqualTo(21);
         }
         try (
             var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
@@ -102,6 +113,34 @@ class ContestMigrationUpgradeTest {
             var result = statement.executeQuery("SHOW TABLES LIKE 'contest_study_guard_preparations'")
         ) {
             assertThat(result.next()).isTrue();
+        }
+        try (
+            var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+            var statement = connection.createStatement();
+            var result
+                = statement
+                    .executeQuery(
+                        "SELECT operation_result,resolution_path FROM contest_guard_operation_history "
+                            + "WHERE resource_type='PROBLEM' AND resource_id=1 AND operation_id='old-op'"
+                    )
+        ) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("ABORTED");
+            assertThat(result.getString(2)).isNull();
+        }
+        try (
+            var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+            var statement = connection.createStatement();
+            var result
+                = statement
+                    .executeQuery(
+                        "SELECT operation_id='legacy ' AS exact_id,operation_id='legacy' AS shortened_id "
+                            + "FROM contest_admin_operations"
+                    )
+        ) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getBoolean("exact_id")).isTrue();
+            assertThat(result.getBoolean("shortened_id")).isFalse();
         }
     }
 }
