@@ -37,7 +37,8 @@ public enum StudyErrorCode implements ErrorCode {
     STUDY_CAPACITY_TOO_SMALL(HttpStatus.CONFLICT, "현재 구성원 수보다 작은 정원으로 줄일 수 없습니다."),
     STUDY_UPDATE_CONFLICT(HttpStatus.CONFLICT, "다른 수정 요청과 충돌했습니다. 최신 정보를 조회 후 다시 시도해 주세요."),
     STUDY_LEADER_ROLE_CHANGE_NOT_ALLOWED(HttpStatus.CONFLICT, "스터디장의 역할은 직접 변경할 수 없습니다. 위임 API를 사용하세요."),
-    STUDY_MANAGER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "운영진은 최대 2명까지만 임명할 수 있습니다.");
+    STUDY_MANAGER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "운영진은 최대 2명까지만 임명할 수 있습니다."),
+    STUDY_ACTIVE_EXAM_EXISTS(HttpStatus.CONFLICT, "예정 또는 진행 중인 시험이 남아 있어 스터디를 종료할 수 없습니다.");
 
     private final HttpStatus status;
     private final String message;

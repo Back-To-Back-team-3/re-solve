@@ -26,6 +26,7 @@ import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.common.web.security.user.UserRole;
 import com.backtoback.study.operation.dto.LeaderDelegationResponse;
+import com.backtoback.study.operation.dto.StudyCloseResponse;
 import com.backtoback.study.operation.dto.StudyRoleChangeResponse;
 import com.backtoback.study.operation.dto.StudyUpdateResponse;
 import com.backtoback.study.operation.service.StudyOperationService;
@@ -147,5 +148,19 @@ class StudyOperationControllerTest {
         mockMvc
             .perform(post("/api/v1/studies/1/leader-delegation").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("§5.3.4 정상 요청이면 200과 studyId를 반환한다")
+    void closeStudy_validRequest_returns200() throws Exception {
+        // given
+        given(studyOperationService.closeStudy(anyLong(), anyLong(), any())).willReturn(new StudyCloseResponse("1"));
+
+        // when & then
+        mockMvc
+            .perform(post("/api/v1/studies/1/close").contentType(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data.studyId").value("1"));
     }
 }

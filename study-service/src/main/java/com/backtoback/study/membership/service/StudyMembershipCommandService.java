@@ -506,13 +506,13 @@ public class StudyMembershipCommandService {
         String correlationId,
         LocalDateTime now
     ) {
-        // ① quota 먼저
-        quotaRepository.decrementIfAboveZero(target.getMemberId());
-
-        // ② study: CLOSED이면 생략
+        // ① study 조회 (read-only)
         Study study
             = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+
+        // ② quota + study: CLOSED이면 종료 시 이미 quota 반환됐으므로 생략 (이중 차감 방지)
         if (study.getStatus() != StudyStatus.CLOSED) {
+            quotaRepository.decrementIfAboveZero(target.getMemberId());
             studyRepository.leaveAndAutoReopen(studyId);
         }
 
@@ -565,13 +565,13 @@ public class StudyMembershipCommandService {
         String correlationId,
         LocalDateTime now
     ) {
-        // ① quota 먼저
-        quotaRepository.decrementIfAboveZero(memberId);
-
-        // ② studies 나중 — CLOSED이면 생략
+        // ① study 조회 (read-only)
         Study study
             = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+
+        // ② quota + study: CLOSED이면 종료 시 이미 quota 반환됐으므로 생략 (이중 차감 방지)
         if (study.getStatus() != StudyStatus.CLOSED) {
+            quotaRepository.decrementIfAboveZero(memberId);
             studyRepository.leaveAndAutoReopen(studyId);
         }
 

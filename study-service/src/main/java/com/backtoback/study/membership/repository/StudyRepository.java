@@ -122,4 +122,16 @@ public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecific
     )
     void bumpVersion(@Param("studyId") Long studyId);
 
+    /**
+     * status가 'CLOSED'가 아닌 경우에만 'CLOSED'로 전이하고 version을 1 올린다(API 명세서 §5.3.4).
+     * 0이면 이미 종료된 스터디이므로 호출자가 STUDY_ALREADY_CLOSED를 던져야 한다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE studies SET status = 'CLOSED', version = version + 1, updated_at = NOW(6) "
+            + "WHERE id = :studyId AND status <> 'CLOSED'",
+        nativeQuery = true
+    )
+    int closeStudyIfNotClosed(@Param("studyId") Long studyId);
+
 }
