@@ -48,7 +48,16 @@ public class ContestGuardWorkflowService {
     private final ObjectMapper mapper;
     private final Clock clock;
 
-    /** 신규 편입과 같은 가드 행을 잠그고 원래 준비 결과를 보존한다. */
+    /**
+     * 신규 편입과 같은 가드 행을 잠그고 기존 사용을 검사한다.
+     * 스터디는 예정 시험의 취소와 최초 목록을 함께 저장하며, 반복 요청에서도 현재 종료 대상을 다시 확인한다.
+     *
+     * @param type 소유 서비스 자원 종류
+     * @param resourceId 소유 서비스의 양의 자원 ID
+     * @param request 원래 작업 ID·유형과 기대 원천 버전
+     * @return 준비·종결 상태와 스터디의 취소 및 대기 시험 목록
+     * @throws ContestException 입력 오류, 동일 ID의 다른 요청, 다른 작업 점유, 오래된 원천 버전 또는 사용 중 자원인 경우
+     */
     @Transactional
     public GuardPreparationResponse prepare(String type, String resourceId, GuardPrepareRequest request) {
         long resource = id(resourceId);
@@ -156,7 +165,17 @@ public class ContestGuardWorkflowService {
         );
     }
 
-    /** 잠금 뒤 작업과 버전을 재확인하고 완료·취소 결과를 멱등하게 보존한다. */
+    /**
+     * 잠금 뒤 현재 작업과 원천 버전을 검증해 완료 또는 취소 결과를 보존한다.
+     * 문제 완료는 기대 버전의 다음 버전만 허용하고 더 최신 공개 상태를 유지한다.
+     *
+     * @param type 소유 서비스 자원 종류
+     * @param resourceId 소유 서비스 자원 ID
+     * @param request 작업 ID와 소유 서비스의 결과 버전
+     * @param complete 완료면 {@code true}, 확정 취소면 {@code false}
+     * @return 현재 가드 상태와 보존된 최대 원천 버전
+     * @throws ContestException 작업 ID·버전 불일치, 반대 결과로 종결 또는 스터디 종료 대기 중인 경우
+     */
     @Transactional
     public GuardCompletionResponse finish(
         String type,
@@ -172,7 +191,18 @@ public class ContestGuardWorkflowService {
         return finishLocked(type, resource, request.operationId(), source, complete, guard);
     }
 
-    /** 원격 조회 뒤 잠금을 다시 잡고 현재 작업과 기대 버전만 종결한다. */
+    /**
+     * 원격 조회 뒤 잠금을 다시 잡고 현재 작업과 기대 버전만 종결한다.
+     * 조회 중 다른 작업이 준비됐거나 원격 결과가 미확인이면 상태를 바꾸지 않는다.
+     *
+     * @param type 스터디 또는 문제 자원 종류
+     * @param resource 소유 서비스 자원 ID
+     * @param operationId 조회한 원래 작업 ID
+     * @param expected 조회 전에 관찰한 기대 원천 버전
+     * @param result 원격 서비스가 보존한 작업 결과
+     * @return 현재 작업에 완료·취소 결과를 반영했는지 여부
+     * @throws ContestException 결과 버전이 계약과 다르거나 스터디 종료를 기다리는 경우
+     */
     @Transactional
     public boolean reconcile(String type, long resource, String operationId, long expected, Result result) {
         if (!("STUDY".equals(type) || "PROBLEM".equals(type)) || !operationId.equals(result.operationId())
@@ -201,7 +231,15 @@ public class ContestGuardWorkflowService {
         return true;
     }
 
-    /** 스터디 종료 이벤트의 작업 ID와 버전이 현재 준비와 일치할 때 완료를 복구한다. */
+    /**
+     * 스터디 종료 이벤트가 현재 준비 작업과 일치하면 완료를 복구한다.
+     * 다른 작업이 준비 중이면 덮어쓰지 않고, 준비 중이 아닐 때 더 최신 종료 버전은 신규 생성을 차단한다.
+     *
+     * @param studyId 종료된 스터디 ID
+     * @param operationId 이벤트의 작업 ID. 없는 경우 {@code null}
+     * @param sourceVersion 스터디의 종료 버전
+     * @throws ContestException 같은 작업이지만 아직 시험 종료를 기다리는 경우
+     */
     @Transactional
     public void studyClosed(long studyId, String operationId, long sourceVersion) {
         guards.lockAll(List.of(new Resource("STUDY", studyId)));
@@ -285,6 +323,7 @@ public class ContestGuardWorkflowService {
         return new GuardCompletionResponse(operationId, next, outcome, Long.toString(latest));
     }
 
+    /** 시험 잠금과 참가자 잠금 뒤 시작 시각을 재검증해 취소와 Outbox를 함께 저장한다. */
     private List<String> cancelScheduled(long studyId, LocalDateTime timestamp) {
         var ids
             = jdbc
@@ -336,6 +375,7 @@ public class ContestGuardWorkflowService {
         return List.copyOf(canceled);
     }
 
+    /** 스케줄러 전이가 지연된 시험도 종단 상태가 될 때까지 완료를 보류한다. */
     private List<String> blockingStudies(long studyId) {
         return jdbc
             .queryForList(
@@ -429,6 +469,7 @@ public class ContestGuardWorkflowService {
         }
     }
 
+    /** 표현이 다른 숫자 문자열도 같은 원천 버전으로 정규화해 요청 해시를 만든다. */
     private String hash(String type, long id, String operationId, String operationType, long expected) {
         try {
             var value = mapper.writeValueAsString(new HashInput(type, id, operationId, operationType, expected));

@@ -29,6 +29,7 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
     @Autowired
     private ContestResourceGuardRepository guards;
 
+    /** 공유 테스트 DB에 남은 같은 자원의 가드와 준비 이력을 지운다. */
     @BeforeEach
     void clearGuards() {
         jdbc.update("DELETE FROM contest_study_guard_preparations WHERE study_id=12");
@@ -37,11 +38,13 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         jdbc.update("DELETE FROM contest_resource_guards WHERE resource_type='PROBLEM' AND resource_id=101");
     }
 
+    /** 이 테스트가 만든 가드가 다른 테스트의 신규 편입을 막지 않게 한다. */
     @AfterEach
     void removeGuards() {
         clearGuards();
     }
 
+    /** 취소 Outbox와 작업 이력이 같은 최초 시험 목록을 유지하는지 확인한다. */
     @Test
     @DisplayName("스터디 준비 재요청은 최초 취소 목록을 보존하고 현재 대기 시험을 조회한다")
     void studyPreparationKeepsCancellationList() {
@@ -87,6 +90,7 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         assertThat(historical.ready()).isFalse();
     }
 
+    /** 준비 거절이 새 가드 행까지 롤백하는지 확인한다. */
     @Test
     @DisplayName("실제 입장한 미확정 시험이 있으면 회원 탈퇴 준비를 남기지 않는다")
     void activeMemberCannotPrepare() {
@@ -102,6 +106,7 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         ).isZero();
     }
 
+    /** 진행 사용 거절 뒤 확정 취소가 준비 전 상태로 돌아가는지 확인한다. */
     @Test
     @DisplayName("진행 중 시험의 고정 문제는 준비를 거절하고 종료 뒤에만 준비한다")
     void activeProblemCannotPrepare() {
@@ -116,6 +121,7 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         assertThat(canceled.operationResult()).isEqualTo("ABORTED");
     }
 
+    /** 더 최신 공개 이벤트와 늦은 완료 요청의 버전 순서를 대조한다. */
     @Test
     @DisplayName("문제 완료는 더 최신 공개 버전을 보존하고 원래 결과 회차만 허용한다")
     void problemCompletionUsesOriginalResultVersion() {
@@ -136,6 +142,7 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         ).isInstanceOf(ContestException.class);
     }
 
+    /** 오래된 작업 응답이 현재 준비를 종결하지 않는지 확인한다. */
     @Test
     @DisplayName("원격 조회 뒤 작업이 바뀌면 이전 문제 결과로 현재 가드를 종결하지 않는다")
     void staleProblemRecoveryCannotCompleteNewWork() {
@@ -158,6 +165,7 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         ).isEqualTo("PREPARED");
     }
 
+    /** 신규 편입의 가드 잠금이 끝난 뒤 숨김 준비가 커밋된 사용을 보는지 확인한다. */
     @Test
     @DisplayName("문제 신규 편입이 먼저 커밋되면 경합한 숨김 준비는 사용 중 오류로 거절한다")
     void enrollmentSerializesWithProblemPrepare() throws Exception {
@@ -204,6 +212,7 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         }
     }
 
+    /** 작업 ID가 일치하는 종료 이벤트만 준비를 완료하는지 확인한다. */
     @Test
     @DisplayName("스터디 종료 이벤트는 같은 준비 작업만 종결하고 다른 작업은 유지한다")
     void studyEventCompletesMatchingOperationOnly() {

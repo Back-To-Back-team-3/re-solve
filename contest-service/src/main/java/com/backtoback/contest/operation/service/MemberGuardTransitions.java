@@ -38,7 +38,16 @@ public class MemberGuardTransitions {
             );
     }
 
-    /** 조회 후 교체된 작업이나 원천 버전은 이전 응답으로 덮어쓰지 않는다. */
+    /**
+     * 조회 후 가드를 잠가 원래 작업과 기대 버전이 현재 준비와 일치할 때만 종결한다.
+     * 더 최신 탈퇴 이벤트가 있으면 원격 취소 결과로 차단을 해제하지 않는다.
+     *
+     * @param memberId 회원 ID
+     * @param operationId 조회한 원래 탈퇴 작업 ID
+     * @param expectedVersion 조회 전에 관찰한 기대 원천 버전
+     * @param result 회원 서비스가 보존한 원래 작업 결과
+     * @return 현재 작업에 종결 결과를 반영했는지 여부
+     */
     @Transactional
     public boolean apply(long memberId, String operationId, long expectedVersion, Result result) {
         if (!operationId.equals(result.operationId()) || "PENDING".equals(result.state())) {
