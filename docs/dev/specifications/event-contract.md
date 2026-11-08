@@ -209,7 +209,7 @@ flowchart LR
 | S1 | `StudyMemberJoined` v1 | study | contest, problem | SNS | 가입이 `APPROVED`가 되는 트랜잭션 | `membershipId` | 확정 |
 | S2 | `StudyMemberLeft` v1 | study | contest, problem, notification | SNS | `LEFT`·`REMOVED`·회원 탈퇴 전파 | `membershipId` | 확정 |
 | S3 | `StudyApplicationDecided` v1 | study | notification | SNS | 승인·거절·만료 | — | 확정 |
-| S4 | `StudyClosed` v1 | study | contest | SNS | 스터디 종료 | `sourceVersion` | 확정 필요 (D·C) |
+| S4 | `StudyClosed` v1 | study | contest | SNS | 스터디 종료 | `sourceVersion` | 확정 |
 | S5 | `AssignmentPublished` v1 | study | notification | SNS | `SCHEDULED → OPEN` | — | 확정 |
 | S6 | `AssignmentDeadlineApproaching` v1 | study | notification | SNS | 마감 24시간 이내 1회 | — | 확정 |
 | S7 | `AssignmentIncompleteRepeated` v1 | study | notification | SNS | 연속 2회 `INCOMPLETE` 발견 | — | 확정 |
@@ -829,13 +829,13 @@ flowchart LR
 | 필드 | `studyId`, `studyName`(추가 제안), `membershipId`, `memberId`, `result`(`APPROVED` / `REJECTED` / `EXPIRED`), `decidedAt` |
 | 소비자 | notification: 신청자에게 `STUDY_APPLICATION_DECIDED` |
 
-#### S4 `StudyClosed` v1 — 확정 필요 (D·C)
+#### S4 `StudyClosed` v1
 
 | 항목 | 내용 |
 | --- | --- |
 | 발행 | 스터디 종료 API(5.3.4)·관리자 강제 종료(5.6.1) 트랜잭션 |
 | aggregate | `studyId` |
-| 필드 | `studyId`, `sourceVersion`(`studies.version`), `closedAt`, `operationId`(가드 도입 시) |
+| 필드 | `studyId`, `sourceVersion`(`studies.version`), `closedAt` |
 | 소비자 | contest: `STUDY` 가드 완료·신규 시험 생성 차단. `CLOSED` 시험의 채점·확정은 계속 |
 
 #### S5~S7 문제집 이벤트
@@ -915,13 +915,13 @@ flowchart LR
 | `StudyMemberJoined` |  |  | ● | ● |  |  |  |
 | `StudyMemberLeft` |  |  | ● | ● |  | ● |  |
 | `StudyApplicationDecided` |  |  |  |  |  | ● |  |
-| `StudyClosed` |  |  |  | ○ |  |  |  |
+| `StudyClosed` |  |  |  | ● |  |  |  |
 | `AssignmentPublished` |  |  |  |  |  | ● |  |
 | `AssignmentDeadlineApproaching` |  |  |  |  |  | ● |  |
 | `AssignmentIncompleteRepeated` |  |  |  |  |  | ● |  |
 | `HintReady` |  | ○ |  |  |  | ● |  |
 | `GitHubSyncFailed` |  |  |  |  |  | ● |  |
-| **합계** | 3 (+1) | 2 (+2) | 8 | 9 (+1) | 16 | 19 | 2 |
+| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 16 | 19 | 2 |
 
 ### 5.1 소비자 구현 체크리스트
 
@@ -1004,7 +1004,6 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 | 2 | 진단 채점 요청 경로·이벤트명 | M6: `exam-submission-queue` 공용 |
 | 3 | 진단 결과 이벤트 분리 | J5 `DiagnosisSubmissionJudged` |
 | 4 | `SubmissionJudged`에 `problemTagIds`·`language`·`problemTitle`·`judgedAt` 추가 | J1 표 (하위 호환 추가) |
-| 5 | `StudyClosed` 신설 | S4 |
 | 6 | `HintReady` member 구독, `completedAt` 추가, 힌트 사용 1/2점 판정 기준(AC보다 먼저 쓴 힌트만?) | S8 |
 | 7 | `hint_block_replicas.participant_id` 컬럼 추가 (참가 취소 우선 규칙 구현) | C5 처리 |
 | 8 | 진단 중 힌트 차단 판정 경로 | 후보: member `DiagnosisStarted`/`DiagnosisClosed` 이벤트로 study 복제본, 또는 study → member 내부 조회 |
