@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -67,4 +69,81 @@ class ProblemContentServiceFailureTest {
             assertThat(failure).hasCause(cause);
         });
     }
+
+    /**
+     * 유효한 JSON이라도 고정 크기 또는 체크섬과 다르면 원문을 제공하지 않는다.
+     *
+     * @param kind 본문·공개 예제·이미지 구분
+     * @param wrongSize 크기 불일치 여부
+     */
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "body,true",
+            "body,false",
+            "sample,true",
+            "sample,false",
+            "image,true",
+            "image,false"
+        }
+    )
+    @DisplayName("본문·공개 예제·이미지의 크기 및 동일 크기 체크섬 불일치를 거부한다")
+    void rejectsCorruptedContent(String kind, boolean wrongSize) {
+        var store = mock(ProblemContentStore.class);
+        var reader = mock(ProblemAssetObjectReader.class);
+        var judge = mock(JudgeStarterCodeClient.class);
+        byte[] body
+            = "{\"description\":\"body\",\"constraints\":\"rule\",\"examples\":\"sample\"}"
+                .getBytes(StandardCharsets.UTF_8);
+        byte[] payload
+            = "sample".equals(kind)
+                ? "{\"argumentTexts\":{\"a\":\"1\"},\"expectedReturnText\":\"2\"}".getBytes(StandardCharsets.UTF_8)
+                : body;
+        var actual = ProblemAssetContent.fromBytes(payload);
+        var broken
+            = new File(
+                "broken",
+                "version-1",
+                wrongSize ? actual.sha256() : "0".repeat(64),
+                actual.sizeBytes() + (wrongSize ? 1 : 0)
+            );
+        given(reader.read("test-bucket", "broken", "version-1")).willReturn(payload);
+        if ("image".equals(kind)) {
+            given(store.image(1L, 2L, 3L, "EXAM:1")).willReturn(new ProblemContentStore.Image("image/png", broken));
+        } else if ("sample".equals(kind)) {
+            var content = ProblemAssetContent.fromBytes(body);
+            var validBody = new File("body", "version-1", content.sha256(), content.sizeBytes());
+            given(reader.read("test-bucket", "body", "version-1")).willReturn(body);
+            given(store.content(1L, 2L, "EXAM:1"))
+                .willReturn(
+                    new ProblemContentStore.Snapshot(
+                        null,
+                        validBody,
+                        List.of(new ProblemContentStore.Sample(1L, broken))
+                    )
+                );
+        } else {
+            given(store.content(1L, 2L, "EXAM:1"))
+                .willReturn(new ProblemContentStore.Snapshot(null, broken, List.of()));
+        }
+        var service
+            = new ProblemContentService(
+                store,
+                reader,
+                new ProblemImageStorageProperties("test-bucket"),
+                judge,
+                JsonMapper.builder().build()
+            );
+        assertThatThrownBy(() -> {
+            if ("image".equals(kind)) {
+                service.image(1L, 2L, 3L, "EXAM:1");
+            } else {
+                service.read(1L, 2L, "EXAM:1");
+            }
+        }).isInstanceOfSatisfying(ProblemException.class, failure -> {
+            assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+            assertThat(failure.getCause()).isInstanceOf(ProblemException.class);
+        });
+    }
+
 }

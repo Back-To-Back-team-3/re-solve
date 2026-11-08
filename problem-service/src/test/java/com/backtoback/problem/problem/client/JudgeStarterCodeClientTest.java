@@ -20,6 +20,7 @@ import org.springframework.web.client.RestClient;
 
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
+import com.backtoback.problem.problem.dto.response.StarterCodeResponse;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 
@@ -35,13 +36,17 @@ class JudgeStarterCodeClientTest {
             .expect(requestTo("/internal/v1/judge/starter-codes"))
             .andRespond(
                 withSuccess(
-                    "{\"starterCodes\":[{\"language\":\"java\",\"sourceCode\":\"class Solution {}\"}]}",
+                    "{\"starterCodes\":[{\"language\":\"python3\",\"sourceCode\":\"def solution(): pass\"},"
+                        + "{\"language\":\"java\",\"sourceCode\":\"class Solution {}\"}]}",
                     MediaType.APPLICATION_JSON
                 )
             );
         var client = new JudgeStarterCodeClient(builder.build(), CircuitBreaker.ofDefaults("starter-test"));
-        assertThat(client.read(Map.of("name", "solution"), List.of("java")).getFirst().sourceCode())
-            .isEqualTo("class Solution {}");
+        assertThat(client.read(Map.of("name", "solution"), List.of("java", "python3")))
+            .containsExactly(
+                new StarterCodeResponse("java", "class Solution {}"),
+                new StarterCodeResponse("python3", "def solution(): pass")
+            );
         server.verify();
     }
 

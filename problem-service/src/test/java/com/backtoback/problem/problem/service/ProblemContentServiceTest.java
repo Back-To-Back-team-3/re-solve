@@ -31,12 +31,14 @@ import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.common.web.security.user.GatewayUser;
+import com.backtoback.common.web.security.user.UserRole;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.client.JudgeProgressClient;
+import com.backtoback.problem.problem.controller.ProblemContentController;
 import com.backtoback.problem.problem.dto.request.ProblemValidationRequest;
 import com.backtoback.problem.problem.dto.response.ProblemContentResponse;
-import com.backtoback.problem.problem.dto.response.ProblemDetailResponse;
 import com.backtoback.problem.problem.dto.response.StarterCodeResponse;
 
 /** 실제 DB에서 공개·고정 회차 본문과 연결 이미지 조회를 검증한다. */
@@ -60,6 +62,8 @@ class ProblemContentServiceTest {
     private ProblemCreateService creates;
     @Autowired
     private ProblemContentService queries;
+    @Autowired
+    private ProblemContentController controller;
     @MockitoBean
     private com.backtoback.problem.problem.client.JudgeStarterCodeClient starter;
     @Autowired
@@ -144,7 +148,16 @@ class ProblemContentServiceTest {
         assertThat(response.samples().getFirst().expectedReturnText()).isEqualTo("2");
         verify(reader, times(2)).read(anyString(), anyString(), anyString());
         var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
-        var json = mapper.valueToTree(ProblemDetailResponse.from(response, true));
+        jdbc.update("""
+            INSERT INTO member_problem_statuses(member_id,problem_id,is_solved,attempt_count,created_at,updated_at)
+            VALUES(9401,?,true,1,NOW(),NOW()),(9402,?,false,1,NOW(),NOW())
+            """, id, id);
+        var detail = controller.content(id, new GatewayUser("9401", UserRole.USER)).getBody().data();
+        var json = mapper.valueToTree(detail);
+        assertThat(controller.content(id, new GatewayUser("9402", UserRole.USER)).getBody().data().solvedStatus())
+            .isEqualTo("UNSOLVED");
+        assertThat(controller.content(id, new GatewayUser("9403", UserRole.USER)).getBody().data().solvedStatus())
+            .isEqualTo("UNSOLVED");
         assertThat(json.has("content")).isFalse();
         assertThat(json.get("publishedAt").asString()).isEqualTo("2026-11-07T10:20:30+09:00");
         assertThat(mapper.valueToTree(response).get("publishedAt").asString()).isEqualTo("2026-11-07T10:20:30+09:00");
