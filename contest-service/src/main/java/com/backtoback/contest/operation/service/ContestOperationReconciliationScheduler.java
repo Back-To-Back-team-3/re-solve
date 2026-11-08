@@ -3,6 +3,8 @@ package com.backtoback.contest.operation.service;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -15,17 +17,20 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import net.javacrumbs.shedlock.core.ExtensibleLockProvider;
+import net.javacrumbs.shedlock.core.LockConfiguration;
+import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.support.KeepAliveLockProvider;
 
 import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.admin.service.ExamRetryService;
 import com.backtoback.contest.admin.service.ExamRetryStore;
-import com.backtoback.contest.exam.store.ExamSchedulerCursorStore;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PreDestroy;
 
 /** 미확인 시험 재처리와 자원 준비 작업을 원래 식별자로 대사한다 (스케줄러 §4.7). */
 @Component
@@ -46,7 +51,8 @@ public class ContestOperationReconciliationScheduler {
     private final ResourceGuardReconciliation resourceGuards;
     private final Clock clock;
     private final MeterRegistry metrics;
-    private final ExamSchedulerCursorStore cursors;
+    private final ScheduledExecutorService lockRenewals = Executors.newSingleThreadScheduledExecutor();
+    private final LockProvider reconciliationLocks;
     private final AtomicLong oldest = new AtomicLong();
     private boolean memberFirst;
 
@@ -59,7 +65,7 @@ public class ContestOperationReconciliationScheduler {
         ResourceGuardReconciliation resourceGuards,
         Clock clock,
         MeterRegistry metrics,
-        ExamSchedulerCursorStore cursors
+        LockProvider lockProvider
     ) {
         this.jdbc = jdbc;
         this.store = store;
@@ -68,7 +74,10 @@ public class ContestOperationReconciliationScheduler {
         this.resourceGuards = resourceGuards;
         this.clock = clock;
         this.metrics = metrics;
-        this.cursors = cursors;
+        if (!(lockProvider instanceof ExtensibleLockProvider extensible)) {
+            throw new IllegalArgumentException("대사 배치에는 잠금 연장을 지원하는 공급자가 필요합니다.");
+        }
+        this.reconciliationLocks = new KeepAliveLockProvider(extensible, lockRenewals);
         Gauge.builder("scheduler.backlog.oldest.seconds", oldest, AtomicLong::get).tag("job", JOB).register(metrics);
     }
 
@@ -77,13 +86,16 @@ public class ContestOperationReconciliationScheduler {
         fixedDelay = 300000,
         initialDelay = 300000
     )
-    @SchedulerLock(
-        name = "ContestOperationReconciliationScheduler",
-        lockAtMostFor = "PT30S"
-    )
     public void run() {
+        var lock
+            = reconciliationLocks
+                .lock(new LockConfiguration(clock.instant(), JOB, Duration.ofSeconds(30), Duration.ZERO));
+        if (lock.isEmpty()) {
+            return;
+        }
         var sample = Timer.start(metrics);
         try {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
             var now = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE);
             var cutoff = now.minusMinutes(1);
             var oldestTime
@@ -107,7 +119,6 @@ public class ContestOperationReconciliationScheduler {
             if (oldest.get() >= Duration.ofMinutes(10).getSeconds()) {
                 log.warn("미확인 작업 장기 보류: oldestSeconds={}", oldest.get());
             }
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
             boolean first = memberFirst;
             memberFirst = !memberFirst;
             if (first) {
@@ -118,32 +129,36 @@ public class ContestOperationReconciliationScheduler {
                 reconcileGuards(cutoff, deadline);
             }
         } finally {
+            lock.get().unlock();
             sample.stop(metrics.timer("scheduler.run.duration", "job", JOB));
         }
     }
 
+    @PreDestroy
+    void stopRenewals() {
+        lockRenewals.shutdown();
+    }
+
     private void reconcileRetries(LocalDateTime cutoff, long deadline) {
-        var cursor = cursors.load(JOB);
+        // 회차 내에서만 지나간 후보를 건너뛰어 확인 시각 저장에 실패해도 다음 회차에 다시 선택한다.
+        Candidate cursor = null;
         while (System.nanoTime() < deadline) {
             var candidates = candidates(cutoff, cursor);
             if (candidates.isEmpty()) {
-                cursors.clear(JOB);
                 return;
             }
             for (var candidate : candidates) {
                 if (System.nanoTime() >= deadline) {
                     return;
                 }
-                cursor = new ExamSchedulerCursorStore.Cursor(candidate.updatedAt(), candidate.id());
-                cursors.save(JOB, cursor);
-                metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
+                cursor = candidate;
                 try {
-                    var operation = store.require(candidate.operationId());
-                    if (!"PENDING".equals(operation.state()) || operation.updatedAt().isAfter(cutoff)) {
+                    if (!markRetryAttempt(candidate, cutoff)) {
                         metrics.counter("scheduler.items", "job", JOB, "result", "skipped").increment();
                         continue;
                     }
-                    var result = retry.reconcile(operation);
+                    metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
+                    var result = retry.reconcile(store.require(candidate.operationId()));
                     String state = "PENDING".equals(result.state()) ? "pending" : "success";
                     metrics.counter("scheduler.items", "job", JOB, "result", state).increment();
                 } catch (RuntimeException failure) {
@@ -236,7 +251,19 @@ public class ContestOperationReconciliationScheduler {
         return jdbc.query(query + "ORDER BY updated_at,id LIMIT 100", mapper, cutoff);
     }
 
-    private java.util.List<Candidate> candidates(LocalDateTime cutoff, ExamSchedulerCursorStore.Cursor cursor) {
+    /** 원격 확인이 실패하더라도 시도 순서는 DB에 남긴다. */
+    private boolean markRetryAttempt(Candidate candidate, LocalDateTime cutoff) {
+        var attemptedAt = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE);
+        return jdbc
+            .update(
+                "UPDATE contest_admin_operations SET updated_at=? WHERE id=? AND state='PENDING' AND updated_at<=?",
+                attemptedAt,
+                candidate.id(),
+                cutoff
+            ) == 1;
+    }
+
+    private java.util.List<Candidate> candidates(LocalDateTime cutoff, Candidate cursor) {
         String query
             = "SELECT id,operation_id,updated_at FROM contest_admin_operations "
                 + "WHERE context='EXAM' AND operation_type='EXAM_RETRY' AND state='PENDING' AND updated_at<=? ";
@@ -250,8 +277,8 @@ public class ContestOperationReconciliationScheduler {
                 query + "AND (updated_at>? OR (updated_at=? AND id>?)) " + "ORDER BY updated_at,id LIMIT 100",
                 mapper,
                 cutoff,
-                cursor.time(),
-                cursor.time(),
+                cursor.updatedAt(),
+                cursor.updatedAt(),
                 cursor.id()
             );
     }

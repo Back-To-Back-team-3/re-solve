@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,11 +20,13 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
+import net.javacrumbs.shedlock.core.ExtensibleLockProvider;
+import net.javacrumbs.shedlock.core.SimpleLock;
+
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.admin.service.ExamRetryService;
 import com.backtoback.contest.admin.service.ExamRetryStore;
 import com.backtoback.contest.exam.service.ExamIntegrationTestSupport;
-import com.backtoback.contest.exam.store.ExamSchedulerCursorStore;
 import com.backtoback.contest.operation.client.MemberOperationClient;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -163,7 +166,6 @@ class MemberGuardReconciliationIntegrationTest extends ExamIntegrationTestSuppor
     void retriesUnknownGuardBeforeNewerCandidates() {
         // given
         var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).withNano(0).plusMinutes(3);
-        var cursors = mock(ExamSchedulerCursorStore.class);
         var firstId
             = jdbc
                 .queryForObject(
@@ -171,8 +173,6 @@ class MemberGuardReconciliationIntegrationTest extends ExamIntegrationTestSuppor
                     Long.class,
                     MEMBER_ID
                 );
-        given(cursors.load("ContestOperationReconciliationScheduler:GUARDS"))
-            .willReturn(null, new ExamSchedulerCursorStore.Cursor(now, firstId));
         given(memberOperations.find(MEMBER_ID, "member-op"))
             .willThrow(new ResourceAccessException("timeout"))
             .willReturn(new MemberOperationClient.Result("member-op", "ABORTED", "4", "ACTIVE"));
@@ -181,7 +181,7 @@ class MemberGuardReconciliationIntegrationTest extends ExamIntegrationTestSuppor
             .willReturn(new MemberOperationClient.Result("newer-op", "PENDING", "4", "ACTIVE"));
 
         // when
-        scheduler(now, cursors).run();
+        runScheduler(now);
         var attemptedAt
             = jdbc
                 .queryForObject(
@@ -206,7 +206,7 @@ class MemberGuardReconciliationIntegrationTest extends ExamIntegrationTestSuppor
                     now.plusSeconds(1),
                     firstId
                 );
-            scheduler(now.plusMinutes(5), cursors).run();
+            runScheduler(now.plusMinutes(5));
 
             // then
             var calls = inOrder(memberOperations);
@@ -223,17 +223,81 @@ class MemberGuardReconciliationIntegrationTest extends ExamIntegrationTestSuppor
         }
     }
 
-    private ContestOperationReconciliationScheduler scheduler(LocalDateTime now, ExamSchedulerCursorStore cursors) {
-        return new ContestOperationReconciliationScheduler(
-            jdbc,
-            mock(ExamRetryStore.class),
-            mock(ExamRetryService.class),
-            reconciliation,
-            mock(ResourceGuardReconciliation.class),
-            Clock.fixed(now.atZone(ClockConfiguration.SERVICE_ZONE).toInstant(), ClockConfiguration.SERVICE_ZONE),
-            new SimpleMeterRegistry(),
-            cursors
-        );
+    /** 응답과 확인 결과 저장이 실패해도 다음 회차는 이전 작업부터 다시 확인한다. */
+    @Test
+    @DisplayName("재처리 확인에 실패한 작업은 다음 대사 회차에서 다시 조회한다")
+    void retriesUnconfirmedExamOperationInNextRun() {
+        // given
+        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).withNano(0).plusMinutes(3);
+        var store = mock(ExamRetryStore.class);
+        var retry = mock(ExamRetryService.class);
+        var operation
+            = new ExamRetryStore.Operation(
+                "retry-op",
+                "EXAM_RETRY",
+                "EXAM",
+                Long.parseLong(examId),
+                1L,
+                "a".repeat(64),
+                1,
+                null,
+                "PENDING",
+                7L,
+                "재처리",
+                null,
+                now.minusMinutes(2)
+            );
+        jdbc
+            .update(
+                "INSERT INTO contest_admin_operations (operation_id,operation_type,context,context_id,receipt_id,"
+                    + "request_hash,expected_judge_attempt,state,actor_member_id,reason,created_at,updated_at) "
+                    + "VALUES ('retry-op','EXAM_RETRY','EXAM',?,1,?,1,'PENDING',7,'재처리',?,?)",
+                examId,
+                operation.hash(),
+                operation.updatedAt(),
+                operation.updatedAt()
+            );
+        given(store.require("retry-op")).willReturn(operation);
+        given(retry.reconcile(operation)).willThrow(new IllegalStateException("대사 결과 저장 실패"));
+
+        // when
+        runScheduler(now, store, retry);
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT updated_at FROM contest_admin_operations WHERE operation_id='retry-op'",
+                    LocalDateTime.class
+                )
+        ).isEqualTo(now);
+        runScheduler(now.plusMinutes(5), store, retry);
+
+        // then
+        org.mockito.Mockito.verify(retry, org.mockito.Mockito.times(2)).reconcile(operation);
+    }
+
+    private void runScheduler(LocalDateTime now) {
+        runScheduler(now, mock(ExamRetryStore.class), mock(ExamRetryService.class));
+    }
+
+    private void runScheduler(LocalDateTime now, ExamRetryStore store, ExamRetryService retry) {
+        var locks = mock(ExtensibleLockProvider.class);
+        given(locks.lock(org.mockito.ArgumentMatchers.any())).willReturn(Optional.of(mock(SimpleLock.class)));
+        var scheduler
+            = new ContestOperationReconciliationScheduler(
+                jdbc,
+                store,
+                retry,
+                reconciliation,
+                mock(ResourceGuardReconciliation.class),
+                Clock.fixed(now.atZone(ClockConfiguration.SERVICE_ZONE).toInstant(), ClockConfiguration.SERVICE_ZONE),
+                new SimpleMeterRegistry(),
+                locks
+            );
+        try {
+            scheduler.run();
+        } finally {
+            scheduler.stopRenewals();
+        }
     }
 
     private String state() {
