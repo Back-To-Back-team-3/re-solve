@@ -707,9 +707,6 @@ class StudyOperationServiceTest {
                 .findByStudyIdAndRoleAndStatus(STUDY_ID, MembershipRole.LEADER, MembershipStatus.APPROVED)
         ).willReturn(Optional.of(leaderMembership));
         given(contestExamClient.hasActiveExams(STUDY_ID)).willReturn(false);
-        given(studyClosePersistService.doCloseStudy(anyLong(), anyLong(), any(), any()))
-            .willReturn(new StudyCloseResponse(String.valueOf(STUDY_ID)));
-
         // when
         StudyCloseResponse result = studyOperationService.closeStudy(STUDY_ID, LEADER_ID, "corr-1");
 
@@ -791,11 +788,6 @@ class StudyOperationServiceTest {
         // given
         given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
         given(contestExamClient.hasActiveExams(STUDY_ID)).willReturn(false);
-        given(
-            studyClosePersistService
-                .doForceCloseStudy(anyLong(), anyLong(), anyLong(), any(), any(), any(), any(), any())
-        ).willReturn(new StudyCloseResponse(String.valueOf(STUDY_ID)));
-
         // when
         StudyCloseResponse result
             = studyOperationService

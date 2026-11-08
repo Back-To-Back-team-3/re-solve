@@ -11,11 +11,11 @@ import com.backtoback.study.assignment.repository.AssignmentRepository;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.membership.domain.MembershipStatus;
+import com.backtoback.study.membership.domain.Study;
 import com.backtoback.study.membership.repository.StudyMemberQuotaRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
 import com.backtoback.study.operation.domain.AuditLog;
-import com.backtoback.study.operation.dto.StudyCloseResponse;
 import com.backtoback.study.operation.repository.AuditLogRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -39,23 +39,23 @@ public class StudyClosePersistService {
      * 스터디 종료 연쇄 효과를 트랜잭션 안에서 원자적으로 적용한다(API 명세서 §5.3.4).
      */
     @Transactional
-    public StudyCloseResponse doCloseStudy(Long studyId, Long studyVersion, String correlationId, LocalDateTime now) {
+    public void doCloseStudy(Long studyId, String correlationId, LocalDateTime now) {
         int rows = studyRepository.closeStudyIfNotClosed(studyId);
         if (rows == 0) {
             throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
         }
-        applyCloseEffects(studyId, studyVersion, correlationId, now);
-        return new StudyCloseResponse(String.valueOf(studyId));
+        Study study
+            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        applyCloseEffects(studyId, study.getVersion(), correlationId, now);
     }
 
     /**
      * 관리자 강제 종료 연쇄 효과를 트랜잭션 안에서 원자적으로 적용한다(API 명세서 §5.6.1).
      */
     @Transactional
-    public StudyCloseResponse doForceCloseStudy(
+    public void doForceCloseStudy(
         Long studyId,
         Long actorId,
-        Long studyVersion,
         String beforeStateJson,
         String reason,
         String clientIp,
@@ -66,9 +66,10 @@ public class StudyClosePersistService {
         if (rows == 0) {
             throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
         }
-        applyCloseEffects(studyId, studyVersion, correlationId, now);
+        Study study
+            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        applyCloseEffects(studyId, study.getVersion(), correlationId, now);
         auditLogRepository.save(AuditLog.forceStudyClosed(actorId, studyId, beforeStateJson, reason, clientIp, now));
-        return new StudyCloseResponse(String.valueOf(studyId));
     }
 
     private void applyCloseEffects(Long studyId, Long studyVersion, String correlationId, LocalDateTime now) {
@@ -86,7 +87,7 @@ public class StudyClosePersistService {
                 "v1",
                 String.valueOf(studyId),
                 correlationId,
-                new StudyClosedPayload(studyId, studyVersion + 1, now)
+                new StudyClosedPayload(studyId, studyVersion, now)
             );
     }
 }

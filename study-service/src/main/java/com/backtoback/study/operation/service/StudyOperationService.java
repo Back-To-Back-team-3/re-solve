@@ -302,7 +302,8 @@ public class StudyOperationService {
         }
         LocalDateTime now
             = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
-        return studyClosePersistService.doCloseStudy(studyId, study.getVersion(), correlationId, now);
+        studyClosePersistService.doCloseStudy(studyId, correlationId, now);
+        return new StudyCloseResponse(String.valueOf(studyId));
     }
 
     /**
@@ -328,17 +329,17 @@ public class StudyOperationService {
         }
         LocalDateTime now
             = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
-        return studyClosePersistService
+        studyClosePersistService
             .doForceCloseStudy(
                 studyId,
                 actorId,
-                study.getVersion(),
                 buildBeforeStateJson(study),
                 request.reason(),
                 clientIp,
                 correlationId,
                 now
             );
+        return new StudyCloseResponse(String.valueOf(studyId));
     }
 
     private String buildBeforeStateJson(Study study) {
