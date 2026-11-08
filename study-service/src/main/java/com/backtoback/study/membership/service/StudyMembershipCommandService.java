@@ -515,8 +515,12 @@ public class StudyMembershipCommandService {
             quotaRepository.decrementIfAboveZero(target.getMemberId());
             studyRepository.leaveAndAutoReopen(studyId);
         }
+        // ③ MANAGER 역할이면 manager_count 감소 (CLOSED 여부 무관)
+        if (target.getRole() == MembershipRole.MANAGER) {
+            studyRepository.decrementManagerCount(studyId);
+        }
 
-        // ③ membership
+        // ④ membership
         if (membershipRepository.removeIfApproved(target.getId(), reason, now) == 0) {
             membershipRepository
                 .findById(target.getId())
@@ -573,6 +577,10 @@ public class StudyMembershipCommandService {
         if (study.getStatus() != StudyStatus.CLOSED) {
             quotaRepository.decrementIfAboveZero(memberId);
             studyRepository.leaveAndAutoReopen(studyId);
+        }
+        // ③ MANAGER 역할이면 manager_count 감소 (CLOSED 여부 무관)
+        if (membership.getRole() == MembershipRole.MANAGER) {
+            studyRepository.decrementManagerCount(studyId);
         }
 
         if (membershipRepository.leaveIfApproved(membership.getId(), now) == 0) {
