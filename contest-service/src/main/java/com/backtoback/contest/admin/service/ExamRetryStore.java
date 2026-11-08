@@ -46,7 +46,7 @@ public class ExamRetryStore {
             return existing;
         }
         var receipt = receipt(examId, receiptId);
-        if (exam.getStatus() == ExamStatus.FINALIZED || !"FAILED".equals(receipt.status())
+        if (exam.getStatus() == ExamStatus.FINALIZED || !"FAILED".equals(receipt.status()) || receipt.zeroConfirmed()
             || receipt.submissionId() == null || receipt.attempt() == null
             || !receipt.attempt().equals(request.expectedJudgeAttempt()) || receipt.attempt() == Integer.MAX_VALUE) {
             throw new ContestException(ContestErrorCode.REJUDGE_NOT_ALLOWED);
@@ -211,12 +211,13 @@ public class ExamRetryStore {
         var rows
             = jdbc
                 .query(
-                    "SELECT submission_id,judge_attempt,status FROM exam_submissions "
+                    "SELECT submission_id,judge_attempt,status,is_zero_confirmed FROM exam_submissions "
                         + "WHERE exam_id=? AND id=? FOR UPDATE",
                     (rs, row) -> new Receipt(
                         rs.getObject(1, Long.class),
                         rs.getObject(2, Integer.class),
-                        rs.getString(3)
+                        rs.getString(3),
+                        rs.getBoolean(4)
                     ),
                     examId,
                     receiptId
@@ -276,7 +277,7 @@ public class ExamRetryStore {
         LocalDateTime updatedAt
     ) {
     }
-    private record Receipt(Long submissionId, Integer attempt, String status) {
+    private record Receipt(Long submissionId, Integer attempt, String status, boolean zeroConfirmed) {
     }
     private record HashInput(long examId, long receiptId, long actorId, int attempt, String reason) {
     }

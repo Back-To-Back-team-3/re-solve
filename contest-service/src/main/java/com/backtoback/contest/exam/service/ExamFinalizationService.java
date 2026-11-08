@@ -13,6 +13,7 @@ import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
@@ -45,9 +46,34 @@ public class ExamFinalizationService {
         if (exam == null || exam.getStatus() != ExamStatus.CLOSED || blocked(examId)) {
             return false;
         }
+        saveSnapshot(examId, exam.getResultRevision(), false);
+        return true;
+    }
+
+    /**
+     * 관리자 작업 트랜잭션에서 확정된 시험의 기존 유효 제출만 다시 집계한다.
+     * 이전 스냅샷과 최초 확정 시각을 보존하고 새 결과와 이벤트를 저장한다.
+     *
+     * @param examId 부모 시험 ID
+     * @param expectedRevision 관리자가 확인한 이전 결과 버전
+     * @return 새 결과 버전의 불변 스냅샷
+     * @throws IllegalStateException 상태·버전이 일치하지 않거나 미종결 작업이 남은 경우
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Snapshot refinalize(long examId, long expectedRevision) {
+        var exam = exams.findForUpdate(examId).orElseThrow();
+        if (exam.getStatus() != ExamStatus.FINALIZED || exam.getResultRevision() != expectedRevision
+            || blocked(examId)) {
+            throw new IllegalStateException("Exam is not ready for refinalization");
+        }
+        return saveSnapshot(examId, expectedRevision, true);
+    }
+
+    /** 최초 확정과 재확정이 동일한 DB 집계 및 스냅샷 경로를 사용한다. */
+    private Snapshot saveSnapshot(long examId, long previousRevision, boolean refinalized) {
         var now
             = LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MICROS), ClockConfiguration.SERVICE_ZONE);
-        long revision = Math.incrementExact(exam.getResultRevision());
+        long revision = Math.incrementExact(previousRevision);
         var problems
             = jdbc
                 .query(
@@ -142,8 +168,8 @@ public class ExamFinalizationService {
             );
         jdbc
             .update(
-                "UPDATE exams SET status='FINALIZED',result_revision=?,finalized_at=?,version=version+1,"
-                    + "updated_at=? WHERE id=?",
+                "UPDATE exams SET status='FINALIZED',result_revision=?,finalized_at=COALESCE(finalized_at,?),"
+                    + "version=version+1," + "updated_at=? WHERE id=?",
                 revision,
                 now,
                 now,
@@ -162,11 +188,11 @@ public class ExamFinalizationService {
                     Long.toString(examId),
                     revision,
                     format(now),
-                    false,
+                    refinalized,
                     participants.stream().map(p -> Long.toString(p.memberId())).toList()
                 )
             );
-        return true;
+        return payload;
     }
 
     /** 진행·미확인 관리자 작업과 미종결 접수 중 하나라도 있으면 보류한다. */
