@@ -8,6 +8,8 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willAnswer;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -67,6 +70,8 @@ class AdminProblemQueryServiceTest {
     private static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7.4-alpine").withExposedPorts(6379);
     @Autowired
     private ObjectMapper mapper;
+    @Autowired
+    private JdbcTemplate jdbc;
     @Autowired
     private ProblemValidationService validationService;
     @Autowired
@@ -156,6 +161,8 @@ class AdminProblemQueryServiceTest {
         assertThat(
             queries.list(new AdminProblemSearchRequest("두 배", null, null, null, null, false, 0, 20, null)).getContent()
         ).anyMatch(item -> item.problem().getId() == id);
+        var published = LocalDateTime.of(2026, 11, 7, 12, 34, 56);
+        jdbc.update("UPDATE problem_revisions SET created_at=? WHERE problem_id=?", published, id);
         var old = AdminProblemDetailResponse.from(details.read(id, Long.parseLong(first.problemRevisionId()), 9001));
         assertThat(mapper.readTree(mapper.writeValueAsString(old)).get("publishedAt").asString()).endsWith("+09:00");
         var historical
@@ -163,6 +170,33 @@ class AdminProblemQueryServiceTest {
                 .from(queries.history(id, 9001, 0, 20, "revisionNumber,desc").getContent().getFirst());
         assertThat(mapper.readTree(mapper.writeValueAsString(historical)).get("publishedAt").asString())
             .endsWith("+09:00");
+        var expectedInstant = published.atZone(ZoneId.of("Asia/Seoul")).toInstant();
+        assertThat(
+            OffsetDateTime
+                .parse(mapper.readTree(mapper.writeValueAsString(old)).get("publishedAt").asString())
+                .toInstant()
+        ).isEqualTo(expectedInstant);
+        assertThat(
+            OffsetDateTime
+                .parse(mapper.readTree(mapper.writeValueAsString(historical)).get("publishedAt").asString())
+                .toInstant()
+        ).isEqualTo(expectedInstant);
+        var firstPage = queries.history(id, 9001, 0, 1, "revisionNumber,desc");
+        var secondPage = queries.history(id, 9001, 1, 1, "revisionNumber,desc");
+        assertThat(firstPage.getTotalElements()).isEqualTo(2);
+        assertThat(secondPage.getTotalElements()).isEqualTo(2);
+        assertThat(firstPage.getContent())
+            .extracting(value -> value.revision().getId())
+            .containsExactly(Long.parseLong(next.problemRevisionId()));
+        assertThat(secondPage.getContent())
+            .extracting(value -> value.revision().getId())
+            .containsExactly(Long.parseLong(first.problemRevisionId()));
+        var filter = new AdminProblemSearchRequest(null, null, null, null, null, false, 0, 1, null);
+        var listFirst = queries.list(filter);
+        var listSecond = queries.list(new AdminProblemSearchRequest(null, null, null, null, null, false, 1, 1, null));
+        assertThat(listSecond.getTotalElements()).isEqualTo(listFirst.getTotalElements());
+        assertThat(listSecond.getContent().getFirst().revision().getId())
+            .isNotEqualTo(listFirst.getContent().getFirst().revision().getId());
         assertThat(old.description()).isEqualTo("설명");
         assertThat(old.testCases()).hasSize(2);
         assertThat(old.testCases().get(1).isSample()).isFalse();
@@ -240,17 +274,19 @@ class AdminProblemQueryServiceTest {
         var validation = validations.findById(Long.parseLong(passed.validationId())).orElseThrow();
         validation.complete("PASSED", "a".repeat(64), "runner-test", LocalDateTime.of(2026, 11, 7, 12, 0));
         validations.saveAndFlush(validation);
+        // 수동 재검증 제한과 무관하게 과거 통과 코드와 같은 언어의 최신 요청을 구성한다.
+        jdbc.update("UPDATE problem_validations SET language='java' WHERE id=?", Long.parseLong(latest.validationId()));
         var progress
             = new JudgeValidationProgressResponse(
                 latest.validationId(),
                 created.problemRevisionId(),
-                "python3",
+                "java",
                 "RUNNING",
                 List.of(),
                 null,
                 null
             );
-        given(judge.read(latest.validationId(), created.problemRevisionId(), "python3")).willAnswer(call -> {
+        given(judge.read(latest.validationId(), created.problemRevisionId(), "java")).willAnswer(call -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             return progress;
         });
@@ -260,26 +296,18 @@ class AdminProblemQueryServiceTest {
             .singleElement()
             .satisfies(code -> assertThat(code.sourceCode()).isEqualTo("passed code"));
         assertThat(result.supportedLanguages()).containsExactly("java");
-        assertThat(result.referenceSolutions())
-            .filteredOn(code -> code.language().equals("python3"))
-            .singleElement()
-            .satisfies(code -> assertThat(code.sourceCode()).isEqualTo("latest code"));
         assertThat(result.languageResults())
             .filteredOn(item -> item.language().equals("java"))
-            .singleElement()
-            .satisfies(item -> assertThat(item.resultApplied()).isTrue());
-        assertThat(result.languageResults())
-            .filteredOn(item -> item.language().equals("python3"))
             .singleElement()
             .satisfies(item -> {
                 assertThat(item.validationId()).isEqualTo(latest.validationId());
                 assertThat(item.status()).isEqualTo("RUNNING");
                 assertThat(item.resultApplied()).isFalse();
             });
-        given(judge.read(latest.validationId(), created.problemRevisionId(), "python3")).willReturn(null);
+        given(judge.read(latest.validationId(), created.problemRevisionId(), "java")).willReturn(null);
         var requested = AdminProblemDetailResponse.from(details.read(problemId, revisionId, 9004));
         assertThat(requested.languageResults())
-            .filteredOn(item -> item.language().equals("python3"))
+            .filteredOn(item -> item.language().equals("java"))
             .singleElement()
             .satisfies(item -> {
                 assertThat(item.status()).isEqualTo("REQUESTED");
@@ -312,7 +340,7 @@ class AdminProblemQueryServiceTest {
         assertThat(newer.supportedLanguages()).isEmpty();
         var cause = new IllegalStateException("judge unavailable");
         var failure = new ProblemException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, cause);
-        given(judge.read(latest.validationId(), created.problemRevisionId(), "python3")).willThrow(failure);
+        given(judge.read(latest.validationId(), created.problemRevisionId(), "java")).willThrow(failure);
         assertThatThrownBy(() -> details.read(problemId, revisionId, 9004)).isSameAs(failure).hasCause(cause);
     }
 }

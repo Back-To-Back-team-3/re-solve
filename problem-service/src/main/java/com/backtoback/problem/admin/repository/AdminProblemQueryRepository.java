@@ -1,6 +1,8 @@
 package com.backtoback.problem.admin.repository;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -81,4 +83,45 @@ public class AdminProblemQueryRepository {
             count.getSingleResult()
         );
     }
+
+    /**
+     * 페이지에 포함된 문제의 사용 회차를 한 번에 조회한다.
+     *
+     * @param problemIds 페이지의 문제 식별자
+     * @return 통과한 최신 회차 식별자
+     */
+    public Map<Long, Long> currentRevisions(List<Long> problemIds) {
+        if (problemIds.isEmpty()) {
+            return Map.of();
+        }
+        var rows = entityManager.createQuery("""
+            select r.problemId, r.id from ProblemRevision r where r.problemId in :ids
+            and r.revisionNumber=(select max(passed.revisionNumber) from ProblemRevision passed
+                where passed.problemId=r.problemId and exists (select v.id from ProblemValidation v
+                    where v.problemRevisionId=passed.id and v.resultStatus='PASSED'))
+            """, Object[].class).setParameter("ids", problemIds).getResultList();
+        Map<Long, Long> result = new HashMap<>();
+        rows.forEach(row -> result.put((Long)row[0], (Long)row[1]));
+        return result;
+    }
+
+    /**
+     * 페이지 회차들의 통과 언어를 일괄 조회한다.
+     *
+     * @param revisionIds 페이지의 회차 식별자
+     * @return 언어 이름순 통과 언어
+     */
+    public Map<Long, List<String>> languages(List<Long> revisionIds) {
+        if (revisionIds.isEmpty()) {
+            return Map.of();
+        }
+        var rows = entityManager.createQuery("""
+            select distinct v.problemRevisionId, v.language from ProblemValidation v
+            where v.problemRevisionId in :ids and v.resultStatus='PASSED' order by v.language
+            """, Object[].class).setParameter("ids", revisionIds).getResultList();
+        Map<Long, List<String>> result = new HashMap<>();
+        rows.forEach(row -> result.computeIfAbsent((Long)row[0], ignored -> new ArrayList<>()).add((String)row[1]));
+        return result;
+    }
+
 }

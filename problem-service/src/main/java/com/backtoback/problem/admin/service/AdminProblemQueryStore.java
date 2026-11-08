@@ -3,6 +3,7 @@ package com.backtoback.problem.admin.service;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -54,7 +55,7 @@ public class AdminProblemQueryStore {
      */
     @Transactional(readOnly = true)
     public Page<Summary> list(AdminProblemSearchRequest filter) {
-        return query.search(filter).map(revision -> summary(problem(revision.getProblemId()), revision));
+        return summaries(query.search(filter));
     }
 
     /**
@@ -78,7 +79,7 @@ public class AdminProblemQueryStore {
         var problem = owned(problemId, author);
         var pageable
             = PageRequest.of(page, size, Sort.by(Sort.Direction.fromString(sort.split(",")[1]), "revisionNumber"));
-        return revisions.findByProblemId(problemId, pageable).map(revision -> summary(problem, revision));
+        return summaries(revisions.findByProblemId(problem.getId(), pageable));
     }
 
     /**
@@ -112,7 +113,7 @@ public class AdminProblemQueryStore {
                 new File(test.getObjectKey(), test.getObjectVersion(), test.getSha256(), test.getSizeBytes())
             );
         }).toList();
-        var history = validations.findByProblemRevisionIdOrderByIdDesc(revision.getId());
+        var history = validations.findDisplayValidations(revision.getId());
         var latest = new LinkedHashMap<String, ProblemValidation>();
         var selected = new LinkedHashMap<String, ProblemValidation>();
         history.forEach(value -> {
@@ -146,6 +147,29 @@ public class AdminProblemQueryStore {
             cases,
             List.copyOf(languages)
         );
+    }
+
+    /**
+     * 페이지의 문제·사용 회차·통과 언어를 일괄 조회해 조합한다.
+     *
+     * @param page 조회된 회차 페이지
+     * @return 원래 순서와 전체 건수를 유지한 메타데이터
+     */
+    private Page<Summary> summaries(Page<ProblemRevision> page) {
+        var problemIds = page.stream().map(ProblemRevision::getProblemId).distinct().toList();
+        var owners
+            = problems.findAllById(problemIds).stream().collect(Collectors.toMap(Problem::getId, value -> value));
+        var current = query.currentRevisions(problemIds);
+        var languages = query.languages(page.stream().map(ProblemRevision::getId).toList());
+        return page
+            .map(
+                revision -> new Summary(
+                    owners.get(revision.getProblemId()),
+                    revision,
+                    current.get(revision.getProblemId()),
+                    languages.getOrDefault(revision.getId(), List.of())
+                )
+            );
     }
 
     /**
