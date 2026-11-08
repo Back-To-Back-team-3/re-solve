@@ -505,6 +505,7 @@ class StudyOperationServiceTest {
             membershipRepository.findByIdAndStudyIdAndStatus(TARGET_MEMBERSHIP_ID, STUDY_ID, MembershipStatus.APPROVED)
         ).willReturn(Optional.of(managerMembership()));
         given(membershipRepository.demoteLeader(LEADER_MEMBERSHIP_ID)).willReturn(1);
+        given(membershipRepository.promoteToLeader(TARGET_MEMBERSHIP_ID)).willReturn(1);
 
         // when
         LeaderDelegationResponse result = studyOperationService.delegateLeader(STUDY_ID, LEADER_ID, request);
@@ -529,6 +530,7 @@ class StudyOperationServiceTest {
             membershipRepository.findByIdAndStudyIdAndStatus(TARGET_MEMBERSHIP_ID, STUDY_ID, MembershipStatus.APPROVED)
         ).willReturn(Optional.of(memberMembership()));
         given(membershipRepository.demoteLeader(LEADER_MEMBERSHIP_ID)).willReturn(1);
+        given(membershipRepository.promoteToLeader(TARGET_MEMBERSHIP_ID)).willReturn(1);
 
         // when
         studyOperationService.delegateLeader(STUDY_ID, LEADER_ID, request);
@@ -557,6 +559,30 @@ class StudyOperationServiceTest {
             .isInstanceOfSatisfying(
                 StudyException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
+            );
+    }
+
+    @Test
+    @DisplayName("§5.3.3 promoteToLeader 0행이면 STUDY_MEMBERSHIP_NOT_FOUND 예외를 던진다")
+    void delegateLeader_promoteRows0_throwsMembershipNotFound() {
+        // given
+        LeaderDelegationRequest request = new LeaderDelegationRequest(TARGET_MEMBERSHIP_ID);
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+        given(
+            membershipRepository
+                .findByStudyIdAndRoleAndStatus(STUDY_ID, MembershipRole.LEADER, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(leaderMembership));
+        given(
+            membershipRepository.findByIdAndStudyIdAndStatus(TARGET_MEMBERSHIP_ID, STUDY_ID, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(memberMembership()));
+        given(membershipRepository.demoteLeader(LEADER_MEMBERSHIP_ID)).willReturn(1);
+        given(membershipRepository.promoteToLeader(TARGET_MEMBERSHIP_ID)).willReturn(0);
+
+        // when & then
+        assertThatThrownBy(() -> studyOperationService.delegateLeader(STUDY_ID, LEADER_ID, request))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND)
             );
     }
 

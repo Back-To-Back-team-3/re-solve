@@ -204,5 +204,5 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
             + "WHERE id = :membershipId AND status = 'APPROVED'",
         nativeQuery = true
     )
-    void promoteToLeader(@Param("membershipId") Long membershipId);
+    int promoteToLeader(@Param("membershipId") Long membershipId);
 }

@@ -215,7 +215,10 @@ public class StudyOperationService {
         if (demoted == 0) {
             throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
         }
-        membershipRepository.promoteToLeader(target.getId());
+        int promoted = membershipRepository.promoteToLeader(target.getId());
+        if (promoted == 0) {
+            throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND);
+        }
 
         if (prevTargetRole == MembershipRole.MEMBER) {
             studyRepository.incrementManagerCountForDelegation(studyId);
