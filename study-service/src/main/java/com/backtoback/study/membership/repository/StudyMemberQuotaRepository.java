@@ -56,7 +56,7 @@ public interface StudyMemberQuotaRepository extends JpaRepository<StudyMemberQuo
     @Modifying(clearAutomatically = true)
     @Query(
         value = "UPDATE study_member_quotas SET active_count = active_count - 1, updated_at = NOW(6) "
-            + "WHERE member_id IN :memberIds",
+            + "WHERE member_id IN :memberIds AND active_count > 0",
         nativeQuery = true
     )
     void decrementActiveCountBatch(@Param("memberIds") List<Long> memberIds);
