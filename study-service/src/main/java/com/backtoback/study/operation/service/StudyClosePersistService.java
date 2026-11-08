@@ -1,6 +1,7 @@
 package com.backtoback.study.operation.service;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -87,7 +88,7 @@ public class StudyClosePersistService {
                 "v1",
                 String.valueOf(studyId),
                 correlationId,
-                new StudyClosedPayload(studyId, studyVersion, now)
+                new StudyClosedPayload(studyId, studyVersion, now.atOffset(ZoneOffset.of("+09:00")))
             );
     }
 }
