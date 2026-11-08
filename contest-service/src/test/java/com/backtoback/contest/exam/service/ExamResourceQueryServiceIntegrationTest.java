@@ -73,7 +73,10 @@ class ExamResourceQueryServiceIntegrationTest extends ExamIntegrationTestSupport
 
         var first = queries.hintBlocks("7", null, 1);
         assertThat(first.hasMore()).isTrue();
-        assertThat(queries.hintBlocks("7", first.nextCursor(), 1).items()).hasSize(1);
+        var second = queries.hintBlocks("7", first.nextCursor(), 1);
+        assertThat(second.items()).hasSize(1);
+        assertThat(second.items().getFirst().contextId()).isEqualTo(Long.toString(secondExam));
+        assertThat(second.items().getFirst().participantId()).isNotEqualTo(Long.toString(participantId));
         assertThatThrownBy(() -> queries.hintBlocks("8", first.nextCursor(), 1))
             .isInstanceOf(com.backtoback.contest.global.error.ContestException.class);
     }
