@@ -221,7 +221,10 @@ public class StudyOperationService {
         }
 
         if (prevTargetRole == MembershipRole.MEMBER) {
-            studyRepository.incrementManagerCountForDelegation(studyId);
+            int rows = studyRepository.incrementManagerCountIfNotFull(studyId);
+            if (rows == 0) {
+                throw new StudyException(StudyErrorCode.STUDY_MANAGER_LIMIT_EXCEEDED);
+            }
         }
 
         LocalDateTime now

@@ -512,7 +512,7 @@ class StudyOperationServiceTest {
 
         // then
         assertThat(result.leaderMembershipId()).isEqualTo(String.valueOf(TARGET_MEMBERSHIP_ID));
-        verify(studyRepository, never()).incrementManagerCountForDelegation(anyLong());
+        verify(studyRepository, never()).incrementManagerCountIfNotFull(anyLong());
         verify(historyRepository, never()).save(null);
     }
 
@@ -531,12 +531,38 @@ class StudyOperationServiceTest {
         ).willReturn(Optional.of(memberMembership()));
         given(membershipRepository.demoteLeader(LEADER_MEMBERSHIP_ID)).willReturn(1);
         given(membershipRepository.promoteToLeader(TARGET_MEMBERSHIP_ID)).willReturn(1);
+        given(studyRepository.incrementManagerCountIfNotFull(STUDY_ID)).willReturn(1);
 
         // when
         studyOperationService.delegateLeader(STUDY_ID, LEADER_ID, request);
 
         // then
-        verify(studyRepository).incrementManagerCountForDelegation(STUDY_ID);
+        verify(studyRepository).incrementManagerCountIfNotFull(STUDY_ID);
+    }
+
+    @Test
+    @DisplayName("§5.3.3 운영진 2명인 스터디에서 MEMBER 위임 시 STUDY_MANAGER_LIMIT_EXCEEDED 예외를 던진다")
+    void delegateLeader_toMemberWhenManagerFull_throwsManagerLimitExceeded() {
+        // given
+        LeaderDelegationRequest request = new LeaderDelegationRequest(TARGET_MEMBERSHIP_ID);
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+        given(
+            membershipRepository
+                .findByStudyIdAndRoleAndStatus(STUDY_ID, MembershipRole.LEADER, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(leaderMembership));
+        given(
+            membershipRepository.findByIdAndStudyIdAndStatus(TARGET_MEMBERSHIP_ID, STUDY_ID, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(memberMembership()));
+        given(membershipRepository.demoteLeader(LEADER_MEMBERSHIP_ID)).willReturn(1);
+        given(membershipRepository.promoteToLeader(TARGET_MEMBERSHIP_ID)).willReturn(1);
+        given(studyRepository.incrementManagerCountIfNotFull(STUDY_ID)).willReturn(0);
+
+        // when & then
+        assertThatThrownBy(() -> studyOperationService.delegateLeader(STUDY_ID, LEADER_ID, request))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_MANAGER_LIMIT_EXCEEDED)
+            );
     }
 
     @Test

@@ -111,15 +111,4 @@ public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecific
     )
     void decrementManagerCount(@Param("studyId") Long studyId);
 
-    /**
-     * 스터디장 위임에서 대상이 MEMBER인 경우 manager_count를 무조건 증가한다(API 명세서 §5.3.3).
-     * 상한 초과가 허용되며 version을 1 올린다.
-     */
-    @Modifying(clearAutomatically = true)
-    @Query(
-        value = "UPDATE studies SET manager_count = manager_count + 1, version = version + 1, updated_at = NOW(6) "
-            + "WHERE id = :studyId",
-        nativeQuery = true
-    )
-    void incrementManagerCountForDelegation(@Param("studyId") Long studyId);
 }
