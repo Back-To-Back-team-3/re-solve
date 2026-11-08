@@ -225,6 +225,8 @@ public class StudyOperationService {
             if (rows == 0) {
                 throw new StudyException(StudyErrorCode.STUDY_MANAGER_LIMIT_EXCEEDED);
             }
+        } else {
+            studyRepository.bumpVersion(studyId);
         }
 
         LocalDateTime now

@@ -111,4 +111,15 @@ public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecific
     )
     void decrementManagerCount(@Param("studyId") Long studyId);
 
+    /**
+     * manager_count 변경 없이 version만 증가한다(API 명세서 §5.3.3 MANAGER 대상 위임).
+     * MANAGER에게 위임하면 net manager_count가 0이지만 스터디 상태 변경으로 version은 올린다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE studies SET version = version + 1, updated_at = NOW(6) WHERE id = :studyId",
+        nativeQuery = true
+    )
+    void bumpVersion(@Param("studyId") Long studyId);
+
 }

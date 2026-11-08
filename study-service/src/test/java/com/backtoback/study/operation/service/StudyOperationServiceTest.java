@@ -513,6 +513,7 @@ class StudyOperationServiceTest {
         // then
         assertThat(result.leaderMembershipId()).isEqualTo(String.valueOf(TARGET_MEMBERSHIP_ID));
         verify(studyRepository, never()).incrementManagerCountIfNotFull(anyLong());
+        verify(studyRepository).bumpVersion(STUDY_ID);
         verify(historyRepository, never()).save(null);
     }
 
