@@ -7172,7 +7172,9 @@
 
 #### 4.6.7 관리자 작업 상태 조회
 
-- **Method / URI:** `GET /api/v1/admin/contest-operations/{operationId}` / `GET /api/v1/exams/{examId}/operations/{operationId}`
+- **Method / URI:**
+    - 관리자: `GET /api/v1/admin/contest-operations?operationId={operationId}`, `GET /api/v1/admin/contest-operations/{operationId}`
+    - 시험 운영자: `GET /api/v1/exams/{examId}/operations?operationId={operationId}`, `GET /api/v1/exams/{examId}/operations/{operationId}`
 - **인증:** 관리자 경로는 `ADMIN` 전용. 시험 경로는 해당 시험 스터디의 현재 `LEADER`·`MANAGER` 전용이며 본인이 요청한 해당 시험의 `EXAM_RETRY` 작업만 조회한다. C가 작업 소유자·시험·D 구성원 권한을 재검증한다.
 - **대응 테이블:** `contest_admin_operations`
 - **설명:** 관리자 작업 상태 조회
@@ -7188,7 +7190,7 @@
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `examId` | string | 시험 경로에서 Y | — | Path · 시험 ID 문자열 |
-    | `operationId` | string | Y | — | Path · 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | — | Query 또는 Path · 호출자 생성 멱등 작업 ID. 1~100자. `/`가 포함된 ID는 URL 인코딩한 쿼리 값으로 전달한다. |
 - **요청 본문:** 없음
 - **응답 헤더:**
     
@@ -7445,7 +7447,7 @@
     - STUDY는 ready=true일 때만 완료한다.
     - `StudyClosed`와 `ProblemStateChanged`는 같은 완료 처리를 복구한다.
     - `MemberWithdrawn`은 탈퇴 상태와 원천 버전을 반영한다. `PREPARED`인 회원 가드는 유지하며, 대사로 복구할 때는 §1.7.3에서 같은 `operationId`의 `COMMITTED` 결과와 완료 버전을 확인한 뒤 종결한다.
-    - **cancel:** 소유 서비스가 작업을 실행하지 않았음(`ABORTED`)을 확정한 뒤 취소한다. OPEN에서 준비한 작업은 OPEN으로 복귀한다. PROBLEM의 BLOCKED에서 후속 보관을 준비했으면 prepared_from_state=BLOCKED로 복원하고 operation_result=ABORTED를 보존한다.
+    - **cancel:** 소유 서비스가 작업을 실행하지 않았음(`ABORTED`)을 확정한 뒤 취소한다. OPEN에서 준비한 작업은 OPEN으로 복귀하되 MEMBER의 더 최신 탈퇴 상태는 BLOCKED로 보존한다. PROBLEM의 BLOCKED에서 후속 보관을 준비했으면 prepared_from_state=BLOCKED로 복원하고 operation_result=ABORTED를 보존한다.
     - 반복 complete/cancel은 같은 operationResult와 상태를 반환한다. 취소는 현재 작업의 ABORTED 확인과 원래 기대 버전을 요구한다. 더 최신 원천 상태가 있으면 GENERAL·PUBLIC만 OPEN, PRIVATE·ARCHIVED는 BLOCKED이며, 그 외에는 준비 전 상태로 복원한다. 원천 버전은 감소시키지 않는다.
     - 이미 완료된 작업은 취소 불가(409 OPERATION_ALREADY_COMPLETED). 스터디 준비로 취소된 시험을 자동 복원하지 않는다.
     - **응답 조건:** 반복 완료·취소는 같은 결과 반환. 오래된 작업 ID는 409 OPERATION_NOT_CURRENT.

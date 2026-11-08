@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.common.api.ApiResponse;
@@ -55,5 +56,24 @@ public class ExamRetryController {
         @AuthenticationPrincipal GatewayUser user
     ) {
         return ResponseEntity.ok(ApiResponse.success(null, service.examOperation(examId, operationId, user)));
+    }
+
+    /** API 명세서 §4.6.7 관리자 작업 상태 조회 — 경로에 담을 수 없는 작업 ID도 조회한다. */
+    @GetMapping("/api/v1/admin/contest-operations")
+    public ResponseEntity<ApiResponse<ContestOperationResponse>> adminOperationById(
+        @RequestParam String operationId,
+        @AuthenticationPrincipal GatewayUser user
+    ) {
+        return adminOperation(operationId, user);
+    }
+
+    /** API 명세서 §4.6.7 시험 작업 상태 조회 — 기존 시험·요청자 권한을 적용한다. */
+    @GetMapping("/api/v1/exams/{examId}/operations")
+    public ResponseEntity<ApiResponse<ContestOperationResponse>> examOperationById(
+        @PathVariable String examId,
+        @RequestParam String operationId,
+        @AuthenticationPrincipal GatewayUser user
+    ) {
+        return examOperation(examId, operationId, user);
     }
 }
