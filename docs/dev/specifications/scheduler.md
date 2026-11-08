@@ -659,7 +659,7 @@
 | --- | --- |
 | 소유 서비스·패키지 | `contest-service` / `operation` |
 | 실행 방식 | `fixedDelay = 5분`, `initialDelay = 5분` |
-| 잠금 | ShedLock `ContestOperationReconciliationScheduler`. §4.0 임대·행 잠금 순서 적용 |
+| 잠금 | ShedLock `ContestOperationReconciliationScheduler`. 실행 중 30초 임대를 갱신한다. §4.0 행 잠금 순서 적용 |
 | 한 회차 처리량 | 페이지당 100건, 20초 뒤 새 선정 중단. 남은 대상은 다음 회차 |
 | 트랜잭션 경계 | 원격 확인 후 관리자 작업·접수 또는 가드·감사를 새 트랜잭션에 반영 |
 | 대상 조회 | 생성·갱신 후 1분 이상 미종결 원격 관리자 작업과 PREPARED 가드 |
@@ -669,7 +669,7 @@
 
 **동작:**
 
-1. EXAM_RETRY는 같은 operationId·expectedJudgeAttempt로 B 계약(API §3.3.7)을 재요청하고 접수 상태를 대사한다. 응답 유실로 새 operationId를 만들지 않는다.
+1. EXAM_RETRY는 오래 갱신되지 않은 작업부터 선택하고 조회 전에 확인 시각을 기록한다. 순회 위치는 한 회차에서만 사용하므로 확인 시각 저장에 실패한 작업도 다음 회차에 다시 선택된다. 같은 operationId·expectedJudgeAttempt로 B 계약(API §3.3.7)을 재요청하고 접수 상태를 대사한다. 응답 유실로 새 operationId를 만들지 않는다.
 2. 성공 목표를 targetJudgeAttempt에 저장한다. 마지막 반영 judge_attempt보다 큰 목표일 때만 REQUESTED·is_zero_confirmed=false로 전이하고 judge_attempt는 유지한다. 이미 목표 이상 결과가 반영됐으면 상태·판정을 보존한다.
 3. 확인된 작업 SUCCEEDED·감사 로그를 함께 저장한다. B가 동일 작업 미실행 실패를 확정하면 FAILED·마지막 오류로 종결한다. 타임아웃·5xx·조회 실패는 미실행 증거가 아니다.
 4. CONTEST_CREATE는 같은 대회·고정 회차·선택 버전·설정 관리자로 미확인 B 연결을 재요청한다. 전체 확인은 SUCCEEDED, 확정 거절·미완료 상태의 시작 시각 경과는 대회 CANCELED·FAILED·감사·취소 Outbox로 함께 종결한다. 해당 작업 SUCCEEDED 전에는 대회를 노출·참가·시작시키지 않는다.
