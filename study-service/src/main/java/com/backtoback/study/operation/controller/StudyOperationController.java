@@ -1,5 +1,6 @@
 package com.backtoback.study.operation.controller;
 
+import org.slf4j.MDC;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -10,9 +11,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.common.api.ApiResponse;
+import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.study.operation.dto.LeaderDelegationRequest;
 import com.backtoback.study.operation.dto.LeaderDelegationResponse;
+import com.backtoback.study.operation.dto.StudyCloseResponse;
 import com.backtoback.study.operation.dto.StudyRoleChangeRequest;
 import com.backtoback.study.operation.dto.StudyRoleChangeResponse;
 import com.backtoback.study.operation.dto.StudyUpdateRequest;
@@ -84,6 +87,23 @@ public class StudyOperationController {
             .ok(
                 ApiResponse
                     .success("스터디장이 위임되었습니다.", studyOperationService.delegateLeader(studyId, requesterId, request))
+            );
+    }
+
+    /**
+     * §5.3.4 스터디 종료 — {@code LEADER}만 호출할 수 있다.
+     */
+    @PostMapping("/{studyId}/close")
+    public ResponseEntity<ApiResponse<StudyCloseResponse>> closeStudy(
+        @PathVariable Long studyId,
+        @AuthenticationPrincipal GatewayUser user
+    ) {
+        Long requesterId = Long.parseLong(user.userId());
+        String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+        return ResponseEntity
+            .ok(
+                ApiResponse
+                    .success("스터디가 종료되었습니다.", studyOperationService.closeStudy(studyId, requesterId, correlationId))
             );
     }
 }

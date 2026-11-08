@@ -43,12 +43,17 @@ import com.backtoback.study.membership.domain.StudyStatus;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
+import com.backtoback.study.operation.client.ContestExamClient;
+import com.backtoback.study.operation.dto.ForceCloseRequest;
 import com.backtoback.study.operation.dto.LeaderDelegationRequest;
 import com.backtoback.study.operation.dto.LeaderDelegationResponse;
+import com.backtoback.study.operation.dto.StudyCloseResponse;
 import com.backtoback.study.operation.dto.StudyRoleChangeRequest;
 import com.backtoback.study.operation.dto.StudyRoleChangeResponse;
 import com.backtoback.study.operation.dto.StudyUpdateRequest;
 import com.backtoback.study.operation.dto.StudyUpdateResponse;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 스터디 운영 서비스 정상·예외 시나리오를 검증한다(API 명세서 §5.3).
@@ -71,6 +76,12 @@ class StudyOperationServiceTest {
     private StudyMembershipHistoryRepository historyRepository;
     @Mock
     private Clock clock;
+    @Mock
+    private ContestExamClient contestExamClient;
+    @Mock
+    private StudyClosePersistService studyClosePersistService;
+    @Mock
+    private ObjectMapper objectMapper;
 
     @InjectMocks
     private StudyOperationService studyOperationService;
@@ -681,6 +692,144 @@ class StudyOperationServiceTest {
             .isInstanceOfSatisfying(
                 StudyException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_ALREADY_CLOSED)
+            );
+    }
+
+    // ── §5.3.4 closeStudy ─────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("§5.3.4 LEADER가 활성 시험 없는 스터디 종료 요청이면 studyId를 반환한다")
+    void closeStudy_success() {
+        // given
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+        given(
+            membershipRepository
+                .findByStudyIdAndRoleAndStatus(STUDY_ID, MembershipRole.LEADER, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(leaderMembership));
+        given(contestExamClient.hasActiveExams(STUDY_ID)).willReturn(false);
+        // when
+        StudyCloseResponse result = studyOperationService.closeStudy(STUDY_ID, LEADER_ID, "corr-1");
+
+        // then
+        assertThat(result.studyId()).isEqualTo(String.valueOf(STUDY_ID));
+    }
+
+    @Test
+    @DisplayName("§5.3.4 존재하지 않는 studyId이면 STUDY_NOT_FOUND 예외를 던진다")
+    void closeStudy_studyNotFound_throwsStudyNotFound() {
+        // given
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> studyOperationService.closeStudy(STUDY_ID, LEADER_ID, "corr-1"))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_NOT_FOUND)
+            );
+    }
+
+    @Test
+    @DisplayName("§5.3.4 이미 CLOSED된 스터디 종료 요청이면 STUDY_ALREADY_CLOSED 예외를 던진다")
+    void closeStudy_alreadyClosed_throwsAlreadyClosed() {
+        // given
+        ReflectionTestUtils.setField(study, "status", StudyStatus.CLOSED);
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+
+        // when & then
+        assertThatThrownBy(() -> studyOperationService.closeStudy(STUDY_ID, LEADER_ID, "corr-1"))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_ALREADY_CLOSED)
+            );
+    }
+
+    @Test
+    @DisplayName("§5.3.4 요청자가 LEADER가 아니면 AUTH_ACCESS_DENIED 예외를 던진다")
+    void closeStudy_notLeader_throwsAccessDenied() {
+        // given
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+        given(
+            membershipRepository
+                .findByStudyIdAndRoleAndStatus(STUDY_ID, MembershipRole.LEADER, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(leaderMembership));
+
+        // when & then
+        assertThatThrownBy(() -> studyOperationService.closeStudy(STUDY_ID, 99L, "corr-1"))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
+            );
+    }
+
+    @Test
+    @DisplayName("§5.3.4 활성 시험이 있으면 STUDY_ACTIVE_EXAM_EXISTS 예외를 던진다")
+    void closeStudy_activeExamExists_throwsActiveExamExists() {
+        // given
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+        given(
+            membershipRepository
+                .findByStudyIdAndRoleAndStatus(STUDY_ID, MembershipRole.LEADER, MembershipStatus.APPROVED)
+        ).willReturn(Optional.of(leaderMembership));
+        given(contestExamClient.hasActiveExams(STUDY_ID)).willReturn(true);
+
+        // when & then
+        assertThatThrownBy(() -> studyOperationService.closeStudy(STUDY_ID, LEADER_ID, "corr-1"))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_ACTIVE_EXAM_EXISTS)
+            );
+    }
+
+    // ── §5.6.1 forceCloseStudy ────────────────────────────────────────────
+
+    @Test
+    @DisplayName("§5.6.1 관리자가 활성 시험 없는 스터디 강제 종료 요청이면 studyId를 반환한다")
+    void forceCloseStudy_success() {
+        // given
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+        given(contestExamClient.hasActiveExams(STUDY_ID)).willReturn(false);
+        // when
+        StudyCloseResponse result
+            = studyOperationService
+                .forceCloseStudy(STUDY_ID, LEADER_ID, new ForceCloseRequest("정책 위반"), "1.2.3.4", "corr-1");
+
+        // then
+        assertThat(result.studyId()).isEqualTo(String.valueOf(STUDY_ID));
+    }
+
+    @Test
+    @DisplayName("§5.6.1 이미 CLOSED된 스터디 강제 종료 요청이면 STUDY_ALREADY_CLOSED 예외를 던진다")
+    void forceCloseStudy_alreadyClosed_throwsAlreadyClosed() {
+        // given
+        ReflectionTestUtils.setField(study, "status", StudyStatus.CLOSED);
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+
+        // when & then
+        assertThatThrownBy(
+            () -> studyOperationService
+                .forceCloseStudy(STUDY_ID, LEADER_ID, new ForceCloseRequest("정책 위반"), "1.2.3.4", "corr-1")
+        )
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_ALREADY_CLOSED)
+            );
+    }
+
+    @Test
+    @DisplayName("§5.6.1 활성 시험이 있으면 STUDY_ACTIVE_EXAM_EXISTS 예외를 던진다")
+    void forceCloseStudy_activeExamExists_throwsActiveExamExists() {
+        // given
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(study));
+        given(contestExamClient.hasActiveExams(STUDY_ID)).willReturn(true);
+
+        // when & then
+        assertThatThrownBy(
+            () -> studyOperationService
+                .forceCloseStudy(STUDY_ID, LEADER_ID, new ForceCloseRequest("정책 위반"), "1.2.3.4", "corr-1")
+        )
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_ACTIVE_EXAM_EXISTS)
             );
     }
 }

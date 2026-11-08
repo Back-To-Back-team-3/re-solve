@@ -105,6 +105,17 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
     );
 
     /**
+     * 지정 스터디의 OPEN·SCHEDULED 문제집을 CLOSED로 일괄 전이한다(API 명세서 §5.3.4 스터디 종료 연쇄).
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(
+        value = "UPDATE assignments SET status = 'CLOSED', closed_at = NOW(6), updated_at = NOW(6) "
+            + "WHERE study_id = :studyId AND status IN ('OPEN', 'SCHEDULED')",
+        nativeQuery = true
+    )
+    void closeActiveAssignments(@Param("studyId") Long studyId);
+
+    /**
      * SCHEDULED·OPEN 상태의 문제집을 FOR SHARE로 조회한다.
      * 가입 트랜잭션에서 잠금 순서 scheduler.md §5.0 ③<④를 보장하기 위해 사용한다.
      */
