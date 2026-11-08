@@ -2154,6 +2154,23 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 완료 버전 | complete.sourceVersion > expected_source_version·현재 operation_id 일치 확인. source_version은 max(저장값, 결과 버전)으로 보존하며 더 최신 원천 상태로 최종 차단 판단 |
 | 복구 | TTL로 자동 해제하지 않음. PENDING·404·조회 실패·결과 불명은 PREPARED 유지. COMMITTED만 complete, ABORTED만 cancel. 조회 결과 뒤 가드 잠금 안에서 현재 operationId·버전 재확인. API §4.7.3·§4.7.4 / 스케줄러 §4.7 |
 | 후속 문제 작업 | 다른 PREPARED 작업은 점유 충돌. PROBLEM_HIDE는 OPEN·BLOCKED에서 새 작업을 준비할 수 있으며 prepared_from_state를 저장한다. 확정 취소는 이전 상태로 복원하고 ABORTED를 보존한다. 더 최신 원천 상태가 있으면 PUBLIC의 GENERAL만 OPEN, PRIVATE·ARCHIVED는 BLOCKED로 유지한다. 다른 PREPARED 작업은 원천 이벤트로 취소하지 않음 |
+| 스터디 준비 결과 | 동일 STUDY_CLOSE 작업의 최초 취소 시험 ID 목록은 `contest_study_guard_preparations`에 영속 보존한다. 재요청의 `ready`와 `blockingExamIds`는 현재 상태로 조회한다. |
+
+#### 4.4.16.1 스터디 가드 준비 결과 (`contest_study_guard_preparations`)
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `study_id` | BIGINT | Y | 스터디 ID |
+| `operation_id` | VARCHAR(100) `_bin` | Y | 원래 STUDY_CLOSE 작업 ID |
+| `request_hash` | CHAR(64) | Y | 최초 준비 요청의 정규화 해시 |
+| `canceled_exam_ids` | JSON | Y | 최초 준비에서 취소한 시험 ID 문자열 배열 |
+| `state` | VARCHAR(30) | Y | 해당 작업의 가드 상태. OPEN / PREPARED / BLOCKED |
+| `operation_result` | VARCHAR(30) | Y | PENDING / COMMITTED / ABORTED |
+| `prepared_at` | DATETIME(6) | Y | 최초 준비 시각 |
+| `created_at` | DATETIME(6) | Y | 최초 준비 시각 |
+
+`uk_contest_study_guard_preparations_study_operation`은 `(study_id, operation_id)`를 유일하게 보장한다. 결과는 자동 삭제하지 않는다.
 
 #### 4.4.17 회원 정보 복제본 (`member_replicas`)
 
@@ -3162,6 +3179,7 @@ contest-service/src/main/resources/db/migration/
   V16_1__guard_add_problem_snapshot.sql
   V16_2__examsubmission_preserve_request.sql
   V16_3__examsubmission_add_dispatch_failure.sql
+  V16_4__guard_create_study_guard_preparations.sql
   V17__contest_create_contests.sql                (P2 착수 시)
   V18__contest_create_contest_problems.sql        (P2 착수 시)
   V19__contest_create_contest_participants.sql    (P2 착수 시)
