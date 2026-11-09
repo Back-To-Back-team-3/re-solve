@@ -64,4 +64,11 @@ public class MemberTagLevel extends BaseTimeEntity {
     public static MemberTagLevel enterWithoutDiagnosis(Long memberId, Long tagId, LocalDateTime enteredAt) {
         return new MemberTagLevel(memberId, tagId, TagLevel.LV1, enteredAt);
     }
+
+    /**
+     * 진단으로 태그에 처음 진입한다 (API 명세서 1.5.1). 레벨은 {@code LV0}으로 두고 진단 결과로 확정한다.
+     */
+    public static MemberTagLevel enterForDiagnosis(Long memberId, Long tagId, LocalDateTime enteredAt) {
+        return new MemberTagLevel(memberId, tagId, TagLevel.LV0, enteredAt);
+    }
 }

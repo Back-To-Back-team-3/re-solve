@@ -733,7 +733,7 @@
 
 ### 1.5 외부 API — 진단 테스트
 
-> `member-service`가 접수하고 채점을 요청하는 초안. **진단 제출 접수 경로·이벤트명 결정 필요.**
+> `member-service`가 접수하고 `DiagnosisSubmissionRequested`(이벤트 계약 M6)로 채점을 요청한다. 결과는 `DiagnosisSubmissionJudged`(J5)로 받는다.
 > 
 
 #### 1.5.1 진단 시작
@@ -774,6 +774,7 @@
     - `DIAGNOSIS_NOT_ELIGIBLE`(409) / 레벨 `LV3`·`MASTER`
     - `DIAGNOSIS_COOLDOWN`(409) / 직전 종료 + 3일 전 (`Retry-After` 포함)
     - `DIAGNOSIS_ALREADY_IN_PROGRESS`(409)
+    - `DIAGNOSIS_PROBLEMS_UNAVAILABLE`(409) / 난이도 1·2·3 중 출제 후보가 없는 난이도가 있음 (태그 진입 1.4.2로 Lv.1 시작 안내)
     - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 출제 후보 조회 실패
     - `MEMBER_SUSPENDED`(403)
 - **동시성/멱등 보장:** 생성 컬럼 `active_tag_id` + `uk_diagnosis_attempts_member_active_tag`. 동시 시작 두 건 중 하나는 `DIAGNOSIS_ALREADY_IN_PROGRESS`.
@@ -831,16 +832,12 @@
 - **인증:** 로그인 필요 (본인)
 - **대응 테이블:** `diagnosis_problems`
 - **설명:** 진단에 고정한 회차의 본문·함수 명세·공개 예제를 반환한다. 레벨 접근 제한을 적용하지 않는다.
-- **응답 (200):** 태그 수정(2.5.3) 응답 구조와 같다.
-    
+- **응답 (200):** problem 고정 회차 본문 조회(2.6.3)의 응답 객체를 `data`에 그대로 담는다(본문·함수 명세·실행 제한·기본 코드·공개 예제).
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "태그가 수정되었습니다.", 
-    	  "data": { 
-    		  "tagId": "2", 
-    		  "name": "그리디" 
-    	  } 
+      {
+        "success": true,
+        "message": null,
+        "data": { "problemId": "301", "problemRevisionId": "1001", "title": "두 수의 합", "difficulty": 1, "description": "## 문제\n…", "samples": [] }
       }
     ```
     

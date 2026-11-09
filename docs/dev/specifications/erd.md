@@ -3065,8 +3065,8 @@ member-service/src/main/resources/db/migration/
   V16__replica_create_hint_usage_replicas.sql
 ```
 
-- V1~V11은 적용된 파일이다. V1은 이 규칙을 정하기 전에 만들어 DB에 적용됐으므로 이름을 바꾸지 않는다(Flyway 적용 기록과 어긋남).
-- V12 이후는 아직 만들지 않은 계획 순서다. 실제 생성 순서에 따라 번호를 다시 매긴다.
+- V1~V15는 적용된 파일이다. V1은 이 규칙을 정하기 전에 만들어 DB에 적용됐으므로 이름을 바꾸지 않는다(Flyway 적용 기록과 어긋남).
+- V16 이후는 아직 만들지 않은 계획 순서다. 실제 생성 순서에 따라 번호를 다시 매긴다.
 
 ### 7.2 Problem (`problem-service`)
 

@@ -55,6 +55,7 @@ class TagLevelControllerTest {
                             false,
                             LocalDateTime.of(2026, 10, 31, 12, 0),
                             new Promotion(TagLevel.LV2, 5, new BigDecimal("60.00")),
+                            120L,
                             List
                                 .of(
                                     new TagAchievement(3L, 1, 6, new BigDecimal("83.33")),
@@ -79,7 +80,7 @@ class TagLevelControllerTest {
             .andExpect(jsonPath("$.data.content[0].achievements[2].band").value("WEAK"))
             .andExpect(jsonPath("$.data.content[0].diagnosis.isEligible").value(false))
             .andExpect(jsonPath("$.data.content[0].diagnosis.cooldownEndsAt").value("2026-10-31T12:00:00+09:00"))
-            .andExpect(jsonPath("$.data.content[0].diagnosis.inProgressDiagnosisId").isEmpty())
+            .andExpect(jsonPath("$.data.content[0].diagnosis.inProgressDiagnosisId").value("120"))
             .andExpect(jsonPath("$.data.content[0].nextPromotion.targetLevel").value("LV2"))
             .andExpect(jsonPath("$.data.content[0].nextPromotion.requiredSolvedCount").value(5))
             .andExpect(jsonPath("$.data.content[0].nextPromotion.requiredAchievementRate").value(60.00));
