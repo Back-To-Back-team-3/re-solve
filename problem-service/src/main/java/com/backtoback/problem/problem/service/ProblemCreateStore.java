@@ -6,13 +6,17 @@ import java.util.Optional;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.domain.ProblemRevisionTestEntry;
+import com.backtoback.problem.problem.domain.ProblemVisibility;
 import com.backtoback.problem.problem.dto.response.ProblemCreateResponse;
+import com.backtoback.problem.problem.repository.ProblemRepository;
 import com.backtoback.problem.problem.repository.ProblemRevisionRepository;
 import com.backtoback.problem.problem.repository.ProblemRevisionTestEntryRepository;
 import com.backtoback.problem.problem.repository.ProblemTestAssetRepository;
@@ -20,11 +24,13 @@ import com.backtoback.problem.problem.repository.ProblemTestAssetRepository;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
 
-/** 최초 회차·파일 연결·멱등 응답·감사를 한 트랜잭션으로 확정한다. */
+/** 회차·파일 연결·멱등 응답·자동 검증·감사를 한 트랜잭션으로 확정한다. */
 @Service
 @RequiredArgsConstructor
 public class ProblemCreateStore {
     private final ProblemRegistrationService registration;
+    private final ProblemRepository problems;
+    private final ProblemRevisionValidationService autoValidations;
     private final ProblemRevisionRepository revisions;
     private final ProblemTestAssetRepository assets;
     private final ProblemRevisionTestEntryRepository tests;
@@ -52,6 +58,33 @@ public class ProblemCreateStore {
             }
             return ProblemCreateResponse.from(revision);
         });
+    }
+
+    /**
+     * 외부 파일 작업 전에 대상·작성자·상태·버전을 확인한다. 최종 저장에서도 문제 잠금 아래 재검사한다.
+     *
+     * @param problemId 대상 문제
+     * @param authorId 관리자
+     * @param version 기대 버전
+     * @throws ProblemException 대상 없음은 {@code PROBLEM_NOT_FOUND}, 타인은 {@code AUTH_ACCESS_DENIED},
+     *     보관 상태는 {@code PROBLEM_INVALID_STATE_TRANSITION}, 버전 불일치는 {@code PROBLEM_VERSION_CONFLICT}
+     */
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        readOnly = true
+    )
+    public void validateRevision(long problemId, long authorId, int version) {
+        var problem
+            = problems.findById(problemId).orElseThrow(() -> new ProblemException(ProblemErrorCode.PROBLEM_NOT_FOUND));
+        if (!problem.getAuthorId().equals(authorId)) {
+            throw new ProblemException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        if (problem.getVisibility() == ProblemVisibility.ARCHIVED) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION);
+        }
+        if (problem.getRowVersion() != version) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_VERSION_CONFLICT);
+        }
     }
 
     /**
@@ -99,6 +132,29 @@ public class ProblemCreateStore {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ProblemCreateResponse save(ProblemRegistrationCommand command, ProblemCreateFiles files, String clientIp) {
+        return save(command, files, clientIp, null);
+    }
+
+    /**
+     * 회차·파일·자동 검증·감사를 원자 저장한다. 잠금 대기 후 최신 통과 코드를 보도록 READ_COMMITTED를 사용한다.
+     *
+     * @param command 저장 입력
+     * @param files 원문 대조와 업로드를 마친 파일
+     * @param clientIp 감사 주소
+     * @param correlationId 자동 검증 이벤트 추적 ID
+     * @return 최초 저장 또는 멱등 응답
+     * @throws ProblemException 입력·참조·멱등·버전 조건을 위반한 경우
+     */
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        isolation = Isolation.READ_COMMITTED
+    )
+    public ProblemCreateResponse save(
+        ProblemRegistrationCommand command,
+        ProblemCreateFiles files,
+        String clientIp,
+        String correlationId
+    ) {
         var result = registration.save(command, files.tests().stream().map(ProblemCreateFiles.TestFile::id).toList());
         if (result.replayed()) {
             markUnreferencedFiles(files);
@@ -127,17 +183,22 @@ public class ProblemCreateStore {
                         )
                 );
         }
+        if (command.problemId() != null) {
+            autoValidations.request(result.problemId(), result.problemRevisionId(), command.authorId(), correlationId);
+        }
         var response = ProblemCreateResponse.from(result);
         jdbc
             .update(
                 """
                     INSERT INTO audit_logs(actor_id,action,target_type,target_id,before_state,after_state,
                     reason,client_ip,created_at)
-                    VALUES (?,'PROBLEM_CREATE','PROBLEM',?,NULL,?,'문제 최초 등록',?,?)
+                    VALUES (?,?,'PROBLEM',?,NULL,?,?,?,?)
                     """,
                 command.authorId(),
+                command.problemId() == null ? "PROBLEM_CREATE" : "PROBLEM_REVISION_CREATE",
                 result.problemId().toString(),
                 mapper.writeValueAsString(response),
+                command.problemId() == null ? "문제 최초 등록" : "새 문제 회차 등록",
                 clientIp,
                 LocalDateTime.now(clock)
             );
