@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.contest.exam.domain.Exam;
@@ -44,6 +45,8 @@ class ExamContextValidationServiceTest {
     private ExamParticipantRepository participants;
     @Mock
     private MemberReplicaRepository members;
+    @Mock
+    private JdbcTemplate jdbc;
     private ExamContextValidationService service;
     private Exam exam;
     private ExamParticipant participant;
@@ -57,6 +60,7 @@ class ExamContextValidationServiceTest {
                 problems,
                 participants,
                 members,
+                jdbc,
                 Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC)
             );
         exam
@@ -119,6 +123,36 @@ class ExamContextValidationServiceTest {
         given(members.findStatus(7L)).willReturn(Optional.of("SUSPENDED"));
         // when & then
         assertThatThrownBy(() -> service.validate(request("RUN", "1001")))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(ContestErrorCode.CONTEXT_ACCESS_DENIED)
+            );
+    }
+
+    /** 접수 ID와 참가·문제 연결이 모두 일치할 때만 열람을 허용한다. */
+    @Test
+    @DisplayName("본인 접수만 시험 제출 열람을 허용한다")
+    void readsOwnReceipt() {
+        // given
+        given(participants.findByExamIdAndMemberIdAndStatusNot(55L, 7L, ExamParticipantStatus.CANCELED))
+            .willReturn(Optional.of(participant));
+        given(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM exam_submissions WHERE id=? AND exam_id=? AND exam_participant_id=? "
+                        + "AND problem_id=?",
+                    Integer.class,
+                    4001L,
+                    55L,
+                    411L,
+                    101L
+                )
+        ).willReturn(1, 0);
+        var request = new ContextValidateRequest("EXAM", "55", "7", "101", "1001", "READ_SUBMISSION", "4001");
+        // when & then
+        assertThat(service.validate(request).allowed()).isTrue();
+        assertThatThrownBy(() -> service.validate(request))
             .isInstanceOf(ContestException.class)
             .satisfies(
                 error -> assertThat(((ContestException)error).getErrorCode())

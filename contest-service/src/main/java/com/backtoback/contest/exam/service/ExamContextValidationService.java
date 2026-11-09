@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +25,7 @@ import com.backtoback.contest.global.error.ContestException;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 실제 시험·고정 회차·입장 상태로 본문, 이미지 및 Run 권한을 판정한다.
+ * 실제 시험·고정 회차·입장 상태와 접수 소유권으로 내부 접근 권한을 판정한다.
  * <p>기준 문서</p>
  * <ul><li>API 명세서 v1.1 / §4.7.1 실행 문맥·열람 권한 검증: EXAM 접근 조건</li></ul>
  */
@@ -35,12 +36,13 @@ public class ExamContextValidationService {
     private final ExamProblemRepository problems;
     private final ExamParticipantRepository participants;
     private final MemberReplicaRepository members;
+    private final JdbcTemplate jdbc;
     private final Clock clock;
 
-    /** EXAM 열람과 Run을 검증하고 아직 연결하지 않은 행위는 거절한다. */
+    /** EXAM 열람과 Run을 검증하고 본인 접수의 연결 관계를 확인한다. */
     @Transactional(readOnly = true)
     public ContextValidationResponse validate(ContextValidateRequest request) {
-        if (!"EXAM".equals(request.context()) || "READ_SUBMISSION".equals(request.action())) {
+        if (!"EXAM".equals(request.context())) {
             throw new ContestException(ContestErrorCode.CONTEXT_ACCESS_DENIED);
         }
         long examId = id(request.contextId());
@@ -63,6 +65,23 @@ public class ExamContextValidationService {
         if (participant.getEnteredAt() == null || localNow.isBefore(exam.getStartsAt())
             || exam.getStatus() == ExamStatus.CANCELED) {
             throw new ContestException(ContestErrorCode.CONTEXT_ACCESS_DENIED);
+        }
+        if ("READ_SUBMISSION".equals(request.action())) {
+            long receiptId = id(request.receiptId());
+            Integer count
+                = jdbc
+                    .queryForObject(
+                        "SELECT COUNT(*) FROM exam_submissions WHERE id=? AND exam_id=? AND exam_participant_id=? "
+                            + "AND problem_id=?",
+                        Integer.class,
+                        receiptId,
+                        examId,
+                        participant.getId(),
+                        problemId
+                    );
+            if (count == null || count != 1) {
+                throw new ContestException(ContestErrorCode.CONTEXT_ACCESS_DENIED);
+            }
         }
         if ("RUN".equals(request.action())) {
             if (participant.getStatus() != ExamParticipantStatus.STARTED
