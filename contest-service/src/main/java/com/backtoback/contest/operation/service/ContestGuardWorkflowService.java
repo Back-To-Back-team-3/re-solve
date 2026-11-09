@@ -146,7 +146,8 @@ public class ContestGuardWorkflowService {
             .update(
                 "UPDATE contest_resource_guards SET operation_id=?,operation_type=?,expected_source_version=?,"
                     + "request_hash=?,prepared_from_state=state,state='PREPARED',"
-                    + "operation_result='PENDING',prepared_at=?,prepared_snapshot_version=snapshot_version,"
+                    + "operation_result='PENDING',prepared_at=?,last_reconciliation_attempt_at=NULL,"
+                    + "prepared_snapshot_version=snapshot_version,"
                     + "version=version+1,updated_at=? WHERE resource_type=? AND resource_id=?",
                 request.operationId(),
                 request.operationType(),
