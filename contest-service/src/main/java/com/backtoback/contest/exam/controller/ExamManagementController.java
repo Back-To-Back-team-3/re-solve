@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.web.security.user.GatewayUser;
+import com.backtoback.contest.exam.dto.ExamCancelRequest;
+import com.backtoback.contest.exam.dto.ExamCancelResponse;
 import com.backtoback.contest.exam.dto.ExamCreateRequest;
 import com.backtoback.contest.exam.dto.ExamResponse;
 import com.backtoback.contest.exam.dto.ExamUpdateRequest;
@@ -45,5 +47,15 @@ public class ExamManagementController {
         @Valid @RequestBody ExamUpdateRequest request
     ) {
         return ResponseEntity.ok(ApiResponse.success("시험이 수정되었습니다.", service.update(examId, user.userId(), request)));
+    }
+
+    /** API 명세서 §4.1.5 시험 취소 — 시작 전 시험을 취소한다. */
+    @PostMapping("/api/v1/exams/{examId}/cancellation")
+    public ResponseEntity<ApiResponse<ExamCancelResponse>> cancel(
+        @PathVariable String examId,
+        @AuthenticationPrincipal GatewayUser user,
+        @Valid @RequestBody ExamCancelRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success("시험이 취소되었습니다.", service.cancel(examId, user.userId(), request)));
     }
 }

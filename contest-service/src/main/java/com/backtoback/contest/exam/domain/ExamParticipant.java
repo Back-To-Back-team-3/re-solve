@@ -130,4 +130,13 @@ public class ExamParticipant extends BaseTimeEntity {
         status = ExamParticipantStatus.CANCELED;
         participantRevision = Math.incrementExact(participantRevision);
     }
+
+    /** 전체 마감까지 입장하지 않은 등록자를 결시 처리한다. */
+    public void markAbsent() {
+        if (status != ExamParticipantStatus.REGISTERED) {
+            throw new IllegalStateException("Participant is not registered");
+        }
+        status = ExamParticipantStatus.ABSENT;
+        participantRevision = Math.incrementExact(participantRevision);
+    }
 }
