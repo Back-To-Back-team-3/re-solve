@@ -120,6 +120,16 @@ class PracticeResultConsumeTest {
         assertThat(achievements.get(0).band()).isEqualTo("WEAK");
         assertThat(achievements.get(1).achievementRate()).isEqualByComparingTo(new BigDecimal("100"));
         assertThat(achievements.get(1).band()).isEqualTo("GOOD");
+
+        // 재채점으로 태그가 바뀌면 남은 제출이 없는 이전 태그의 성취도는 지우고 새 태그에 만든다.
+        consume(event(103, memberId, 12, 2, "AC", 3, List.of("5")));
+        assertThat(
+            count(
+                "select count(*) from member_tag_achievements where member_id = ? and tag_id = 3 and difficulty = 2",
+                memberId
+            )
+        ).isZero();
+        assertThat(achievement(memberId, 5, 2)).containsExactly(1, "2.00", "2.00", "100.00");
     }
 
     @Test
@@ -128,14 +138,16 @@ class PracticeResultConsumeTest {
         long memberId = member(7002L);
         Map<String, Object> noTags = payload(201, memberId, 21, 1, "AC", 1, List.of());
         Map<String, Object> badVerdict = payload(202, memberId, 21, 1, "PASS", 1, List.of("3"));
+        Map<String, Object> unknownMember = payload(203, 999_999L, 21, 1, "AC", 1, List.of("3"));
 
-        for (String message : List
-            .of(message(noTags), message(badVerdict), event(203, 999_999L, 21, 1, "AC", 1, List.of("3")))) {
-            assertThatThrownBy(() -> consume(message)).isInstanceOf(RuntimeException.class);
+        for (Map<String, Object> event : List.of(noTags, badVerdict, unknownMember)) {
+            assertThatThrownBy(() -> consume(message(event))).isInstanceOf(RuntimeException.class);
+            // 다른 테스트의 소비 기록과 섞이지 않도록 이번 이벤트 ID만 확인한다.
+            assertThat(count("select count(*) from processed_events where event_id = ?", event.get("eventId")))
+                .isZero();
         }
 
         assertThat(acks).hasValue(0);
-        assertThat(count("select count(*) from processed_events where event_type = 'SubmissionJudged'")).isZero();
         assertThat(count("select count(*) from practice_result_replicas where submission_id between 201 and 203"))
             .isZero();
     }
@@ -247,7 +259,7 @@ class PracticeResultConsumeTest {
             );
     }
 
-    private long count(String sql) {
-        return jdbcTemplate.queryForObject(sql, Long.class);
+    private long count(String sql, Object... args) {
+        return jdbcTemplate.queryForObject(sql, Long.class, args);
     }
 }
