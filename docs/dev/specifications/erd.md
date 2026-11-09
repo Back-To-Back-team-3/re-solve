@@ -2123,13 +2123,16 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `state` | VARCHAR(30) | Y | OPEN / PREPARED / BLOCKED |
 | `prepared_from_state` | VARCHAR(30) | N | OPEN / BLOCKED. 최초 prepare 전만 NULL, 해당 작업의 복원 상태 |
 | `operation_result` | VARCHAR(30) | N | PENDING / COMMITTED / ABORTED. 최초 작업 전만 NULL, 종결 뒤 보존 |
-| `source_status` | VARCHAR(30) | N | PROBLEM의 최신 원천 visibility. 상태 스냅샷 수신 전 또는 다른 자원은 NULL |
+| `source_status` | VARCHAR(30) | N | PROBLEM의 최신 스냅샷 visibility 또는 STUDY에서 관찰한 CLOSED. 상태를 관찰하기 전에는 NULL |
 | `source_scope` | VARCHAR(30) | N | 같은 원천 버전의 PROBLEM scope. 다른 자원은 NULL |
-| `source_version` | BIGINT | Y | 기본 0. 소유 서비스 상태 이벤트의 순서 값 |
+| `source_version` | BIGINT | Y | 기본 0. 관찰한 원천 상태·완료 버전의 최댓값 |
+| `snapshot_version` | BIGINT | N | PROBLEM에서 적용한 전체 스냅샷 버전. 미수신 또는 기존 값의 근거가 불명확하면 NULL |
+| `prepared_snapshot_version` | BIGINT | N | 현재 문제 작업을 준비할 때 적용돼 있던 스냅샷 버전 |
 | `source_revision_id` | BIGINT | N | 최신 PROBLEM 사용 회차 ID. 수신 전 또는 사용 회차가 없으면 NULL |
 | `source_revision_number` | INT | N | 최신 사용 회차 번호. 사용 회차 ID가 NULL이면 NULL |
 | `source_supported_languages` | JSON | N | 최신 사용 회차의 통과 언어 배열. 미수신·다른 자원은 NULL, 사용 회차가 없으면 빈 배열 |
 | `prepared_at` | DATETIME(6) | N | 준비 시각. 준비 전 NULL |
+| `last_reconciliation_attempt_at` | DATETIME(6) | N | 현재 준비 작업의 마지막 대사 시도 시각. 신규 준비 시 NULL. 스냅샷 갱신과 별도 |
 | `version` | BIGINT | Y | 기본 0. 낙관적 락 |
 | `created_at` | DATETIME(6) | Y | 생성 시간 |
 | `updated_at` | DATETIME(6) | Y | 갱신 시간 |
@@ -2154,6 +2157,43 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 완료 버전 | complete.sourceVersion > expected_source_version·현재 operation_id 일치 확인. source_version은 max(저장값, 결과 버전)으로 보존하며 더 최신 원천 상태로 최종 차단 판단 |
 | 복구 | TTL로 자동 해제하지 않음. PENDING·404·조회 실패·결과 불명은 PREPARED 유지. COMMITTED만 complete, ABORTED만 cancel. 조회 결과 뒤 가드 잠금 안에서 현재 operationId·버전 재확인. API §4.7.3·§4.7.4 / 스케줄러 §4.7 |
 | 후속 문제 작업 | 다른 PREPARED 작업은 점유 충돌. PROBLEM_HIDE는 OPEN·BLOCKED에서 새 작업을 준비할 수 있으며 prepared_from_state를 저장한다. 확정 취소는 이전 상태로 복원하고 ABORTED를 보존한다. 더 최신 원천 상태가 있으면 PUBLIC의 GENERAL만 OPEN, PRIVATE·ARCHIVED는 BLOCKED로 유지한다. 다른 PREPARED 작업은 원천 이벤트로 취소하지 않음 |
+| 스터디 준비 결과 | 동일 `STUDY_CLOSE` 작업의 최초 취소 시험 ID 목록을 §4.4.16.1에 보존한다. 재요청 응답은 API §4.7.3을 따른다. |
+
+#### 4.4.16.1 스터디 가드 준비 결과 (`contest_study_guard_preparations`)
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `study_id` | BIGINT | Y | 스터디 ID |
+| `operation_id` | VARCHAR(100) `utf8mb4_0900_bin` | Y | 원래 STUDY_CLOSE 작업 ID. 대소문자와 후행 공백을 구분 |
+| `request_hash` | CHAR(64) | Y | 최초 준비 요청의 정규화 해시 |
+| `canceled_exam_ids` | JSON | Y | 최초 준비에서 취소한 시험 ID 문자열 배열 |
+| `state` | VARCHAR(30) | Y | 해당 작업의 가드 상태. OPEN / PREPARED / BLOCKED |
+| `operation_result` | VARCHAR(30) | Y | PENDING / COMMITTED / ABORTED |
+| `prepared_at` | DATETIME(6) | Y | 최초 준비 시각 |
+| `created_at` | DATETIME(6) | Y | 최초 준비 시각 |
+
+**제약 및 인덱스**
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `uk_contest_study_guard_preparations_study_operation` | `(study_id, operation_id)` | 같은 스터디 작업의 최초 준비 결과를 한 행으로 보존 |
+
+- 준비 결과는 자동 삭제하지 않는다.
+
+#### 4.4.16.2 가드 작업 종결 이력 (`contest_guard_operation_history`)
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| resource_type·resource_id·operation_id | VARCHAR(30)·BIGINT·VARCHAR(100) | Y | 작업 식별 복합 PK. ID 후행 공백을 구분해 원문 보존 |
+| request_hash·prepared_at | CHAR(64)·DATETIME(6) | N | 준비 해시와 시각 |
+| state·operation_result | VARCHAR(30) | Y | 종결 가드 상태와 COMMITTED / ABORTED 결과 |
+| source_version | BIGINT | Y | 종결 시 가드 원천 버전 |
+| resolution_path | VARCHAR(30) | N | DIRECT / RECONCILIATION / EVENT. 마이그레이션 이전 결과는 NULL |
+| reason | VARCHAR(500) | N | 직접 호출에서 수신한 사유 |
+| resolved_at | DATETIME(6) | N | 종결 시각. 마이그레이션 이전 결과는 NULL |
+
+가드 상태와 같은 트랜잭션에 저장한다. 회원·문제의 이전 작업 prepare 재요청은 해시와 결과를 이력에서 확인한다.
 
 #### 4.4.17 회원 정보 복제본 (`member_replicas`)
 
@@ -2183,7 +2223,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
-| `operation_id` | VARCHAR(100) `_bin` | Y | 호출자 생성 멱등 작업 ID |
+| `operation_id` | VARCHAR(100) `utf8mb4_0900_bin` | Y | 호출자 생성 멱등 작업 ID. 기존 ID의 후행 공백 보존 |
 | `operation_type` | VARCHAR(30) | Y | CONTEST_CREATE / EXAM_RETRY / EXAM_ZERO_CONFIRM / CONTEST_VOID_CONFIRM / RESULT_REFINALIZE |
 | `context` | VARCHAR(30) | Y | EXAM / CONTEST |
 | `context_id` | BIGINT | Y | 부모 시험·대회 ID (문맥별 논리 연결) |
@@ -3162,6 +3202,10 @@ contest-service/src/main/resources/db/migration/
   V16_1__guard_add_problem_snapshot.sql
   V16_2__examsubmission_preserve_request.sql
   V16_3__examsubmission_add_dispatch_failure.sql
+  V16_4__guard_create_study_guard_preparations.sql
+  V16_5__guard_preserve_operation_history_and_snapshot_versions.sql
+  V16_6__guard_compare_study_operation_ids_exactly.sql
+  V16_7__guard_track_reconciliation_attempts.sql
   V17__contest_create_contests.sql                (P2 착수 시)
   V18__contest_create_contest_problems.sql        (P2 착수 시)
   V19__contest_create_contest_participants.sql    (P2 착수 시)
