@@ -1,7 +1,7 @@
 # 에러 코드 표
 
 > “API 명세서 v1.0 — 전문” 의 에러 코드 표
-> 
+>
 
 #### **Common · Auth**
 
@@ -68,7 +68,7 @@
 | 오류 코드 | HTTP | 설명 |
 | --- | --- | --- |
 | `UNSUPPORTED_LANGUAGE` | 400 | 지원하지 않거나 비활성 언어 |
-| `CODE_TOO_LARGE` | 413 | UTF-8 코드 64KB 초과 |
+| `CODE_TOO_LARGE` | 413 | UTF-8 코드 64KiB 초과. 시험 Draft·직접 제출은 채점 요청 이벤트의 직렬화 크기가 256KiB를 넘을 때도 반환한다. |
 | `SUBMISSION_RATE_LIMITED` | 429 | 분당 10회 또는 동일 문제 5초 간격 초과 (`Retry-After`) |
 | `SUBMISSION_NOT_FOUND` | 404 | 제출을 찾을 수 없거나 본인 제출이 아님 |
 | `SUBMISSION_JUDGING_IN_PROGRESS` | 409 | 진행 중 채점 회차가 있는 제출에 재채점·재처리 요청 |
