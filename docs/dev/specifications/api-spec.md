@@ -182,7 +182,7 @@
 | judge | 채점 관리자 | `ADMIN` | 재채점은 `EXAM` 장애 실패 건만 | B |
 | contest | 시험 생성·수정·취소 | 로그인 필요 (`SUSPENDED` 차단) | 해당 스터디 `LEADER`·`MANAGER` (study 동기 조회) | C |
 | contest | 시험 참가·응시·결과 | 로그인 필요 (`SUSPENDED` 차단) | 등록 참가자, 등록 시 스터디 `APPROVED` 구성원 | C |
-| contest | 시험 실패 재처리·작업 조회 | 로그인 필요 | `ADMIN` 또는 해당 시험 스터디 현재 `LEADER`·`MANAGER` | C |
+| contest | 시험 실패 재처리·작업 조회 | 로그인 필요 | 재처리는 `ADMIN` 또는 현재 `LEADER`·`MANAGER`. 작업 조회는 `ADMIN` 또는 해당 시험 운영자의 본인 `EXAM_RETRY` | C |
 | contest | 대회 조회·순위 | 공개 | — | C |
 | contest | 대회 참가·응시 | 로그인 필요 (`SUSPENDED` 차단) | 등록·실제 입장 참가자 | C |
 | contest | 시험·대회 관리자 | `ADMIN` | — | C |
@@ -6888,7 +6888,7 @@
 
 #### 4.6.3 실패 시험 제출 재처리
 
-- **Method / URI:** `POST /api/v1/admin/exam-submissions/{examSubmissionId}/retry`
+- **Method / URI:** `POST /api/v1/exams/{examId}/submissions/{examSubmissionId}/retry`
 - **인증:** `ADMIN` 또는 해당 시험 스터디의 현재 `LEADER`·`MANAGER`. C가 최종 검증.
 - **대응 테이블:** `exams`, `exam_submissions`, `contest_admin_operations`, `audit_logs`
 - **설명:** `EXAM`·`FAILED` 및 부모 `FINALIZED` 전만. §4.8.5의 `POST /internal/v1/judge/submissions/{submissionId}/retry`로 새 회차 요청. `contest_admin_operations`를 먼저 `PENDING` 저장 후 원격 호출. 이 작업이 남으면 결과 확정을 보류.
@@ -6903,13 +6903,14 @@
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `examSubmissionId` | string | Y | — | Path · 식별자 문자열 |
+    | `examId` | string | Y | — | Path · 시험 ID 문자열 |
+    | `examSubmissionId` | string | Y | — | Path · 해당 시험의 접수 ID 문자열 |
 - **요청 본문:**
     
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
     | `expectedJudgeAttempt` | integer | Y | 처리 대상 종결 채점 회차 |
     | `reason` | string | Y | 조치 사유. 1~500자 |
     
@@ -6958,7 +6959,7 @@
 
 #### 4.6.4 실패 제출 종결 처리
 
-- 시험의 전달 전 크기 초과 실패(`dispatch_failure_code=CODE_TOO_LARGE`)도 종결 대상이다. Judge 제출이 없으므로 `expectedJudgeAttempt=0`으로 검증하고 Judge 재처리·대사는 호출하지 않는다. 원문과 실패 사유를 보존하며 나머지 잠금·재계산·감사 규칙은 동일하다.
+- 시험의 전달 전 크기 초과·지원 불가 언어 실패(`dispatch_failure_code=CODE_TOO_LARGE`·`UNSUPPORTED_LANGUAGE`)도 종결 대상이다. Judge 제출이 없으므로 `expectedJudgeAttempt=0`으로 검증하고 Judge 재처리·대사는 호출하지 않는다. 원문·언어·실패 사유를 보존하며 나머지 잠금·재계산·감사 규칙은 동일하다. 회차 0에서는 이 두 실패 사유와 Judge 연결 없음이 모두 확인돼야 하며, 종결 후 기존 시험 확정 경로로 진행한다.
 
 - **Method / URI:** `POST /api/v1/admin/contest-submissions/{context}/{receiptId}/resolution`
 - **인증:** `ADMIN`
@@ -6982,7 +6983,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
     | `action` | string | Y | 문맥 검증·관리 조치 종류. 해당 허용 값 적용 |
     | `expectedJudgeAttempt` | integer | Y | 처리 대상 종결 채점 회차 |
     | `reason` | string | Y | 조치 사유. 1~500자 |
@@ -7059,7 +7060,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
     | `expectedResultRevision` | string | Y | 재확정 대상의 이전 결과 버전 문자열 |
     | `reason` | string | Y | 조치 사유. 1~500자 |
     
@@ -7172,8 +7173,10 @@
 
 #### 4.6.7 관리자 작업 상태 조회
 
-- **Method / URI:** `GET /api/v1/admin/contest-operations/{operationId}`
-- **인증:** `ADMIN` 또는 본인이 요청한 `EXAM_RETRY` 작업의 현재 시험 운영자. C가 작업 소유자·시험·D 구성원 권한 재검증.
+- **Method / URI:**
+    - 관리자: `GET /api/v1/admin/contest-operations?operationId={operationId}`, `GET /api/v1/admin/contest-operations/{operationId}`
+    - 시험 운영자: `GET /api/v1/exams/{examId}/operations?operationId={operationId}`, `GET /api/v1/exams/{examId}/operations/{operationId}`
+- **인증:** 관리자 경로는 `ADMIN` 전용. 시험 경로는 해당 시험 스터디의 현재 `LEADER`·`MANAGER` 전용이며 본인이 요청한 해당 시험의 `EXAM_RETRY` 작업만 조회한다. C가 작업 소유자·시험·D 구성원 권한을 재검증한다.
 - **대응 테이블:** `contest_admin_operations`
 - **설명:** 관리자 작업 상태 조회
 - **요청 헤더:**
@@ -7187,7 +7190,8 @@
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `operationId` | string | Y | — | Path · 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `examId` | string | 시험 경로에서 Y | — | Path · 시험 ID 문자열 |
+    | `operationId` | string | Y | — | Query 또는 Path · 호출자 생성 멱등 작업 ID. 1~100자. `/`가 포함된 ID는 URL 인코딩한 쿼리 값으로 전달한다. |
 - **요청 본문:** 없음
 - **응답 헤더:**
     
@@ -7384,8 +7388,9 @@
 - **비고:**
     - **MEMBER:** 자원 잠금 아래 실제 입장한 미확정 시험·대회가 있으면 WITHDRAWAL_BLOCKED_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 등록·입장을 차단한다.
     - **STUDY:** PREPARED와 신규 시험 생성 차단을 저장한다.
-    - 모든 SCHEDULED 시험을 동일 취소 계약으로 취소하고 등록자에게 알린다.
-    - 아직 시간상 진행 중인 시험이 있으면 202·ready=false·blockingExamIds 반환; 재요청 시 종료를 확인한다.
+    - 모든 SCHEDULED 시험을 동일 취소 계약으로 취소하고 등록자에게 알린다. 취소 이벤트의 `reason`은 `스터디 종료 준비로 시험이 취소되었습니다.`이다.
+    - 같은 `operationId`로 재요청하면 최초 `canceledExamIds`를 반환하고 현재 시험 상태로 `ready`와 `blockingExamIds`를 계산한다.
+    - 아직 시간상 진행 중인 시험이 있으면 202와 함께 `ready=false` 및 `blockingExamIds`를 반환한다.
     - 모든 시험이 CLOSED/FINALIZED/CANCELED면 ready=true. 아직 미확정인 CLOSED 시험은 차단하지 않는다.
     - **PROBLEM:** SCHEDULED 또는 시간상 진행 중인 시험·대회에 포함되면 PROBLEM_IN_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 문제 편입을 막는다.
     - EXAM_ONLY 종료공개와 고정 회차 채점은 가드와 분리한다.
@@ -7396,7 +7401,7 @@
     - 다른 본문은 422 IDEMPOTENCY_KEY_CONFLICT. 다른 PREPARED 작업이 점유하면 409 CONTEST_OPERATION_BLOCKED. expectedSourceVersion < 저장 sourceVersion은 409 SOURCE_VERSION_CONFLICT.
     - **PROBLEM 응답:** 신규 준비 성공은 200·`PREPARED`·`ready=true`이며 `canceledExamIds`·`blockingExamIds`는 빈 배열이다. 예정·진행 참조가 있으면 `PROBLEM_IN_ACTIVE_EXAM`(409)이며 PREPARED를 남기지 않는다. PROBLEM 준비로 시험·대회를 자동 취소하지 않는다.
     - **직렬화:** PROBLEM prepare와 시험 생성·문제 교체·대회 생성의 해당 문제 편입은 같은 `(PROBLEM, problemId)` 가드 행을 잠근다. 신규 가드 행은 유일 제약으로 먼저 확보한 후 잠근다. 둘 중 먼저 커밋한 결과를 다른 쪽이 확인하므로 사용 조회 뒤 신규 편입을 끼워 넣을 수 없다. 원격 HTTP는 이 잠금 밖에서 끝낸다.
-    - **준비 전 상태:** PROBLEM_HIDE는 다른 미종결 작업이 없는 OPEN 또는 BLOCKED에서 준비한다. prepared_from_state와 operation_result=PENDING을 같은 가드 트랜잭션에 저장한다. 반복 prepare는 원래 준비·종결 결과를 반환하고 기존 결과를 초기화하지 않는다.
+    - **준비 전 상태:** PROBLEM_HIDE는 다른 미종결 작업이 없는 OPEN 또는 BLOCKED에서 준비한다. prepared_from_state와 operation_result=PENDING을 같은 가드 트랜잭션에 저장한다. 회원·문제의 종결 작업은 작업별로 보존한다. 이후 다른 작업을 준비했어도 동일 prepare는 기존 결과를 반환하며 가드를 다시 준비하지 않는다.
     - **작업 유형:** MEMBER/WITHDRAWAL은 member-service, STUDY/STUDY_CLOSE는 study-service, PROBLEM/PROBLEM_HIDE는 problem-service만 호출한다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
@@ -7404,7 +7409,7 @@
 
 - **Method / URI:** `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/complete`, `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/cancel`
 - **인증:** §4.7.3의 자원 소유 서비스.
-- **대응 테이블:** `contest_resource_guards`
+- **대응 테이블:** `contest_resource_guards`, `contest_guard_operation_history`
 - **설명:** 자원 작업 완료·취소
 - **요청 헤더:** 없음
 - **요청 파라미터:**
@@ -7441,13 +7446,15 @@
     - **complete:** 소유 서비스가 자기 DB 상태를 변경한 뒤 호출한다.
     - 가드 operationId 일치와 expectedSourceVersion보다 큰 결과 버전을 확인해 operation_result=COMMITTED로 종결한다. source_version은 기존값과 결과 버전 중 큰 값으로 보존한다. PROBLEM은 최신 source_status가 결과보다 큰 버전의 PUBLIC이고 GENERAL 재공개인 경우에만 OPEN, 그 외 BLOCKED로 반영한다. PROBLEM complete의 버전은 Problem COMMITTED 결과와 같아야 하며, cancel은 원래 기대 버전을 사용하고 원천 상태를 증가시키지 않는다.
     - STUDY는 ready=true일 때만 완료한다.
-    - MemberWithdrawn/StudyClosed/ProblemStateChanged도 같은 완료 처리를 복구한다.
-    - **cancel:** 소유 서비스가 작업을 실행하지 않았음(`ABORTED`)을 확정한 뒤 취소한다. OPEN에서 준비한 작업은 OPEN으로 복귀한다. PROBLEM의 BLOCKED에서 후속 보관을 준비했으면 prepared_from_state=BLOCKED로 복원하고 operation_result=ABORTED를 보존한다.
-    - 반복 complete/cancel은 같은 operationResult와 상태를 반환한다. 취소는 현재 작업의 ABORTED 확인과 원래 기대 버전을 요구한다. 더 최신 원천 상태가 있으면 GENERAL·PUBLIC만 OPEN, PRIVATE·ARCHIVED는 BLOCKED이며, 그 외에는 준비 전 상태로 복원한다. 원천 버전은 감소시키지 않는다.
+    - `StudyClosed`와 `ProblemStateChanged`는 같은 완료 처리를 복구한다. 다른 준비 작업 중 관찰한 스터디 종료는 준비를 유지하고 이후 취소 시에도 신규 생성을 차단한다.
+    - `MemberWithdrawn`은 탈퇴 상태와 원천 버전을 반영한다. `PREPARED`인 회원 가드는 유지하며, 대사로 복구할 때는 §1.7.3에서 같은 `operationId`의 `COMMITTED` 결과와 완료 버전을 확인한 뒤 종결한다.
+    - **cancel:** 소유 서비스가 작업을 실행하지 않았음(`ABORTED`)을 확정한 뒤 취소한다. OPEN에서 준비한 작업은 OPEN으로 복귀하되 MEMBER의 더 최신 탈퇴 상태는 BLOCKED로 보존한다. PROBLEM의 BLOCKED에서 후속 보관을 준비했으면 prepared_from_state=BLOCKED로 복원하고 operation_result=ABORTED를 보존한다.
+    - 반복 complete/cancel은 같은 operationResult와 상태를 반환한다. 취소는 현재 작업의 ABORTED 확인과 원래 기대 버전을 요구한다. 문제는 준비 중 새로 반영한 스냅샷이 기대 버전 이상이고 최신 원천 버전과 같을 때 GENERAL·PUBLIC만 OPEN으로 복원한다. PRIVATE·ARCHIVED는 BLOCKED이며, 최신 스냅샷이 없으면 준비 전 상태로 복원한다. 원천 버전은 감소시키지 않는다.
     - 이미 완료된 작업은 취소 불가(409 OPERATION_ALREADY_COMPLETED). 스터디 준비로 취소된 시험을 자동 복원하지 않는다.
     - **응답 조건:** 반복 완료·취소는 같은 결과 반환. 오래된 작업 ID는 409 OPERATION_NOT_CURRENT.
+    - **종결 이력:** 직접 호출·대사·이벤트의 확인 경로를 가드 변경과 함께 저장한다. 사유는 직접 호출에서 받은 경우만 저장한다.
     - **복구:** C는 PREPARED 1분 초과 건을 5분 주기로 소유 서비스 operation 상태 API로 대사한다.
-    - COMMITTED는 complete, ABORTED는 cancel, PENDING/조회 실패는 유지·운영 알림. TTL 자동 해제 없음. PROBLEM의 GENERAL 재공개는 현재 작업을 덮어쓰지 않는 더 큰 PUBLIC 이벤트에만 OPEN이며 ARCHIVED는 해제하지 않는다. 미해결 PREPARED의 다른 작업을 PUBLIC 스냅샷만으로 취소하지 않는다. 해당 스냅샷의 sourceVersion·visibility·scope는 source_version·source_status·source_scope에 함께 보존하고 작업 종결 뒤 최신 상태로 차단을 결정한다. 오래된 스냅샷은 무시하고 ARCHIVED는 후속 해제하지 않는다.
+    - COMMITTED는 complete, ABORTED는 cancel, PENDING/조회 실패는 유지·운영 알림. TTL 자동 해제 없음. PROBLEM의 GENERAL 재공개는 현재 작업을 덮어쓰지 않는 더 큰 PUBLIC 이벤트에만 OPEN이며 ARCHIVED는 해제하지 않는다. 미해결 PREPARED의 다른 작업을 PUBLIC 스냅샷만으로 취소하지 않는다. 완료 버전과 전체 스냅샷 버전을 분리한다. 더 최신 전체 스냅샷은 보존하되 완료 버전보다 오래된 공개 스냅샷은 차단을 해제하지 않는다. ARCHIVED는 후속 해제하지 않는다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
 #### 4.7.5 스터디 시험 상태 조회
@@ -8962,7 +8969,7 @@
 | member | 1.6.1 ~ 1.6.3 | 회원 목록, 정지·해제, 권한 변경 |
 | problem | 2.3.1 ~ 2.3.11, 2.4, 2.5.2 ~ 2.5.4 | 문제 등록·회차·공개·비공개·보관·검증, 이미지, 태그 |
 | judge | 3.2.1 ~ 3.2.5 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구 |
-| contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, `FAILED` 0점 확정, 결과 재확정 |
+| contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, 시험 실패 재처리·작업 조회, `FAILED` 0점 확정, 결과 재확정. 시험 운영자 경로는 §4.6.3·§4.6.7 참조 |
 | study | 5.6.1 ~ 5.6.2 | 스터디 강제 종료, AC 복제본 재동기화 |
 | notification | 7.2.1 | 시스템 전역 공지 알림 브로드캐스트 |
 
