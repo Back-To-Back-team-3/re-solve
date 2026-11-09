@@ -138,6 +138,38 @@ class AssetObjectDeleterTest {
         verify(s3, never()).deleteObjects(any(DeleteObjectsRequest.class));
     }
 
+    /** 대상 키를 지난 뒤에는 같은 접두사의 다른 객체를 조회하거나 삭제하지 않는다. */
+    @Test
+    @DisplayName("목록 마커가 대상 키를 지나면 남은 페이지를 건너뛴다")
+    void stopsAfterTargetKey() {
+        var s3 = mock(S3Client.class);
+        given(s3.getBucketVersioning(any(GetBucketVersioningRequest.class)))
+            .willReturn(GetBucketVersioningResponse.builder().status(BucketVersioningStatus.ENABLED).build());
+        var sibling = ObjectVersion.builder().key("key-other").versionId("other").build();
+        given(s3.listObjectVersions(any(ListObjectVersionsRequest.class)))
+            .willReturn(
+                ListObjectVersionsResponse
+                    .builder()
+                    .isTruncated(true)
+                    .nextKeyMarker("key-other")
+                    .versions(ObjectVersion.builder().key("key").versionId("v1").build(), sibling)
+                    .build(),
+                ListObjectVersionsResponse
+                    .builder()
+                    .isTruncated(true)
+                    .nextKeyMarker("key-other")
+                    .versions(sibling)
+                    .build()
+            );
+        given(s3.deleteObjects(any(DeleteObjectsRequest.class))).willReturn(DeleteObjectsResponse.builder().build());
+        new AssetObjectDeleter(s3).delete("bucket", "key", "v1", () -> Duration.ofSeconds(10));
+        verify(s3, times(2)).listObjectVersions(any(ListObjectVersionsRequest.class));
+        var request = ArgumentCaptor.forClass(DeleteObjectsRequest.class);
+        verify(s3).deleteObjects(request.capture());
+        assertThat(request.getValue().delete().objects()).hasSize(1);
+        assertThat(request.getValue().delete().objects().getFirst().key()).isEqualTo("key");
+    }
+
     /** 최종 구간의 HTTP 호출이 잔여 예산을 넘지 않도록 한다. */
     @Test
     @DisplayName("잔여 예산이 10초 미만이면 S3 호출 제한도 함께 줄인다")

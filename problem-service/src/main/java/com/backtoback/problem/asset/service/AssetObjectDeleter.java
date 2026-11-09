@@ -124,6 +124,10 @@ public class AssetObjectDeleter {
             if (keyMarker == null) {
                 throw new IllegalStateException("S3 버전 목록의 다음 위치가 없습니다.");
             }
+            // prefix가 정확한 키이므로 더 긴 키부터는 대상 버전이 나오지 않는다.
+            if (!key.equals(keyMarker) && keyMarker.startsWith(key)) {
+                return objects;
+            }
         }
         throw new IllegalStateException("파일 버전 목록이 한 건의 정리 범위를 초과했습니다.");
     }
