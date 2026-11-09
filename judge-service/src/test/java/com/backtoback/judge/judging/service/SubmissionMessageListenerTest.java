@@ -22,9 +22,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -370,11 +373,116 @@ class SubmissionMessageListenerTest {
         assertThat(count("judge_jobs")).isEqualTo(1);
     }
 
+    /** DLQ 이동 후 실제 SQS 재전달과 운영자 감사 저장을 검증한다. */
+    @Test
+    @DisplayName("반복 실패한 시험 요청을 DLQ에서 재전달하면 접수 한 건과 감사 기록이 남는다")
+    void redrivesAndAudits() {
+        jdbc.update("DELETE FROM audit_logs");
+        // given: DB 작업 INSERT가 실패해 SQS가 원본 메시지를 격리한다.
+        var eventId = UUID.randomUUID();
+        String event = examMessage(eventId, "ExamSubmissionRequested");
+        try (var sqs = sqsClient()) {
+            rejectJobInsert();
+            try {
+                sqs.sendMessage(request -> request.queueUrl(submissionQueue).messageBody(event));
+                await()
+                    .atMost(Duration.ofSeconds(25))
+                    .untilAsserted(
+                        () -> assertThat(
+                            sqs
+                                .getQueueAttributes(
+                                    request -> request
+                                        .queueUrl(deadLetterQueue)
+                                        .attributeNames(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES)
+                                )
+                                .attributes()
+                                .get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES)
+                        ).isEqualTo("1")
+                    );
+                assertThat(count("processed_events")).isZero();
+                assertThat(count("submissions")).isZero();
+            } finally {
+                jdbc.execute("ALTER TABLE judge_jobs DROP CHECK chk_test_reject_first_attempt");
+            }
+
+            // when: 원인이 해소된 뒤 DLQ 이동 작업으로 원래 큐에 재전달한다.
+            String taskHandle = sqs.startMessageMoveTask(request -> request.sourceArn(deadLetterArn)).taskHandle();
+            assertThat(taskHandle).isNotBlank();
+            await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+                assertThat(sqs.listMessageMoveTasks(request -> request.sourceArn(deadLetterArn)).results())
+                    .anyMatch(
+                        task -> "COMPLETED".equals(task.status()) && task.approximateNumberOfMessagesMoved() == 1
+                    );
+                assertThat(count("judge_jobs")).isEqualTo(1);
+            });
+            auditRedrive(eventId, taskHandle, 25L);
+            auditRedrive(eventId, taskHandle, 26L);
+            sqs.sendMessage(request -> request.queueUrl(submissionQueue).messageBody(event));
+
+            // then: 이동 완료 후 같은 이벤트가 다시 배달돼도 최초 제출과 작업이 유지된다.
+            await()
+                .atMost(Duration.ofSeconds(15))
+                .untilAsserted(
+                    () -> assertThat(
+                        sqs
+                            .getQueueAttributes(
+                                request -> request
+                                    .queueUrl(submissionQueue)
+                                    .attributeNames(
+                                        QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES,
+                                        QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE
+                                    )
+                            )
+                            .attributes()
+                            .values()
+                    ).containsExactlyInAnyOrder("0", "0")
+                );
+            assertThat(count("submissions")).isEqualTo(1);
+            assertThat(count("judge_jobs")).isEqualTo(1);
+            assertThat(count("processed_events")).isEqualTo(1);
+            assertThat(count("audit_logs")).isEqualTo(1);
+            var audit = jdbc.queryForMap("SELECT actor_id,action,target_id,reason,after_state FROM audit_logs");
+            assertThat(audit)
+                .containsEntry("actor_id", 25L)
+                .containsEntry("target_id", eventId.toString())
+                .containsEntry("action", "DLQ_REDRIVE")
+                .containsEntry("reason", "DB 장애 복구");
+            assertThat(mapper.readTree((String)audit.get("after_state")).get("moveTaskHandle").asString())
+                .isEqualTo(taskHandle);
+        }
+    }
+
     /** 실제 업무 트랜잭션의 작업 INSERT만 실패하도록 테스트 DB에 제약을 주입한다. */
     private void rejectJobInsert() {
         jdbc.execute("""
             ALTER TABLE judge_jobs ADD CONSTRAINT chk_test_reject_first_attempt CHECK (try_count <> 1)
             """);
+    }
+
+    /**
+     * 운영에서 사용하는 SQL로 테스트 재전달의 감사 행을 기록한다.
+     *
+     * @param eventId 재전달 원본 이벤트 ID
+     * @param taskHandle LocalStack의 이동 작업 핸들
+     * @param actorId 감사 기록 집행자
+     */
+    private void auditRedrive(UUID eventId, String taskHandle, long actorId) {
+        jdbc.execute((ConnectionCallback<Void>)connection -> {
+            try (var statement = connection.prepareStatement("""
+                SET @redrive_actor_id=?, @redrive_event_id=?, @redrive_receipt_id=?,
+                    @redrive_task_handle=?, @redrive_reason=?
+                """)) {
+                statement.setLong(1, actorId);
+                statement.setString(2, eventId.toString());
+                statement.setLong(3, 71L);
+                statement.setString(4, taskHandle);
+                statement.setString(5, "DB 장애 복구");
+                statement.execute();
+            }
+            ScriptUtils
+                .executeSqlScript(connection, new ClassPathResource("operations/audit-exam-submission-redrive.sql"));
+            return null;
+        });
     }
 
     /**
