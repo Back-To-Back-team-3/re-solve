@@ -34,6 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.exception.BusinessException;
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.member.global.error.MemberErrorCode;
 import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.domain.MemberStatus;
@@ -52,6 +53,7 @@ import com.backtoback.member.skill.store.DiagnosisDraftStore.Draft;
 
 /**
  * 진단 시작·Draft·이력(API 명세서 1.5.1·1.5.2·1.5.4·1.5.7)을 실제 MySQL로 확인한다. problem 호출은 대역으로 바꾼다.
+ * 테스트가 만드는 시각은 서비스 Clock과 같은 서울 시간이어야 한다(CI 서버는 UTC).
  */
 @SpringBootTest
 @Testcontainers(disabledWithoutDocker = true)
@@ -137,13 +139,16 @@ class DiagnosisServiceTest {
         assertError(() -> diagnosisService.start(memberId, 4L), MemberErrorCode.DIAGNOSIS_PROBLEMS_UNAVAILABLE);
         assertThat(tagLevelRepository.findByMemberIdAndTagId(memberId, 4L)).isEmpty();
 
-        MemberTagLevel lv3 = MemberTagLevel.enterWithoutDiagnosis(memberId, 5L, LocalDateTime.now());
+        MemberTagLevel lv3
+            = MemberTagLevel.enterWithoutDiagnosis(memberId, 5L, LocalDateTime.now(ClockConfiguration.SERVICE_ZONE));
         ReflectionTestUtils.setField(lv3, "level", TagLevel.LV3);
         tagLevelRepository.save(lv3);
         assertError(() -> diagnosisService.start(memberId, 5L), MemberErrorCode.DIAGNOSIS_NOT_ELIGIBLE);
 
-        MemberTagLevel cooling = MemberTagLevel.enterWithoutDiagnosis(memberId, 6L, LocalDateTime.now());
-        ReflectionTestUtils.setField(cooling, "lastDiagnosisEndedAt", LocalDateTime.now().minusDays(1));
+        MemberTagLevel cooling
+            = MemberTagLevel.enterWithoutDiagnosis(memberId, 6L, LocalDateTime.now(ClockConfiguration.SERVICE_ZONE));
+        ReflectionTestUtils
+            .setField(cooling, "lastDiagnosisEndedAt", LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).minusDays(1));
         tagLevelRepository.save(cooling);
         assertThatThrownBy(() -> diagnosisService.start(memberId, 6L))
             .isInstanceOf(DiagnosisCooldownException.class)
@@ -247,7 +252,7 @@ class DiagnosisServiceTest {
         jdbcTemplate
             .update(
                 "update diagnosis_attempts set ends_at = ? where id = ?",
-                LocalDateTime.now().minusSeconds(1),
+                LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).minusSeconds(1),
                 diagnosisId
             );
         assertError(
