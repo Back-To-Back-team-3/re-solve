@@ -170,6 +170,26 @@ class AssetObjectDeleterTest {
         assertThat(request.getValue().delete().objects().getFirst().key()).isEqualTo("key");
     }
 
+    /** 삭제 응답이 성공해도 재조회에서 삭제 마커가 남으면 실패한다. */
+    @Test
+    @DisplayName("삭제 후 같은 키의 삭제 마커가 남으면 성공 처리하지 않는다")
+    void rejectsRemainingDeleteMarker() {
+        var s3 = mock(S3Client.class);
+        given(s3.getBucketVersioning(any(GetBucketVersioningRequest.class)))
+            .willReturn(GetBucketVersioningResponse.builder().status(BucketVersioningStatus.ENABLED).build());
+        var remaining
+            = ListObjectVersionsResponse
+                .builder()
+                .deleteMarkers(DeleteMarkerEntry.builder().key("key").versionId("marker").build())
+                .build();
+        given(s3.listObjectVersions(any(ListObjectVersionsRequest.class))).willReturn(remaining);
+        given(s3.deleteObjects(any(DeleteObjectsRequest.class))).willReturn(DeleteObjectsResponse.builder().build());
+        assertThatThrownBy(
+            () -> new AssetObjectDeleter(s3).delete("bucket", "key", "marker", () -> Duration.ofSeconds(10))
+        ).isInstanceOf(IllegalStateException.class).hasMessage("삭제 후 S3 버전이 남아 있습니다.");
+        verify(s3, times(2)).listObjectVersions(any(ListObjectVersionsRequest.class));
+    }
+
     /** 최종 구간의 HTTP 호출이 잔여 예산을 넘지 않도록 한다. */
     @Test
     @DisplayName("잔여 예산이 10초 미만이면 S3 호출 제한도 함께 줄인다")

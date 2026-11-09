@@ -36,8 +36,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.event.service.OutboxRelay;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.problem.asset.domain.AssetKind;
 import com.backtoback.problem.asset.scheduler.UnlinkedAssetCleanupScheduler;
+import com.backtoback.problem.global.exception.ProblemException;
+import com.backtoback.problem.problem.service.ProblemAssetContent;
+import com.backtoback.problem.problem.service.ProblemValidationStore;
 
 /** 실제 MySQL에서 파일 삭제 선점·실패 복구와 연결 경합을 검증한다. */
 @SpringBootTest(
@@ -79,6 +83,8 @@ class AssetCleanupServiceTest {
     private AssetCleanupService service;
     @Autowired
     private UnlinkedAssetCleanupScheduler scheduler;
+    @Autowired
+    private ProblemValidationStore validations;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private AssetCleanupStore storeSpy;
     @MockitoBean
@@ -119,6 +125,8 @@ class AssetCleanupServiceTest {
                     LocalDateTime.now(clock).minusHours(23),
                     recent.id()
                 );
+            jdbc.update("UPDATE " + kind.table() + " SET updated_at='1999-01-01 00:00:00' WHERE id=?", old.id());
+            assertThat(store.candidates()).contains(old).doesNotContain(linked, recent);
             assertThat(service.clean(old, new AssetCleanupBudget(clock), owner)).isEqualTo("deleted");
             assertThat(service.clean(pending, new AssetCleanupBudget(clock), owner)).isEqualTo("unconfirmed");
             assertThat(service.clean(linked, new AssetCleanupBudget(clock), owner)).isEqualTo("skipped");
@@ -259,6 +267,42 @@ class AssetCleanupServiceTest {
                 store.releaseLease(nextOwner.get());
             }
         }
+    }
+
+    /** 삭제 선점이 먼저 커밋되면 실제 검증 접수 트랜잭션에서 CODE 연결을 거부한다. */
+    @Test
+    @DisplayName("삭제 선점된 CODE 파일로는 새 검증 요청을 저장할 수 없다")
+    void rejectsValidationForDeletingCode() {
+        var candidate = asset(AssetKind.CODE, "PENDING", true);
+        var content
+            = ProblemAssetContent
+                .fromBytes(
+                    new byte[] {
+                        1
+                    }
+                );
+        jdbc.update("""
+            UPDATE problem_code_assets SET sha256=?, size_bytes=?, upload_finished_at=uploaded_at WHERE id=?
+            """, content.sha256(), content.sizeBytes(), candidate.id());
+        validations.validate(1L, 1L, 1L, "cpp");
+        assertThat(store.claim(candidate, owner).outcome()).isEqualTo("claimed");
+        var key = java.util.UUID.randomUUID().toString();
+        var command
+            = new ProblemValidationStore.Command(1L, 1L, 1L, "cpp", key, "a".repeat(64), content, "trace", null);
+        assertThatThrownBy(() -> validations.save(command, candidate.id()))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_INVALID_REQUEST)
+            );
+        assertThat(state(candidate)).isEqualTo("DELETING");
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM problem_validations WHERE code_asset_id=?",
+                    Integer.class,
+                    candidate.id()
+                )
+        ).isZero();
     }
 
     /** 실제 연결 참조는 상태가 잘못 저장돼 있어도 보호한다. */
