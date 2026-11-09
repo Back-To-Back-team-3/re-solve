@@ -151,15 +151,21 @@ public class ExamManagementService {
         return new Selection(List.copyOf(ids), total);
     }
 
-    /** 시작과 길이는 실제 저장 직전에도 현재 서버 시각으로 검사한다. */
+    /** 서울 시간으로 저장할 수 있는지와 시험 시작·길이 조건을 저장 직전에도 검사한다. */
     private void validateTime(OffsetDateTime startsAt, OffsetDateTime endsAt) {
         var start = startsAt.toInstant().truncatedTo(ChronoUnit.MICROS);
         var end = endsAt.toInstant().truncatedTo(ChronoUnit.MICROS);
         Duration duration = Duration.between(start, end);
-        if (!start.isAfter(clock.instant()) || duration.compareTo(Duration.ofMinutes(1)) < 0
-            || duration.compareTo(Duration.ofMinutes(180)) > 0) {
+        if (!isStorable(startsAt) || !isStorable(endsAt) || !start.isAfter(clock.instant())
+            || duration.compareTo(Duration.ofMinutes(1)) < 0 || duration.compareTo(Duration.ofMinutes(180)) > 0) {
             throw invalid();
         }
+    }
+
+    /** 시험 시간을 서울 시간으로 변환한 뒤 {@code DATETIME(6)}의 연도 범위를 확인한다. */
+    private boolean isStorable(OffsetDateTime value) {
+        int year = local(value).getYear();
+        return year >= 1000 && year <= 9999;
     }
 
     /** 누락·비가용 문제는 거절하고 손상된 응답은 의존 장애로 처리한다. */

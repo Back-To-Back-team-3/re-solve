@@ -157,6 +157,27 @@ class ExamManagementServiceTest {
         verifyNoInteractions(dependencies, members, transactions);
     }
 
+    /** 시작이 저장 범위 안이어도 종료를 서울 시간으로 저장할 수 없으면 요청을 거절한다. */
+    @Test
+    @DisplayName("서울 시간으로 바꾼 시험 종료가 9999년을 넘으면 거절한다")
+    void rejectsEndOutsideDatabaseRange() {
+        var request
+            = new ExamCreateRequest(
+                "시험",
+                "FIXED",
+                OffsetDateTime.parse("9999-12-31T13:30:00Z"),
+                OffsetDateTime.parse("9999-12-31T15:30:00Z"),
+                List.of(new Problem("1", "100.00", 1))
+            );
+        assertThatThrownBy(() -> service.create("12", "7", request))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(CommonErrorCode.COMMON_INVALID_REQUEST)
+            );
+        verifyNoInteractions(dependencies, members, transactions);
+    }
+
     @Test
     @DisplayName("종료된 스터디는 문제 조회와 저장을 수행하지 않는다")
     void rejectsClosedStudy() {

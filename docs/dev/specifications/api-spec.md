@@ -4698,6 +4698,7 @@
     ```
     
     - `title` 1~200자, `mode`는 `FIXED`만 허용, `problems` 1~20개 (중복 `problemId` 불가), `displayOrder`는 1부터 문제 수까지 연속, `startsAt`은 현재 이후, `endsAt > startsAt`, 시험 시간 1~180분, `score` 0.01~9999.99 소수점 둘째 자리 문자열, 배점 합계 9999.99 이하
+    - `startsAt`·`endsAt`을 서울 시간으로 변환했을 때 연도가 1000~9999 범위를 벗어나면 `COMMON_INVALID_REQUEST`(400)를 반환한다.
 - **응답 헤더:**
     
     
