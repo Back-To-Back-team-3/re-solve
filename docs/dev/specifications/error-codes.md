@@ -89,6 +89,7 @@
 | `EXAM_NOT_FOUND` / `CONTEST_NOT_FOUND` | 404 | 부모 문맥 없음 |
 | `EXAM_SUBMISSION_NOT_FOUND` | 404 | 시험 접수 없음 |
 | `EXAM_NOT_ELIGIBLE` | 403 | 등록 시 `APPROVED` 구성원 복제본 없음 |
+| `EXAM_PARTICIPANT_LIMIT_REACHED` | 409 | 활성 참가 10,000명에 도달한 시험에 신규 등록 요청 |
 | `EXAM_NOT_REGISTERED` / `CONTEST_NOT_REGISTERED` | 403 | 활성 등록 없음 |
 | `EXAM_NOT_STARTED` / `CONTEST_NOT_STARTED` | 403 | 시작 전 입장·문제 조회 |
 | `EXAM_CLOSED` / `CONTEST_CLOSED` | 409 | 신규 저장·제출·Run 마감 |
