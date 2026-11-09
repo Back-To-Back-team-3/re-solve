@@ -5,8 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 
+import java.sql.DriverManager;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +30,7 @@ import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.event.service.OutboxRelay;
+import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 
 import tools.jackson.databind.ObjectMapper;
@@ -49,7 +53,7 @@ class ProblemContestServiceTest {
     @Container
     private static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7.4-alpine").withExposedPorts(6379);
     private static final AtomicLong IDS = new AtomicLong(9000);
-    @Autowired
+    @MockitoSpyBean
     private ProblemContestService service;
     @Autowired
     private ProblemOperationService operations;
@@ -121,24 +125,102 @@ class ProblemContestServiceTest {
         assertThat(linked.getContestLinkSourceVersion()).isEqualTo(2);
         jdbc.update("UPDATE problems SET row_version=4,visibility='ARCHIVED' WHERE id=?", id);
         assertThat(link(10).getContestLinkSourceVersion()).isEqualTo(2);
-        assertThatThrownBy(() -> link(11)).isInstanceOf(ProblemException.class);
+        assertThatThrownBy(() -> link(11))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode())
+                    .isEqualTo(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION)
+            );
+        assertThatThrownBy(() -> link(10, id + 1, 99))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode())
+                    .isEqualTo(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION)
+            );
+        assertThatThrownBy(() -> link(10, id, 100))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode())
+                    .isEqualTo(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION)
+            );
+        assertThat(link(10).getContestProblemRevisionId()).isEqualTo(id);
+        assertThat(link(10).getContestPolicyActorId()).isEqualTo(99L);
         assertThat(count("audit_logs", "target_id")).isOne();
     }
 
-    /** 같은 연결의 병렬 요청을 실제 MySQL에서 직렬화한다. */
+    /**
+     * 첫 연결이 보유한 문제 행 잠금에 두 번째 연결이 실제로 대기하는지 확인한다.
+     *
+     * @throws Exception 연결 실행 또는 잠금 관찰 실패
+     */
     @Test
-    @DisplayName("같은 대회 연결의 동시 요청은 연결 버전과 감사를 한 번만 저장한다")
+    @DisplayName("같은 대회 연결의 동시 요청은 잠금 대기 뒤 최초 버전과 감사를 보존한다")
     void concurrentLink() throws Exception {
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var firstRequest = new AtomicBoolean(true);
+        doAnswer(call -> {
+            var result = call.callRealMethod();
+            if (firstRequest.compareAndSet(true, false)) {
+                locked.countDown();
+                if (!release.await(20, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("첫 연결의 잠금 해제 대기 시간 초과");
+                }
+            }
+            return result;
+        })
+            .when(AopTestUtils.<ProblemContestService>getUltimateTargetObject(service))
+            .link(org.mockito.ArgumentMatchers.eq(id), any(), any());
         try (var pool = Executors.newFixedThreadPool(2)) {
             var first = pool.submit(() -> link(10));
-            var second = pool.submit(() -> link(10));
-            assertThat(first.get(10, TimeUnit.SECONDS).getContestLinkSourceVersion()).isEqualTo(2);
-            assertThat(second.get(10, TimeUnit.SECONDS).getContestLinkSourceVersion()).isEqualTo(2);
+            try {
+                assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+                var second = pool.submit(() -> link(10));
+                awaitProblemLock();
+                assertThat(second.isDone()).isFalse();
+                release.countDown();
+                assertThat(first.get(10, TimeUnit.SECONDS).getContestLinkSourceVersion()).isEqualTo(2);
+                assertThat(second.get(10, TimeUnit.SECONDS).getContestLinkSourceVersion()).isEqualTo(2);
+            } finally {
+                release.countDown();
+            }
         }
         assertThat(count("audit_logs", "target_id")).isOne();
+        assertThat(jdbc.queryForObject("SELECT row_version FROM problems WHERE id=?", Integer.class, id)).isEqualTo(2);
     }
 
-    /** 링크 누락은 ACK하지 않고 연결 복구 후 같은 이벤트를 재처리한다. */
+    /**
+     * 현재 문제의 기본 키에 대한 실제 MySQL 행 잠금 대기를 관찰한다.
+     *
+     * @throws Exception 잠금 관찰 또는 대기 실패
+     */
+    private void awaitProblemLock() throws Exception {
+        try (
+            var observer = DriverManager.getConnection(MYSQL.getJdbcUrl(), "root", MYSQL.getPassword());
+            var statement = observer.prepareStatement("""
+                SELECT COUNT(*) FROM performance_schema.data_lock_waits w
+                JOIN performance_schema.data_locks l
+                    ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID AND l.ENGINE=w.ENGINE
+                WHERE l.OBJECT_SCHEMA=DATABASE() AND l.OBJECT_NAME='problems'
+                    AND l.INDEX_NAME='PRIMARY' AND l.LOCK_TYPE='RECORD' AND l.LOCK_DATA=?
+                """)
+        ) {
+            statement.setString(1, Long.toString(id));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            do {
+                try (var rows = statement.executeQuery()) {
+                    rows.next();
+                    if (rows.getInt(1) > 0) {
+                        return;
+                    }
+                }
+                Thread.sleep(25);
+            } while (System.nanoTime() < deadline);
+            throw new AssertionError("두 번째 연결의 문제 행 잠금 대기를 확인하지 못했습니다.");
+        }
+    }
+
+    /** 링크 복구 후 종료 공개의 상태·회차·언어 이벤트를 한 번만 저장한다. */
     @Test
     @DisplayName("연결 복구 뒤 같은 종료 이벤트를 반영하고 새 이벤트 ID 중복도 재공개하지 않는다")
     void endedReplay() {
@@ -155,6 +237,28 @@ class ProblemContestServiceTest {
         assertThat(jdbc.queryForObject("SELECT scope FROM problems WHERE id=?", String.class, id))
             .isEqualTo("EXAM_ONLY");
         assertThat(count("outbox_events", "aggregate_id")).isOne();
+        var event
+            = mapper
+                .readTree(
+                    jdbc
+                        .queryForObject(
+                            "SELECT payload FROM outbox_events WHERE aggregate_id=?",
+                            String.class,
+                            Long.toString(id)
+                        )
+                );
+        assertThat(event.path("eventType").asString()).isEqualTo("ProblemStateChanged");
+        assertThat(event.path("schemaVersion").asString()).isEqualTo("v2");
+        assertThat(event.path("aggregateId").asString()).isEqualTo(Long.toString(id));
+        assertThat(event.path("problemId").asString()).isEqualTo(Long.toString(id));
+        assertThat(event.path("sourceVersion").asInt()).isEqualTo(3);
+        assertThat(event.path("scope").asString()).isEqualTo("EXAM_ONLY");
+        assertThat(event.path("visibility").asString()).isEqualTo("PUBLIC");
+        assertThat(event.path("problemRevisionId").asString()).isEqualTo(Long.toString(id));
+        assertThat(event.path("revisionNumber").asInt()).isEqualTo(1);
+        assertThat(event.path("supportedLanguages")).hasSize(1);
+        assertThat(event.path("supportedLanguages").get(0).asString()).isEqualTo("cpp");
+        assertThat(event.path("changeType").asString()).isEqualTo("VISIBILITY");
         assertThat(
             jdbc
                 .queryForObject(
@@ -212,14 +316,26 @@ class ProblemContestServiceTest {
      * @return 최초 연결
      */
     private com.backtoback.problem.problem.domain.Problem link(long contest) {
+        return link(contest, id, 99);
+    }
+
+    /**
+     * 지정한 대회·회차·관리자로 연결을 요청한다.
+     *
+     * @param contest 대회 ID
+     * @param revision 고정 회차 ID
+     * @param actor 정책 설정 관리자 ID
+     * @return 최초 연결
+     */
+    private com.backtoback.problem.problem.domain.Problem link(long contest, long revision, long actor) {
         return service
             .link(
                 id,
                 new com.backtoback.problem.problem.dto.request.ContestProblemLinkRequest(
                     Long.toString(contest),
-                    Long.toString(id),
+                    Long.toString(revision),
                     1,
-                    "99"
+                    Long.toString(actor)
                 ),
                 "127.0.0.1"
             );
