@@ -106,7 +106,7 @@ public interface StudyRepository extends JpaRepository<Study, Long>, JpaSpecific
     @Modifying(clearAutomatically = true)
     @Query(
         value = "UPDATE studies SET manager_count = manager_count - 1, version = version + 1, updated_at = NOW(6) "
-            + "WHERE id = :studyId",
+            + "WHERE id = :studyId AND manager_count > 0",
         nativeQuery = true
     )
     void decrementManagerCount(@Param("studyId") Long studyId);

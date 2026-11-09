@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.time.Clock;
@@ -307,6 +308,62 @@ class StudyMembershipCommandServiceTest {
             );
     }
 
+    @Test
+    @DisplayName("MANAGER가 탈퇴하면 manager_count가 감소한다")
+    void cancelOrLeave_manager_decrementsManagerCount() {
+        StudyMembership manager
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.MANAGER, MembershipStatus.APPROVED, NOW, null, NOW);
+        ReflectionTestUtils.setField(manager, "id", 50L);
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
+            .willReturn(Optional.of(manager));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(instantStudy));
+        given(membershipRepository.leaveIfApproved(eq(50L), any())).willReturn(1);
+
+        service.cancelOrLeave(STUDY_ID, MEMBER_ID, CORR_ID);
+
+        verify(studyRepository).decrementManagerCount(STUDY_ID);
+    }
+
+    @Test
+    @DisplayName("MEMBER가 탈퇴하면 manager_count는 변경하지 않는다")
+    void cancelOrLeave_member_doesNotDecrementManagerCount() {
+        StudyMembership member
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.MEMBER, MembershipStatus.APPROVED, NOW, null, NOW);
+        ReflectionTestUtils.setField(member, "id", 50L);
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
+            .willReturn(Optional.of(member));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(instantStudy));
+        given(membershipRepository.leaveIfApproved(eq(50L), any())).willReturn(1);
+
+        service.cancelOrLeave(STUDY_ID, MEMBER_ID, CORR_ID);
+
+        verify(studyRepository, never()).decrementManagerCount(any());
+    }
+
+    @Test
+    @DisplayName("CLOSED 스터디에서 MANAGER가 탈퇴하면 manager_count는 감소하지만 leaveAndAutoReopen은 호출하지 않는다")
+    void cancelOrLeave_closedStudy_manager_decrementsManagerCount_skipsReopen() {
+        Study closedStudy
+            = Study.recruit("스터디", "설명", "EMPLOYMENT", "LV2", "java", "EVENING", 5, JoinType.INSTANT, false);
+        ReflectionTestUtils.setField(closedStudy, "id", STUDY_ID);
+        ReflectionTestUtils.setField(closedStudy, "status", StudyStatus.CLOSED);
+        StudyMembership manager
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.MANAGER, MembershipStatus.APPROVED, NOW, null, NOW);
+        ReflectionTestUtils.setField(manager, "id", 50L);
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
+            .willReturn(Optional.of(manager));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(closedStudy));
+        given(membershipRepository.leaveIfApproved(eq(50L), any())).willReturn(1);
+
+        service.cancelOrLeave(STUDY_ID, MEMBER_ID, CORR_ID);
+
+        verify(studyRepository).decrementManagerCount(STUDY_ID);
+        verify(studyRepository, never()).leaveAndAutoReopen(any());
+    }
+
     // ─── approve ──────────────────────────────────────────────────────────────
 
     @Test
@@ -538,5 +595,29 @@ class StudyMembershipCommandServiceTest {
                 StudyException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
             );
+    }
+
+    @Test
+    @DisplayName("MANAGER를 강퇴하면 manager_count가 감소한다")
+    void remove_manager_decrementsManagerCount() {
+        Long membershipId = 82L;
+        Long targetMemberId = 30L;
+        StudyMembership leaderMembership
+            = StudyMembership
+                .apply(STUDY_ID, MEMBER_ID, MembershipRole.LEADER, MembershipStatus.APPROVED, NOW, null, NOW);
+        StudyMembership targetManager
+            = StudyMembership
+                .apply(STUDY_ID, targetMemberId, MembershipRole.MANAGER, MembershipStatus.APPROVED, NOW, null, NOW);
+        ReflectionTestUtils.setField(targetManager, "id", membershipId);
+
+        given(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), eq(MEMBER_ID), any()))
+            .willReturn(Optional.of(leaderMembership));
+        given(membershipRepository.findById(membershipId)).willReturn(Optional.of(targetManager));
+        given(studyRepository.findById(STUDY_ID)).willReturn(Optional.of(instantStudy));
+        given(membershipRepository.removeIfApproved(eq(membershipId), any(), any())).willReturn(1);
+
+        service.remove(STUDY_ID, membershipId, MEMBER_ID, "규칙 위반", CORR_ID);
+
+        verify(studyRepository).decrementManagerCount(STUDY_ID);
     }
 }
