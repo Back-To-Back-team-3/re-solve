@@ -174,9 +174,11 @@ public class ContestOperationReconciliationScheduler {
         }
     }
 
+    /** 시도 시각 저장이 실패한 가드도 이번 회차에서 한 번만 선택한다. */
     private void reconcileGuards(LocalDateTime cutoff, long deadline) {
+        GuardCandidate cursor = null;
         while (System.nanoTime() < deadline) {
-            var candidates = guardCandidates(cutoff);
+            var candidates = guardCandidates(cutoff, cursor);
             if (candidates.isEmpty()) {
                 return;
             }
@@ -184,8 +186,9 @@ public class ContestOperationReconciliationScheduler {
                 if (System.nanoTime() >= deadline) {
                     return;
                 }
+                cursor = candidate;
                 try {
-                    if (!markGuardAttempt(candidate, cutoff)) {
+                    if (!markGuardAttempt(candidate)) {
                         continue;
                     }
                     metrics.counter("scheduler.items", "job", JOB, "result", "selected").increment();
@@ -217,28 +220,32 @@ public class ContestOperationReconciliationScheduler {
         }
     }
 
-    /** 이번에 확인한 가드를 뒤로 보내 신규 유입 중에도 앞서 실패한 항목이 다시 선정되게 한다. */
-    private boolean markGuardAttempt(GuardCandidate candidate, LocalDateTime cutoff) {
+    /** 가드·스냅샷 갱신 시각을 건드리지 않고 현재 준비 작업의 대사 시도만 기록한다. */
+    private boolean markGuardAttempt(GuardCandidate candidate) {
         var attemptedAt = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE);
         return jdbc
             .update(
-                "UPDATE contest_resource_guards SET updated_at=? WHERE id=? AND operation_id=? "
-                    + "AND version=? AND updated_at<=? AND state='PREPARED' AND operation_result='PENDING'",
+                "UPDATE contest_resource_guards SET last_reconciliation_attempt_at=? WHERE id=? AND operation_id=? "
+                    + "AND version=? AND COALESCE(last_reconciliation_attempt_at,prepared_at,created_at)=? "
+                    + "AND state='PREPARED' AND operation_result='PENDING'",
                 attemptedAt,
                 candidate.id(),
                 candidate.operationId(),
                 candidate.version(),
-                cutoff
+                candidate.reconciliationTime()
             ) == 1;
     }
 
-    private java.util.List<GuardCandidate> guardCandidates(LocalDateTime cutoff) {
+    /** 스냅샷 갱신과 독립된 시도 시각으로 정렬하고 이번 회차에서 지나간 위치를 제외한다. */
+    private java.util.List<GuardCandidate> guardCandidates(LocalDateTime cutoff, GuardCandidate cursor) {
+        String reconciliationTime = "COALESCE(last_reconciliation_attempt_at,prepared_at,created_at)";
         String query
-            = "SELECT id,resource_type,resource_id,operation_id,expected_source_version,version "
+            = "SELECT id,resource_type,resource_id,operation_id,expected_source_version,version," + reconciliationTime
+                + " AS reconciliation_time "
                 + "FROM contest_resource_guards WHERE ((resource_type='MEMBER' AND operation_type='WITHDRAWAL') "
                 + "OR (resource_type='STUDY' AND operation_type='STUDY_CLOSE') "
                 + "OR (resource_type='PROBLEM' AND operation_type='PROBLEM_HIDE')) "
-                + "AND state='PREPARED' AND operation_result='PENDING' AND updated_at<=? ";
+                + "AND state='PREPARED' AND operation_result='PENDING' AND " + reconciliationTime + "<=? ";
         org.springframework.jdbc.core.RowMapper<GuardCandidate> mapper
             = (rs, row) -> new GuardCandidate(
                 rs.getLong(1),
@@ -246,9 +253,22 @@ public class ContestOperationReconciliationScheduler {
                 rs.getLong(3),
                 rs.getString(4),
                 rs.getLong(5),
-                rs.getLong(6)
+                rs.getLong(6),
+                rs.getObject(7, LocalDateTime.class)
             );
-        return jdbc.query(query + "ORDER BY updated_at,id LIMIT 100", mapper, cutoff);
+        String order = "ORDER BY reconciliation_time,id LIMIT 100";
+        if (cursor == null) {
+            return jdbc.query(query + order, mapper, cutoff);
+        }
+        return jdbc
+            .query(
+                query + "AND (" + reconciliationTime + ">? OR (" + reconciliationTime + "=? AND id>?)) " + order,
+                mapper,
+                cutoff,
+                cursor.reconciliationTime(),
+                cursor.reconciliationTime(),
+                cursor.id()
+            );
     }
 
     /** 원격 확인이 실패하더라도 시도 순서는 DB에 남긴다. */
@@ -286,13 +306,15 @@ public class ContestOperationReconciliationScheduler {
     private record Candidate(long id, String operationId, LocalDateTime updatedAt) {
     }
 
+    /** 현재 가드의 준비 작업과 이번 회차의 정렬 위치. */
     private record GuardCandidate(
         long id,
         String type,
         long resourceId,
         String operationId,
         long expectedVersion,
-        long version
+        long version,
+        LocalDateTime reconciliationTime
     ) {
     }
 }
