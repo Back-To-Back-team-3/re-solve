@@ -7,12 +7,12 @@ import com.backtoback.study.membership.repository.projection.MembershipWithStudy
  */
 public record MembershipItemResponse(String studyId, String membershipId, String role, String studyStatus) {
 
-    public static MembershipItemResponse from(MembershipWithStudyStatus p) {
+    public static MembershipItemResponse from(MembershipWithStudyStatus projection) {
         return new MembershipItemResponse(
-            String.valueOf(p.getStudyId()),
-            String.valueOf(p.getId()),
-            p.getRole(),
-            p.getStudyStatus()
+            String.valueOf(projection.getStudyId()),
+            String.valueOf(projection.getId()),
+            projection.getRole(),
+            projection.getStudyStatus()
         );
     }
 }
