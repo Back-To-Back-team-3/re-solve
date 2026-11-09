@@ -3,6 +3,8 @@ package com.backtoback.study.replica.listener;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
+import com.backtoback.study.membership.service.MemberWithdrawnConsumerService;
+import com.backtoback.study.replica.event.dto.MemberWithdrawnPayload;
 import com.backtoback.study.replica.event.dto.SubmissionJudgedPayload;
 import com.backtoback.study.replica.service.SubmissionJudgedConsumerService;
 
@@ -21,12 +23,14 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class SubmissionJudgedEventListener {
 
+    private static final String MEMBER_WITHDRAWN_EVENT_TYPE = "MemberWithdrawn";
     private static final String SUPPORTED_EVENT_TYPE = "SubmissionJudged";
     private static final String MDC_CORRELATION_ID = "correlationId";
     private static final String MDC_EVENT_ID = "eventId";
     private static final String MDC_EVENT_TYPE = "eventType";
 
     private final ObjectMapper objectMapper;
+    private final MemberWithdrawnConsumerService memberWithdrawnConsumerService;
     private final SubmissionJudgedConsumerService consumerService;
 
     @SqsListener("${study.sqs.queue-name:study-queue}")
@@ -47,6 +51,12 @@ public class SubmissionJudgedEventListener {
         }
 
         try {
+            if (MEMBER_WITHDRAWN_EVENT_TYPE.equals(eventType)) {
+                MemberWithdrawnPayload event = objectMapper.treeToValue(payload, MemberWithdrawnPayload.class);
+                memberWithdrawnConsumerService.consume(event);
+                return;
+            }
+
             if (!SUPPORTED_EVENT_TYPE.equals(eventType)) {
                 // event-contract.md §1.4 §1: 모르는 eventType은 processed_events만 기록 후 성공
                 consumerService
