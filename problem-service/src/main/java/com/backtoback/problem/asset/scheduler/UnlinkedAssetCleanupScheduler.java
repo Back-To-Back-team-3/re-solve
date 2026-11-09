@@ -2,6 +2,7 @@ package com.backtoback.problem.asset.scheduler;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -11,7 +12,9 @@ import com.backtoback.problem.asset.service.AssetCleanupService;
 import com.backtoback.problem.asset.service.AssetCleanupStore;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -24,6 +27,15 @@ public class UnlinkedAssetCleanupScheduler {
     private final AssetCleanupService cleanup;
     private final MeterRegistry metrics;
     private final Clock clock;
+    private final AtomicLong oldestUnlinked = new AtomicLong();
+    private final AtomicLong oldestDeleting = new AtomicLong();
+
+    /** 미연결·삭제 중 파일의 마지막 조회값을 각각 Gauge로 등록한다. */
+    @PostConstruct
+    void registerOldestAgeGauges() {
+        metrics.gauge("problem.asset.cleanup.oldest.seconds", Tags.of("state", "unlinked"), oldestUnlinked);
+        metrics.gauge("problem.asset.cleanup.oldest.seconds", Tags.of("state", "deleting"), oldestDeleting);
+    }
 
     /** 잠금의 절반인 15분 예산을 모든 원격·DB 단계에 공유한다(스케줄러 §0.1·§2.1). */
     @Scheduled(
@@ -56,14 +68,10 @@ public class UnlinkedAssetCleanupScheduler {
                 metrics.counter("problem.asset.cleanup.items", "outcome", result).increment();
             }
             if (budget.hasTime(Duration.ofSeconds(10))) {
-                metrics
-                    .summary("problem.asset.cleanup.oldest.seconds", "state", "unlinked")
-                    .record(store.oldestAge(false));
+                oldestUnlinked.set(store.oldestAge(false));
             }
             if (budget.hasTime(Duration.ofSeconds(10))) {
-                metrics
-                    .summary("problem.asset.cleanup.oldest.seconds", "state", "deleting")
-                    .record(store.oldestAge(true));
+                oldestDeleting.set(store.oldestAge(true));
             }
         } finally {
             try {

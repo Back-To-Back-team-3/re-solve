@@ -271,7 +271,7 @@ public class AssetCleanupStore {
         propagation = Propagation.REQUIRES_NEW,
         timeout = 10
     )
-    public double oldestAge(boolean deleting) {
+    public long oldestAge(boolean deleting) {
         LocalDateTime oldest = null;
         for (var kind : AssetKind.values()) {
             var value
