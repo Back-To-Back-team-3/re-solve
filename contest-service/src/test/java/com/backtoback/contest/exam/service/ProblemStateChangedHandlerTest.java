@@ -288,7 +288,7 @@ class ProblemStateChangedHandlerTest {
                 message(
                     UUID.randomUUID().toString(),
                     99202,
-                    3,
+                    4,
                     "GENERAL",
                     "PRIVATE",
                     "\"92\"",
@@ -300,6 +300,25 @@ class ProblemStateChangedHandlerTest {
             );
         // then
         assertThat(row(99202).get("state")).isEqualTo("PREPARED");
+        // when
+        consumer
+            .consume(
+                message(
+                    UUID.randomUUID().toString(),
+                    99202,
+                    4,
+                    "GENERAL",
+                    "PRIVATE",
+                    "\"92\"",
+                    "1",
+                    "[\"java\"]",
+                    "\"current\""
+                ),
+                mock(Runnable.class)
+            );
+        // then
+        assertThat(row(99202).get("state")).isEqualTo("PREPARED");
+        assertThat(row(99202).get("operation_result")).isEqualTo("PENDING");
         // when
         consumer
             .consume(
@@ -324,7 +343,7 @@ class ProblemStateChangedHandlerTest {
                 message(
                     UUID.randomUUID().toString(),
                     99202,
-                    4,
+                    3,
                     "GENERAL",
                     "PRIVATE",
                     "\"92\"",
@@ -338,6 +357,13 @@ class ProblemStateChangedHandlerTest {
         assertThat(row(99202).get("state")).isEqualTo("OPEN");
         assertThat(row(99202).get("operation_result")).isEqualTo("COMMITTED");
         assertThat(((Number)row(99202).get("source_version")).longValue()).isEqualTo(5);
+        assertThat(
+            jdbc
+                .queryForMap(
+                    "SELECT resolution_path,reason FROM contest_guard_operation_history "
+                        + "WHERE resource_type='PROBLEM' AND resource_id=99202 AND operation_id='current'"
+                )
+        ).containsEntry("resolution_path", "EVENT").containsEntry("reason", null);
     }
 
     /** 회차가 없는 스냅샷은 빈 배열을 저장하고 잘못된 이벤트는 소비 기록과 ACK를 남기지 않는다. */

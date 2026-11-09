@@ -170,7 +170,7 @@ class ExamStorageTest {
 
     /** 빈 스키마에서 마이그레이션 순서와 시험·공통 테이블의 생성을 확인한다. */
     @Test
-    @DisplayName("빈 데이터베이스에 V1부터 V16.3까지 순서대로 적용한다")
+    @DisplayName("빈 데이터베이스에 V1부터 V16.7까지 순서대로 적용한다")
     void migratesEmptyDatabase() {
         List<String> versions
             = jdbc
@@ -199,7 +199,11 @@ class ExamStorageTest {
                 "16",
                 "16.1",
                 "16.2",
-                "16.3"
+                "16.3",
+                "16.4",
+                "16.5",
+                "16.6",
+                "16.7"
             );
         assertThat(jdbc.queryForList("SHOW TABLES", String.class))
             .contains(
@@ -218,7 +222,8 @@ class ExamStorageTest {
                 "study_membership_replicas",
                 "result_snapshots",
                 "contest_resource_guards",
-                "contest_admin_operations"
+                "contest_admin_operations",
+                "contest_study_guard_preparations"
             );
     }
 

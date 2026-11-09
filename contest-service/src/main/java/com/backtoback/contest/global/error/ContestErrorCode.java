@@ -17,6 +17,8 @@ public enum ContestErrorCode implements ErrorCode {
     CONTEXT_NOT_FOUND(HttpStatus.NOT_FOUND, "내부 문맥을 찾을 수 없습니다."),
     PROBLEM_REVISION_NOT_INCLUDED(HttpStatus.NOT_FOUND, "문맥에 고정된 문제 회차가 아닙니다."),
     EXAM_NOT_FOUND(HttpStatus.NOT_FOUND, "시험을 찾을 수 없습니다."),
+    EXAM_SUBMISSION_NOT_FOUND(HttpStatus.NOT_FOUND, "시험 접수를 찾을 수 없습니다."),
+    REJUDGE_NOT_ALLOWED(HttpStatus.CONFLICT, "재처리할 수 없는 제출입니다."),
     EXAM_STUDY_CLOSED(HttpStatus.CONFLICT, "종료된 스터디에서는 시험을 변경할 수 없습니다."),
     EXAM_PROBLEM_NOT_AVAILABLE(HttpStatus.CONFLICT, "선택할 수 없는 문제가 있습니다."),
     EXAM_PROBLEM_NOT_INCLUDED(HttpStatus.NOT_FOUND, "시험에 포함되지 않은 문제입니다."),
@@ -51,6 +53,7 @@ public enum ContestErrorCode implements ErrorCode {
     OPERATION_ALREADY_COMPLETED(HttpStatus.CONFLICT, "이미 반대 결과로 종결된 작업입니다."),
     SUBMISSION_NOT_SHAREABLE(HttpStatus.CONFLICT, "공유 가능한 확정 AC 제출이 아닙니다."),
     RESULT_NOT_FINALIZED(HttpStatus.CONFLICT, "결과가 확정되지 않았습니다."),
+    RESULT_FINALIZATION_BLOCKED(HttpStatus.CONFLICT, "종결되지 않은 작업이 있습니다."),
     RESULT_REVISION_NOT_FOUND(HttpStatus.NOT_FOUND, "확정 결과 버전을 찾을 수 없습니다.");
 
     private final HttpStatus status;
