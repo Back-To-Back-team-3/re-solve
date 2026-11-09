@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -257,6 +258,34 @@ class ExamManagementServiceTest {
         assertThat(result.totalScore()).isEqualTo("100.00");
         assertThat(result.problems().getFirst().problemRevisionId()).isEqualTo("10");
         verify(problems).saveAll(any());
+    }
+
+    /** 원격 확인 뒤 복제본에서 정지를 확인하면 시험과 문제를 저장하지 않는다. */
+    @Test
+    @DisplayName("저장 단계에서 정지된 회원의 시험 생성 요청을 거절한다")
+    void rejectsMemberSuspendedBeforeSave() {
+        given(members.refresh(7)).willReturn("ACTIVE");
+        given(dependencies.study(12))
+            .willReturn(new StudyMembers("12", "ACTIVE", List.of(new StudyMember("7", "8", "LEADER"))));
+        given(dependencies.problems(List.of(1L)))
+            .willReturn(
+                new ProblemSummaries(
+                    List.of(new ProblemSummary("1", true, "GENERAL", "PUBLIC", 3L, "10", 2, "문제", List.of("java")))
+                )
+            );
+        given(transactions.execute(any())).willAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(null);
+        });
+        willThrow(new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED)).given(members).requireActiveForExamWrite(7);
+
+        assertThatThrownBy(() -> service.create("12", "7", request(List.of(new Problem("1", "100.00", 1)))))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
+            );
+        verifyNoInteractions(guards, exams, problems);
     }
 
     @Test

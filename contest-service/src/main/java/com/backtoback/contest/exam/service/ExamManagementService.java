@@ -89,7 +89,10 @@ public class ExamManagementService {
         authorize(study, member);
         var summaries = validateSummaries(selection.ids(), dependencies.problems(selection.ids()).items());
         try {
-            return transactions.execute(status -> updateLocked(id, study, version, settings, selection, summaries));
+            return transactions.execute(status -> {
+                members.requireActiveForExamWrite(member);
+                return updateLocked(id, study, version, settings, selection, summaries);
+            });
         } catch (OptimisticLockingFailureException failure) {
             throw new ContestException(ContestErrorCode.EXAM_REVISION_CONFLICT, failure);
         }
@@ -219,6 +222,7 @@ public class ExamManagementService {
         Selection selection,
         Map<Long, ProblemSummary> summaries
     ) {
+        members.requireActiveForExamWrite(member);
         verifyResources(study, selection, summaries);
         validateTime(request.startsAt(), request.endsAt());
         var exam
