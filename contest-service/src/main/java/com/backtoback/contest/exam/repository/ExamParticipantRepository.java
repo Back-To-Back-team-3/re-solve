@@ -1,0 +1,38 @@
+package com.backtoback.contest.exam.repository;
+
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import com.backtoback.contest.exam.domain.ExamParticipant;
+
+import jakarta.persistence.LockModeType;
+
+/** 부모 잠금 뒤 참가 이력을 최신 순으로 잠근다 (ERD 6.4.1). */
+public interface ExamParticipantRepository extends JpaRepository<ExamParticipant, Long> {
+    /**
+     * 부모 시험 잠금 뒤 같은 회원의 참가를 최신 순으로 잠근다.
+     *
+     * @param examId 부모 시험 식별자
+     * @param memberId 참가 회원 식별자
+     * @return 잠긴 참가 행 목록
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from ExamParticipant p where p.exam.id = :exam and p.memberId = :member order by p.id desc")
+    List<ExamParticipant> findForUpdate(@Param("exam") long examId, @Param("member") long memberId);
+
+    /** 부모 시험 잠금 뒤 현재 활성 참가가 지정한 위치까지 존재하는지 확인한다. */
+    @Query(
+        value = """
+            SELECT active_member_id FROM exam_participants
+            WHERE exam_id = :exam AND active_member_id IS NOT NULL
+            ORDER BY active_member_id LIMIT 1 OFFSET :offset FOR UPDATE
+            """,
+        nativeQuery = true
+    )
+    Optional<Long> findActiveParticipantAtOffset(@Param("exam") long examId, @Param("offset") int offset);
+}
