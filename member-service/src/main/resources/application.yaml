@@ -19,6 +19,8 @@ resolve:
   messaging:
     enabled: ${MEMBER_MESSAGING_ENABLED:false}
     topic-arn: ${MEMBER_EVENTS_TOPIC_ARN:}
+    consumer-enabled: ${MEMBER_EVENTS_CONSUMER_ENABLED:false}
+    queue-url: ${MEMBER_QUEUE_URL:}
   auth:
     frontend-origin: ${FRONTEND_ORIGIN:http://localhost:8080}
     # 로그인 후 이동할 수 있는 프론트 경로(상대 경로 접두어). "/"는 모든 상대 경로를 허용한다.

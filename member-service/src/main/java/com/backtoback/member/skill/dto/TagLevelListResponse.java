@@ -8,6 +8,7 @@ import java.util.List;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.member.skill.config.SkillProperties.Promotion;
 import com.backtoback.member.skill.domain.MemberTagLevel;
+import com.backtoback.member.skill.service.TagAchievement;
 import com.backtoback.member.skill.service.TagLevelSummary;
 
 /**
@@ -34,8 +35,7 @@ public record TagLevelListResponse(List<TagLevelItem> content) {
                 String.valueOf(tagLevel.getTagId()),
                 tagLevel.getLevel().name(),
                 tagLevel.getLevel().getAccessibleMaxDifficulty(),
-                // shortcut: 성취도 집계(member_tag_achievements) 전이라 빈 배열, 연습 결과 복제본 반영을 구현할 때 채운다.
-                List.of(),
+                summary.achievements().stream().map(Achievement::from).toList(),
                 new Diagnosis(summary.diagnosisEligible(), toOffset(summary.cooldownEndsAt()), null),
                 NextPromotion.from(summary.nextPromotion())
             );
@@ -47,6 +47,15 @@ public record TagLevelListResponse(List<TagLevelItem> content) {
     }
 
     public record Achievement(int difficulty, int solvedCount, BigDecimal achievementRate, String band) {
+
+        static Achievement from(TagAchievement achievement) {
+            return new Achievement(
+                achievement.difficulty(),
+                achievement.solvedCount(),
+                achievement.achievementRate(),
+                achievement.band()
+            );
+        }
     }
 
     /**
