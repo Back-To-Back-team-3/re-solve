@@ -269,7 +269,7 @@ flowchart LR
 
 | 소비자 | 처리 (정책 §9.4) |
 | --- | --- |
-| study | 가입 `APPROVED → LEFT`(카운터 −1)·`PENDING → CANCELED`, 학습 프로필 복제본·추천 결과·힌트 차단 복제본 삭제, 가입마다 `StudyMemberLeft`(`MEMBER_WITHDRAWN`) 발행. `member_ac_replicas`·진행 기록은 유지 |
+| study | 가입 `APPROVED → LEFT`(카운터 −1)·`PENDING → CANCELED`, 학습 프로필 복제본·추천 결과·힌트 차단 복제본 삭제, 가입마다 `StudyMemberLeft`(`MEMBER_WITHDRAWN`) 발행. `member_replicas` `member_status = WITHDRAWN`·`source_version` 갱신(지연 M1·M2 덮어쓰기 차단). `member_ac_replicas`·진행 기록은 유지 |
 | problem | `member_replicas` 익명화("탈퇴한 사용자"), 공유 풀이 `CANCELED` |
 | contest | 익명화, `MEMBER` 자원 가드 완료(도입 시). 참가 기록·결과는 유지 |
 | notification | 해당 회원 알림 물리 삭제, SSE 연결 종료 |

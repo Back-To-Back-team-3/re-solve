@@ -562,34 +562,24 @@ public class StudyMembershipCommandService {
             );
     }
 
-    private void applyLeave(
-        StudyMembership membership,
-        Long studyId,
-        Long memberId,
-        String correlationId,
-        LocalDateTime now
-    ) {
-        // ① study 조회 (read-only)
+    void applyLeaveInternal(StudyMembership membership, String reason, String correlationId, LocalDateTime now) {
         Study study
-            = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
-
-        // ② quota + study: CLOSED이면 종료 시 이미 quota 반환됐으므로 생략 (이중 차감 방지)
+            = studyRepository
+                .findById(membership.getStudyId())
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
         if (study.getStatus() != StudyStatus.CLOSED) {
-            quotaRepository.decrementIfAboveZero(memberId);
-            studyRepository.leaveAndAutoReopen(studyId);
+            quotaRepository.decrementIfAboveZero(membership.getMemberId());
+            studyRepository.leaveAndAutoReopen(membership.getStudyId());
         }
-        // ③ MANAGER 역할이면 manager_count 감소 (CLOSED 여부 무관)
         if (membership.getRole() == MembershipRole.MANAGER) {
-            studyRepository.decrementManagerCount(studyId);
+            studyRepository.decrementManagerCount(membership.getStudyId());
         }
-
         if (membershipRepository.leaveIfApproved(membership.getId(), now) == 0) {
             membershipRepository
                 .findById(membership.getId())
                 .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND));
             throw new StudyException(StudyErrorCode.STUDY_MEMBERSHIP_NOT_FOUND);
         }
-
         historyRepository
             .save(
                 StudyMembershipHistory
@@ -599,13 +589,12 @@ public class StudyMembershipCommandService {
                         MembershipStatus.LEFT,
                         null,
                         membership.getRole(),
-                        memberId,
+                        membership.getMemberId(),
                         null,
                         now
                     )
             );
-
-        String leftAt = now.atOffset(ZoneOffset.of("+09:00")).format(EVENT_TIME_FORMAT);
+        String leftAtStr = now.atOffset(ZoneOffset.of("+09:00")).format(EVENT_TIME_FORMAT);
         outboxEventWriter
             .append(
                 AGGREGATE_TYPE,
@@ -614,13 +603,23 @@ public class StudyMembershipCommandService {
                 String.valueOf(membership.getId()),
                 correlationId,
                 new StudyMemberLeftPayload(
-                    String.valueOf(studyId),
+                    String.valueOf(membership.getStudyId()),
                     String.valueOf(membership.getId()),
-                    String.valueOf(memberId),
-                    MembershipStatus.LEFT.name(),
-                    leftAt,
+                    String.valueOf(membership.getMemberId()),
+                    reason,
+                    leftAtStr,
                     study.getName()
                 )
             );
+    }
+
+    private void applyLeave(
+        StudyMembership membership,
+        Long studyId,
+        Long memberId,
+        String correlationId,
+        LocalDateTime now
+    ) {
+        applyLeaveInternal(membership, MembershipStatus.LEFT.name(), correlationId, now);
     }
 }
