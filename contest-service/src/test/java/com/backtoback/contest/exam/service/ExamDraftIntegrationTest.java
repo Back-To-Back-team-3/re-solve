@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doAnswer;
 
 import java.time.LocalDateTime;
@@ -14,131 +13,24 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.service.ExamDraftStore.SaveRequest;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
-/** MySQL 잠금과 Redis 버퍼로 Draft 순번과 재접속 복구를 확인한다. */
-@SpringBootTest(
-    properties = {
-        "spring.cloud.aws.sns.enabled=false",
-        "spring.cloud.aws.sqs.enabled=false"
-    }
-)
-@Testcontainers(disabledWithoutDocker = true)
-class ExamDraftIntegrationTest {
-    @Container
-    static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("contest_db");
-    @Container
-    static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7.4-alpine").withExposedPorts(6379);
-
-    /** 테스트 컨텍스트의 격리된 저장소 주소를 등록한다. */
-    @DynamicPropertySource
-    static void infrastructure(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
-        registry.add("spring.data.redis.host", REDIS::getHost);
-        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
-    }
-
-    @MockitoBean
-    private ExamLifecycleScheduler scheduler;
-    @MockitoBean
-    private MemberReplicaService refresh;
-    @Autowired
-    private ExamDraftStore store;
-    @Autowired
-    private ExamDraftBuffer buffer;
-    @Autowired
-    private JdbcTemplate jdbc;
+/** Draft 순번·크기 제한과 Redis 버퍼의 저장 순서를 검증한다. */
+class ExamDraftIntegrationTest extends ExamIntegrationTestSupport {
     @MockitoSpyBean
-    private StringRedisTemplate redis;
-    @Autowired
-    private TransactionTemplate transactions;
-    private String examId;
-    private long participantId;
+    private StringRedisTemplate draftRedis;
 
-    /** 입장한 참가자와 두 문제를 저장한다. */
-    @BeforeEach
-    void setUp() {
-        jdbc.update("DELETE FROM exam_drafts");
-        jdbc.update("DELETE FROM exam_participant_histories");
-        jdbc.update("DELETE FROM exam_participants");
-        jdbc.update("DELETE FROM exam_problems");
-        jdbc.update("DELETE FROM exams");
-        jdbc.update("DELETE FROM member_replicas");
-        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE);
-        jdbc
-            .update(
-                "INSERT INTO member_replicas (member_id,nickname,member_status,source_version,"
-                    + "synced_at,created_at,updated_at) " + "VALUES (7,'회원','ACTIVE',1,?,?,?)",
-                now,
-                now,
-                now
-            );
-        jdbc
-            .update(
-                "INSERT INTO exams (study_id,creator_id,title,mode,starts_at,ends_at,status,exam_revision,"
-                    + "total_score,result_revision,version,created_at,updated_at) VALUES "
-                    + "(12,7,'시험','FIXED',?,?,'IN_PROGRESS',1,100,0,0,?,?)",
-                now.minusHours(1),
-                now.plusHours(1),
-                now,
-                now
-            );
-        examId = jdbc.queryForObject("SELECT MAX(id) FROM exams", String.class);
-        jdbc
-            .update(
-                "INSERT INTO exam_participants (exam_id,member_id,status,participant_revision,registered_at,entered_at,"
-                    + "personal_ends_at,total_score,is_ranked,version,created_at,updated_at) "
-                    + "VALUES (?,7,'STARTED',2,?,?,?,0,false,0,?,?)",
-                examId,
-                now.minusHours(2),
-                now.minusMinutes(30),
-                now.plusHours(1),
-                now,
-                now
-            );
-        participantId = jdbc.queryForObject("SELECT MAX(id) FROM exam_participants", Long.class);
-        for (int problem = 101; problem <= 102; problem++) {
-            jdbc
-                .update(
-                    "INSERT INTO exam_problems (exam_id,problem_id,problem_revision_id,problem_title,revision_number,"
-                        + "score,display_order,created_at,updated_at) VALUES (?,?,?,'문제',1,50,?,?,?)",
-                    examId,
-                    problem,
-                    problem + 900,
-                    problem - 100,
-                    now,
-                    now
-                );
-        }
-        given(refresh.refresh(7)).willReturn("ACTIVE");
-    }
-
-    /** 언어 전환 이후에도 순번은 문제 전체에서 비교하고 빈 최신 코드를 복구한다. */
     @Test
     @DisplayName("언어를 바꿔도 작은 순번을 무시하고 빈 최신 코드를 복구한다")
     void sequenceAcrossLanguages() {
@@ -161,7 +53,33 @@ class ExamDraftIntegrationTest {
         assertThat(recovered.problemSequences()).extracting("serverSeq").containsExactly("6", "0");
     }
 
-    /** 동일 창의 뒤 요청만 저장하고 밀린 다른 문제는 0과 null을 반환한다. */
+    @Test
+    @DisplayName("이벤트 크기를 초과한 신규 Draft는 기존 저장본을 보존한다")
+    void oversizedEventPreservesDraft() {
+        // given
+        var first = store.prepare(examId, "7", "101", new SaveRequest("java", "기존", "1"));
+        var oversized
+            = store.prepare(examId, "7", "101", new SaveRequest("java", String.valueOf((char)1).repeat(50000), "2"));
+        assertThat(store.save(first).applied()).isTrue();
+        // when & then
+        assertThatThrownBy(() -> store.save(oversized))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode()).isEqualTo(ContestErrorCode.CODE_TOO_LARGE)
+            );
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT source_code FROM exam_drafts WHERE exam_participant_id=?",
+                    String.class,
+                    participantId
+                )
+        ).isEqualTo("기존");
+        assertThat(
+            jdbc.queryForObject("SELECT seq FROM exam_drafts WHERE exam_participant_id=?", Long.class, participantId)
+        ).isEqualTo(1L);
+    }
+
     @Test
     @DisplayName("같은 참가자의 버퍼에서 밀린 요청은 미저장 문제의 순번 0과 null 시각을 반환한다")
     void bufferKeepsLastRequest() throws Exception {
@@ -189,10 +107,10 @@ class ExamDraftIntegrationTest {
                 throw new IllegalStateException("버퍼 마감 제어 대기 초과");
             }
             return List.of(due, 0L);
-        }).when(redis).execute(eq(enqueue), eq(List.of(prefix)), anyString());
+        }).when(draftRedis).execute(eq(enqueue), eq(List.of(prefix)), anyString());
         // 등록과 저장은 실제 Redis를 사용하고, 두 요청 등록 뒤 마감 시각만 앞당긴다.
         doAnswer(invocation -> redis.execute(close, List.of(slot), "0"))
-            .when(redis)
+            .when(draftRedis)
             .execute(eq(close), eq(List.of(slot)), eq(Long.toString(due)));
 
         try (var pool = Executors.newFixedThreadPool(2)) {
@@ -247,7 +165,6 @@ class ExamDraftIntegrationTest {
             .isEqualTo(ContestErrorCode.EXAM_CLOSED);
     }
 
-    /** 참가자 잠금 대기 중 마감이 지나면 새 저장을 거절한다. */
     @Test
     @DisplayName("부모 잠금 대기 중 개인 마감이 바뀌면 저장하지 않는다")
     void rechecksDeadlineAfterLock() throws Exception {
@@ -293,7 +210,6 @@ class ExamDraftIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isZero();
     }
 
-    /** 동시 언어 저장은 참가자 잠금으로 직렬화하고 최대 순번을 유지한다. */
     @Test
     @DisplayName("서로 다른 언어의 동시 저장은 큰 순번을 최신 Draft로 유지한다")
     void concurrentLanguagesKeepMaximum() throws Exception {
@@ -326,7 +242,6 @@ class ExamDraftIntegrationTest {
         ).isEqualTo(2L);
     }
 
-    /** 정지된 회원의 신규 저장은 참가와 기존 저장본을 바꾸지 않는다. */
     @Test
     @DisplayName("정지 회원은 새 Draft를 저장할 수 없다")
     void suspendedCannotSave() {
@@ -343,7 +258,6 @@ class ExamDraftIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_drafts", Integer.class)).isZero();
     }
 
-    /** Redis의 시간 경계 전에는 마지막 요청을 확정하지 않는다. */
     @Test
     @DisplayName("버퍼 마감 전에 깨어나도 마감 직전의 마지막 요청을 선택한다")
     void waitsForRedisDeadline() throws Exception {

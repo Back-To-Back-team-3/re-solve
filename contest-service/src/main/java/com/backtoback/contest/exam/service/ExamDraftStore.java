@@ -37,6 +37,7 @@ public class ExamDraftStore {
     private final ExamProblemRepository problems;
     private final MemberReplicaRepository members;
     private final MemberReplicaService refresh;
+    private final ExamSubmissionMessageSize messageSize;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final Clock clock;
@@ -114,6 +115,7 @@ public class ExamDraftStore {
             if (work.seq() <= current.seq()) {
                 return response(false, current, participant, now);
             }
+            messageSize.validate(work.sourceCode());
             jdbc
                 .update(
                     "INSERT INTO exam_drafts (exam_participant_id,problem_id,language,source_code,seq,saved_at,"

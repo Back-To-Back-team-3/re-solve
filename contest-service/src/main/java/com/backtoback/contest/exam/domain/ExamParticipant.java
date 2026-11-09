@@ -139,4 +139,22 @@ public class ExamParticipant extends BaseTimeEntity {
         status = ExamParticipantStatus.ABSENT;
         participantRevision = Math.incrementExact(participantRevision);
     }
+
+    /** 수동 종료 시 개인 마감을 서버 시간보다 늦지 않게 확정한다. */
+    public void shortenDeadline(LocalDateTime now) {
+        if (now.isBefore(personalEndsAt)) {
+            personalEndsAt = now;
+        }
+    }
+
+    /** 자동 제출을 끝낸 실제 입장자를 종료 처리한다. */
+    public void finish(LocalDateTime now) {
+        if (status != ExamParticipantStatus.STARTED || enteredAt == null) {
+            throw new IllegalStateException("Participant is not started");
+        }
+        autoSubmittedAt = now;
+        finishedAt = now;
+        status = ExamParticipantStatus.FINISHED;
+        participantRevision = Math.incrementExact(participantRevision);
+    }
 }
