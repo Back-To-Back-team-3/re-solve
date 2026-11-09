@@ -6,9 +6,14 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
+import java.util.Collections;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +31,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.common.event.dto.EventMetadata;
+import com.backtoback.common.event.service.EventJsonCodec;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
@@ -76,6 +83,8 @@ class ExamParticipationIntegrationTest {
     private ContestResourceGuardRepository guards;
     @Autowired
     private ObjectMapper objectMapper;
+    @Autowired
+    private EventJsonCodec eventJsonCodec;
     private String examId;
 
     /** 각 시나리오가 독립된 시험과 회원 복제본으로 시작하도록 데이터를 저장한다. */
@@ -118,6 +127,78 @@ class ExamParticipationIntegrationTest {
                 examId
             );
         given(refresh.refresh(7)).willReturn("ACTIVE");
+    }
+
+    /** 신규 등록만 한도를 적용하고 취소로 비워진 자리를 다시 사용할 수 있게 한다. */
+    @Test
+    @DisplayName("활성 참가가 한도에 도달하면 기존 등록은 반환하고 신규 등록만 거절한다")
+    void enforcesActiveParticipantLimit() {
+        var rows
+            = IntStream
+                .range(0, ExamParticipationService.MAX_ACTIVE_PARTICIPANTS - 1)
+                .mapToObj(
+                    index -> new Object[] {
+                        examId,
+                        1000L + index,
+                        examId
+                    }
+                )
+                .toList();
+        jdbc.batchUpdate("""
+            INSERT INTO exam_participants (
+                exam_id, member_id, status, registered_at, personal_ends_at,
+                total_score, is_ranked, version, created_at, updated_at
+            )
+            SELECT ?, ?, 'REGISTERED', NOW(6), ends_at, 0, TRUE, 0, NOW(6), NOW(6)
+            FROM exams WHERE id = ?
+            """, rows);
+        jdbc.update("""
+            INSERT INTO member_replicas (
+                member_id,nickname,member_status,source_version,synced_at,created_at,updated_at
+            )
+            VALUES (8,'회원','ACTIVE',1,NOW(6),NOW(6),NOW(6))
+            """);
+        jdbc.update("""
+            INSERT INTO study_membership_replicas (
+                study_id,member_id,membership_id,is_active,synced_at,created_at,updated_at
+            )
+            VALUES (12,8,2,TRUE,NOW(6),NOW(6),NOW(6))
+            """);
+        given(refresh.refresh(8)).willReturn("ACTIVE");
+
+        assertThat(service.register(examId, "7").created()).isTrue();
+        assertThat(service.register(examId, "7").created()).isFalse();
+        assertThatThrownBy(() -> service.register(examId, "8"))
+            .isInstanceOfSatisfying(
+                ContestException.class,
+                error -> assertThat(error.getErrorCode()).isEqualTo(ContestErrorCode.EXAM_PARTICIPANT_LIMIT_REACHED)
+            );
+        assertThat(count("outbox_events")).isEqualTo(1);
+        service.cancel(examId, "7");
+        assertThat(service.register(examId, "8").created()).isTrue();
+    }
+
+    /** 공통 헤더와 최대 길이의 문제·수신자 필드를 함께 직렬화해 발행 한도를 확인한다. */
+    @Test
+    @DisplayName("한도까지 등록된 시험의 전체 수신자 스냅샷이 256 KiB 이하다")
+    void fullParticipantSnapshotFitsEventLimit() {
+        String id = Long.toString(Long.MAX_VALUE);
+        String time = "9999-12-31T23:59:59.999999+09:00";
+        var metadata
+            = new EventMetadata(UUID.randomUUID(), "ExamUpdated", "v1", OffsetDateTime.parse(time), id, "a".repeat(64));
+        var payload
+            = new ExamManagementService.UpdatedPayload(
+                id,
+                id,
+                Integer.toString(Integer.MAX_VALUE),
+                Collections.nCopies(20, new ExamManagementService.UpdatedProblem(id, id, "9999.99", 20)),
+                time,
+                time,
+                Collections.nCopies(ExamParticipationService.MAX_ACTIVE_PARTICIPANTS, id)
+            );
+
+        assertThat(eventJsonCodec.serialize(metadata, payload).getBytes(StandardCharsets.UTF_8).length)
+            .isLessThanOrEqualTo(256 * 1024);
     }
 
     /** 취소 후 새 참가를 만들면서 동일 요청의 이력과 Outbox 중복을 확인한다. */

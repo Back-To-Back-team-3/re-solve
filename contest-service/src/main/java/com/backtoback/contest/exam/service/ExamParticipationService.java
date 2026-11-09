@@ -47,6 +47,9 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class ExamParticipationService {
+    /** 최대 길이의 회원 ID를 담아도 {@code ExamUpdated}의 공통 메시지 한도에 여유를 둔다. */
+    static final int MAX_ACTIVE_PARTICIPANTS = 10_000;
+
     private final MemberReplicaService memberRefresh;
     private final MemberReplicaRepository members;
     private final ContestResourceGuardService guards;
@@ -97,6 +100,9 @@ public class ExamParticipationService {
         var active = rows.stream().filter(row -> row.getStatus() != ExamParticipantStatus.CANCELED).findFirst();
         if (active.isPresent()) {
             return new Registration(ExamParticipationResponse.from(active.get(), now), false);
+        }
+        if (participants.findActiveParticipantAtOffset(examId, MAX_ACTIVE_PARTICIPANTS - 1).isPresent()) {
+            throw new ContestException(ContestErrorCode.EXAM_PARTICIPANT_LIMIT_REACHED);
         }
         var participant = participants.saveAndFlush(ExamParticipant.register(exam, member, now));
         history(participant, null, ExamParticipantStatus.REGISTERED, member, now);

@@ -5085,6 +5085,7 @@
 - **인증:** 로그인 필요 (`SUSPENDED` 차단) + `ACTIVE` 회원이며 등록 시 `APPROVED` 구성원 복제본이 있어야 한다. 없으면 `EXAM_NOT_ELIGIBLE`(403)
 - **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `study_membership_replicas`, `member_replicas`, `contest_resource_guards`, `outbox_events`
 - **설명:** 종료 전 등록 가능. 기존 활성 참가가 있으면 `200`으로 기존 반환, 새 등록은 `201`. `CANCELED` 문맥에는 등록 불가.
+    - 시험별 활성 참가가 10,000명이면 신규 등록을 `EXAM_PARTICIPANT_LIMIT_REACHED`(409)로 거절한다. 취소된 참가는 세지 않으며 기존 활성 참가의 재요청은 기존 응답을 유지한다.
 - **요청 헤더:**
     
     
@@ -5133,8 +5134,8 @@
     ```
     
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_ELIGIBLE`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `CONTEST_OPERATION_BLOCKED`(409)
-- **동시성 보장:** `MEMBER` 가드·시험·참가자 순으로 잠금, 활성 참가 1건 보장
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_ELIGIBLE`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `EXAM_PARTICIPANT_LIMIT_REACHED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `CONTEST_OPERATION_BLOCKED`(409)
+- **동시성 보장:** `MEMBER` 가드·시험·참가자 순으로 잠근다. 회원별 활성 참가 1건을 보장하고 시험 행 잠금 아래 신규 등록 한도를 확인한다.
 - **발행:** `ExamParticipantRegistered` — 새 등록 시(`201`)만
 - **외부 의존:** `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 상태 조회 실패·불완전 응답 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 자원 잠금 전에 수행한다.
 

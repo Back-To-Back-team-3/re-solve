@@ -29,6 +29,8 @@ public enum ContestErrorCode implements ErrorCode {
     EXAM_CANCELED(HttpStatus.CONFLICT, "취소된 시험입니다."),
     EXAM_PARTICIPATION_CANCELLATION_CLOSED(HttpStatus.CONFLICT, "참가를 취소할 수 없습니다."),
     EXAM_NOT_ELIGIBLE(HttpStatus.FORBIDDEN, "시험에 참가할 자격이 없습니다."),
+    // 기존 활성 참가 재요청은 허용하고, 이벤트 수신자 상한에 도달한 시험의 신규 등록만 거절한다.
+    EXAM_PARTICIPANT_LIMIT_REACHED(HttpStatus.CONFLICT, "시험 참가 인원이 한도에 도달했습니다."),
     EXAM_CLOSED(HttpStatus.CONFLICT, "시험의 요청 시간이 종료되었습니다."),
     CONTEST_CLOSED(HttpStatus.CONFLICT, "대회의 요청 시간이 종료되었습니다."),
     WITHDRAWAL_BLOCKED_ACTIVE_EXAM(HttpStatus.CONFLICT, "실제 입장한 미확정 시험·대회가 있습니다."),
