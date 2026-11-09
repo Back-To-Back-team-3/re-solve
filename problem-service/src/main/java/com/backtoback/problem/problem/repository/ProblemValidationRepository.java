@@ -11,6 +11,30 @@ import com.backtoback.problem.problem.domain.ProblemValidation;
 /** 검증 요청의 멱등 기록과 회차별 진행·통과 상태를 조회한다. */
 public interface ProblemValidationRepository extends JpaRepository<ProblemValidation, Long> {
     /**
+     * 언어마다 최신 요청과 최신 통과 요청만 조회한다.
+     *
+     * @param revisionId 고정 회차
+     * @return 최신 요청 순서의 표시 대상 검증
+     */
+    @Query("""
+        select v from ProblemValidation v where v.problemRevisionId=:revisionId and
+        (v.id in (select max(latest.id) from ProblemValidation latest
+            where latest.problemRevisionId=:revisionId group by latest.language)
+        or v.id in (select max(passed.id) from ProblemValidation passed
+            where passed.problemRevisionId=:revisionId and passed.resultStatus='PASSED'
+            group by passed.language)) order by v.id desc
+        """)
+    List<ProblemValidation> findDisplayValidations(long revisionId);
+
+    /**
+     * 회차의 검증 이력을 최신 요청부터 조회한다.
+     *
+     * @param revisionId 고정 회차
+     * @return 최신순 검증 요청
+     */
+    List<ProblemValidation> findByProblemRevisionIdOrderByIdDesc(Long revisionId);
+
+    /**
      * 작성 관리자와 멱등키의 원래 요청을 조회한다.
      *
      * @param authorId 작성 관리자
