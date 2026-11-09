@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.function.Supplier;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -53,7 +55,7 @@ public class WithdrawalCheckClient {
                     .get()
                     .uri("/internal/v1/contest/members/{memberId}/active-participations", memberId)
                     .retrieve()
-                    .body(ActiveParticipations.class)
+                    .toEntity(ActiveParticipations.class)
             );
         if (body == null || body.withdrawalBlocked() == null) {
             throw unavailable("contest", null);
@@ -79,7 +81,7 @@ public class WithdrawalCheckClient {
                             .build()
                     )
                     .retrieve()
-                    .body(LeaderMemberships.class)
+                    .toEntity(LeaderMemberships.class)
             );
         if (body == null || body.items() == null || !String.valueOf(memberId).equals(body.memberId())) {
             throw unavailable("study", null);
@@ -87,13 +89,18 @@ public class WithdrawalCheckClient {
         return !body.items().isEmpty();
     }
 
-    // 200이 아닌 응답(가입이 없는 회원의 404 포함)과 통신 오류는 확인 실패로 본다.
-    private static <T> T fetch(String service, Supplier<T> call) {
+    // 정확히 200이 아닌 응답(202 같은 다른 성공, 가입이 없는 회원의 404 포함)과 통신 오류는 확인 실패로 본다.
+    private static <T> T fetch(String service, Supplier<ResponseEntity<T>> call) {
+        ResponseEntity<T> response;
         try {
-            return call.get();
+            response = call.get();
         } catch (RestClientException exception) {
             throw unavailable(service, exception);
         }
+        if (!response.getStatusCode().isSameCodeAs(HttpStatus.OK)) {
+            throw unavailable(service, null);
+        }
+        return response.getBody();
     }
 
     private static MemberException unavailable(String service, RestClientException cause) {

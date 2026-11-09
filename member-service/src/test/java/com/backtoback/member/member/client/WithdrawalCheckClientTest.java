@@ -79,20 +79,34 @@ class WithdrawalCheckClientTest {
     }
 
     @Test
-    @DisplayName("필드 누락·다른 회원 응답·404·서버 오류·통신 오류는 차단 없음이 아니라 COMMON_DEPENDENCY_UNAVAILABLE")
+    @DisplayName("200이 아닌 성공(202)·필드 누락·다른 회원 응답·404·서버 오류·통신 오류는 차단 없음이 아니라 COMMON_DEPENDENCY_UNAVAILABLE")
     void failsClosed() {
         contest.expect(requestTo(CONTEST_URL)).andRespond(withSuccess("{\"items\":[]}", MediaType.APPLICATION_JSON));
         contest.expect(requestTo(CONTEST_URL)).andRespond(withServerError());
+        contest
+            .expect(requestTo(CONTEST_URL))
+            .andRespond(
+                withStatus(HttpStatus.ACCEPTED)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"withdrawalBlocked\":false,\"items\":[]}")
+            );
         study
             .expect(requestTo(STUDY_URL))
             .andRespond(withSuccess("{\"memberId\":\"8\",\"items\":[]}", MediaType.APPLICATION_JSON));
         study.expect(requestTo(STUDY_URL)).andRespond(withStatus(HttpStatus.NOT_FOUND));
         study.expect(requestTo(STUDY_URL)).andRespond(withException(new IOException("connection refused")));
+        study
+            .expect(requestTo(STUDY_URL))
+            .andRespond(
+                withStatus(HttpStatus.ACCEPTED)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"memberId\":\"7\",\"items\":[]}")
+            );
 
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 3; i++) {
             assertUnavailable(() -> client.hasActiveExam(7L));
         }
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             assertUnavailable(() -> client.isStudyLeader(7L));
         }
     }

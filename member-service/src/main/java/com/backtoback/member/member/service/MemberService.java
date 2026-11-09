@@ -82,6 +82,8 @@ public class MemberService {
 
     /**
      * 회원의 쓰기 요청용 조회. 같은 회원의 변경({@code profile_version} 증가)이 겹치지 않도록 행을 잠그고, 정지 회원은 403이다.
+     * 탈퇴 회원도 잠근 뒤 403으로 거절한다. 탈퇴 후에도 다른 세션의 Access Token은 만료 전까지 살아 있어, 익명화를 되돌리거나
+     * 학습 프로필·태그 레벨을 새로 만들지 않게 한다.
      */
     @Transactional
     public Member lockActiveMember(Long memberId) {
@@ -89,6 +91,9 @@ public class MemberService {
             = memberRepository
                 .findForUpdateById(memberId)
                 .orElseThrow(() -> new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
+        if (member.isWithdrawn()) {
+            throw new MemberException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
         if (member.isSuspended()) {
             throw new MemberException(MemberErrorCode.MEMBER_SUSPENDED);
         }
@@ -103,8 +108,8 @@ public class MemberService {
         if (getMember(memberId).isWithdrawn()) {
             return;
         }
-        // shortcut: 확인과 탈퇴 사이에 시험에 입장하는 경우는 막지 않음(참가는 MemberWithdrawn으로 익명화), contest 자원 가드(4.7.3·4.7.4)를
-        // 도입할 때 prepare·complete로 바꾼다.
+        // shortcut: 확인과 탈퇴 사이에 시험에 입장하거나 스터디장을 위임받는 경우는 막지 않음(참가·가입은 MemberWithdrawn으로 정리), contest
+        // 자원 가드(4.7.3·4.7.4)와 study 쪽 같은 가드를 도입할 때 prepare·complete로 바꾼다.
         if (withdrawalCheckClient.hasActiveExam(memberId)) {
             throw new MemberException(MemberErrorCode.WITHDRAWAL_BLOCKED_ACTIVE_EXAM);
         }
