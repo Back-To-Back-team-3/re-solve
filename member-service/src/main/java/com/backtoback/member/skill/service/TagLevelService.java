@@ -3,6 +3,8 @@ package com.backtoback.member.skill.service;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,7 @@ import com.backtoback.member.skill.domain.MemberLevelHistory;
 import com.backtoback.member.skill.domain.MemberTagLevel;
 import com.backtoback.member.skill.repository.MemberLevelHistoryRepository;
 import com.backtoback.member.skill.repository.MemberTagLevelRepository;
+import com.backtoback.member.skill.store.PracticeResultStore;
 
 import lombok.RequiredArgsConstructor;
 
@@ -31,6 +34,7 @@ public class TagLevelService {
     private final LearningProfileService learningProfileService;
     private final ProblemTagClient problemTagClient;
     private final SkillProperties properties;
+    private final PracticeResultStore practiceResultStore;
     private final Clock clock;
 
     /**
@@ -65,6 +69,11 @@ public class TagLevelService {
     @Transactional(readOnly = true)
     public List<TagLevelSummary> getTagLevels(Long memberId) {
         LocalDateTime now = LocalDateTime.now(clock);
+        Map<Long, List<TagAchievement>> achievements
+            = practiceResultStore
+                .findAchievements(memberId)
+                .stream()
+                .collect(Collectors.groupingBy(TagAchievement::tagId));
         return tagLevelRepository.findAllByMemberIdOrderByTagIdAsc(memberId).stream().map(tagLevel -> {
             LocalDateTime cooldownEndsAt = cooldownEndsAt(tagLevel, now);
             // shortcut: 진행 중인 진단 확인 없음, 진단(1.5) 구현 시 같은 태그의 진행 중 진단이 있으면 응시 불가로 바꾼다.
@@ -73,7 +82,8 @@ public class TagLevelService {
                 tagLevel,
                 eligible,
                 cooldownEndsAt,
-                properties.promotions().get(tagLevel.getLevel())
+                properties.promotions().get(tagLevel.getLevel()),
+                achievements.getOrDefault(tagLevel.getTagId(), List.of())
             );
         }).toList();
     }

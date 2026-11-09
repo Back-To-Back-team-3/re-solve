@@ -42,6 +42,7 @@ import com.backtoback.member.skill.domain.MemberTagLevel;
 import com.backtoback.member.skill.domain.TagLevel;
 import com.backtoback.member.skill.repository.MemberLevelHistoryRepository;
 import com.backtoback.member.skill.repository.MemberTagLevelRepository;
+import com.backtoback.member.skill.store.PracticeResultStore;
 
 @ExtendWith(MockitoExtension.class)
 class TagLevelServiceTest {
@@ -65,6 +66,9 @@ class TagLevelServiceTest {
     @Mock
     private ProblemTagClient problemTagClient;
 
+    @Mock
+    private PracticeResultStore practiceResultStore;
+
     private TagLevelService tagLevelService;
 
     @BeforeEach
@@ -80,6 +84,7 @@ class TagLevelServiceTest {
                 learningProfileService,
                 problemTagClient,
                 properties,
+                practiceResultStore,
                 clock
             );
     }

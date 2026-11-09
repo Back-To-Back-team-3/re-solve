@@ -37,6 +37,8 @@ dependencies {
     // Outbox 저장·SNS 발행
     implementation project(':common-event')
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-sns'
+    // member-queue 수신
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
     // 발행 완료 Outbox 정리·ShedLock
     implementation project(':common-scheduling')
 
