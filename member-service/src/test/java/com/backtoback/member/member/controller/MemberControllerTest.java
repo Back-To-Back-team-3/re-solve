@@ -5,8 +5,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -27,6 +29,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.backtoback.member.auth.service.AuthService;
 import com.backtoback.member.global.config.SecurityConfig;
 import com.backtoback.member.global.error.MemberErrorCode;
 import com.backtoback.member.global.error.MemberException;
@@ -50,6 +53,9 @@ class MemberControllerTest {
 
     @MockitoBean
     private LearningProfileService learningProfileService;
+
+    @MockitoBean
+    private AuthService authService;
 
     @Test
     @DisplayName("1.2.1 내 정보 조회는 계정 정보와 학습 프로필 입력 여부, +09:00 가입 시각을 준다")
@@ -256,6 +262,38 @@ class MemberControllerTest {
             )
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.error.code").value("MEMBER_SUSPENDED"));
+    }
+
+    @Test
+    @DisplayName("1.2.3 회원 탈퇴는 204이고 이 요청의 세션 토큰을 폐기하며, 토큰 폐기가 실패해도 204다")
+    void withdrawRevokesCurrentSession() throws Exception {
+        mockMvc
+            .perform(
+                delete("/api/v1/members/me")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .header("Authorization", "Bearer access-token")
+            )
+            .andExpect(status().isNoContent());
+        verify(memberService).withdraw(7L);
+        verify(authService).logout("7", "Bearer access-token", null);
+
+        doThrow(new IllegalStateException("redis down")).when(authService).logout(any(), any(), any());
+        mockMvc
+            .perform(delete("/api/v1/members/me").header("X-User-Id", "7").header("X-User-Role", "USER"))
+            .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("1.2.3 차단 조건이면 409와 안내를 주고 토큰을 폐기하지 않는다")
+    void withdrawBlocked() throws Exception {
+        doThrow(new MemberException(MemberErrorCode.WITHDRAWAL_BLOCKED_STUDY_LEADER)).when(memberService).withdraw(7L);
+
+        mockMvc
+            .perform(delete("/api/v1/members/me").header("X-User-Id", "7").header("X-User-Role", "USER"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error.code").value("WITHDRAWAL_BLOCKED_STUDY_LEADER"));
+        verify(authService, never()).logout(any(), any(), any());
     }
 
     private Member member(Long id, String nickname) {

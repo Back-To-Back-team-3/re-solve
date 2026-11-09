@@ -1,5 +1,8 @@
 package com.backtoback.member.member.service;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -11,6 +14,7 @@ import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.auth.client.GitHubUser;
 import com.backtoback.member.global.error.MemberErrorCode;
 import com.backtoback.member.global.error.MemberException;
+import com.backtoback.member.member.client.WithdrawalCheckClient;
 import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.repository.MemberRepository;
 
@@ -27,6 +31,8 @@ public class MemberService {
     private final MemberRepository memberRepository;
     private final MemberEventPublisher memberEventPublisher;
     private final TransactionTemplate transactionTemplate;
+    private final WithdrawalCheckClient withdrawalCheckClient;
+    private final Clock clock;
 
     /**
      * GitHub 사용자 ID로 회원을 찾고, 없으면 가입시킨다.
@@ -76,6 +82,8 @@ public class MemberService {
 
     /**
      * 회원의 쓰기 요청용 조회. 같은 회원의 변경({@code profile_version} 증가)이 겹치지 않도록 행을 잠그고, 정지 회원은 403이다.
+     * 탈퇴 회원도 잠근 뒤 403으로 거절한다. 탈퇴 후에도 다른 세션의 Access Token은 만료 전까지 살아 있어, 익명화를 되돌리거나
+     * 학습 프로필·태그 레벨을 새로 만들지 않게 한다.
      */
     @Transactional
     public Member lockActiveMember(Long memberId) {
@@ -83,10 +91,42 @@ public class MemberService {
             = memberRepository
                 .findForUpdateById(memberId)
                 .orElseThrow(() -> new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
+        if (member.isWithdrawn()) {
+            throw new MemberException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
         if (member.isSuspended()) {
             throw new MemberException(MemberErrorCode.MEMBER_SUSPENDED);
         }
         return member;
+    }
+
+    /**
+     * 회원 탈퇴 (API 명세서 1.2.3). 원격 확인은 회원 행을 잠그기 전에 끝내고, 통과하면 한 트랜잭션에서 {@code WITHDRAWN}
+     * 전이·익명화·{@code MemberWithdrawn} 기록을 한다. 이미 탈퇴했으면 아무것도 하지 않는다.
+     */
+    public void withdraw(Long memberId) {
+        if (getMember(memberId).isWithdrawn()) {
+            return;
+        }
+        // shortcut: 확인과 탈퇴 사이에 시험에 입장하거나 스터디장을 위임받는 경우는 막지 않음(참가·가입은 MemberWithdrawn으로 정리), contest
+        // 자원 가드(4.7.3·4.7.4)와 study 쪽 같은 가드를 도입할 때 prepare·complete로 바꾼다.
+        if (withdrawalCheckClient.hasActiveExam(memberId)) {
+            throw new MemberException(MemberErrorCode.WITHDRAWAL_BLOCKED_ACTIVE_EXAM);
+        }
+        if (withdrawalCheckClient.isStudyLeader(memberId)) {
+            throw new MemberException(MemberErrorCode.WITHDRAWAL_BLOCKED_STUDY_LEADER);
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            Member member
+                = memberRepository
+                    .findForUpdateById(memberId)
+                    .orElseThrow(() -> new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
+            if (member.isWithdrawn()) {
+                return;
+            }
+            member.withdraw(LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS));
+            memberEventPublisher.memberWithdrawn(member);
+        });
     }
 
     @Transactional(readOnly = true)
