@@ -2164,7 +2164,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `study_id` | BIGINT | Y | 스터디 ID |
-| `operation_id` | VARCHAR(100) `_bin` | Y | 원래 STUDY_CLOSE 작업 ID |
+| `operation_id` | VARCHAR(100) `utf8mb4_0900_bin` | Y | 원래 STUDY_CLOSE 작업 ID. 대소문자와 후행 공백을 구분 |
 | `request_hash` | CHAR(64) | Y | 최초 준비 요청의 정규화 해시 |
 | `canceled_exam_ids` | JSON | Y | 최초 준비에서 취소한 시험 ID 문자열 배열 |
 | `state` | VARCHAR(30) | Y | 해당 작업의 가드 상태. OPEN / PREPARED / BLOCKED |
