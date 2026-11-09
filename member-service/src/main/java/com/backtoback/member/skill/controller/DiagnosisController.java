@@ -119,11 +119,9 @@ public class DiagnosisController {
         @PathVariable Long problemId,
         @Valid @RequestBody DiagnosisDraftRequest request
     ) {
-        long seq = Long.parseLong(request.seq());
         DiagnosisDraftResponse response
             = DiagnosisDraftResponse
-                .of(
-                    seq,
+                .from(
                     diagnosisService
                         .saveDraft(
                             memberId(user),
@@ -131,7 +129,7 @@ public class DiagnosisController {
                             problemId,
                             request.language(),
                             request.sourceCode(),
-                            seq
+                            Long.parseLong(request.seq())
                         )
                 );
         return ResponseEntity.ok(ApiResponse.success(response));

@@ -35,6 +35,7 @@ import com.backtoback.member.skill.repository.MemberTagLevelRepository;
 import com.backtoback.member.skill.store.DiagnosisDraftStore;
 import com.backtoback.member.skill.store.DiagnosisDraftStore.Draft;
 import com.backtoback.member.skill.store.DiagnosisDraftStore.LastSubmission;
+import com.backtoback.member.skill.store.DiagnosisDraftStore.SaveResult;
 
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.JsonNode;
@@ -125,7 +126,7 @@ public class DiagnosisService {
      * 진단 Draft 저장 (API 명세서 1.5.4). 제한 시각이 지났거나 종료된 진단은 받지 않는다.
      */
     @Transactional
-    public Draft saveDraft(
+    public SaveResult saveDraft(
         Long memberId,
         Long diagnosisId,
         Long problemId,
@@ -133,7 +134,10 @@ public class DiagnosisService {
         String sourceCode,
         long seq
     ) {
-        DiagnosisAttempt attempt = getAttempt(memberId, diagnosisId);
+        DiagnosisAttempt attempt
+            = attemptRepository
+                .findForUpdateByIdAndMemberId(diagnosisId, memberId)
+                .orElseThrow(() -> new MemberException(MemberErrorCode.DIAGNOSIS_NOT_FOUND));
         getProblem(attempt, problemId);
         LocalDateTime now = now();
         if (!attempt.isOpenAt(now)) {
@@ -202,8 +206,9 @@ public class DiagnosisService {
         return picked;
     }
 
+    // Long 범위 안(18자리 이하)만 받는다.
     private static boolean isId(String value) {
-        return value != null && value.matches("[1-9][0-9]{0,18}");
+        return value != null && value.matches("[1-9][0-9]{0,17}");
     }
 
     private DiagnosisAttempt getAttempt(Long memberId, Long diagnosisId) {

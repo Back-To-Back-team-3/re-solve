@@ -87,9 +87,13 @@ class ProblemDiagnosisClientTest {
             );
         server.expect(requestTo(CONTENT_URL)).andRespond(withServerError());
 
-        assertThatThrownBy(() -> client.candidates(3L)).isInstanceOf(BusinessException.class);
-        assertThatThrownBy(() -> client.candidates(3L)).isInstanceOf(BusinessException.class);
-        assertThatThrownBy(() -> client.content(120L, 301L, 1001L))
+        assertUnavailable(() -> client.candidates(3L));
+        assertUnavailable(() -> client.candidates(3L));
+        assertUnavailable(() -> client.content(120L, 301L, 1001L));
+    }
+
+    private void assertUnavailable(org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {
+        assertThatThrownBy(call)
             .isInstanceOf(BusinessException.class)
             .extracting("errorCode")
             .isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);

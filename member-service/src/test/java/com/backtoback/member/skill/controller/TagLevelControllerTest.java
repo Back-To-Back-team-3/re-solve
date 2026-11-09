@@ -1,5 +1,6 @@
 package com.backtoback.member.skill.controller;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -62,6 +63,14 @@ class TagLevelControllerTest {
                                     new TagAchievement(3L, 2, 2, new BigDecimal("79.99")),
                                     new TagAchievement(3L, 3, 1, new BigDecimal("59.99"))
                                 )
+                        ),
+                        new TagLevelSummary(
+                            MemberTagLevel.enterWithoutDiagnosis(7L, 5L, LocalDateTime.of(2026, 10, 21, 9, 0)),
+                            true,
+                            null,
+                            null,
+                            null,
+                            List.of()
                         )
                     )
             );
@@ -81,6 +90,7 @@ class TagLevelControllerTest {
             .andExpect(jsonPath("$.data.content[0].diagnosis.isEligible").value(false))
             .andExpect(jsonPath("$.data.content[0].diagnosis.cooldownEndsAt").value("2026-10-31T12:00:00+09:00"))
             .andExpect(jsonPath("$.data.content[0].diagnosis.inProgressDiagnosisId").value("120"))
+            .andExpect(jsonPath("$.data.content[1].diagnosis.inProgressDiagnosisId").value(nullValue()))
             .andExpect(jsonPath("$.data.content[0].nextPromotion.targetLevel").value("LV2"))
             .andExpect(jsonPath("$.data.content[0].nextPromotion.requiredSolvedCount").value(5))
             .andExpect(jsonPath("$.data.content[0].nextPromotion.requiredAchievementRate").value(60.00));

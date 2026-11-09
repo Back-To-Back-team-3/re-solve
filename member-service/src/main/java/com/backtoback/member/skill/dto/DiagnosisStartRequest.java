@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Pattern;
 public record DiagnosisStartRequest(
     @NotBlank(message = "태그 ID는 필수입니다.")
     @Pattern(
-        regexp = "[1-9][0-9]{0,18}",
+        regexp = "[1-9][0-9]{0,17}",
         message = "태그 ID는 숫자여야 합니다."
     ) String tagId
 ) {

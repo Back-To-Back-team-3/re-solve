@@ -7,7 +7,6 @@ import java.util.Map;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -21,46 +20,39 @@ public class DiagnosisDraftStore {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * 문항·언어별 Draft를 저장한다. 저장된 {@code seq}보다 작거나 같은 요청은 반영하지 않는다(늦게 도착한 이전 Draft).
+     * Draft를 저장한다. 순번은 문항 단위라, 언어와 관계없이 그 문항에 저장된 가장 큰 {@code seq}보다 작거나 같은 요청은
+     * 반영하지 않는다(늦게 도착한 이전 Draft·같은 순번 재전송). 호출하는 쪽이 응시 행을 잠가 같은 응시의 저장을 한 줄로 세운다.
      *
-     * @return 반영 여부와 저장 후 서버의 {@code seq}·저장 시각
+     * @return 실제 반영 여부와 그 문항의 최신 Draft
      */
-    @Transactional
-    public Draft save(long attemptId, long problemId, String language, String sourceCode, long seq, LocalDateTime now) {
-        if (update(attemptId, problemId, language, sourceCode, seq, now) == 0) {
-            int inserted
-                = jdbcTemplate
-                    .update(
-                        "insert ignore into diagnosis_drafts (diagnosis_attempt_id, problem_id, language, source_code, "
-                            + "seq, saved_at, version, created_at, updated_at) values (?, ?, ?, ?, ?, ?, 0, ?, ?)",
-                        attemptId,
-                        problemId,
-                        language,
-                        sourceCode,
-                        seq,
-                        now,
-                        now,
-                        now
-                    );
-            // 동시에 첫 저장이 들어와 다른 요청이 먼저 넣었으면, 그 행보다 큰 seq인지 한 번 더 확인한다.
-            if (inserted == 0) {
-                update(attemptId, problemId, language, sourceCode, seq, now);
-            }
+    public SaveResult save(
+        long attemptId,
+        long problemId,
+        String language,
+        String sourceCode,
+        long seq,
+        LocalDateTime now
+    ) {
+        Draft latest = findLatest(attemptId).get(problemId);
+        if (latest != null && seq <= latest.seq()) {
+            return new SaveResult(false, latest);
         }
-        return jdbcTemplate
-            .queryForObject(
-                "select language, source_code, seq, saved_at from diagnosis_drafts "
-                    + "where diagnosis_attempt_id = ? and problem_id = ? and language = ?",
-                (row, index) -> new Draft(
-                    row.getString("language"),
-                    row.getString("source_code"),
-                    row.getLong("seq"),
-                    row.getObject("saved_at", LocalDateTime.class)
-                ),
+        jdbcTemplate
+            .update(
+                "insert into diagnosis_drafts (diagnosis_attempt_id, problem_id, language, source_code, seq, saved_at, "
+                    + "version, created_at, updated_at) values (?, ?, ?, ?, ?, ?, 0, ?, ?) as new "
+                    + "on duplicate key update source_code = new.source_code, seq = new.seq, saved_at = new.saved_at, "
+                    + "version = diagnosis_drafts.version + 1, updated_at = new.updated_at",
                 attemptId,
                 problemId,
-                language
+                language,
+                sourceCode,
+                seq,
+                now,
+                now,
+                now
             );
+        return new SaveResult(true, new Draft(language, sourceCode, seq, now));
     }
 
     /**
@@ -112,33 +104,12 @@ public class DiagnosisDraftStore {
         return last;
     }
 
-    private int update(
-        long attemptId,
-        long problemId,
-        String language,
-        String sourceCode,
-        long seq,
-        LocalDateTime now
-    ) {
-        return jdbcTemplate
-            .update(
-                "update diagnosis_drafts set source_code = ?, seq = ?, saved_at = ?, version = version + 1, "
-                    + "updated_at = ? "
-                    + "where diagnosis_attempt_id = ? and problem_id = ? and language = ? and seq < ?",
-                sourceCode,
-                seq,
-                now,
-                now,
-                attemptId,
-                problemId,
-                language,
-                seq
-            );
-    }
-
     public record Draft(String language, String sourceCode, long seq, LocalDateTime savedAt) {
     }
 
     public record LastSubmission(String status, long draftSeq) {
+    }
+
+    public record SaveResult(boolean applied, Draft draft) {
     }
 }

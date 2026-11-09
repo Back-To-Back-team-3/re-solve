@@ -50,6 +50,7 @@ import com.backtoback.member.skill.repository.MemberTagLevelRepository;
 import com.backtoback.member.skill.service.DiagnosisService.DiagnosisDetail;
 import com.backtoback.member.skill.service.DiagnosisService.StartedDiagnosis;
 import com.backtoback.member.skill.store.DiagnosisDraftStore.Draft;
+import com.backtoback.member.skill.store.DiagnosisDraftStore.SaveResult;
 
 /**
  * 진단 시작·Draft·이력(API 명세서 1.5.1·1.5.2·1.5.4·1.5.7)을 실제 MySQL로 확인한다. problem 호출은 대역으로 바꾼다.
@@ -217,7 +218,9 @@ class DiagnosisServiceTest {
     }
 
     @Test
-    @DisplayName("Draft는 더 큰 seq만 반영하고, 복구는 문항별 가장 큰 seq를 주며, 다른 회원·다른 문항·64KB 초과·제한 시각 이후는 거절한다")
+    @DisplayName(
+        "Draft는 문항의 모든 언어 중 더 큰 seq만 반영하고(같은 seq 재전송 포함), 복구는 문항별 가장 큰 seq를 주며, 다른 회원·다른 문항·64KB 초과·제한 시각 이후는 거절한다"
+    )
     void savesDrafts() {
         Long memberId = member(9005L, MemberStatus.ACTIVE);
         Long other = member(9006L, MemberStatus.ACTIVE);
@@ -225,13 +228,31 @@ class DiagnosisServiceTest {
         given(problemDiagnosisClient.candidates(8L)).willReturn(CANDIDATES);
         Long diagnosisId = diagnosisService.start(memberId, 8L).attempt().getId();
 
-        Draft first = diagnosisService.saveDraft(memberId, diagnosisId, 301L, "python3", "v5", 5);
-        Draft stale = diagnosisService.saveDraft(memberId, diagnosisId, 301L, "python3", "v3", 3);
+        SaveResult first = diagnosisService.saveDraft(memberId, diagnosisId, 301L, "python3", "v5", 5);
+        SaveResult stale = diagnosisService.saveDraft(memberId, diagnosisId, 301L, "python3", "v3", 3);
+        SaveResult sameSeq = diagnosisService.saveDraft(memberId, diagnosisId, 301L, "python3", "other", 5);
         diagnosisService.saveDraft(memberId, diagnosisId, 301L, "java", "v6", 6);
+        // 순번은 문항 단위라, 다른 언어로 늦게 온 이전 순번도 반영하지 않는다.
+        SaveResult lateOtherLanguage = diagnosisService.saveDraft(memberId, diagnosisId, 301L, "python3", "v5b", 5);
 
-        assertThat(first.seq()).isEqualTo(5L);
-        assertThat(stale.seq()).isEqualTo(5L);
-        assertThat(stale.sourceCode()).isEqualTo("v5");
+        assertThat(first.applied()).isTrue();
+        assertThat(first.draft().seq()).isEqualTo(5L);
+        assertThat(stale.applied()).isFalse();
+        assertThat(stale.draft().seq()).isEqualTo(5L);
+        assertThat(stale.draft().sourceCode()).isEqualTo("v5");
+        assertThat(sameSeq.applied()).isFalse();
+        assertThat(sameSeq.draft().sourceCode()).isEqualTo("v5");
+        assertThat(lateOtherLanguage.applied()).isFalse();
+        assertThat(lateOtherLanguage.draft().language()).isEqualTo("java");
+        assertThat(lateOtherLanguage.draft().seq()).isEqualTo(6L);
+        assertThat(
+            jdbcTemplate
+                .queryForObject(
+                    "select source_code from diagnosis_drafts where diagnosis_attempt_id = ? and language = 'python3'",
+                    String.class,
+                    diagnosisId
+                )
+        ).isEqualTo("v5");
         Draft latest = diagnosisService.getDetail(memberId, diagnosisId).drafts().get(301L);
         assertThat(latest.language()).isEqualTo("java");
         assertThat(latest.seq()).isEqualTo(6L);
@@ -265,12 +286,15 @@ class DiagnosisServiceTest {
     @DisplayName("이력은 본인 응시만 태그로 걸러 최신 시작순으로 준다")
     void historyFiltersByTag() {
         Long memberId = member(9007L, MemberStatus.ACTIVE);
+        Long other = member(9008L, MemberStatus.ACTIVE);
         given(problemTagClient.exists(10L)).willReturn(true);
         given(problemTagClient.exists(11L)).willReturn(true);
         given(problemDiagnosisClient.candidates(10L)).willReturn(CANDIDATES);
         given(problemDiagnosisClient.candidates(11L)).willReturn(CANDIDATES);
         Long first = diagnosisService.start(memberId, 10L).attempt().getId();
         Long second = diagnosisService.start(memberId, 11L).attempt().getId();
+        diagnosisService.start(other, 10L);
+        diagnosisService.start(other, 11L);
         PageRequest newestFirst = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "startedAt", "id"));
 
         assertThat(diagnosisService.getHistory(memberId, null, newestFirst).getContent())

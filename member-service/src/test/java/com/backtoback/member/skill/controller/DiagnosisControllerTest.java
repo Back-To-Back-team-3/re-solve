@@ -33,6 +33,7 @@ import com.backtoback.member.skill.service.DiagnosisCooldownException;
 import com.backtoback.member.skill.service.DiagnosisService;
 import com.backtoback.member.skill.service.DiagnosisService.StartedDiagnosis;
 import com.backtoback.member.skill.store.DiagnosisDraftStore.Draft;
+import com.backtoback.member.skill.store.DiagnosisDraftStore.SaveResult;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -96,10 +97,11 @@ class DiagnosisControllerTest {
     @Test
     @DisplayName("1.5.4 Draft 저장은 요청 seq가 반영됐는지와 서버 seq를 주고, 잘못된 언어·순번은 400이다")
     void saveDraft() throws Exception {
+        Draft saved = new Draft("python3", "code", 15L, LocalDateTime.of(2026, 10, 3, 20, 21, 12));
         given(diagnosisService.saveDraft(7L, 120L, 301L, "python3", "code", 15L))
-            .willReturn(new Draft("python3", "code", 15L, LocalDateTime.of(2026, 10, 3, 20, 21, 12)));
+            .willReturn(new SaveResult(true, saved));
         given(diagnosisService.saveDraft(7L, 120L, 301L, "python3", "old", 3L))
-            .willReturn(new Draft("python3", "code", 15L, LocalDateTime.of(2026, 10, 3, 20, 21, 12)));
+            .willReturn(new SaveResult(false, saved));
 
         mockMvc
             .perform(draft("{\"language\":\"python3\",\"sourceCode\":\"code\",\"seq\":\"15\"}"))
