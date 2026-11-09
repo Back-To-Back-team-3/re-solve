@@ -3175,16 +3175,18 @@ judge-service/src/main/resources/db/migration/
   V13__judging_create_validation_jobs.sql
   V14__judging_create_validation_runs.sql
   V15__judging_create_validation_test_results.sql
+  V16__judging_remove_validation_run_verdict.sql
   V18__common_create_shedlock.sql
   V19__judging_track_submission_execution_recovery.sql
+  V20__common_create_audit_logs.sql
 ```
 
 기존 V1~V4는 공통 테이블 구축 계획 번호이며 실제 적용 이력과 구분한다. 기존 마이그레이션을 재사용하지 않고 Outbox·소비 기록은 V11·V12, 검증 작업·시도·테스트 결과는 V13~V15로 추가한다.
 
-§4.3.7의 대표 판정 제거는 후속 마이그레이션으로 반영한다(미구현). 이미 적용한 V14를 수정하지 않고 `judge_validation_runs.verdict` 및 해당 컬럼을 참조하는 CHECK를 제거하며, `SUCCEEDED`의 생성기 정보 필수 조건은 유지한다. 기존 시도 행과 나머지 요약은 보존한다. 파일 번호는 구현 시 실제 적용 이력과 대조해 확정한다.
-
+- V16: 검증 실행 이력에서 대표 판정 컬럼과 관련 CHECK를 제거한다. 기존 시도 행과 나머지 요약을 보존한다(§4.3.7).
 - V18: 제출 작업 임대 회수 스케줄러의 공통 잠금 테이블을 추가한다(스케줄러 §3.2).
 - V19: 생성 응답 유실 복구 횟수와 재개할 컴파일 메시지를 작업에 저장한다. 기존 작업의 복구 횟수는 0으로 채운 뒤 필수 제약을 적용한다(§4.3.2).
+- V20: 시험 제출 DLQ 감사 로그와 이벤트 ID·SQS 이동 작업 핸들의 조합을 보호하는 유일 인덱스를 생성한다(§3.3).
 
 ### 7.4 Contest (`contest-service`)
 
