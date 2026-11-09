@@ -1,5 +1,8 @@
 package com.backtoback.member.member.service;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -11,6 +14,7 @@ import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.auth.client.GitHubUser;
 import com.backtoback.member.global.error.MemberErrorCode;
 import com.backtoback.member.global.error.MemberException;
+import com.backtoback.member.member.client.WithdrawalCheckClient;
 import com.backtoback.member.member.domain.Member;
 import com.backtoback.member.member.repository.MemberRepository;
 
@@ -27,6 +31,8 @@ public class MemberService {
     private final MemberRepository memberRepository;
     private final MemberEventPublisher memberEventPublisher;
     private final TransactionTemplate transactionTemplate;
+    private final WithdrawalCheckClient withdrawalCheckClient;
+    private final Clock clock;
 
     /**
      * GitHub 사용자 ID로 회원을 찾고, 없으면 가입시킨다.
@@ -87,6 +93,35 @@ public class MemberService {
             throw new MemberException(MemberErrorCode.MEMBER_SUSPENDED);
         }
         return member;
+    }
+
+    /**
+     * 회원 탈퇴 (API 명세서 1.2.3). 원격 확인은 회원 행을 잠그기 전에 끝내고, 통과하면 한 트랜잭션에서 {@code WITHDRAWN}
+     * 전이·익명화·{@code MemberWithdrawn} 기록을 한다. 이미 탈퇴했으면 아무것도 하지 않는다.
+     */
+    public void withdraw(Long memberId) {
+        if (getMember(memberId).isWithdrawn()) {
+            return;
+        }
+        // shortcut: 확인과 탈퇴 사이에 시험에 입장하는 경우는 막지 않음(참가는 MemberWithdrawn으로 익명화), contest 자원 가드(4.7.3·4.7.4)를
+        // 도입할 때 prepare·complete로 바꾼다.
+        if (withdrawalCheckClient.hasActiveExam(memberId)) {
+            throw new MemberException(MemberErrorCode.WITHDRAWAL_BLOCKED_ACTIVE_EXAM);
+        }
+        if (withdrawalCheckClient.isStudyLeader(memberId)) {
+            throw new MemberException(MemberErrorCode.WITHDRAWAL_BLOCKED_STUDY_LEADER);
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            Member member
+                = memberRepository
+                    .findForUpdateById(memberId)
+                    .orElseThrow(() -> new MemberException(MemberErrorCode.MEMBER_NOT_FOUND));
+            if (member.isWithdrawn()) {
+                return;
+            }
+            member.withdraw(LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS));
+            memberEventPublisher.memberWithdrawn(member);
+        });
     }
 
     @Transactional(readOnly = true)

@@ -24,6 +24,9 @@ public class Member extends BaseTimeEntity {
 
     private static final long INITIAL_PROFILE_VERSION = 1L;
 
+    // 정책 및 상태 9.4: 복제본과 같은 표시 이름
+    private static final String WITHDRAWN_NICKNAME = "탈퇴한 사용자";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -106,6 +109,21 @@ public class Member extends BaseTimeEntity {
     public void suspend(LocalDateTime now) {
         this.status = MemberStatus.SUSPENDED;
         this.suspendedAt = now;
+        this.profileVersion++;
+    }
+
+    /**
+     * 탈퇴한다 (API 명세서 1.2.3). 표시 정보와 연락처를 익명화하고 {@code profileVersion}을 올린다(이벤트 계약 M1~M3 공통 순서).
+     * {@code githubId}는 재가입 정책이 정해질 때까지 남겨, 같은 GitHub 계정의 로그인을 거절하는 데 쓴다.
+     */
+    public void withdraw(LocalDateTime now) {
+        this.status = MemberStatus.WITHDRAWN;
+        this.withdrawnAt = now;
+        this.suspendedAt = null;
+        this.nickname = WITHDRAWN_NICKNAME;
+        this.githubLogin = "withdrawn-" + id;
+        this.email = null;
+        this.profileImageUrl = null;
         this.profileVersion++;
     }
 

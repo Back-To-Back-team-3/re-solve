@@ -25,6 +25,7 @@ public class MemberEventPublisher {
     static final String MEMBER_UPDATED = "MemberUpdated";
     static final String MEMBER_SUSPENDED = "MemberSuspended";
     static final String LEARNING_PROFILE_UPDATED = "LearningProfileUpdated";
+    static final String MEMBER_WITHDRAWN = "MemberWithdrawn";
     static final String SCHEMA_VERSION = "v1";
     // 이벤트 계약 공통 규칙: +09:00, 마이크로초 6자리 (occurredAt과 같은 형식)
     private static final DateTimeFormatter EVENT_TIME_FORMAT
@@ -75,6 +76,25 @@ public class MemberEventPublisher {
                 String.valueOf(snapshot.memberId()),
                 correlationId(),
                 LearningProfileUpdatedPayload.from(snapshot)
+            );
+    }
+
+    /**
+     * 탈퇴 (M3). {@code sourceVersion}은 M1과 같은 {@code profile_version} 계열이다.
+     */
+    public void memberWithdrawn(Member member) {
+        outboxEventWriter
+            .append(
+                AGGREGATE_TYPE,
+                MEMBER_WITHDRAWN,
+                SCHEMA_VERSION,
+                String.valueOf(member.getId()),
+                correlationId(),
+                new MemberWithdrawnPayload(
+                    String.valueOf(member.getId()),
+                    EVENT_TIME_FORMAT.format(member.getWithdrawnAt().atZone(ClockConfiguration.SERVICE_ZONE)),
+                    member.getProfileVersion()
+                )
             );
     }
 

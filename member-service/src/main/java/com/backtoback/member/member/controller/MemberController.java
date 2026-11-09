@@ -1,16 +1,20 @@
 package com.backtoback.member.member.controller;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.web.security.user.GatewayUser;
+import com.backtoback.member.auth.service.AuthService;
 import com.backtoback.member.member.dto.LearningProfileRequest;
 import com.backtoback.member.member.dto.LearningProfileResponse;
 import com.backtoback.member.member.dto.LearningProfileSaveResponse;
@@ -22,7 +26,9 @@ import com.backtoback.member.member.service.MemberService;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/members/me")
 @RequiredArgsConstructor
@@ -30,6 +36,7 @@ public class MemberController {
 
     private final MemberService memberService;
     private final LearningProfileService learningProfileService;
+    private final AuthService authService;
 
     /**
      * 1.2.1 내 정보 조회
@@ -80,6 +87,27 @@ public class MemberController {
                 .save(memberId(user), request.goal(), request.preferredLanguages(), request.activeTimeSlots());
         return ResponseEntity
             .ok(ApiResponse.success("학습 프로필이 저장되었습니다.", LearningProfileSaveResponse.of(profileVersion)));
+    }
+
+    /**
+     * 1.2.3 회원 탈퇴 — 탈퇴 후 이 요청의 세션 토큰을 폐기한다. 다른 세션의 Refresh Token은 탈퇴 회원 재발급 거절로 막힌다.
+     */
+    @DeleteMapping
+    public ResponseEntity<Void> withdraw(
+        @AuthenticationPrincipal GatewayUser user,
+        @RequestHeader(
+            name = HttpHeaders.AUTHORIZATION,
+            required = false
+        ) String authorization
+    ) {
+        memberService.withdraw(memberId(user));
+        try {
+            authService.logout(user.userId(), authorization, null);
+        } catch (RuntimeException exception) {
+            // 탈퇴는 이미 커밋됐고 Refresh Token 재발급도 거절되므로, 폐기 실패로 탈퇴 응답을 바꾸지 않는다.
+            log.warn("Token revocation after withdrawal failed: {}", exception.getClass().getSimpleName());
+        }
+        return ResponseEntity.noContent().build();
     }
 
     // Gateway가 JWT subject(회원 ID 숫자)를 X-User-Id로 전달한다.
