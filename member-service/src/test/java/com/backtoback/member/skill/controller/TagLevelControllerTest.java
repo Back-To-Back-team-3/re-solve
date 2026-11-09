@@ -28,6 +28,7 @@ import com.backtoback.member.global.error.MemberException;
 import com.backtoback.member.skill.config.SkillProperties.Promotion;
 import com.backtoback.member.skill.domain.MemberTagLevel;
 import com.backtoback.member.skill.domain.TagLevel;
+import com.backtoback.member.skill.service.TagAchievement;
 import com.backtoback.member.skill.service.TagLevelService;
 import com.backtoback.member.skill.service.TagLevelSummary;
 
@@ -42,7 +43,7 @@ class TagLevelControllerTest {
     private TagLevelService tagLevelService;
 
     @Test
-    @DisplayName("1.4.1 태그 레벨 목록은 레벨·최대 난이도·진단 가능 여부(+09:00)·다음 승급 기준을 준다")
+    @DisplayName("1.4.1 태그 레벨 목록은 레벨·최대 난이도·난이도별 성취도와 구간·진단 가능 여부(+09:00)·다음 승급 기준을 준다")
     void getTagLevelsReturnsSummaries() throws Exception {
         MemberTagLevel tagLevel = MemberTagLevel.enterWithoutDiagnosis(7L, 3L, LocalDateTime.of(2026, 10, 20, 9, 0));
         given(tagLevelService.getTagLevels(7L))
@@ -53,7 +54,13 @@ class TagLevelControllerTest {
                             tagLevel,
                             false,
                             LocalDateTime.of(2026, 10, 31, 12, 0),
-                            new Promotion(TagLevel.LV2, 5, new BigDecimal("60.00"))
+                            new Promotion(TagLevel.LV2, 5, new BigDecimal("60.00")),
+                            List
+                                .of(
+                                    new TagAchievement(3L, 1, 6, new BigDecimal("83.33")),
+                                    new TagAchievement(3L, 2, 2, new BigDecimal("79.99")),
+                                    new TagAchievement(3L, 3, 1, new BigDecimal("59.99"))
+                                )
                         )
                     )
             );
@@ -64,7 +71,12 @@ class TagLevelControllerTest {
             .andExpect(jsonPath("$.data.content[0].tagId").value("3"))
             .andExpect(jsonPath("$.data.content[0].level").value("LV1"))
             .andExpect(jsonPath("$.data.content[0].accessibleMaxDifficulty").value(1))
-            .andExpect(jsonPath("$.data.content[0].achievements").isEmpty())
+            .andExpect(jsonPath("$.data.content[0].achievements[0].difficulty").value(1))
+            .andExpect(jsonPath("$.data.content[0].achievements[0].solvedCount").value(6))
+            .andExpect(jsonPath("$.data.content[0].achievements[0].achievementRate").value(83.33))
+            .andExpect(jsonPath("$.data.content[0].achievements[0].band").value("GOOD"))
+            .andExpect(jsonPath("$.data.content[0].achievements[1].band").value("NORMAL"))
+            .andExpect(jsonPath("$.data.content[0].achievements[2].band").value("WEAK"))
             .andExpect(jsonPath("$.data.content[0].diagnosis.isEligible").value(false))
             .andExpect(jsonPath("$.data.content[0].diagnosis.cooldownEndsAt").value("2026-10-31T12:00:00+09:00"))
             .andExpect(jsonPath("$.data.content[0].diagnosis.inProgressDiagnosisId").isEmpty())
