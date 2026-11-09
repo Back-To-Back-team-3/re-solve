@@ -144,6 +144,7 @@ class ProblemContentServiceTest {
         jdbc.update("UPDATE problem_revisions SET created_at='2026-11-07 10:20:30' WHERE id=?", revision);
         clearInvocations(reader);
         var response = ProblemContentResponse.from(queries.read(id, null, null));
+        assertThat(response.starterCodes()).containsExactly(new StarterCodeResponse("java", "starter"));
         assertThat(response.samples()).hasSize(1);
         assertThat(response.samples().getFirst().expectedReturnText()).isEqualTo("2");
         verify(reader, times(2)).read(anyString(), anyString(), anyString());
@@ -154,6 +155,9 @@ class ProblemContentServiceTest {
             """, id, id);
         var detail = controller.content(id, new GatewayUser("9401", UserRole.USER)).getBody().data();
         var json = mapper.valueToTree(detail);
+        assertThat(json.get("starterCodes").size()).isEqualTo(1);
+        assertThat(json.get("starterCodes").get(0).get("language").asString()).isEqualTo("java");
+        assertThat(json.get("starterCodes").get(0).get("sourceCode").asString()).isEqualTo("starter");
         assertThat(controller.content(id, new GatewayUser("9402", UserRole.USER)).getBody().data().solvedStatus())
             .isEqualTo("UNSOLVED");
         assertThat(controller.content(id, new GatewayUser("9403", UserRole.USER)).getBody().data().solvedStatus())
@@ -201,7 +205,11 @@ class ProblemContentServiceTest {
             VALUES(?,9302,'LINKED',?,'version-1',?,'image/png',3,NOW(),NOW(),NOW(),NOW(),NOW())
             """, id, key, image.sha256());
         long imageId = jdbc.queryForObject("SELECT id FROM problem_images WHERE object_key=?", Long.class, key);
-        assertThatThrownBy(() -> queries.image(id, revision, imageId, "EXAM:1")).isInstanceOf(ProblemException.class);
+        assertThatThrownBy(() -> queries.image(id, revision, imageId, "EXAM:1"))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode()).isEqualTo(ProblemErrorCode.PROBLEM_NOT_FOUND)
+            );
         jdbc.update("""
             INSERT INTO problem_body_images(body_asset_id,image_id,created_at)
             SELECT body_asset_id,?,NOW() FROM problem_revisions WHERE id=?
@@ -209,7 +217,20 @@ class ProblemContentServiceTest {
         var result = queries.image(id, revision, imageId, "EXAM:1");
         assertThat(result.contentType()).isEqualTo("image/png");
         assertThat(result.bytes()).containsExactly(1, 2, 3);
-        assertThatThrownBy(() -> queries.image(id, revision, imageId, null)).isInstanceOf(ProblemException.class);
+        assertThatThrownBy(() -> queries.image(id, revision, imageId, null))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode()).isEqualTo(ProblemErrorCode.PROBLEM_NOT_FOUND)
+            );
+        var other = creates.create(9302, UUID.randomUUID().toString(), ProblemCreateFixtures.request(), null);
+        // 본문 연결은 유지해 문제 소속 검사만으로 다른 문제의 이미지를 거부하는지 확인한다.
+        jdbc.update("UPDATE problem_images SET problem_id=? WHERE id=?", Long.parseLong(other.problemId()), imageId);
+        assertThatThrownBy(() -> queries.image(id, revision, imageId, "EXAM:1"))
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode()).isEqualTo(ProblemErrorCode.PROBLEM_NOT_FOUND)
+            );
+
     }
 
 }

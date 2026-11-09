@@ -67,7 +67,7 @@ class JudgeStarterCodeClientTest {
     }
 
     /**
-     * 누락·중복·자료형 오류를 의존 장애로 처리한다.
+     * 응답 구조·언어 집합·원문 타입 오류를 의존 장애로 처리한다.
      *
      * @param payload 잘못된 응답
      */
@@ -75,12 +75,16 @@ class JudgeStarterCodeClientTest {
     @ValueSource(
         strings = {
             "{\"starterCodes\":[]}",
+            "{}",
+            "{\"starterCodes\":{\"item\":{\"language\":\"java\",\"sourceCode\":\"a\"}}}",
+            "{\"starterCodes\":[{\"language\":\"java\",\"sourceCode\":\"a\"},"
+                + "{\"language\":\"python3\",\"sourceCode\":\"b\"}]}",
             "{\"starterCodes\":[{\"language\":\"java\",\"sourceCode\":7}]}",
             "{\"starterCodes\":[{\"language\":\"java\",\"sourceCode\":\"a\"},"
                 + "{\"language\":\"java\",\"sourceCode\":\"b\"}]}"
         }
     )
-    @DisplayName("기본 코드의 누락 언어·중복 언어·문자열 아닌 원문은 거부한다")
+    @DisplayName("기본 코드의 잘못된 구조·언어 집합·원문 타입은 의존 장애로 거부한다")
     void rejectsInvalidResponse(String payload) {
         var builder = RestClient.builder();
         var server = MockRestServiceServer.bindTo(builder).build();
@@ -89,6 +93,10 @@ class JudgeStarterCodeClientTest {
             .andRespond(withSuccess(payload, MediaType.APPLICATION_JSON));
         var client = new JudgeStarterCodeClient(builder.build(), CircuitBreaker.ofDefaults("starter-invalid"));
         assertThatThrownBy(() -> client.read(Map.of("name", "solution"), List.of("java")))
-            .isInstanceOf(ProblemException.class);
+            .isInstanceOfSatisfying(
+                ProblemException.class,
+                failure -> assertThat(failure.getErrorCode()).isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+            );
+        server.verify();
     }
 }
