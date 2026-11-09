@@ -55,8 +55,20 @@ class AssetObjectDeleterIntegrationTest {
             s3.putObject(request -> request.bucket(bucket).key("target-other"), RequestBody.fromString("preserved"));
             s3.deleteObject(request -> request.bucket(bucket).key("target"));
             var deleter = new AssetObjectDeleter(s3);
-            deleter.delete(bucket, "target", latest.versionId(), new AssetCleanupBudget(Clock.systemUTC()));
-            deleter.delete(bucket, "target", latest.versionId(), new AssetCleanupBudget(Clock.systemUTC()));
+            deleter
+                .delete(
+                    bucket,
+                    "target",
+                    latest.versionId(),
+                    new AssetCleanupBudget(Clock.systemUTC())::requestTimeout
+                );
+            deleter
+                .delete(
+                    bucket,
+                    "target",
+                    latest.versionId(),
+                    new AssetCleanupBudget(Clock.systemUTC())::requestTimeout
+                );
             var remaining = s3.listObjectVersions(request -> request.bucket(bucket));
             assertThat(remaining.versions()).extracting(version -> version.key()).containsExactly("target-other");
             assertThat(remaining.deleteMarkers()).isEmpty();

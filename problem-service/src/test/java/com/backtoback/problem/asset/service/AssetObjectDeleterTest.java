@@ -66,7 +66,8 @@ class AssetObjectDeleterTest {
             )
             .willReturn(ListObjectVersionsResponse.builder().isTruncated(false).build());
         given(s3.deleteObjects(any(DeleteObjectsRequest.class))).willReturn(DeleteObjectsResponse.builder().build());
-        new AssetObjectDeleter(s3).delete("bucket", "key", "v2", new AssetCleanupBudget(Clock.systemUTC()));
+        new AssetObjectDeleter(s3)
+            .delete("bucket", "key", "v2", new AssetCleanupBudget(Clock.systemUTC())::requestTimeout);
         var pages = ArgumentCaptor.forClass(ListObjectVersionsRequest.class);
         verify(s3, times(3)).listObjectVersions(pages.capture());
         assertThat(pages.getAllValues().get(1).keyMarker()).isEqualTo("key");
@@ -87,12 +88,13 @@ class AssetObjectDeleterTest {
         given(s3.getBucketVersioning(any(GetBucketVersioningRequest.class)))
             .willReturn(GetBucketVersioningResponse.builder().build());
         var deleter = new AssetObjectDeleter(s3);
-        deleter.delete("bucket", "key", null, new AssetCleanupBudget(Clock.systemUTC()));
+        deleter.delete("bucket", "key", null, new AssetCleanupBudget(Clock.systemUTC())::requestTimeout);
         verify(s3).deleteObject(any(DeleteObjectRequest.class));
         given(s3.deleteObject(any(DeleteObjectRequest.class)))
             .willThrow(S3Exception.builder().statusCode(403).message("denied").build());
-        assertThatThrownBy(() -> deleter.delete("bucket", "key", null, new AssetCleanupBudget(Clock.systemUTC())))
-            .isInstanceOf(S3Exception.class);
+        assertThatThrownBy(
+            () -> deleter.delete("bucket", "key", null, new AssetCleanupBudget(Clock.systemUTC())::requestTimeout)
+        ).isInstanceOf(S3Exception.class);
     }
 
     /** HTTP 성공이어도 부분 삭제 오류가 있으면 DB 정리로 진행하지 않는다. */
@@ -112,7 +114,8 @@ class AssetObjectDeleterTest {
         given(s3.deleteObjects(any(DeleteObjectsRequest.class)))
             .willReturn(DeleteObjectsResponse.builder().errors(S3Error.builder().code("AccessDenied").build()).build());
         assertThatThrownBy(
-            () -> new AssetObjectDeleter(s3).delete("bucket", "key", null, new AssetCleanupBudget(Clock.systemUTC()))
+            () -> new AssetObjectDeleter(s3)
+                .delete("bucket", "key", null, new AssetCleanupBudget(Clock.systemUTC())::requestTimeout)
         ).isInstanceOf(IllegalStateException.class);
     }
 
@@ -129,7 +132,7 @@ class AssetObjectDeleterTest {
             given(clock.instant()).willReturn(now.plus(Duration.ofMinutes(31)));
             return GetBucketVersioningResponse.builder().status(BucketVersioningStatus.ENABLED).build();
         });
-        assertThatThrownBy(() -> new AssetObjectDeleter(s3).delete("bucket", "key", "v1", budget))
+        assertThatThrownBy(() -> new AssetObjectDeleter(s3).delete("bucket", "key", "v1", budget::requestTimeout))
             .isInstanceOf(IllegalStateException.class);
         verify(s3, never()).listObjectVersions(any(ListObjectVersionsRequest.class));
         verify(s3, never()).deleteObjects(any(DeleteObjectsRequest.class));

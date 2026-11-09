@@ -31,14 +31,17 @@ public class UnlinkedAssetCleanupScheduler {
         zone = "Asia/Seoul"
     )
     public void clean() {
+        var budget = new AssetCleanupBudget(clock);
         var lease = store.acquireLease();
         if (lease.isEmpty()) {
             return;
         }
         var owner = lease.get();
         var sample = Timer.start(metrics);
-        var budget = new AssetCleanupBudget(clock);
         try {
+            if (!budget.hasTime(Duration.ofSeconds(10)) || !store.isCurrentLease(owner)) {
+                return;
+            }
             for (var candidate : store.candidates()) {
                 if (!budget.hasTime(Duration.ofSeconds(10))) {
                     break;

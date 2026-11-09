@@ -1,7 +1,9 @@
 package com.backtoback.problem.asset.service;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
 
@@ -27,17 +29,17 @@ public class AssetObjectDeleter {
      * @param bucket 저장 버킷
      * @param key 삭제 선점된 불변 키
      * @param knownVersion 저장 당시 버전
-     * @param budget 전체 정리 회차의 공유 실행 예산
+     * @param requestTimeout 각 S3 요청의 소유권을 검사하고 제한 시간을 반환하는 공급자
      * @throws RuntimeException S3 실패·부분 삭제·불완전한 버전 목록
      */
-    public void delete(String bucket, String key, String knownVersion, AssetCleanupBudget budget) {
+    public void delete(String bucket, String key, String knownVersion, Supplier<Duration> requestTimeout) {
         var versioning
             = s3
                 .getBucketVersioning(
                     GetBucketVersioningRequest
                         .builder()
                         .bucket(bucket)
-                        .overrideConfiguration(config -> config.apiCallTimeout(budget.requestTimeout()))
+                        .overrideConfiguration(config -> config.apiCallTimeout(requestTimeout.get()))
                         .build()
                 );
         if (versioning.status() == null && knownVersion == null) {
@@ -47,12 +49,12 @@ public class AssetObjectDeleter {
                         .builder()
                         .bucket(bucket)
                         .key(key)
-                        .overrideConfiguration(config -> config.apiCallTimeout(budget.requestTimeout()))
+                        .overrideConfiguration(config -> config.apiCallTimeout(requestTimeout.get()))
                         .build()
                 );
             return;
         }
-        var versions = versions(bucket, key, budget);
+        var versions = versions(bucket, key, requestTimeout);
         for (int start = 0; start < versions.size(); start += 1000) {
             var batch = versions.subList(start, Math.min(start + 1000, versions.size()));
             var result
@@ -62,14 +64,14 @@ public class AssetObjectDeleter {
                             .builder()
                             .bucket(bucket)
                             .delete(Delete.builder().objects(batch).quiet(true).build())
-                            .overrideConfiguration(config -> config.apiCallTimeout(budget.requestTimeout()))
+                            .overrideConfiguration(config -> config.apiCallTimeout(requestTimeout.get()))
                             .build()
                     );
             if (!result.errors().isEmpty()) {
                 throw new IllegalStateException("파일의 일부 S3 버전을 삭제하지 못했습니다.");
             }
         }
-        if (!versions(bucket, key, budget).isEmpty()) {
+        if (!versions(bucket, key, requestTimeout).isEmpty()) {
             throw new IllegalStateException("삭제 후 S3 버전이 남아 있습니다.");
         }
     }
@@ -79,11 +81,11 @@ public class AssetObjectDeleter {
      *
      * @param bucket 저장 버킷
      * @param key 불변 키
-     * @param budget 전체 정리 회차의 공유 실행 예산
+     * @param requestTimeout 각 S3 요청의 소유권을 검사하고 제한 시간을 반환하는 공급자
      * @return 실제 삭제할 버전
      * @throws IllegalStateException 과도하거나 불완전한 버전 목록
      */
-    private List<ObjectIdentifier> versions(String bucket, String key, AssetCleanupBudget budget) {
+    private List<ObjectIdentifier> versions(String bucket, String key, Supplier<Duration> requestTimeout) {
         var objects = new ArrayList<ObjectIdentifier>();
         String keyMarker = null;
         String versionMarker = null;
@@ -101,7 +103,7 @@ public class AssetObjectDeleter {
                             .keyMarker(keyMarker)
                             .versionIdMarker(versionMarker)
                             .maxKeys(1000)
-                            .overrideConfiguration(config -> config.apiCallTimeout(budget.requestTimeout()))
+                            .overrideConfiguration(config -> config.apiCallTimeout(requestTimeout.get()))
                             .build()
                     );
             result

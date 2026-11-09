@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.sql.DriverManager;
 import java.time.Clock;
@@ -36,6 +37,7 @@ import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.problem.asset.domain.AssetKind;
+import com.backtoback.problem.asset.scheduler.UnlinkedAssetCleanupScheduler;
 
 /** 실제 MySQL에서 파일 삭제 선점·실패 복구와 연결 경합을 검증한다. */
 @SpringBootTest(
@@ -75,6 +77,8 @@ class AssetCleanupServiceTest {
     private AssetCleanupStore store;
     @Autowired
     private AssetCleanupService service;
+    @Autowired
+    private UnlinkedAssetCleanupScheduler scheduler;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private AssetCleanupStore storeSpy;
     @MockitoBean
@@ -229,6 +233,34 @@ class AssetCleanupServiceTest {
         }
     }
 
+    /** 잠금 획득 직후 중단된 이전 스케줄 실행은 재개해도 S3 호출을 시작하지 않는다. */
+    @Test
+    @DisplayName("다른 실행이 잠금을 재획득한 뒤 이전 스케줄 실행은 S3 삭제를 시작하지 않는다")
+    void staleSchedulerCannotStartS3AfterLeaseReacquired() {
+        var candidate = asset(AssetKind.CODE, "PENDING", true);
+        store.releaseLease(owner);
+        var nextOwner = new AtomicReference<String>();
+        var target = AopTestUtils.<AssetCleanupStore>getUltimateTargetObject(storeSpy);
+        var otherInstance = new AssetCleanupStore(jdbc, clock);
+        willAnswer(call -> {
+            var first = ((java.util.Optional<?>)call.callRealMethod()).orElseThrow();
+            jdbc.update("UPDATE shedlock SET lock_until=UTC_TIMESTAMP(3)-INTERVAL 1 SECOND WHERE locked_by=?", first);
+            nextOwner.set(otherInstance.acquireLease().orElseThrow());
+            return java.util.Optional.of(first);
+        }).given(target).acquireLease();
+        try {
+            scheduler.clean();
+            assertThat(nextOwner.get()).isNotNull();
+            verifyNoInteractions(objects);
+            assertThat(state(candidate)).isEqualTo("PENDING");
+            assertThat(otherInstance.acquireLease()).isEmpty();
+        } finally {
+            if (nextOwner.get() != null) {
+                store.releaseLease(nextOwner.get());
+            }
+        }
+    }
+
     /** 실제 연결 참조는 상태가 잘못 저장돼 있어도 보호한다. */
     @Test
     @DisplayName("이전 회차·테스트·본문 이미지·검증 코드 참조는 미연결 상태여도 삭제하지 않는다")
@@ -250,7 +282,7 @@ class AssetCleanupServiceTest {
                         + " SET status='PENDING',upload_finished_at=now(6)-INTERVAL 2 DAY WHERE id=?",
                     id
                 );
-            assertThatThrownBy(() -> store.claim(candidate)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> store.claim(candidate, owner)).isInstanceOf(IllegalStateException.class);
             jdbc.update("UPDATE " + entry.getKey().table() + " SET status='LINKED' WHERE id=?", id);
         }
         var body = asset(AssetKind.BODY, "PENDING", true);
@@ -261,15 +293,15 @@ class AssetCleanupServiceTest {
                 body.id(),
                 image.id()
             );
-        assertThatThrownBy(() -> store.claim(body)).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> store.claim(image)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> store.claim(body, owner)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> store.claim(image, owner)).isInstanceOf(IllegalStateException.class);
         var code = asset(AssetKind.CODE, "PENDING", true);
         jdbc.update("""
             INSERT INTO problem_validations(problem_revision_id,requested_by,language,code_asset_id,trigger_type,
                 request_hash,result_status,created_at,updated_at)
             VALUES(1,1,'java',?,'MANUAL',repeat('a',64),'FAILED',now(6),now(6))
             """, code.id());
-        assertThatThrownBy(() -> store.claim(code)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> store.claim(code, owner)).isInstanceOf(IllegalStateException.class);
         verify(objects, never()).delete(any(), any(), any(), any());
     }
 
@@ -328,7 +360,7 @@ class AssetCleanupServiceTest {
                 LocalDateTime.now(clock).minusHours(24),
                 candidate.id()
             );
-        var file = store.claim(candidate).file();
+        var file = store.claim(candidate, owner).file();
         var image = imageRepository.findById(candidate.id()).orElseThrow();
         assertThatThrownBy(() -> image.linkToProblem(1L, 1L)).isInstanceOf(IllegalStateException.class);
         jdbc

@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -59,7 +60,28 @@ public class AssetCleanupStore {
      * @param owner 회차의 소유권 토큰
      */
     public void releaseLease(String owner) {
-        jdbc.update("UPDATE shedlock SET lock_until=UTC_TIMESTAMP(3) WHERE name=? AND locked_by=?", LOCK_NAME, owner);
+        jdbc.execute((ConnectionCallback<Void>)connection -> {
+            int previous = connection.getNetworkTimeout();
+            int timeout = previous == 0 ? 10_000 : Math.min(previous, 10_000);
+            connection.setNetworkTimeout(Runnable::run, timeout);
+            try (
+                var statement
+                    = connection
+                        .prepareStatement(
+                            "UPDATE shedlock SET lock_until=UTC_TIMESTAMP(3) WHERE name=? AND locked_by=?"
+                        )
+            ) {
+                statement.setQueryTimeout(10);
+                statement.setString(1, LOCK_NAME);
+                statement.setString(2, owner);
+                statement.executeUpdate();
+            } finally {
+                if (!connection.isClosed()) {
+                    connection.setNetworkTimeout(Runnable::run, previous);
+                }
+            }
+            return null;
+        });
     }
 
     /**
@@ -103,13 +125,17 @@ public class AssetCleanupStore {
      * 업로드 종료·유예 시각과 실패 분류는 변경하지 않는다.
      *
      * @param candidate 선정된 파일
+     * @param owner 정리 회차의 ShedLock 소유권 토큰
      * @return 잠금을 획득하고 시도 순서를 갱신했는지 여부
      */
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
         timeout = 10
     )
-    public boolean recordAttempt(Candidate candidate) {
+    public boolean recordAttempt(Candidate candidate, String owner) {
+        if (!ownsLease(owner, true)) {
+            return false;
+        }
         var rows = lock(candidate);
         if (rows.isEmpty() || "LINKED".equals(rows.getFirst().status())) {
             return false;
@@ -127,6 +153,7 @@ public class AssetCleanupStore {
      * 잠긴 후보는 건너뛰며 종료·유예·참조를 확인해 DELETING을 커밋한다.
      *
      * @param candidate 후보
+     * @param owner 정리 회차의 ShedLock 소유권 토큰
      * @return 선점 결과와 불변 파일 정보
      * @throws IllegalStateException LINKED 이외 상태의 참조 불일치
      */
@@ -134,7 +161,10 @@ public class AssetCleanupStore {
         propagation = Propagation.REQUIRES_NEW,
         timeout = 10
     )
-    public Claim claim(Candidate candidate) {
+    public Claim claim(Candidate candidate, String owner) {
+        if (!ownsLease(owner, true)) {
+            return new Claim("skipped", null);
+        }
         var rows = lock(candidate);
         if (rows.isEmpty()) {
             return new Claim("skipped", null);
@@ -176,11 +206,7 @@ public class AssetCleanupStore {
     )
     public boolean complete(File expected, String owner) {
         // 재획득과 최종 삭제를 같은 잠금 행으로 직렬화하고 커밋까지 소유권을 보호한다.
-        var leases = jdbc.queryForList("""
-            SELECT locked_by FROM shedlock WHERE name=? AND locked_by=?
-                AND lock_until>UTC_TIMESTAMP(3) FOR UPDATE
-            """, String.class, LOCK_NAME, owner);
-        if (leases.isEmpty()) {
+        if (!ownsLease(owner, true)) {
             return false;
         }
         var rows = lock(expected.candidate());
@@ -198,6 +224,40 @@ public class AssetCleanupStore {
         return jdbc
             .update("DELETE FROM " + expected.candidate().kind().table() + " WHERE id=?", expected.candidate().id())
             == 1;
+    }
+
+    /**
+     * 다음 S3 요청 전에 정리 회차의 소유권과 만료 시각을 확인한다.
+     *
+     * @param owner 정리 회차의 ShedLock 소유권 토큰
+     * @return 현재 유효한 소유권인지 여부
+     */
+    @Transactional(
+        readOnly = true,
+        propagation = Propagation.REQUIRES_NEW,
+        timeout = 10
+    )
+    public boolean isCurrentLease(String owner) {
+        return ownsLease(owner, false);
+    }
+
+    /**
+     * DB 시각으로 잠금 소유권을 확인하고, 쓰기 단계에서는 재획득과 직렬화한다.
+     *
+     * @param owner 정리 회차의 ShedLock 소유권 토큰
+     * @param lock 조회한 잠금 행을 트랜잭션 종료까지 잠글지 여부
+     * @return 현재 유효한 소유권인지 여부
+     */
+    private boolean ownsLease(String owner, boolean lock) {
+        return !jdbc
+            .queryForList(
+                "SELECT locked_by FROM shedlock WHERE name=? AND locked_by=? AND lock_until>UTC_TIMESTAMP(3)"
+                    + (lock ? " FOR UPDATE" : ""),
+                String.class,
+                LOCK_NAME,
+                owner
+            )
+            .isEmpty();
     }
 
     /**

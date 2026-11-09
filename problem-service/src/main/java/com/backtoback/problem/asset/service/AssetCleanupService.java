@@ -33,19 +33,27 @@ public class AssetCleanupService {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public String clean(AssetCleanupStore.Candidate candidate, AssetCleanupBudget budget, String owner) {
         budget.requireDatabaseTime();
-        if (!store.recordAttempt(candidate)) {
+        if (!store.recordAttempt(candidate, owner)) {
             return "skipped";
         }
         budget.requireDatabaseTime();
-        var claim = store.claim(candidate);
+        var claim = store.claim(candidate, owner);
         if (claim.file() == null) {
             if ("unconfirmed".equals(claim.outcome())) {
                 log.warn("업로드 종료 미확인 파일 보존: kind={}, id={}", candidate.kind(), candidate.id());
             }
             return claim.outcome();
         }
+        if (!store.isCurrentLease(owner)) {
+            return "skipped";
+        }
         try {
-            objects.delete(storage.bucket(), claim.file().key(), claim.file().version(), budget);
+            objects.delete(storage.bucket(), claim.file().key(), claim.file().version(), () -> {
+                if (!store.isCurrentLease(owner)) {
+                    throw new IllegalStateException("파일 정리 잠금 소유권이 만료되었습니다.");
+                }
+                return budget.requestTimeout();
+            });
         } catch (RuntimeException failure) {
             metrics.counter("problem.asset.cleanup.s3.failures").increment();
             throw failure;
