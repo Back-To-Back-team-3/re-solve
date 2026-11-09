@@ -5479,7 +5479,8 @@
     
 - **에러:**
     - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403)
-    - `UNSUPPORTED_LANGUAGE`(400) / 조회한 지원 언어 결과가 없거나 잠금 후 고정 회차와 일치하지 않는 경우. 기존 Draft의 언어 불일치는 위 실패 접수로 보존한다.
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Problem 지원 언어 조회에 실패하거나 응답의 지원 언어 목록이 비어 있는 등 응답이 유효하지 않은 경우.
+    - `UNSUPPORTED_LANGUAGE`(400) / 시험 잠금 후 자동 제출 대상의 지원 언어 조회 결과가 없거나 조회한 회차가 현재 고정 회차와 일치하지 않는 경우. 유효한 지원 언어 목록에 기존 Draft의 언어가 없으면 위 실패 접수로 보존한다.
 - **발행:** `ExamSubmissionRequested` — 언어·크기 검사를 통과한 자동 제출 문제별
 
 #### 4.2.7 내 시험 결과
