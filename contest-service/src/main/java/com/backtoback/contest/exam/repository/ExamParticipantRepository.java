@@ -57,4 +57,12 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
         nativeQuery = true
     )
     Optional<Long> findActiveParticipantAtOffset(@Param("exam") long examId, @Param("offset") int offset);
+
+    /** 부모 잠금 뒤 입장하지 않은 등록자를 식별자 순서로 잠근다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from ExamParticipant p where p.exam.id = :exam and p.status = :status order by p.id")
+    List<ExamParticipant> findByExamAndStatusForUpdate(
+        @Param("exam") long examId,
+        @Param("status") ExamParticipantStatus status
+    );
 }

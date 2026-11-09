@@ -11,6 +11,7 @@ import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.logging.HttpClientConfiguration;
 import com.backtoback.contest.exam.client.ExamDependencyProperties;
+import com.backtoback.contest.exam.client.ExamRunProperties;
 import com.backtoback.contest.exam.client.MemberClientProperties;
 
 /**
@@ -21,7 +22,8 @@ import com.backtoback.contest.exam.client.MemberClientProperties;
 @EnableConfigurationProperties(
     {
         MemberClientProperties.class,
-        ExamDependencyProperties.class
+        ExamDependencyProperties.class,
+        ExamRunProperties.class
     }
 )
 @Import(

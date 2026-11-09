@@ -31,6 +31,8 @@ import com.backtoback.contest.exam.domain.Exam;
 import com.backtoback.contest.exam.domain.ExamMode;
 import com.backtoback.contest.exam.domain.ExamProblem;
 import com.backtoback.contest.exam.domain.ExamStatus;
+import com.backtoback.contest.exam.dto.ExamCancelRequest;
+import com.backtoback.contest.exam.dto.ExamCancelResponse;
 import com.backtoback.contest.exam.dto.ExamCreateRequest;
 import com.backtoback.contest.exam.dto.ExamResponse;
 import com.backtoback.contest.exam.dto.ExamUpdateRequest;
@@ -96,6 +98,116 @@ public class ExamManagementService {
         } catch (OptimisticLockingFailureException failure) {
             throw new ContestException(ContestErrorCode.EXAM_REVISION_CONFLICT, failure);
         }
+    }
+
+    /** 현재 스터디 관리자 권한을 확인하고 부모 잠금 아래 취소 또는 재요청을 처리한다. */
+    public ExamCancelResponse cancel(String examId, String memberId, ExamCancelRequest request) {
+        long id = positiveId(examId);
+        long member = positiveId(memberId);
+        if (request == null || request.version() == null || !request.version().matches("0|[1-9][0-9]*")
+            || request.reason() == null || request.reason().isEmpty() || request.reason().length() > 500) {
+            throw invalid();
+        }
+        long version;
+        try {
+            version = Long.parseLong(request.version());
+        } catch (NumberFormatException failure) {
+            throw invalid();
+        }
+        var exam = exams.findById(id).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
+        long study = exam.getStudyId();
+        authorizeCancellation(study, member);
+        try {
+            return transactions.execute(status -> cancelLocked(id, study, version, request.reason()));
+        } catch (OptimisticLockingFailureException failure) {
+            throw new ContestException(ContestErrorCode.EXAM_REVISION_CONFLICT, failure);
+        }
+    }
+
+    /** 스터디 종료 여부와 관계없이 현재 관리자 권한을 조회한다. */
+    private void authorizeCancellation(long study, long member) {
+        if (!"ACTIVE".equals(members.refresh(member))) {
+            throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        var snapshot = dependencies.study(study);
+        if (!Set.of("ACTIVE", "RECRUITING", "CLOSED").contains(snapshot.studyStatus())) {
+            throw dependencyFailure();
+        }
+        if (snapshot
+            .members()
+            .stream()
+            .noneMatch(
+                item -> Long.toString(member).equals(item.memberId())
+                    && ("LEADER".equals(item.role()) || "MANAGER".equals(item.role()))
+            )) {
+            throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+    }
+
+    /** 취소 상태·참가자 스냅샷·Outbox를 한 트랜잭션에서 기록한다. */
+    private ExamCancelResponse cancelLocked(long id, long study, long version, String reason) {
+        var exam = exams.findForUpdate(id).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
+        if (!studyEquals(exam, study)) {
+            throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        if (exam.getStatus() == ExamStatus.CANCELED) {
+            return ExamCancelResponse.from(exam);
+        }
+        var now
+            = LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MICROS), ClockConfiguration.SERVICE_ZONE);
+        if (exam.getStatus() != ExamStatus.SCHEDULED || !now.isBefore(exam.getStartsAt())) {
+            throw new ContestException(ContestErrorCode.EXAM_MODIFICATION_CLOSED);
+        }
+        if (exam.getVersion() != version) {
+            throw new ContestException(ContestErrorCode.EXAM_REVISION_CONFLICT);
+        }
+        var memberIds
+            = jdbc
+                .queryForList(
+                    "SELECT member_id FROM exam_participants WHERE exam_id = ? "
+                        + "AND status <> 'CANCELED' ORDER BY id FOR UPDATE",
+                    Long.class,
+                    id
+                );
+        now = LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MICROS), ClockConfiguration.SERVICE_ZONE);
+        if (!now.isBefore(exam.getStartsAt())) {
+            throw new ContestException(ContestErrorCode.EXAM_MODIFICATION_CLOSED);
+        }
+        exam.cancel(now);
+        exams.saveAndFlush(exam);
+        var result = ExamCancelResponse.from(exam);
+        String correlation = MDC.get(CorrelationIdFilter.MDC_KEY);
+        if (correlation == null) {
+            correlation = "contest-" + UUID.randomUUID();
+        }
+        outbox
+            .append(
+                "EXAM",
+                "ExamCanceled",
+                "v1",
+                Long.toString(id),
+                correlation,
+                new CanceledPayload(
+                    Long.toString(id),
+                    Long.toString(study),
+                    result.examRevision(),
+                    formatTime(result.canceledAt()),
+                    reason,
+                    memberIds.stream().map(String::valueOf).toList()
+                )
+            );
+        return result;
+    }
+
+    /** 시험 취소 시점의 사유와 활성 참가자 스냅샷이다. */
+    public record CanceledPayload(
+        String examId,
+        String studyId,
+        String examRevision,
+        String canceledAt,
+        String reason,
+        List<String> targetMemberIds
+    ) {
     }
 
     private void authorize(long study, long member) {

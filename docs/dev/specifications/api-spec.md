@@ -5074,7 +5074,9 @@
     ```
     
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFY_NOT_ALLOWED`(409), `EXAM_UPDATE_CONFLICT`(409)
+    - `COMMON_INVALID_REQUEST`(400) / 시험 식별자·버전·사유 유효성 검증 실패
+    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFICATION_CLOSED`(409), `EXAM_REVISION_CONFLICT`(409)
+    - `CONTEST_DEPENDENCY_UNAVAILABLE`(503) / 현재 스터디 관리자 권한 확인에 필요한 외부 의존 조회 실패 또는 불완전한 응답
 - **발행:** `ExamCanceled` — 취소 시각·사유·활성 등록자 ID 스냅샷 포함
 
 ### 4.2 외부 API — 시험 참가·Draft·제출·결과
@@ -5279,6 +5281,7 @@
 - **Method / URI:** `PUT /api/v1/exams/{examId}/drafts/{problemId}`
 - **인증:** 로그인 필요 + `ACTIVE`·`STARTED` 본인
 - **Rate Limit:** 참가자당 초당 1회 (초과 요청은 마지막 요청만 반영하는 서버 버퍼 처리)
+- **버퍼 응답:** 같은 버퍼에서 밀린 요청은 마지막 요청의 처리 완료 뒤 `applied=false`와 해당 문제의 실제 서버 최대 `seq`를 반환한다. 저장된 Draft가 없으면 `serverSeq`는 `"0"`, `savedAt`은 `null`이다.
 - **대응 테이블:** `exams`, `exam_participants`, `exam_drafts`, `member_replicas`
 - **설명:** 참가자 잠금 아래 문제의 전체 언어 최대 `seq`보다 큰 경우 해당 언어 Draft를 저장. 같거나 작으면 무시하고 `applied: false` 반환. 직접 제출은 이 버퍼를 우회해 최신 코드를 트랜잭션에서 저장. 저장 성공은 DB 커밋 후 응답하며 개인 마감 판정은 DB §6.4.1을 따른다.
 - **요청 헤더:**
@@ -5324,7 +5327,7 @@
     | --- | --- | --- |
     | `applied` | boolean | 신규 Draft가 실제 저장됐는지 |
     | `serverSeq` | string | 서버의 전체 언어 최대 순번 문자열 |
-    | `savedAt` | string (date-time) | 서버 Draft 저장 시각 |
+    | `savedAt` | string (date-time) 또는 null | 서버 Draft 저장 시각. 버퍼에서 밀린 요청의 문제에 저장된 Draft가 없으면 null |
     | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
     | `serverNow` | string (date-time) | C 서버 기준 시각 |
     
@@ -5343,7 +5346,7 @@
     ```
     
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `CODE_TOO_LARGE`(413), `COMMON_INVALID_REQUEST`(400)
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_PROBLEM_NOT_INCLUDED`(404), `MEMBER_SUSPENDED`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400), `COMMON_INVALID_REQUEST`(400), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 
 #### 4.2.5 시험 직접 제출
 
@@ -5925,7 +5928,7 @@
     }
     ```
     
-- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_CLOSED`(409), `RUN_IN_PROGRESS`(429), `RUN_TIMEOUT`(504), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400)
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_PROBLEM_NOT_INCLUDED`(404), `MEMBER_SUSPENDED`(403), `EXAM_CANCELED`(409), `EXAM_CLOSED`(409), `RUN_IN_PROGRESS`(429), `RUN_TIMEOUT`(504), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400), `COMMON_INVALID_REQUEST`(400), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **외부 의존:** `POST /internal/v1/judge/runs` (judge) — 실패 시 503
 
 ### 4.3 외부 API — 시험 실시간 결과
