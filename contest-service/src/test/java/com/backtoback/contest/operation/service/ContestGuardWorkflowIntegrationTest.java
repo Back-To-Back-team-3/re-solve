@@ -100,6 +100,22 @@ class ContestGuardWorkflowIntegrationTest extends ExamIntegrationTestSupport {
         assertThat(historical.ready()).isFalse();
     }
 
+    /** 같은 스터디에서도 작업 ID 끝의 공백에 따라 독립된 준비 이력을 사용한다. */
+    @Test
+    @DisplayName("스터디 종료 준비 이력은 작업 ID의 후행 공백을 구분한다")
+    void studyPreparationDistinguishesTrailingSpace() {
+        var original = new GuardPrepareRequest("study-op", "STUDY_CLOSE", "4");
+        var spaced = new GuardPrepareRequest("study-op ", "STUDY_CLOSE", "4");
+
+        workflow.prepare("STUDY", "12", original);
+        workflow.finish("STUDY", "12", new GuardFinishRequest("study-op", "4", "취소"), false);
+        var prepared = workflow.prepare("STUDY", "12", spaced);
+
+        assertThat(prepared.operationResult()).isEqualTo("PENDING");
+        assertThat(workflow.prepare("STUDY", "12", original).operationResult()).isEqualTo("ABORTED");
+        assertThat(workflow.prepare("STUDY", "12", spaced).operationResult()).isEqualTo("PENDING");
+    }
+
     /** 준비 거절이 새 가드 행까지 롤백하는지 확인한다. */
     @Test
     @DisplayName("실제 입장한 미확정 시험이 있으면 회원 탈퇴 준비를 남기지 않는다")
