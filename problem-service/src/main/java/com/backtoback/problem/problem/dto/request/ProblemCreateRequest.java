@@ -37,7 +37,7 @@ public record ProblemCreateRequest(
     FunctionSpec functionSpec,
     @Valid Limits executionLimits,
     List<TestCaseRequest> testCases
-) {
+) implements ProblemContentRequest {
     /** 등록 시 회차에 고정할 실행 제한의 선택 입력. */
     public record Limits(
         @Min(

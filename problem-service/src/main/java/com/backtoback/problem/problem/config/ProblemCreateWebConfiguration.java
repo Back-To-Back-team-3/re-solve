@@ -8,7 +8,7 @@ import com.backtoback.problem.problem.service.ProblemCreateBodyReader;
 
 import lombok.RequiredArgsConstructor;
 
-/** 최초 등록 요청에만 본문 크기 제한과 엄격한 JSON 변환을 적용한다. */
+/** 최초·새 회차 등록 요청에 본문 크기 제한과 엄격한 JSON 변환을 적용한다. */
 @Configuration(proxyBeanMethods = false)
 @RequiredArgsConstructor
 public class ProblemCreateWebConfiguration implements WebMvcConfigurer {
