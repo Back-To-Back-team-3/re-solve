@@ -6,10 +6,12 @@ import java.time.LocalDateTime;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.client.MemberClient;
 import com.backtoback.contest.exam.client.MemberStatusResponse;
 import com.backtoback.contest.exam.repository.MemberReplicaRepository;
+import com.backtoback.contest.global.error.ContestException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -30,6 +32,17 @@ public class MemberReplicaService {
     public String refresh(long memberId) {
         var response = memberClient.fetch(memberId);
         return transactions.execute(status -> saveSnapshot(memberId, response));
+    }
+
+    /**
+     * 시험 저장 트랜잭션에서 이미 반영된 회원 상태를 잠그고 확인한다.
+     *
+     * @throws ContestException 활성 복제본이 없으면 {@code AUTH_ACCESS_DENIED}
+     */
+    public void requireActiveForExamWrite(long memberId) {
+        if (members.lockStatus(memberId).filter("ACTIVE"::equals).isEmpty()) {
+            throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
     }
 
     /**
