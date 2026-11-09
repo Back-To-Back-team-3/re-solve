@@ -7,9 +7,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
+import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.Study;
 import com.backtoback.study.membership.domain.StudyMembership;
+import com.backtoback.study.membership.dto.MembershipItemResponse;
+import com.backtoback.study.membership.dto.MembershipListResponse;
 import com.backtoback.study.membership.dto.StudyMembersResponse;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
@@ -47,5 +50,17 @@ public class StudyMemberInternalService {
                 .toList();
 
         return new StudyMembersResponse(String.valueOf(study.getId()), study.getStatus().name(), members);
+    }
+
+    @Transactional(readOnly = true)
+    public MembershipListResponse findMemberMemberships(Long memberId, MembershipRole role, boolean activeOnly) {
+        String roleStr = role != null ? role.name() : null;
+        List<MembershipItemResponse> items
+            = membershipRepository
+                .findActiveMembershipsForMember(memberId, roleStr, activeOnly)
+                .stream()
+                .map(MembershipItemResponse::from)
+                .toList();
+        return new MembershipListResponse(String.valueOf(memberId), items);
     }
 }
