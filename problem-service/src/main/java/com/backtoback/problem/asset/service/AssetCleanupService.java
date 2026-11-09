@@ -26,11 +26,12 @@ public class AssetCleanupService {
      *
      * @param candidate 파일 후보
      * @param budget 전체 정리 회차의 실행 예산
+     * @param owner 정리 회차의 ShedLock 소유권 토큰
      * @return 처리 결과
      * @throws RuntimeException 선점·S3·DB 정리 실패
      */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public String clean(AssetCleanupStore.Candidate candidate, AssetCleanupBudget budget) {
+    public String clean(AssetCleanupStore.Candidate candidate, AssetCleanupBudget budget, String owner) {
         budget.requireDatabaseTime();
         if (!store.recordAttempt(candidate)) {
             return "skipped";
@@ -50,7 +51,7 @@ public class AssetCleanupService {
             throw failure;
         }
         budget.requireDatabaseTime();
-        if (store.complete(claim.file())) {
+        if (store.complete(claim.file(), owner)) {
             metrics.counter("problem.asset.cleanup.deleted.rows").increment();
             return "deleted";
         }

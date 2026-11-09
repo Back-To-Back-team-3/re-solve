@@ -2,15 +2,21 @@ package com.backtoback.problem.asset.service;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+
+import net.javacrumbs.shedlock.core.LockConfiguration;
+import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
 
 import com.backtoback.problem.asset.domain.AssetKind;
 
@@ -20,8 +26,41 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class AssetCleanupStore {
+    private static final String LOCK_NAME = "UnlinkedAssetCleanupScheduler";
+    private static final Duration LOCK_DURATION = Duration.ofMinutes(30);
+
     private final JdbcTemplate jdbc;
     private final Clock clock;
+
+    /**
+     * DB 시각을 사용하는 ShedLock을 회차별 고유 토큰으로 획득한다.
+     *
+     * @return 획득한 소유권 토큰 또는 빈 값
+     */
+    public Optional<String> acquireLease() {
+        var owner = UUID.randomUUID().toString();
+        var provider
+            = new JdbcTemplateLockProvider(
+                JdbcTemplateLockProvider.Configuration
+                    .builder()
+                    .withJdbcTemplate(jdbc)
+                    .usingDbTime()
+                    .withLockedByValue(owner)
+                    .build()
+            );
+        return provider
+            .lock(new LockConfiguration(Instant.now(clock), LOCK_NAME, LOCK_DURATION, Duration.ZERO))
+            .map(lock -> owner);
+    }
+
+    /**
+     * 현재 회차가 획득한 잠금만 해제한다.
+     *
+     * @param owner 회차의 소유권 토큰
+     */
+    public void releaseLease(String owner) {
+        jdbc.update("UPDATE shedlock SET lock_until=UTC_TIMESTAMP(3) WHERE name=? AND locked_by=?", LOCK_NAME, owner);
+    }
 
     /**
      * 네 파일 종류에서 복구·종료 확인·정리 후보를 합계 500건까지 조회한다.
@@ -127,6 +166,7 @@ public class AssetCleanupStore {
      * S3 삭제 뒤 동일 파일의 실제 참조를 다시 검사하고 파일 행만 삭제한다.
      *
      * @param expected 삭제한 파일의 불변 메타 정보
+     * @param owner 정리 회차의 ShedLock 소유권 토큰
      * @return 실제 DB 삭제 여부
      * @throws IllegalStateException 상태·참조·객체 정보 불일치
      */
@@ -134,7 +174,15 @@ public class AssetCleanupStore {
         propagation = Propagation.REQUIRES_NEW,
         timeout = 10
     )
-    public boolean complete(File expected) {
+    public boolean complete(File expected, String owner) {
+        // 재획득과 최종 삭제를 같은 잠금 행으로 직렬화하고 커밋까지 소유권을 보호한다.
+        var leases = jdbc.queryForList("""
+            SELECT locked_by FROM shedlock WHERE name=? AND locked_by=?
+                AND lock_until>UTC_TIMESTAMP(3) FOR UPDATE
+            """, String.class, LOCK_NAME, owner);
+        if (leases.isEmpty()) {
+            return false;
+        }
         var rows = lock(expected.candidate());
         if (rows.isEmpty()) {
             return false;

@@ -6,9 +6,6 @@ import java.time.Duration;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import net.javacrumbs.shedlock.core.LockAssert;
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
-
 import com.backtoback.problem.asset.service.AssetCleanupBudget;
 import com.backtoback.problem.asset.service.AssetCleanupService;
 import com.backtoback.problem.asset.service.AssetCleanupStore;
@@ -33,12 +30,12 @@ public class UnlinkedAssetCleanupScheduler {
         cron = "0 30 4 * * *",
         zone = "Asia/Seoul"
     )
-    @SchedulerLock(
-        name = "UnlinkedAssetCleanupScheduler",
-        lockAtMostFor = "PT30M"
-    )
     public void clean() {
-        LockAssert.assertLocked();
+        var lease = store.acquireLease();
+        if (lease.isEmpty()) {
+            return;
+        }
+        var owner = lease.get();
         var sample = Timer.start(metrics);
         var budget = new AssetCleanupBudget(clock);
         try {
@@ -46,10 +43,9 @@ public class UnlinkedAssetCleanupScheduler {
                 if (!budget.hasTime(Duration.ofSeconds(10))) {
                     break;
                 }
-                LockAssert.assertLocked();
                 String result;
                 try {
-                    result = cleanup.clean(candidate, budget);
+                    result = cleanup.clean(candidate, budget, owner);
                 } catch (RuntimeException failure) {
                     result = "failed";
                     log.warn("파일 정리 실패: kind={}, id={}", candidate.kind(), candidate.id(), failure);
@@ -67,7 +63,11 @@ public class UnlinkedAssetCleanupScheduler {
                     .record(store.oldestAge(true));
             }
         } finally {
-            sample.stop(metrics.timer("problem.asset.cleanup.duration"));
+            try {
+                store.releaseLease(owner);
+            } finally {
+                sample.stop(metrics.timer("problem.asset.cleanup.duration"));
+            }
         }
     }
 }

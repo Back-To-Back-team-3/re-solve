@@ -14,10 +14,11 @@ import static org.mockito.Mockito.verify;
 import java.sql.DriverManager;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,10 +33,6 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
-
-import net.javacrumbs.shedlock.core.LockConfiguration;
-import net.javacrumbs.shedlock.core.LockProvider;
-import net.javacrumbs.shedlock.core.SimpleLock;
 
 import com.backtoback.common.event.service.OutboxRelay;
 import com.backtoback.problem.asset.domain.AssetKind;
@@ -86,10 +83,22 @@ class AssetCleanupServiceTest {
     private JdbcTemplate jdbc;
     @Autowired
     private Clock clock;
-    @Autowired
-    private LockProvider locks;
     @MockitoBean
     private OutboxRelay relay;
+
+    private String owner;
+
+    /** 각 테스트의 정리 회차에 ShedLock을 획득한다. */
+    @BeforeEach
+    void acquireLease() {
+        owner = store.acquireLease().orElseThrow();
+    }
+
+    /** 테스트에서 획득한 정리 회차의 잠금을 해제한다. */
+    @AfterEach
+    void releaseLease() {
+        store.releaseLease(owner);
+    }
 
     /** 네 파일 종류의 상태와 업로드 유예를 각각 다시 검사한다. */
     @Test
@@ -106,10 +115,10 @@ class AssetCleanupServiceTest {
                     LocalDateTime.now(clock).minusHours(23),
                     recent.id()
                 );
-            assertThat(service.clean(old, new AssetCleanupBudget(clock))).isEqualTo("deleted");
-            assertThat(service.clean(pending, new AssetCleanupBudget(clock))).isEqualTo("unconfirmed");
-            assertThat(service.clean(linked, new AssetCleanupBudget(clock))).isEqualTo("skipped");
-            assertThat(service.clean(recent, new AssetCleanupBudget(clock))).isEqualTo("skipped");
+            assertThat(service.clean(old, new AssetCleanupBudget(clock), owner)).isEqualTo("deleted");
+            assertThat(service.clean(pending, new AssetCleanupBudget(clock), owner)).isEqualTo("unconfirmed");
+            assertThat(service.clean(linked, new AssetCleanupBudget(clock), owner)).isEqualTo("skipped");
+            assertThat(service.clean(recent, new AssetCleanupBudget(clock), owner)).isEqualTo("skipped");
             assertThat(exists(old)).isFalse();
             assertThat(exists(pending)).isTrue();
         }
@@ -131,7 +140,7 @@ class AssetCleanupServiceTest {
         var first = store.candidates();
         assertThat(first).hasSize(500);
         for (var candidate : first) {
-            assertThatThrownBy(() -> service.clean(candidate, new AssetCleanupBudget(clock)))
+            assertThatThrownBy(() -> service.clean(candidate, new AssetCleanupBudget(clock), owner))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("S3 unavailable");
             assertThat(state(candidate)).isEqualTo("DELETING");
@@ -148,53 +157,75 @@ class AssetCleanupServiceTest {
     void restartRecovery() {
         var candidate = asset(AssetKind.CODE, "DISCARDED", true);
         willThrow(new IllegalStateException("S3 timeout")).given(objects).delete(any(), any(), any(), any());
-        assertThatThrownBy(() -> service.clean(candidate, new AssetCleanupBudget(clock)))
+        assertThatThrownBy(() -> service.clean(candidate, new AssetCleanupBudget(clock), owner))
             .isInstanceOf(IllegalStateException.class);
         assertThat(state(candidate)).isEqualTo("DELETING");
         reset(objects);
         var target = AopTestUtils.<AssetCleanupStore>getUltimateTargetObject(storeSpy);
         willAnswer(call -> {
             throw new DataAccessResourceFailureException("DB unavailable");
-        }).given(target).complete(any());
-        assertThatThrownBy(() -> service.clean(candidate, new AssetCleanupBudget(clock)))
+        }).given(target).complete(any(), any());
+        assertThatThrownBy(() -> service.clean(candidate, new AssetCleanupBudget(clock), owner))
             .isInstanceOf(DataAccessResourceFailureException.class);
         assertThat(state(candidate)).isEqualTo("DELETING");
         reset(target);
-        assertThat(service.clean(candidate, new AssetCleanupBudget(clock))).isEqualTo("deleted");
+        assertThat(service.clean(candidate, new AssetCleanupBudget(clock), owner)).isEqualTo("deleted");
         assertThat(exists(candidate)).isFalse();
     }
 
-    /** 실제 DB 잠금이 만료돼 재선점된 경우 이전 실행은 DB 삭제로 진행하지 않는다. */
+    /** S3 응답이 실행 예산을 넘기면 DB 정리를 중단하고 다음 시도에서 재개한다. */
     @Test
-    @DisplayName("S3 응답 전에 다른 실행이 잠금을 얻으면 이전 실행의 DB 정리를 중단하고 재개한다")
-    void stopsAfterLeaseExpires() {
+    @DisplayName("S3 응답 전에 실행 예산이 끝나면 DB 정리를 중단한다")
+    void stopsAfterBudgetExpires() {
         var candidate = asset(AssetKind.CODE, "DISCARDED", true);
         var pausedClock = mock(Clock.class);
-        var start = Instant.now(clock);
+        var start = clock.instant();
         given(pausedClock.instant()).willReturn(start);
         var budget = new AssetCleanupBudget(pausedClock);
-        String name = "cleanup-expiry-" + java.util.UUID.randomUUID();
-        var configuration = new LockConfiguration(start, name, Duration.ofMinutes(30), Duration.ZERO);
-        assertThat(locks.lock(configuration)).isPresent();
-        var nextOwner = new AtomicReference<SimpleLock>();
         willAnswer(call -> {
-            jdbc.update("UPDATE shedlock SET lock_until=NOW(3)-INTERVAL 1 SECOND WHERE name=?", name);
-            nextOwner.set(locks.lock(configuration).orElseThrow());
-            given(pausedClock.instant()).willReturn(start.plus(Duration.ofMinutes(31)));
+            given(pausedClock.instant()).willReturn(start.plus(Duration.ofMinutes(16)));
             return null;
         }).given(objects).delete(any(), any(), any(), any());
+        assertThatThrownBy(() -> service.clean(candidate, budget, owner)).isInstanceOf(IllegalStateException.class);
+        assertThat(state(candidate)).isEqualTo("DELETING");
+        reset(objects);
+        assertThat(service.clean(candidate, new AssetCleanupBudget(clock), owner)).isEqualTo("deleted");
+    }
+
+    /** 예산 검사 직후 새 회차가 잠금을 획득하면 이전 회차의 DB 정리와 잠금 해제를 막는다. */
+    @Test
+    @DisplayName("새 회차가 잠금을 재획득하면 이전 회차는 DB 파일을 삭제하거나 새 잠금을 해제할 수 없다")
+    void rejectsStaleCompletionAfterLeaseReacquired() {
+        var candidate = asset(AssetKind.CODE, "DISCARDED", true);
+        var nextOwner = new AtomicReference<String>();
+        var target = AopTestUtils.<AssetCleanupStore>getUltimateTargetObject(storeSpy);
+        // 예산 검사와 트랜잭션의 첫 잠금 조회 사이에 다른 연결이 잠금을 재획득한다.
+        willAnswer(call -> {
+            try (
+                var connection
+                    = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+                var expire = connection.prepareStatement("""
+                    UPDATE shedlock SET lock_until=UTC_TIMESTAMP(3)-INTERVAL 1 SECOND WHERE locked_by=?
+                    """)
+            ) {
+                expire.setString(1, owner);
+                assertThat(expire.executeUpdate()).isOne();
+            }
+            nextOwner.set(store.acquireLease().orElseThrow());
+            return call.callRealMethod();
+        }).given(target).complete(any(), org.mockito.ArgumentMatchers.eq(owner));
         try {
-            assertThatThrownBy(() -> service.clean(candidate, budget)).isInstanceOf(IllegalStateException.class);
-            assertThat(nextOwner.get()).isNotNull();
+            assertThat(service.clean(candidate, new AssetCleanupBudget(clock), owner)).isEqualTo("skipped");
+            assertThat(nextOwner.get()).isNotNull().isNotEqualTo(owner);
             assertThat(state(candidate)).isEqualTo("DELETING");
-            reset(objects);
-            assertThat(service.clean(candidate, new AssetCleanupBudget(clock))).isEqualTo("deleted");
+            store.releaseLease(owner);
+            assertThat(store.acquireLease()).isEmpty();
+            assertThat(service.clean(candidate, new AssetCleanupBudget(clock), nextOwner.get())).isEqualTo("deleted");
             assertThat(exists(candidate)).isFalse();
         } finally {
             if (nextOwner.get() != null) {
-                nextOwner.get().unlock();
+                store.releaseLease(nextOwner.get());
             }
-            jdbc.update("DELETE FROM shedlock WHERE name=?", name);
         }
     }
 
@@ -259,7 +290,7 @@ class AssetCleanupServiceTest {
                 statement.setLong(1, candidate.id());
                 statement.executeQuery().close();
             }
-            assertThat(service.clean(candidate, new AssetCleanupBudget(clock))).isEqualTo("skipped");
+            assertThat(service.clean(candidate, new AssetCleanupBudget(clock), owner)).isEqualTo("skipped");
             try (var statement = connection.prepareStatement("""
                 INSERT INTO problem_body_images(body_asset_id,image_id,created_at) VALUES(1,?,now(6))
                 """)) {
@@ -272,7 +303,7 @@ class AssetCleanupServiceTest {
             }
             connection.commit();
         }
-        assertThat(service.clean(candidate, new AssetCleanupBudget(clock))).isEqualTo("skipped");
+        assertThat(service.clean(candidate, new AssetCleanupBudget(clock), owner)).isEqualTo("skipped");
         assertThat(exists(candidate)).isTrue();
     }
 
@@ -305,7 +336,7 @@ class AssetCleanupServiceTest {
                 "INSERT INTO problem_body_images(body_asset_id,image_id,created_at) VALUES(1,?,now(6))",
                 candidate.id()
             );
-        assertThatThrownBy(() -> store.complete(file)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> store.complete(file, owner)).isInstanceOf(IllegalStateException.class);
         assertThat(exists(candidate)).isTrue();
     }
 
