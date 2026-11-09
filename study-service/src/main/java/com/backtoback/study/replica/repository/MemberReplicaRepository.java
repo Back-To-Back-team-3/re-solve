@@ -24,11 +24,11 @@ public interface MemberReplicaRepository extends JpaRepository<MemberReplica, Lo
      */
     @Modifying(clearAutomatically = true)
     @Query(
-        value = "INSERT INTO member_replicas "
-            + "(member_id, nickname, profile_image_url, member_status, source_version, synced_at, created_at, updated_at) "
+        value = "INSERT INTO member_replicas " + "(member_id, nickname, profile_image_url, member_status, "
+            + "source_version, synced_at, created_at, updated_at) "
             + "VALUES (:memberId, '', NULL, 'WITHDRAWN', :sourceVersion, :syncedAt, NOW(6), NOW(6)) "
-            + "ON DUPLICATE KEY UPDATE "
-            + "member_status = 'WITHDRAWN', source_version = :sourceVersion, synced_at = :syncedAt, updated_at = NOW(6)",
+            + "ON DUPLICATE KEY UPDATE " + "member_status = 'WITHDRAWN', source_version = :sourceVersion, "
+            + "synced_at = :syncedAt, updated_at = NOW(6)",
         nativeQuery = true
     )
     void upsertWithdrawn(
