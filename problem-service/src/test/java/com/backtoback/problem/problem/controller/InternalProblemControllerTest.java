@@ -332,7 +332,7 @@ class InternalProblemControllerTest {
             .withBean(InternalProblemService.class, () -> org.mockito.Mockito.mock(InternalProblemService.class))
             .withUserConfiguration(InternalProblemStubConfiguration.class, InternalProblemController.class)
             .run(context -> {
-                assertThat(context).hasSingleBean(InternalProblemController.class);
+                assertThat(context).doesNotHaveBean(InternalProblemController.class);
                 assertThat(context).hasSingleBean(InternalProblemService.class);
             });
 
