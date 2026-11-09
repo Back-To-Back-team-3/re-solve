@@ -139,7 +139,7 @@ class SubmissionWorkerTest {
             return new JudgeExecutionCreateResponse("token", runtime);
         });
         given(store.saveToken(eq(lease), anyInt(), eq("token"))).willReturn(true);
-        given(store.saveResult(eq(lease), anyInt(), any())).willReturn(true);
+        given(store.saveResult(eq(lease), anyInt(), any(), any())).willReturn(true);
         given(evaluator.evaluate(any(), any(), eq("1"), eq(1024), eq(64)))
             .willReturn(
                 new JudgeTestResult(State.COMPLETED, JudgeVerdict.WA, 1, null, "0", null, null),
@@ -149,7 +149,26 @@ class SubmissionWorkerTest {
         verify(assets).read(data.cases().get(0).asset());
         verify(assets).read(data.cases().get(1).asset());
         verify(client, times(2)).create(any());
-        verify(store).complete(lease, data, null);
+        verify(store).complete(lease, data);
+    }
+
+    /** 임대 회수 후 기존 Judge0 실행을 조회하며 생성 요청을 반복하지 않는지 확인한다. */
+    @Test
+    @DisplayName("회수한 테스트는 저장한 Judge0 토큰으로만 결과를 조회한다")
+    void pollsResumedTokensWithoutCreating() {
+        given(store.completedOrders(lease)).willReturn(java.util.Set.of(1));
+        given(store.resumableTokens(lease)).willReturn(Map.of(2, "second"));
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        given(store.saveResult(eq(lease), anyInt(), any(), any())).willReturn(true);
+        given(evaluator.evaluate(any(), any(), eq("1"), eq(1024), eq(64)))
+            .willReturn(new JudgeTestResult(State.COMPLETED, JudgeVerdict.AC, 1, null, "1", null, null));
+
+        assertThat(worker.runOnce()).isTrue();
+        verify(client, never()).find("first");
+        verify(client).find("second");
+        verify(client, never()).create(any());
+        verify(store).complete(lease, data);
     }
 
     /** 생성기 오류가 Judge0 장애로 기록되거나 외부 실행을 생성하지 않는지 확인한다. */
@@ -173,7 +192,7 @@ class SubmissionWorkerTest {
         given(client.create(any())).willThrow(new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED));
         assertThat(worker.runOnce()).isTrue();
         verify(client, times(1)).create(any());
-        verify(store, never()).complete(any(), any(), any());
+        verify(store, never()).complete(any(), any());
         verify(store, never()).fail(any(), any());
     }
 

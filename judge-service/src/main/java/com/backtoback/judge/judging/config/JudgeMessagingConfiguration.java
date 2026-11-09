@@ -17,7 +17,8 @@ import com.backtoback.common.event.client.EventDestinationResolver;
 import com.backtoback.common.event.config.OutboxRelayConfiguration;
 import com.backtoback.common.event.dto.EventDestination;
 import com.backtoback.common.event.service.EventConsumer;
-import com.backtoback.judge.judging.service.JudgeWorkScheduler;
+import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
+import com.backtoback.judge.judging.service.SubmissionScheduler;
 import com.backtoback.judge.judging.service.SubmissionWorker;
 import com.backtoback.judge.judging.service.ValidationMessageListener;
 import com.backtoback.judge.judging.service.ValidationScheduler;
@@ -36,7 +37,12 @@ import software.amazon.awssdk.services.sqs.SqsAsyncClient;
     havingValue = "true"
 )
 @EnableConfigurationProperties(JudgeMessagingProperties.class)
-@Import(OutboxRelayConfiguration.class)
+@Import(
+    {
+        OutboxRelayConfiguration.class,
+        SchedulerLockConfiguration.class
+    }
+)
 public class JudgeMessagingConfiguration {
     private static final Set<String> RESULT_EVENTS
         = Set
@@ -160,22 +166,22 @@ public class JudgeMessagingConfiguration {
     }
 
     /**
-     * 메시징이 활성화된 환경에서 일반 제출 선점과 기한 초과 정리를 예약한다.
+     * 메시징이 활성화된 환경에서 제출 선점과 기한·임대 만료 처리를 예약한다.
      *
      * @param worker 일반 제출 실행기
-     * @param store 일반 제출 실행 저장소
-     * @param executor 일반 제출 전용 실행 스레드 풀
+     * @param store 제출 실행 저장소
+     * @param executor 제출 전용 실행 스레드 풀
      * @param clock 공통 시각
-     * @return 일반 제출 예약 작업
+     * @return 제출 실행 및 회수 예약 작업
      */
     @Bean
-    public JudgeWorkScheduler submissionScheduler(
+    public SubmissionScheduler submissionScheduler(
         SubmissionWorker worker,
         SubmissionExecutionStore store,
         @Qualifier("judgeSubmissionExecutor") ThreadPoolTaskExecutor executor,
         Clock clock
     ) {
-        return new JudgeWorkScheduler(worker::runOnce, store::expireOne, executor, clock);
+        return new SubmissionScheduler(worker, store, executor, clock);
     }
 
 }

@@ -67,9 +67,10 @@ class SubmissionHistoryReaderTest {
             jdbc
                 .update(
                     """
-                        INSERT INTO judge_jobs(id,submission_id,judge_attempt,status,try_count,next_run_at,deadline_at,
-                        finished_at,created_at,updated_at) VALUES (?,1,?,?,1,'2026-10-31 09:00:00',
-                        '2026-10-31 09:10:00',?,'2026-10-31 09:00:00','2026-10-31 09:00:00')
+                        INSERT INTO judge_jobs(id,submission_id,judge_attempt,status,try_count,unknown_retry_count,
+                            next_run_at,deadline_at,finished_at,created_at,updated_at)
+                        VALUES (?,1,?,?,1,0,'2026-10-31 09:00:00',
+                            '2026-10-31 09:10:00',?,'2026-10-31 09:00:00','2026-10-31 09:00:00')
                         """,
                     attempt,
                     attempt,

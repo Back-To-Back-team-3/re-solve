@@ -11,11 +11,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 
 import lombok.extern.slf4j.Slf4j;
 
-/** 활성화 설정으로 등록할 때만 채점 실행과 기한 초과 정리를 예약한다. DB 잠금으로 인스턴스 간 선점을 분리한다. */
+/** 활성화 설정으로 등록할 때만 채점 실행과 기한 초과 종결과 임대 회수를 예약한다. DB 잠금으로 인스턴스 간 선점을 분리한다. */
 @Slf4j
 public class JudgeWorkScheduler {
     private final BooleanSupplier worker;
-    private final BooleanSupplier expiry;
+    private final BooleanSupplier recovery;
     private final Executor executor;
     private final Clock clock;
     private final List<Lane> lanes = List.of(new Lane(), new Lane());
@@ -24,13 +24,13 @@ public class JudgeWorkScheduler {
      * 주기 제어 스레드와 실제 실행 스레드를 분리한다.
      *
      * @param worker 작업 한 건의 상위 실행기
-     * @param expiry 기한 초과 종결 저장소
+     * @param recovery 기한 초과 종결·임대 회수 저장소
      * @param executor 실행 전용 스레드 풀
      * @param clock 공통 시각
      */
-    public JudgeWorkScheduler(BooleanSupplier worker, BooleanSupplier expiry, Executor executor, Clock clock) {
+    public JudgeWorkScheduler(BooleanSupplier worker, BooleanSupplier recovery, Executor executor, Clock clock) {
         this.worker = worker;
-        this.expiry = expiry;
+        this.recovery = recovery;
         this.executor = executor;
         this.clock = clock;
     }
@@ -54,19 +54,28 @@ public class JudgeWorkScheduler {
         }
     }
 
-    /** 실행 스레드 점유나 Judge0 장애와 독립적으로 기한이 지난 작업을 건별 트랜잭션으로 종결한다. */
+    /** 실행 스레드 점유나 Judge0 장애와 독립적으로 기한 초과·임대 만료 작업을 건별 트랜잭션으로 회수한다. */
     @Scheduled(
         fixedDelay = 30000,
         scheduler = "judgeValidationScheduler"
     )
     public void expire() {
+        recoverBatch(recovery);
+    }
+
+    /**
+     * 회차당 최대 100건을 독립 트랜잭션으로 처리한다.
+     *
+     * @param recoverOne 회수 대상 한 건을 처리하는 저장소 호출
+     */
+    protected void recoverBatch(BooleanSupplier recoverOne) {
         try {
             // 한 회차가 다른 예약 작업을 무한히 지연시키지 않도록 처리량을 제한한다.
-            for (int count = 0; count < 100 && expiry.getAsBoolean(); count++) {
+            for (int count = 0; count < 100 && recoverOne.getAsBoolean(); count++) {
                 // 각 저장소 호출이 독립적으로 커밋된다.
             }
         } catch (RuntimeException failure) {
-            log.warn("채점 기한 초과 종결 실패: type={}", failure.getClass().getSimpleName());
+            log.warn("채점 작업 회수 실패: type={}", failure.getClass().getSimpleName());
         }
     }
 
