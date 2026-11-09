@@ -123,7 +123,7 @@ flowchart LR
     S --> TS
     I --> TI
     C -->|"Exam/ContestSubmissionRequested"| QX
-    M -.->|"DiagnosisSubmissionRequested (확정 필요)"| QX
+    M -->|"DiagnosisSubmissionRequested"| QX
     QX --> JS[judge consumer]
     P -->|"ProblemValidationRequested"| QV
     QV --> JS
@@ -152,8 +152,8 @@ flowchart LR
 
 | 큐 | 소비 서비스 | 구독 이벤트 수 | Visibility | 최대 수신 → DLQ |
 | --- | --- | --- | --- | --- |
-| `exam-submission-queue` | judge | 2 (+진단 1, 확정 필요) | 120초 | 3회 (정책 §3.4) |
-| `member-queue` | member | 4 (확정 필요 2 포함) | 120초 | 5회 (제안) |
+| `exam-submission-queue` | judge | 3 (시험·대회·진단) | 120초 | 3회 (정책 §3.4) |
+| `member-queue` | member | 4 (`HintReady` 확정 필요 포함) | 120초 | 5회 (제안) |
 | `problem-queue` | problem | 8 | 120초 | 5회 |
 | `problem-validation-queue` | judge | 1 | 공통 수신 규칙 | 담당 A의 검증 큐·DLQ 설정 확인 |
 | `contest-queue` | contest | 10 | 120초 | 5회 |
@@ -182,7 +182,7 @@ flowchart LR
 | M3 | `MemberWithdrawn` v1 | member | problem, contest, study, notification, integration | SNS | 탈퇴 | `sourceVersion` | 확정 |
 | M4 | `LearningProfileUpdated` v1 | member | study | SNS | 프로필 입력·변경, 레벨 확정·변경 | `profileVersion` | 확정 |
 | M5 | `TagLevelChanged` v1 | member | notification | SNS | 진단 결과·승급·하향·쿨타임 해제 | — | 확정 |
-| M6 | `DiagnosisSubmissionRequested` v1 | member | judge | SQS `exam-submission-queue` | 진단 문항 제출·자동 제출 | — | 확정 필요 (B·E) |
+| M6 | `DiagnosisSubmissionRequested` v1 | member | judge | SQS `exam-submission-queue` | 진단 문항 제출·자동 제출 | — | 확정 |
 | P1 | `ProblemStateChanged` v1 / v2 | problem | study, contest | SNS | v1 기존 공개 계약 / v2 공개 상태·사용 회차·통과 언어 변경 | `sourceVersion` | v1 기존 계약 / v2 소비자 전환 확인 필요 |
 | P2 | `ProblemValidationRequested` v1 | problem | judge | 검증 SQS 직접 | 검증 접수·자동 재검증 요청 저장 | `validationId` 멱등 | 제공·소비 담당 확인 필요 |
 | P3 | `ProblemValidationCompleted` v1 | judge | problem | SNS | 검증 최종 판정 저장 | `validationId` 종결 1회 | 제공·소비 담당 확인 필요 |
@@ -190,7 +190,7 @@ flowchart LR
 | J2 | `ExamSubmissionJudged` v1 | judge | contest | SNS | `EXAM` 회차 정상 종결 | `judgeAttempt` | 확정 |
 | J3 | `ContestSubmissionJudged` v1 | judge | contest | SNS | `CONTEST` 회차 정상 종결 | `judgeAttempt` | 확정 |
 | J4 | `SubmissionFailed` v1 | judge | notification, contest, member(진단) | SNS | 시도 상한 또는 전체 처리 기한 초과 `FAILED` | `judgeAttempt` | 확정 |
-| J5 | `DiagnosisSubmissionJudged` v1 | judge | member | SNS | `DIAGNOSIS` 회차 정상 종결 | `judgeAttempt` | 확정 필요 (B·E) |
+| J5 | `DiagnosisSubmissionJudged` v1 | judge | member | SNS | `DIAGNOSIS` 회차 정상 종결 | `judgeAttempt` | 확정 |
 | C1 | `ExamSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 시험 직접·자동 제출 접수 | — (`examSubmissionId` 멱등) | 확정 |
 | C2 | `ContestSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 대회 제출 접수 | — (`contestSubmissionId` 멱등) | 확정 |
 | C3 | `ExamParticipantRegistered` v1 | contest | study, notification | SNS | 새 활성 참가 생성 | `participantRevision`, `contextRevision` | 확정 |
@@ -345,10 +345,10 @@ flowchart LR
 | --- | --- |
 | notification | `LEVEL_CHANGED` 생성. 문구는 `reasonType`별(정책 §8.3 레벨 알림) |
 
-#### M6 `DiagnosisSubmissionRequested` v1 — 확정 필요 (B·E)
+#### M6 `DiagnosisSubmissionRequested` v1
 
 - **발행:** 진단 문항 제출(1.5.5)·최종 제출/만료 자동 제출(1.5.6) 트랜잭션. `diagnosis_submissions`(`ACCEPTED`)와 함께 Outbox 기록 → Relay가 SQS로 전송 후 `REQUESTED`. aggregate = `diagnosisSubmissionId`.
-- **경로 제안:** 시험·대회와 같은 `exam-submission-queue`를 공용으로 쓴다. judge 소비 로직(processed_events + submissions + judge_jobs 원자 저장)이 같고 큐를 늘리지 않는다. 큐 이름은 `judge-request-queue`로 바꾸는 안을 함께 검토한다.
+- **경로:** 시험·대회와 같은 `exam-submission-queue`를 공용으로 쓴다. judge 소비 로직(processed_events + submissions + judge_jobs 원자 저장)이 같고 큐를 늘리지 않는다.
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
@@ -594,7 +594,7 @@ flowchart LR
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
 | `context` | string | Y | `PRACTICE` / `EXAM` / `CONTEST` / `DIAGNOSIS` |
-| `contextId` · `receiptId` | string | N | 시험·대회·진단만 (`receiptId` = `source_submission_id`) |
+| `contextId` · `receiptId` | string | N | 시험·대회·진단만 (`receiptId` = `source_submission_id`). 진단은 `contextId` = `diagnosisId`, `receiptId` = `diagnosisSubmissionId` |
 | `submissionId` · `userId` · `problemId` · `problemRevisionId` | string | Y |  |
 | `judgeAttempt` | integer | Y | 실패 종결 회차 |
 | `status` | string | Y | `FAILED` |
@@ -607,10 +607,25 @@ flowchart LR
 | contest | `EXAM`·`CONTEST` 접수 `FAILED` 전이 → 확정 보류, 관리자 운영 알림 |
 | member | `DIAGNOSIS`만: 진단 제출 `FAILED`, 응시 `is_cooldown_exempt = true` (정책 §8.3 쿨타임 예외) |
 
-#### J5 `DiagnosisSubmissionJudged` v1 — 확정 필요 (B·E)
+#### J5 `DiagnosisSubmissionJudged` v1
 
-- **제안:** `SubmissionJudged`는 `PRACTICE` 전용 계약이고 소비자 5곳이 진단을 걸러야 하므로, 진단 결과는 J2와 같은 형식의 별도 이벤트로 분리한다(정책 미결정 "DIAGNOSIS 결과 이벤트 분리", 2주차).
-- 필드: J2에서 `context = DIAGNOSIS`, `diagnosisId`·`diagnosisSubmissionId`로 문맥 ID를 바꾼 형식. 소비자 member는 `diagnosis_submissions` 반영 → 응시 내 모든 제출 종결 시 `CLOSED → SCORED` 전이 + M4·M5 발행.
+- **분리:** `SubmissionJudged`는 `PRACTICE` 전용 계약이고 소비자 5곳이 진단을 걸러야 하므로, 진단 결과는 J2와 같은 형식의 별도 이벤트로 둔다. `judge-events` 토픽으로 발행하고 member는 `member-queue`로 받는다.
+- **발행:** `DIAGNOSIS` 제출의 회차 정상 종결 트랜잭션(재채점·재처리 새 회차 포함). aggregate = `submissionId`. 시도 상한·기한 초과는 J4로 발행한다.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `context` | string | Y | `DIAGNOSIS` |
+| `diagnosisId` · `diagnosisSubmissionId` | string | Y | M6의 값 그대로 (`diagnosisSubmissionId` = judge `source_submission_id`) |
+| `submissionId` · `userId` · `problemId` · `problemRevisionId` | string | Y | 원래 접수와 대조 |
+| `judgeAttempt` | integer | Y | 종결 회차 |
+| `status` | string | Y | `COMPLETED` |
+| `verdict` | string | Y | `AC` / `WA` / `TLE` / `MLE` / `RE` / `CE` |
+| `passedCount` · `totalCount` · `maxTimeMs` · `maxMemoryKb` | integer | Y·Y·N·N | `CE`면 시간·메모리 null |
+| `submittedAt` | string (date-time) | Y | M6 `receivedAt`과 동일 |
+
+| 소비자 | 처리 (`judgeAttempt > 저장값`일 때만) |
+| --- | --- |
+| member | 접수 연결 검증(사용자·문제·고정 회차) → `diagnosis_submissions` 반영 → 응시 내 모든 제출 종결 시 `CLOSED → SCORED` 전이 + M4·M5 발행 |
 
 ### 4.4 contest (담당 C)
 
@@ -888,7 +903,7 @@ flowchart LR
 | `MemberWithdrawn` |  |  | ● | ● | ● | ● | ● |
 | `LearningProfileUpdated` |  |  |  |  | ● |  |  |
 | `TagLevelChanged` |  |  |  |  |  | ● |  |
-| `DiagnosisSubmissionRequested` | ○ |  |  |  |  |  |  |
+| `DiagnosisSubmissionRequested` | ● |  |  |  |  |  |  |
 | `ProblemStateChanged` v1 / v2 |  |  |  | ● | ● |  |  |
 | `ProblemValidationRequested` v1 | ● |  |  |  |  |  |  |
 | `ProblemValidationCompleted` v1 |  |  | ● |  |  |  |  |
@@ -896,7 +911,7 @@ flowchart LR
 | `ExamSubmissionJudged` |  |  |  | ● |  |  |  |
 | `ContestSubmissionJudged` |  |  |  | ● |  |  |  |
 | `SubmissionFailed` |  | ● (진단) |  | ● |  | ● |  |
-| `DiagnosisSubmissionJudged` |  | ○ |  |  |  |  |  |
+| `DiagnosisSubmissionJudged` |  | ● |  |  |  |  |  |
 | `ExamSubmissionRequested` | ● |  |  |  |  |  |  |
 | `ContestSubmissionRequested` | ● |  |  |  |  |  |  |
 | `ExamParticipantRegistered` |  |  |  |  | ● | ● |  |
@@ -1001,8 +1016,6 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 
 | # | 항목 | 현재 초안 |
 | --- | --- | --- |
-| 2 | 진단 채점 요청 경로·이벤트명 | M6: `exam-submission-queue` 공용 |
-| 3 | 진단 결과 이벤트 분리 | J5 `DiagnosisSubmissionJudged` |
 | 4 | `SubmissionJudged`에 `problemTagIds`·`language`·`problemTitle`·`judgedAt` 추가 | J1 표 (하위 호환 추가) |
 | 6 | `HintReady` member 구독, `completedAt` 추가, 힌트 사용 1/2점 판정 기준(AC보다 먼저 쓴 힌트만?) | S8 |
 | 7 | `hint_block_replicas.participant_id` 컬럼 추가 (참가 취소 우선 규칙 구현) | C5 처리 |
