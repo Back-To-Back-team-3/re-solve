@@ -2,6 +2,7 @@ package com.backtoback.judge.judging.store;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,10 +20,14 @@ import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
 import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse;
+import com.backtoback.judge.judging.repository.ExecutionRuntimeRepository;
 import com.backtoback.judge.judging.service.SubmissionVerdict;
 import com.backtoback.judge.judging.service.dto.SubmissionExecutionInput;
 import com.backtoback.judge.judging.service.dto.SubmissionLease;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.backtoback.judge.judging.service.execution.dto.JudgeTestResult;
+import com.backtoback.judge.submission.domain.Submission;
+import com.backtoback.judge.submission.domain.Submission.Context;
 import com.backtoback.judge.submission.repository.SubmissionRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -32,30 +37,81 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class SubmissionExecutionStore {
     private static final String TOKEN_RECOVERY = "TOKEN_RECOVERY";
+    private static final DateTimeFormatter EVENT_TIME = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx");
     private final JdbcTemplate jdbc;
     private final Clock clock;
     private final SubmissionRepository submissions;
     private final OutboxEventWriter events;
+    private final ExecutionRuntimeRepository runtimes;
 
     /**
-     * 접수 시 고정한 제출 코드와 실행 환경을 조회한다.
+     * 제출 코드와 이미 확정한 실행 환경을 조회한다.
      *
      * @param lease 현재 작업의 회차·실행 시도·임대 소유권
      * @return 고정된 실행 입력
      * @throws java.util.NoSuchElementException 제출이 존재하지 않는 경우
-     * @throws IllegalArgumentException 고정 실행 환경이 없는 경우
+     * @throws IllegalArgumentException 일반 풀이에 고정 실행 환경이 없는 경우
      */
     @Transactional(readOnly = true)
     public SubmissionExecutionInput input(SubmissionLease lease) {
         var submission = submissions.findById(lease.submissionId()).orElseThrow();
-        Assert.notNull(submission.getRuntime(), "접수 시 확정한 실행 환경이 필요합니다.");
+        var runtime = submission.getRuntime();
+        Assert.isTrue(runtime != null || submission.getContext() != Context.PRACTICE, "일반 풀이에는 접수 시 확정한 실행 환경이 필요합니다.");
         return new SubmissionExecutionInput(
             submission.getProblemId(),
             submission.getProblemRevisionId(),
             submission.getLanguage(),
             submission.getSourceCode(),
-            submission.getRuntime().toRuntime()
+            runtime == null ? null : runtime.toRuntime()
         );
+    }
+
+    /**
+     * 현재 작업의 고정 회차 통과 프로필과 테스트 구성을 첫 실행 전에 저장한다.
+     *
+     * @param lease 현재 작업의 소유권
+     * @param data 고정 회차에서 확인한 실행 자료
+     * @param language 제출 언어
+     * @return 확정한 런타임, 소유권을 잃었으면 빈 값
+     * @throws IllegalArgumentException 통과 프로필·스냅샷·언어가 일치하지 않는 경우
+     */
+    @Transactional
+    public Optional<JudgeRuntime> initializeExternal(
+        SubmissionLease lease,
+        SubmissionJudgingDataResponse data,
+        String language
+    ) {
+        if (!owns(lease)) {
+            return Optional.empty();
+        }
+        var runtime
+            = runtimes
+                .findSnapshot(data.runtimeKey(language))
+                .orElseThrow(() -> new IllegalArgumentException("고정 실행 환경을 찾을 수 없습니다."));
+        var selected = runtime.toRuntime();
+        Assert.isTrue(language.equals(selected.language()), "고정 실행 환경의 언어가 일치하지 않습니다.");
+        var instant = now();
+        Assert.state(jdbc.update("""
+            UPDATE submissions SET runtime_id=?,updated_at=?
+            WHERE id=? AND context<>'PRACTICE' AND runtime_id IS NULL
+            """, runtime.getId(), instant, lease.submissionId()) == 1, "미확정 외부 제출만 초기화할 수 있습니다.");
+        // 런타임과 테스트를 함께 저장해 초기화 일부만 남은 상태로 재실행되지 않게 한다.
+        for (var test : data.cases()) {
+            jdbc
+                .update(
+                    """
+                        INSERT INTO judge_test_results(judge_job_id,test_asset_id,test_order,is_sample,token_status,
+                            created_at,updated_at) VALUES (?,?,?,?,'NOT_CREATED',?,?)
+                        """,
+                    lease.jobId(),
+                    Long.parseLong(test.testAssetId()),
+                    test.testOrder(),
+                    test.isSample(),
+                    instant,
+                    instant
+                );
+        }
+        return Optional.of(selected);
     }
 
     /**
@@ -95,7 +151,7 @@ public class SubmissionExecutionStore {
                         SELECT j.id,j.submission_id,j.judge_attempt,j.try_count,j.deadline_at
                         FROM judge_jobs j STRAIGHT_JOIN submissions s ON s.id=j.submission_id
                         WHERE j.status IN ('PENDING','RETRY_WAITING') AND j.next_run_at<=? AND j.deadline_at>?
-                        AND j.try_count<=3 AND j.judge_attempt=s.judge_attempt AND s.context='PRACTICE'
+                        AND j.try_count<=3 AND j.judge_attempt=s.judge_attempt AND s.context IN ('PRACTICE','EXAM')
                         ORDER BY j.next_run_at,j.id LIMIT 1 FOR UPDATE SKIP LOCKED
                         """,
                     (row, index) -> new SubmissionLease(
@@ -373,26 +429,34 @@ public class SubmissionExecutionStore {
             UPDATE judge_jobs SET status='SUCCEEDED',finished_at=?,lease_token=NULL,lease_until=NULL,
             last_error=NULL,pending_compile_message=NULL,updated_at=? WHERE id=?
             """, instant, instant, lease.jobId());
-        var payload = payload(lease);
+        var submission = submissions.findById(lease.submissionId()).orElseThrow();
+        var payload = payload(lease, submission);
         payload.put("verdict", verdict.name());
         payload.put("passedCount", metrics.get("passed"));
         payload.put("totalCount", verdicts.size());
         payload.put("maxTimeMs", time);
         payload.put("maxMemoryKb", memory);
-        payload.put("judgedAt", instant.atZone(ClockConfiguration.SERVICE_ZONE).toOffsetDateTime().toString());
-        payload.put("problemTitle", data.problemTitle());
-        payload.put("problemDifficulty", data.problemDifficulty());
-        payload.put("problemTags", data.problemTags());
-        payload.put("problemTagIds", data.problemTagIds());
+        String eventType = switch (submission.getContext()) {
+            case PRACTICE -> {
+                payload.put("language", submission.getLanguage());
+                payload.put("judgedAt", instant.atZone(ClockConfiguration.SERVICE_ZONE).toOffsetDateTime().toString());
+                payload.put("problemTitle", data.problemTitle());
+                payload.put("problemDifficulty", data.problemDifficulty());
+                payload.put("problemTags", data.problemTags());
+                payload.put("problemTagIds", data.problemTagIds());
+                yield "SubmissionJudged";
+            }
+            case EXAM -> {
+                payload.put("context", "EXAM");
+                payload.put("examId", submission.getContextId().toString());
+                payload.put("examSubmissionId", submission.getSourceSubmissionId().toString());
+                payload.put("status", "COMPLETED");
+                yield "ExamSubmissionJudged";
+            }
+            default -> throw new IllegalStateException("결과 발행을 지원하지 않는 채점 문맥입니다.");
+        };
         events
-            .append(
-                "Submission",
-                "SubmissionJudged",
-                "v1",
-                Long.toString(lease.submissionId()),
-                lease.correlationId(),
-                payload
-            );
+            .append("Submission", eventType, "v1", Long.toString(lease.submissionId()), lease.correlationId(), payload);
         return true;
     }
 
@@ -447,7 +511,7 @@ public class SubmissionExecutionStore {
                     """
                         SELECT j.id,j.submission_id,j.judge_attempt,j.try_count,j.lease_token,j.deadline_at
                         FROM judge_jobs j STRAIGHT_JOIN submissions s ON s.id=j.submission_id
-                        WHERE s.context='PRACTICE'
+                        WHERE s.context IN ('PRACTICE','EXAM')
                         AND ((s.judge_attempt=j.judge_attempt AND j.status='RUNNING'
                             AND j.lease_until>? AND j.deadline_at>?)
                             OR j.status IN ('RETRY_WAITING','FAILED','SUCCEEDED'))
@@ -517,7 +581,7 @@ public class SubmissionExecutionStore {
                 .query(
                     """
                         SELECT j.* FROM judge_jobs j STRAIGHT_JOIN submissions s ON s.id=j.submission_id
-                        WHERE s.context='PRACTICE' AND s.judge_attempt=j.judge_attempt
+                        WHERE s.context IN ('PRACTICE','EXAM') AND s.judge_attempt=j.judge_attempt
                         AND j.status IN ('PENDING','RUNNING','RETRY_WAITING')
                         AND (j.deadline_at<=? OR (j.status='RUNNING' AND (j.lease_until<=? OR j.started_at<=?)))
                         ORDER BY j.deadline_at,j.id LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -608,11 +672,15 @@ public class SubmissionExecutionStore {
                 instant,
                 lease.submissionId()
             );
-        var payload = payload(lease);
-        payload.remove("language");
-        payload.put("context", "PRACTICE");
-        payload.put("contextId", null);
-        payload.put("receiptId", null);
+        var submission = submissions.findById(lease.submissionId()).orElseThrow();
+        var payload = payload(lease, submission);
+        payload.put("context", submission.getContext().name());
+        payload.put("contextId", submission.getContextId() == null ? null : submission.getContextId().toString());
+        payload
+            .put(
+                "receiptId",
+                submission.getSourceSubmissionId() == null ? null : submission.getSourceSubmissionId().toString()
+            );
         payload.put("status", "FAILED");
         payload.put("errorCode", error);
         events
@@ -629,30 +697,24 @@ public class SubmissionExecutionStore {
     /**
      * 고정 제출 정보로 결과 이벤트의 공통 필드를 구성한다.
      *
-     * @param lease 현재 작업의 회차·실행 시도·임대 소유권
+     * @param lease 현재 작업의 채점 회차
+     * @param submission 제출의 불변 식별 정보와 원본 접수 시각
      * @return 제출 식별자와 고정 회차를 담은 이벤트 필드
      */
-    private LinkedHashMap<String, Object> payload(SubmissionLease lease) {
-        return jdbc.queryForObject("SELECT * FROM submissions WHERE id=?", (row, index) -> {
-            var value = new LinkedHashMap<String, Object>();
-            value.put("submissionId", Long.toString(lease.submissionId()));
-            value.put("userId", row.getString("member_id"));
-            value.put("problemId", row.getString("problem_id"));
-            value.put("problemRevisionId", row.getString("problem_revision_id"));
-            value.put("judgeAttempt", lease.judgeAttempt());
-            value.put("language", row.getString("language"));
-            value
-                .put(
-                    "submittedAt",
-                    row
-                        .getTimestamp("submitted_at")
-                        .toLocalDateTime()
-                        .atZone(ClockConfiguration.SERVICE_ZONE)
-                        .toOffsetDateTime()
-                        .toString()
-                );
-            return value;
-        }, lease.submissionId());
+    private LinkedHashMap<String, Object> payload(SubmissionLease lease, Submission submission) {
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("submissionId", submission.getId().toString());
+        payload.put("userId", Long.toString(submission.getMemberId()));
+        payload.put("problemId", Long.toString(submission.getProblemId()));
+        payload.put("problemRevisionId", Long.toString(submission.getProblemRevisionId()));
+        payload.put("judgeAttempt", lease.judgeAttempt());
+        var submittedAt = submission.getSubmittedAt().atZone(ClockConfiguration.SERVICE_ZONE).toOffsetDateTime();
+        payload
+            .put(
+                "submittedAt",
+                submission.getContext() == Context.PRACTICE ? submittedAt.toString() : EVENT_TIME.format(submittedAt)
+            );
+        return payload;
     }
 
     /**

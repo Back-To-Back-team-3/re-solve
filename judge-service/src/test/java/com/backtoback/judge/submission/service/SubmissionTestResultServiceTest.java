@@ -145,7 +145,8 @@ class SubmissionTestResultServiceTest {
                     List.of("1"),
                     null,
                     null,
-                    List.of(new SubmissionJudgingDataResponse.TestCase("30", 1, true, asset))
+                    List.of(new SubmissionJudgingDataResponse.TestCase("30", 1, true, asset)),
+                    List.of()
                 )
             );
         var service = new SubmissionTestResultService(history, dataClient, assets);

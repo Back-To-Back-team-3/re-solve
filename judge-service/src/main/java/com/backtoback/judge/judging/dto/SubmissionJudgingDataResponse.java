@@ -6,6 +6,8 @@ import java.util.Map;
 
 import org.springframework.util.Assert;
 
+import com.backtoback.judge.submission.dto.ProblemExecutionProfileResponse;
+
 /** 고정 회차의 실행 자료와 결과 이벤트 메타데이터. (API 명세서 §2.6.2) */
 public record SubmissionJudgingDataResponse(
     String problemId,
@@ -16,7 +18,8 @@ public record SubmissionJudgingDataResponse(
     List<String> problemTagIds,
     FunctionSpec functionSpec,
     ProblemValidationDataResponse.Limits executionLimits,
-    List<TestCase> cases
+    List<TestCase> cases,
+    List<ProblemExecutionProfileResponse> executionProfiles
 ) {
 
     /**
@@ -61,6 +64,31 @@ public record SubmissionJudgingDataResponse(
             Assert.notNull(test.asset(), "파일 참조가 필요합니다.");
             test.asset().validate();
         }
+    }
+
+    /**
+     * 외부 제출 언어의 유일한 통과 프로필에서 런타임 키를 가져온다.
+     *
+     * @param language 고정 회차에서 실행할 언어
+     * @return 실행 환경 스냅샷의 해시
+     * @throws IllegalArgumentException 일치하는 통과 프로필이 없거나 중복되거나 키가 유효하지 않은 경우
+     */
+    public String runtimeKey(String language) {
+        Assert.notEmpty(executionProfiles, "고정 회차의 통과 프로필이 필요합니다.");
+        var matches
+            = executionProfiles
+                .stream()
+                .filter(profile -> profile != null && language.equals(profile.language()))
+                .toList();
+        Assert.isTrue(matches.size() == 1, "제출 언어의 통과 프로필이 하나여야 합니다.");
+        var profile = matches.getFirst();
+        Assert
+            .isTrue(
+                profile.runtimeKey() != null && profile.runtimeKey().matches("[0-9a-f]{64}"),
+                "고정 실행 환경 키가 올바르지 않습니다."
+            );
+        Assert.hasText(profile.runnerVersion(), "통과 프로필의 생성기 정보가 필요합니다.");
+        return profile.runtimeKey();
     }
 
     /** 접수 시 고정한 테스트 식별자·순서·공개 여부와 원문 참조. */

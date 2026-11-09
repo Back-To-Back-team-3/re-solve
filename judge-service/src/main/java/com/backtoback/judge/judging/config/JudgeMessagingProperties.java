@@ -11,11 +11,13 @@ import jakarta.validation.constraints.Pattern;
  *
  * @param topicArn Judge 결과용 Standard SNS 토픽 ARN
  * @param validationQueueUrl 관리자 검증용 Standard SQS 큐 URL
+ * @param submissionQueueUrl 외부 제출용 Standard SQS 큐 URL, 비어 있으면 수신 비활성
  */
 @Validated
 @ConfigurationProperties("judge.messaging")
 public record JudgeMessagingProperties(
     @NotBlank @Pattern(regexp = "arn:[^:]+:sns:[^:]+:[0-9]{12}:[A-Za-z0-9_-]+") String topicArn,
-    @NotBlank @Pattern(regexp = "https?://[^\\s]+(?<!\\.fifo)") String validationQueueUrl
+    @NotBlank @Pattern(regexp = "https?://[^\\s]+(?<!\\.fifo)") String validationQueueUrl,
+    @Pattern(regexp = "|https?://[^\\s]+(?<!\\.fifo)") String submissionQueueUrl
 ) {
 }

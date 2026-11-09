@@ -2,9 +2,12 @@ package com.backtoback.judge.judging.config;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -19,7 +22,10 @@ import com.backtoback.common.event.client.EventDestinationResolver;
 import com.backtoback.common.event.config.OutboxRelayConfiguration;
 import com.backtoback.common.event.dto.EventDestination;
 import com.backtoback.common.event.service.EventConsumer;
+import com.backtoback.common.event.service.EventHandler;
+import com.backtoback.common.event.service.EventMessageDecoder;
 import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
+import com.backtoback.judge.judging.service.SubmissionMessageListener;
 import com.backtoback.judge.judging.service.SubmissionScheduler;
 import com.backtoback.judge.judging.service.SubmissionWorker;
 import com.backtoback.judge.judging.service.ValidationMessageListener;
@@ -28,11 +34,19 @@ import com.backtoback.judge.judging.service.ValidationWorker;
 import com.backtoback.judge.judging.store.SubmissionExecutionStore;
 import com.backtoback.judge.judging.store.ValidationExecutionStore;
 
+import io.awspring.cloud.autoconfigure.sns.SnsClientCustomizer;
 import io.awspring.cloud.sqs.config.SqsMessageListenerContainerFactory;
 import io.awspring.cloud.sqs.listener.QueueNotFoundStrategy;
+import software.amazon.awssdk.core.SdkRequest;
+import software.amazon.awssdk.core.interceptor.Context;
+import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
+import software.amazon.awssdk.core.interceptor.ExecutionInterceptor;
+import software.amazon.awssdk.services.sns.model.MessageAttributeValue;
+import software.amazon.awssdk.services.sns.model.PublishRequest;
 import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+import tools.jackson.databind.ObjectMapper;
 
-/** 하나의 활성화 설정으로 검증 수신·실행·기한 초과 종결·결과 SNS Relay를 함께 등록한다. */
+/** 하나의 활성화 설정으로 검증·제출 수신, 실행·복구와 결과 SNS Relay를 등록한다. */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(
     name = "judge.messaging.enabled",
@@ -74,13 +88,48 @@ public class JudgeMessagingConfiguration {
     }
 
     /**
+     * Judge 제출 결과에 문맥별 SNS 구독 필터가 사용할 속성을 추가한다. (이벤트 계약 §2.1)
+     *
+     * @param mapper Outbox 이벤트의 원문 해석기
+     * @return Judge SNS 클라이언트의 요청 설정
+     */
+    @Bean
+    public SnsClientCustomizer judgeResultContextAttribute(ObjectMapper mapper) {
+        return builder -> builder
+            .overrideConfiguration(config -> config.addExecutionInterceptor(new ExecutionInterceptor() {
+                /** {@inheritDoc} */
+                @Override
+                public SdkRequest modifyRequest(Context.ModifyRequest context, ExecutionAttributes attributes) {
+                    if (!(context.request() instanceof PublishRequest request)) {
+                        return context.request();
+                    }
+                    var type = request.messageAttributes().get("eventType");
+                    if (type == null || !RESULT_EVENTS.contains(type.stringValue())
+                        || "ProblemValidationCompleted".equals(type.stringValue())) {
+                        return request;
+                    }
+                    String submissionContext
+                        = "SubmissionJudged".equals(type.stringValue()) ? "PRACTICE"
+                            : mapper.readTree(request.message()).path("context").asString();
+                    var values = new HashMap<>(request.messageAttributes());
+                    values
+                        .put(
+                            "context",
+                            MessageAttributeValue.builder().dataType("String").stringValue(submissionContext).build()
+                        );
+                    return request.toBuilder().messageAttributes(values).build();
+                }
+            }));
+    }
+
+    /**
      * ACK 배치를 끄고 삭제 완료를 기다리며 없는 큐를 자동 생성하지 않는다.
      *
      * @param client 기존 리전·자격 증명·엔드포인트를 사용하는 SQS 클라이언트
-     * @return 검증 리스너 전용 팩토리
+     * @return 검증·제출 큐가 공유하는 수동 ACK 팩토리
      */
     @Bean
-    public SqsMessageListenerContainerFactory<Object> judgeValidationListenerFactory(SqsAsyncClient client) {
+    public SqsMessageListenerContainerFactory<Object> judgeManualAckListenerFactory(SqsAsyncClient client) {
         return SqsMessageListenerContainerFactory
             .builder()
             .sqsAsyncClient(client)
@@ -97,11 +146,35 @@ public class JudgeMessagingConfiguration {
      * 활성화된 환경에서만 수동 ACK 리스너를 등록한다.
      *
      * @param consumer Judge 업무 DB의 공통 소비기
+     * @param decoder 검증 큐의 이벤트 종류·버전을 확인할 해석기
+     * @param handlers 다른 큐 소속의 등록 이벤트 종류를 확인할 처리기
      * @return 검증 요청 리스너
      */
     @Bean
-    public ValidationMessageListener validationMessageListener(EventConsumer consumer) {
-        return new ValidationMessageListener(consumer);
+    public ValidationMessageListener validationMessageListener(
+        EventConsumer consumer,
+        EventMessageDecoder decoder,
+        List<EventHandler> handlers
+    ) {
+        return new ValidationMessageListener(consumer, decoder, handlers);
+    }
+
+    /**
+     * 제출 큐 주소가 준비된 환경에 공용 채점 요청 리스너를 등록한다.
+     *
+     * @param consumer 커밋 후 ACK를 수행하는 공통 소비기
+     * @param decoder 수신 원문 형식 검사기
+     * @param handlers 종류·버전별 업무 처리기
+     * @return 시험·대회·진단 공용 제출 큐 리스너
+     */
+    @Bean
+    @ConditionalOnExpression("!environment.getProperty('judge.messaging.submission-queue-url', '').isBlank()")
+    public SubmissionMessageListener submissionMessageListener(
+        EventConsumer consumer,
+        EventMessageDecoder decoder,
+        List<EventHandler> handlers
+    ) {
+        return new SubmissionMessageListener(consumer, decoder, handlers);
     }
 
     /**
@@ -187,7 +260,7 @@ public class JudgeMessagingConfiguration {
     /**
      * 메시징이 활성화된 환경에서 제출 선점과 기한·임대 만료 처리를 예약한다.
      *
-     * @param worker 일반 제출 실행기
+     * @param worker 일반·시험 제출 실행기
      * @param store 제출 실행 저장소
      * @param executor 제출 전용 실행 스레드 풀
      * @param clock 공통 시각
