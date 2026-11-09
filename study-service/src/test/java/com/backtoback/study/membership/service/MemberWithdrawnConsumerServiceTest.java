@@ -162,9 +162,9 @@ class MemberWithdrawnConsumerServiceTest {
     }
 
     private static StudyMembership pendingMembership(Long id) {
-        StudyMembership m = mock(StudyMembership.class);
-        given(m.getId()).willReturn(id);
-        given(m.getRole()).willReturn(MembershipRole.MEMBER);
-        return m;
+        StudyMembership membership = mock(StudyMembership.class);
+        given(membership.getId()).willReturn(id);
+        given(membership.getRole()).willReturn(MembershipRole.MEMBER);
+        return membership;
     }
 }
