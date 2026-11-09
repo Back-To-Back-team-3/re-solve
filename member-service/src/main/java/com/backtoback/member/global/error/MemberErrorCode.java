@@ -23,6 +23,8 @@ public enum MemberErrorCode implements ErrorCode {
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
     MEMBER_SUSPENDED(HttpStatus.FORBIDDEN, "정지된 회원은 이용할 수 없습니다."),
     MEMBER_NICKNAME_INVALID(HttpStatus.BAD_REQUEST, "닉네임은 이모지 없이 2~50자로 입력해 주세요."),
+    WITHDRAWAL_BLOCKED_ACTIVE_EXAM(HttpStatus.CONFLICT, "입장한 시험·대회의 결과가 확정된 뒤에 탈퇴할 수 있습니다."),
+    WITHDRAWAL_BLOCKED_STUDY_LEADER(HttpStatus.CONFLICT, "스터디장을 다른 구성원에게 위임하거나 스터디를 종료한 뒤에 탈퇴할 수 있습니다."),
 
     // Level
     LEVEL_TAG_NOT_FOUND(HttpStatus.NOT_FOUND, "태그를 찾을 수 없습니다."),
