@@ -170,4 +170,50 @@ public class Problem extends BaseTimeEntity {
             throw new ProblemException(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION);
         }
     }
+
+    /**
+     * 대회 연결을 처음 한 번만 기록한다.
+     *
+     * @param contest 대회 ID
+     * @param revision 고정 회차 ID
+     * @param actor 정책 설정 관리자
+     * @param version 원래 기대 버전
+     * @throws ProblemException 기존 연결 불일치 또는 버전·상태 오류
+     */
+    public void linkContest(long contest, long revision, long actor, int version) {
+        if (contestId != null) {
+            if (!contestId.equals(contest) || !contestProblemRevisionId.equals(revision)
+                || !contestPolicyActorId.equals(actor)) {
+                throw new ProblemException(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION);
+            }
+            return;
+        }
+        if (rowVersion != version) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_VERSION_CONFLICT);
+        }
+        if (scope != ProblemScope.EXAM_ONLY || visibility == ProblemVisibility.ARCHIVED) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION);
+        }
+        contestId = contest;
+        contestProblemRevisionId = revision;
+        contestPolicyActorId = actor;
+        contestLinkSourceVersion = ++rowVersion;
+    }
+
+    /**
+     * 연결과 관리자 변경 보호를 확인한 대회 전용 문제를 종료 공개한다.
+     *
+     * @param now 최초 공개 시각
+     * @throws ProblemException 허용하지 않는 상태
+     */
+    public void publishAfterContest(LocalDateTime now) {
+        if (scope != ProblemScope.EXAM_ONLY || contestId == null || visibility != ProblemVisibility.PRIVATE) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_INVALID_STATE_TRANSITION);
+        }
+        visibility = ProblemVisibility.PUBLIC;
+        rowVersion++;
+        if (publishedAt == null) {
+            publishedAt = now;
+        }
+    }
 }
