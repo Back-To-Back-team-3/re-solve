@@ -2,6 +2,8 @@ package com.backtoback.problem.problem.repository;
 
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -13,6 +15,23 @@ import jakarta.persistence.LockModeType;
 
 /** 문제 수정 회차를 저장하고, 문제·회차 번호로 조회한다. */
 public interface ProblemRevisionRepository extends JpaRepository<ProblemRevision, Long> {
+    /**
+     * 잠금 없이 최신 작성 회차를 조회한다.
+     *
+     * @param problemId 소유 문제
+     * @return 최신 회차
+     */
+    Optional<ProblemRevision> findTopByProblemIdOrderByRevisionNumberDesc(Long problemId);
+
+    /**
+     * 문제의 회차 이력을 페이지로 조회한다.
+     *
+     * @param problemId 소유 문제
+     * @param pageable 페이지 조건
+     * @return 회차 이력
+     */
+    Page<ProblemRevision> findByProblemId(Long problemId, Pageable pageable);
+
     /** 작성자 멱등키로 기존 회차 등록 결과를 조회한다. */
     Optional<ProblemRevision> findByAuthorIdAndIdempotencyKey(Long authorId, String idempotencyKey);
 
