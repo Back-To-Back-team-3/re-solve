@@ -1,7 +1,5 @@
 package com.backtoback.problem.problem.controller;
 
-import java.util.List;
-
 import org.springframework.context.annotation.Conditional;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
@@ -12,7 +10,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.problem.problem.config.InternalProblemServiceCondition;
@@ -21,7 +18,6 @@ import com.backtoback.problem.problem.dto.response.ContestProblemLinkResponse;
 import com.backtoback.problem.problem.dto.response.JudgingDataResponse;
 import com.backtoback.problem.problem.dto.response.JudgingValidationResponse;
 import com.backtoback.problem.problem.dto.response.ProblemContentResponse;
-import com.backtoback.problem.problem.dto.response.ProblemSummaryListResponse;
 import com.backtoback.problem.problem.service.InternalProblemService;
 
 import jakarta.validation.Valid;
@@ -83,15 +79,6 @@ public class InternalProblemController {
             .cacheControl(CacheControl.noStore())
             .header("X-Content-Type-Options", "nosniff")
             .body(image);
-    }
-
-    /** 요청한 문제 ID마다 편입 요약을 반환한다. (API 명세서 2.6.5) */
-    @GetMapping(PROBLEM_PATH + "/summaries")
-    public ProblemSummaryListResponse getSummaries(
-        @RequestParam List<String> ids,
-        @RequestParam @NotBlank(message = "용도는 필수입니다.") String purpose
-    ) {
-        return internalProblemService.getSummaries(ids, purpose);
     }
 
     /** 대회 전용 문제 연결 요청의 고정 성공·충돌 결과를 반환한다. (API 명세서 2.6.9) */
