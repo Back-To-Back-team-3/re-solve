@@ -3485,8 +3485,8 @@
 
 - **Method / URI:** `GET /internal/v1/problems/diagnosis-candidates`
 - **인증:** 내부 호출 (member)
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`
-- **설명:** 태그의 `GENERAL`·`PUBLIC` 문제 중 난이도 1·2·3에서 각각 1개를 무작위로 골라 현재 회차와 함께 반환한다. 난이도별 후보가 없으면 해당 항목을 `null`로 반환한다.
+- **대응 테이블:** `tags`, `problems`, `problem_revisions`, `problem_revision_tags`, `problem_validations`
+- **설명:** `GENERAL`·`PUBLIC` 문제에서 검증을 통과한 최신 회차의 태그와 난이도를 기준으로 후보를 찾는다. 난이도 1·2·3에서 각각 1개를 무작위로 골라 고정 회차 ID와 함께 반환한다. 응답 배열의 순서는 난이도 1·2·3이며, 후보가 없는 위치는 `null`이다.
 - **요청 파라미터:**
 
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
@@ -3520,6 +3520,10 @@
       ]
     }
     ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 태그 ID 누락 또는 양의 정수 범위를 벗어남
+    - `PROBLEM_TAG_NOT_FOUND`(404) / 존재하지 않는 태그
 
 ---
 

@@ -21,3 +21,14 @@
 | `ce.java` | CE | 컴파일 오류 (타입 불일치) |
 
 각 파일은 `JavaExecutionCodeGenerator`가 그대로 받을 수 있는 `class Solution` 단독 코드다. 패키지 선언 없음.
+
+
+## Problem 진단 기준 데이터 등록
+
+Problem·Judge 메시징과 Java 채점 실행기가 연결된 테스트 환경에서 기존 태그 하나에 난이도별 기준 문제를 등록할 수 있다. 저장소 루트에서 아래 명령을 실행하고, 해당 환경의 관리자 액세스 토큰을 입력한다.
+
+```bash
+python3 problem-service/scripts/seed-diagnosis-problems.py http://localhost:8080 <태그-ID>
+```
+
+첫 번째 테스트는 공개 예제로, 나머지는 숨김 테스트로 등록한다. 오답 코드에 `WA`가 있는지, 정답 코드의 모든 테스트가 `AC`인지와 Problem의 결과 반영 여부를 확인한 후 그 회차를 공개한다. 같은 환경에서 같은 관리자와 태그로 재실행하면 등록·검증 멱등키를 재사용한다.
