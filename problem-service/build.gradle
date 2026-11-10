@@ -34,6 +34,7 @@ dependencies {
     implementation project(':common-web')
     implementation project(':common-jpa')
     implementation project(':common-event')
+    implementation project(':common-scheduling')
 
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
@@ -56,7 +57,6 @@ dependencies {
     implementation 'org.flywaydb:flyway-mysql'
 
     // Scheduler lock
-    implementation 'net.javacrumbs.shedlock:shedlock-spring:7.10.1'
     implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1'
 
     // AWS S3

@@ -17,6 +17,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.sql.DataSource;
+
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
@@ -27,8 +29,9 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.support.JdbcTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.mysql.MySQLContainer;
 
@@ -276,15 +279,11 @@ class TagCreationRecordCleanupSchedulerTest {
                     new MapPropertySource("cleanup-test", Map.of("problem.tag-idempotency.cleanup.enabled", "false"))
                 );
         }
-        context
-            .registerBean(
-                JdbcTemplate.class,
-                () -> new JdbcTemplate(
-                    new DriverManagerDataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
-                )
-            );
+        var dataSource = new DriverManagerDataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+        context.registerBean(DataSource.class, () -> dataSource);
+        context.registerBean(PlatformTransactionManager.class, () -> new JdbcTransactionManager(dataSource));
         context.registerBean(TagCreationRecordService.class, () -> service);
-        context.registerBean(Clock.class, () -> clock);
+        context.registerBean("testClock", Clock.class, () -> clock, definition -> definition.setPrimary(true));
         context.register(SchedulingConfig.class, TagCreationRecordCleanupScheduler.class);
         context.refresh();
         return context;
