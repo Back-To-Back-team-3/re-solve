@@ -8,16 +8,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
@@ -28,6 +31,7 @@ import com.backtoback.judge.judging.domain.JudgeVerdict;
 import com.backtoback.judge.submission.domain.Submission;
 import com.backtoback.judge.submission.domain.SubmissionDraft;
 import com.backtoback.judge.submission.repository.SubmissionRepository;
+import com.backtoback.judge.submission.service.AcceptedSubmissionSummary;
 import com.backtoback.judge.submission.service.InternalSubmissionQueryService;
 
 /** Contest 내부 조회의 성공 응답과 원본 코드의 접근 경계를 검증한다. */
@@ -40,6 +44,7 @@ import com.backtoback.judge.submission.service.InternalSubmissionQueryService;
     }
 )
 class InternalSubmissionQueryControllerTest {
+    private static final String ACCEPTED = "/internal/v1/submissions/accepted";
     private static final String RECEIPT = "/internal/v1/judge/submissions/by-receipt";
     private static final String RESULT = "/internal/v1/submissions/2002/result";
     private static final String SOURCE = "/internal/v1/submissions/2002/source";
@@ -47,6 +52,71 @@ class InternalSubmissionQueryControllerTest {
     private SubmissionRepository submissions;
     @Autowired
     private MockMvc mvc;
+
+    /**
+     * 기본 페이지 크기와 직접 응답 형식, 마지막 페이지의 null 커서를 확인한다.
+     *
+     * @throws Exception 요청 실행 실패
+     */
+    @Test
+    @DisplayName("정답 이력은 원본 식별 필드 네 개와 마지막 페이지의 null 커서만 반환한다")
+    void returnsAcceptedHistory() throws Exception {
+        given(
+            submissions
+                .findByMemberIdAndContextAndStatusAndVerdictAndIdGreaterThanOrderByIdAsc(
+                    7,
+                    Submission.Context.PRACTICE,
+                    Submission.Status.COMPLETED,
+                    JudgeVerdict.AC,
+                    0,
+                    PageRequest.of(0, 101)
+                )
+        ).willReturn(List.of(new AcceptedSubmissionSummary(11L, 19L, LocalDateTime.of(2026, 9, 28, 10, 0), 2)));
+
+        mvc
+            .perform(get(ACCEPTED).param("context", "PRACTICE").param("userId", "7"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.items[0].submissionId").value("11"))
+            .andExpect(jsonPath("$.items[0].problemId").value("19"))
+            .andExpect(jsonPath("$.items[0].submittedAt").value("2026-09-28T10:00:00+09:00"))
+            .andExpect(jsonPath("$.items[0].judgeAttempt").value(2))
+            .andExpect(jsonPath("$.items[0].length()").value(4))
+            .andExpect(jsonPath("$.nextCursor").value(nullValue()))
+            .andExpect(jsonPath("$.data").doesNotHaveJsonPath());
+    }
+
+    /**
+     * 정답 이력의 문맥, 양수 ID와 페이지 크기 제약을 검사한다.
+     *
+     * @param context 요청 문맥
+     * @param userId 대상 회원 ID
+     * @param after 이전 페이지의 마지막 제출 ID
+     * @param size 요청 페이지 크기
+     * @throws Exception 요청 실행 실패
+     */
+    @ParameterizedTest
+    @CsvSource(
+        {
+            "EXAM,7,1,100",
+            "PRACTICE,0,1,100",
+            "PRACTICE,7,9223372036854775808,100",
+            "PRACTICE,7,1,0",
+            "PRACTICE,7,1,501"
+        }
+    )
+    @DisplayName("정답 이력의 다른 문맥, 잘못된 식별자와 페이지 범위를 거절한다")
+    void rejectsInvalidAcceptedHistory(String context, String userId, String after, String size) throws Exception {
+        mvc
+            .perform(
+                get(ACCEPTED)
+                    .param("context", context)
+                    .param("userId", userId)
+                    .param("after", after)
+                    .param("size", size)
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+    }
 
     /**
      * 미접수 상태와 허용하지 않는 문맥을 구분한다.

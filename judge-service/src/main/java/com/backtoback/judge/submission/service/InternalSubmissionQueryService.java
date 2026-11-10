@@ -2,21 +2,47 @@ package com.backtoback.judge.submission.service;
 
 import java.util.Optional;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
+import com.backtoback.judge.judging.domain.JudgeVerdict;
 import com.backtoback.judge.submission.domain.Submission;
+import com.backtoback.judge.submission.dto.AcceptedSubmissionHistoryResponse;
 import com.backtoback.judge.submission.repository.SubmissionRepository;
 
 import lombok.RequiredArgsConstructor;
 
-/** 시험·대회·진단 제출 대사와 시험·진단 복기에 필요한 제출만 조회한다. */
+/** 시험·대회·진단 제출 대사, 복기와 일반 풀이 AC 이력 조회를 지원한다. */
 @Service
 @RequiredArgsConstructor
 public class InternalSubmissionQueryService {
     private final SubmissionRepository submissions;
+
+    /**
+     * 재동기화에 필요한 회원별 일반 풀이 AC 이력을 조회한다. (API 명세서 §3.3.4)
+     *
+     * @param userId 재동기화할 회원 ID
+     * @param after 마지막으로 반환한 제출 ID; 첫 페이지이면 0
+     * @param size 검증된 최대 응답 행 수
+     * @return 제출 ID 오름차순의 AC 목록과 다음 커서
+     */
+    @Transactional(readOnly = true)
+    public AcceptedSubmissionHistoryResponse acceptedHistory(long userId, long after, int size) {
+        var rows
+            = submissions
+                .findByMemberIdAndContextAndStatusAndVerdictAndIdGreaterThanOrderByIdAsc(
+                    userId,
+                    Submission.Context.PRACTICE,
+                    Submission.Status.COMPLETED,
+                    JudgeVerdict.AC,
+                    after,
+                    PageRequest.of(0, size + 1)
+                );
+        return AcceptedSubmissionHistoryResponse.from(rows, size);
+    }
 
     /**
      * 시험·대회·진단 ID가 일치하는 제출의 현재 채점 상태를 조회한다.

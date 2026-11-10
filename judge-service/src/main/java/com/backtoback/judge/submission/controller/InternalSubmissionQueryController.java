@@ -9,19 +9,55 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.submission.domain.Submission;
+import com.backtoback.judge.submission.dto.AcceptedSubmissionHistoryResponse;
 import com.backtoback.judge.submission.dto.InternalSubmissionResultResponse;
 import com.backtoback.judge.submission.dto.InternalSubmissionSourceResponse;
 import com.backtoback.judge.submission.dto.SubmissionReceiptResponse;
 import com.backtoback.judge.submission.service.InternalSubmissionQueryService;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
 
-/** 시험·대회·진단 제출 대사와 시험·진단 복기 내부 API. */
+/** 시험·대회·진단 제출 대사, 복기와 일반 풀이 AC 이력 조회 내부 API. */
 @RestController
 @RequiredArgsConstructor
 public class InternalSubmissionQueryController {
     private final InternalSubmissionQueryService queries;
+
+    /**
+     * 회원별 일반 풀이 정답 이력을 커서로 조회한다. (API 명세서 §3.3.4)
+     * 잘못된 문맥·식별자·크기는 요청 검증 단계에서 {@code COMMON_INVALID_REQUEST}로 응답한다.
+     *
+     * @param context 일반 풀이를 뜻하는 {@code PRACTICE}
+     * @param userId 재동기화할 회원 ID
+     * @param after 마지막 제출 ID; 첫 페이지에서는 생략
+     * @param size 페이지 크기; 생략하면 100
+     * @return 공통 성공 래퍼 없이 반환하는 정답 이력 페이지
+     */
+    @GetMapping("/internal/v1/submissions/accepted")
+    public ResponseEntity<AcceptedSubmissionHistoryResponse> acceptedHistory(
+        @RequestParam
+        @Pattern(
+            regexp = "PRACTICE",
+            message = "재동기화 문맥은 PRACTICE여야 합니다."
+        ) String context,
+        @RequestParam @SubmissionQueryId String userId,
+        @RequestParam(required = false) @SubmissionQueryId String after,
+        @RequestParam(defaultValue = "100")
+        @Min(
+            value = 1,
+            message = "페이지 크기는 1 이상이어야 합니다."
+        )
+        @Max(
+            value = 500,
+            message = "페이지 크기는 500 이하여야 합니다."
+        ) int size
+    ) {
+        long afterId = after == null ? 0L : Long.parseLong(after);
+        return ResponseEntity.ok(queries.acceptedHistory(Long.parseLong(userId), afterId, size));
+    }
 
     /**
      * Judge 제출 ID와 시험·대회·진단 ID가 일치하는 제출 상태를 조회한다. (API 명세서 §3.3.1)
