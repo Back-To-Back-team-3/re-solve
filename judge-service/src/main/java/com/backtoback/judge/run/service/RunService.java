@@ -238,7 +238,7 @@ public class RunService {
                 }
             }
         }
-        if (request.useSamples()) {
+        if (Boolean.TRUE.equals(request.useSamples())) {
             inputs.addAll(0, prepareSamples(request, data, generator, guard));
         }
         return inputs;

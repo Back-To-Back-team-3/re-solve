@@ -19,13 +19,13 @@ public record RunRequest(
     @NotBlank String problemRevisionId,
     @NotBlank String language,
     @NotBlank String sourceCode,
-    boolean useSamples,
+    Boolean useSamples,
     @Size(max = 5) List<@NotNull @Valid CustomInput> customInputs
 ) {
     /** 실행 대상과 UTF-8 코드 크기를 확인한다. */
     public void validate() {
         if (language == null || language.isBlank() || sourceCode == null || sourceCode.isBlank()
-            || !useSamples && (customInputs == null || customInputs.isEmpty())
+            || !Boolean.TRUE.equals(useSamples) && (customInputs == null || customInputs.isEmpty())
             || customInputs != null && (customInputs.size() > 5
                 || customInputs.stream().anyMatch(value -> value == null || value.argumentTexts() == null))) {
             throw new JudgeException(CommonErrorCode.COMMON_INVALID_REQUEST);
