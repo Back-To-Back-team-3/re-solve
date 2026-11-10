@@ -434,7 +434,7 @@ public class SubmissionExecutionStore {
     }
 
     /**
-     * 30초 이상 응답이 불명확한 요청을 회수한다. (스케줄러 §3.3)
+     * 30초 이상 응답이 불명확한 요청을 회수한다. 실행 중에는 현재 시도의 요청만 회수한다. (스케줄러 §3.3)
      *
      * @return 처리할 UNKNOWN 요청이 있었는지 여부
      */
@@ -454,6 +454,7 @@ public class SubmissionExecutionStore {
                         AND EXISTS (
                             SELECT 1 FROM judge_test_results t WHERE t.judge_job_id=j.id
                             AND t.token_status='UNKNOWN' AND t.updated_at<=?
+                            AND (j.status<>'RUNNING' OR t.created_try_count=j.try_count)
                         )
                         ORDER BY j.id LIMIT 1 FOR UPDATE SKIP LOCKED
                         """,
@@ -482,7 +483,8 @@ public class SubmissionExecutionStore {
         int reset = jdbc.update("""
             UPDATE judge_test_results SET token_status='NOT_CREATED',created_try_count=NULL,updated_at=?
             WHERE judge_job_id=? AND token_status='UNKNOWN' AND updated_at<=?
-            """, instant, lease.jobId(), instant.minusSeconds(30));
+            AND (?<>'RUNNING' OR created_try_count=?)
+            """, instant, lease.jobId(), instant.minusSeconds(30), status, lease.tryCount());
         if (reset == 0 || !running) {
             return reset > 0;
         }

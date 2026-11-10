@@ -326,6 +326,28 @@ class SubmissionExecutionStoreTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
     }
 
+    /** 이전 시도의 응답 유실이 새 시도의 임대나 재생성 횟수에 영향을 주지 않는지 확인한다. */
+    @Test
+    @DisplayName("새 시도를 선점하고 준비하기 전에는 이전 시도의 UNKNOWN으로 임대를 회수하지 않는다")
+    void keepsNewLeaseWhenPreviousAttemptIsUnknown() {
+        var first = store.claim().orElseThrow();
+        given(clock.instant()).willReturn(START.plusSeconds(119));
+        assertThat(store.beginCreate(first, 1)).isTrue();
+        given(clock.instant()).willReturn(START.plusSeconds(120));
+        assertThat(store.recoverOne()).isTrue();
+
+        given(clock.instant()).willReturn(START.plusSeconds(149));
+        var second = store.claim().orElseThrow();
+        assertThat(second.tryCount()).isEqualTo(2);
+        assertThat(store.recoverUnknownOne()).isFalse();
+        assertThat(jdbc.queryForObject("SELECT lease_token FROM judge_jobs WHERE id=1", String.class))
+            .isEqualTo(second.token());
+        assertThat(jdbc.queryForObject("SELECT unknown_retry_count FROM judge_jobs WHERE id=1", Integer.class))
+            .isZero();
+        assertThat(store.prepare(second)).isTrue();
+        assertThat(store.beginCreate(second, 1)).isTrue();
+    }
+
     /** 별도 UNKNOWN 복구가 임대를 교체하며 동일 시도에서 재생성 두 번을 제한하는지 확인한다. */
     @Test
     @DisplayName("UNKNOWN은 30초 후 같은 시도에서 두 번 재생성하고 세 번째 유실은 시스템 실패로 닫는다")
