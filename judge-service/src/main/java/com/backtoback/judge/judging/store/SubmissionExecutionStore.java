@@ -16,6 +16,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.Assert;
 
+import com.backtoback.common.event.dto.ExamSubmissionJudgedPayload;
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
@@ -430,6 +431,36 @@ public class SubmissionExecutionStore {
             last_error=NULL,pending_compile_message=NULL,updated_at=? WHERE id=?
             """, instant, instant, lease.jobId());
         var submission = submissions.findById(lease.submissionId()).orElseThrow();
+        if (submission.getContext() == Context.EXAM) {
+            var examResult
+                = new ExamSubmissionJudgedPayload(
+                    Context.EXAM.name(),
+                    submission.getContextId().toString(),
+                    submission.getSourceSubmissionId().toString(),
+                    submission.getId().toString(),
+                    Long.toString(submission.getMemberId()),
+                    Long.toString(submission.getProblemId()),
+                    Long.toString(submission.getProblemRevisionId()),
+                    lease.judgeAttempt(),
+                    Submission.Status.COMPLETED.name(),
+                    verdict.name(),
+                    ((Number)metrics.get("passed")).intValue(),
+                    verdicts.size(),
+                    time == null ? null : ((Number)time).intValue(),
+                    memory == null ? null : ((Number)memory).intValue(),
+                    EVENT_TIME.format(submission.getSubmittedAt().atZone(ClockConfiguration.SERVICE_ZONE))
+                );
+            events
+                .append(
+                    "Submission",
+                    "ExamSubmissionJudged",
+                    "v1",
+                    Long.toString(lease.submissionId()),
+                    lease.correlationId(),
+                    examResult
+                );
+            return true;
+        }
         var payload = payload(lease, submission);
         payload.put("verdict", verdict.name());
         payload.put("passedCount", metrics.get("passed"));
@@ -445,13 +476,6 @@ public class SubmissionExecutionStore {
                 payload.put("problemTags", data.problemTags());
                 payload.put("problemTagIds", data.problemTagIds());
                 yield "SubmissionJudged";
-            }
-            case EXAM -> {
-                payload.put("context", "EXAM");
-                payload.put("examId", submission.getContextId().toString());
-                payload.put("examSubmissionId", submission.getSourceSubmissionId().toString());
-                payload.put("status", "COMPLETED");
-                yield "ExamSubmissionJudged";
             }
             default -> throw new IllegalStateException("결과 발행을 지원하지 않는 채점 문맥입니다.");
         };

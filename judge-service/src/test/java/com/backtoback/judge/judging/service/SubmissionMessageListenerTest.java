@@ -512,19 +512,31 @@ class SubmissionMessageListenerTest {
             assertThat(messages).hasSize(1);
             var result = mapper.readTree(messages.getFirst().body());
             assertThat(result.get("eventType").asString()).isEqualTo("ExamSubmissionJudged");
-            assertThat(result.get("context").asString()).isEqualTo("EXAM");
             assertThat(messages.getFirst().messageAttributes().get("context").stringValue()).isEqualTo("EXAM");
-            assertThat(result.get("examId").asString()).isEqualTo("55");
-            assertThat(result.get("examSubmissionId").asString()).isEqualTo("71");
-            assertThat(result.get("status").asString()).isEqualTo("COMPLETED");
-            assertThat(result.get("verdict").asString()).isEqualTo("CE");
-            assertThat(result.get("passedCount").asInt()).isZero();
-            assertThat(result.get("totalCount").asInt()).isEqualTo(1);
-            assertThat(result.get("maxTimeMs").isNull()).isTrue();
-            assertThat(result.get("maxMemoryKb").isNull()).isTrue();
-            assertThat(result.get("submittedAt").asString()).isEqualTo("2026-10-31T09:00:00.123456+09:00");
-            assertThat(result.has("sourceCode")).isFalse();
-            assertThat(result.has("problemTags")).isFalse();
+            var body = (tools.jackson.databind.node.ObjectNode)result;
+            for (String header : List
+                .of("eventId", "eventType", "schemaVersion", "occurredAt", "aggregateId", "correlationId")) {
+                assertThat(body.remove(header)).isNotNull();
+            }
+            assertThat(body).isEqualTo(mapper.readTree("""
+                {
+                  "context": "EXAM",
+                  "examId": "55",
+                  "examSubmissionId": "71",
+                  "submissionId": "%d",
+                  "userId": "9",
+                  "problemId": "101",
+                  "problemRevisionId": "1001",
+                  "judgeAttempt": 1,
+                  "status": "COMPLETED",
+                  "verdict": "CE",
+                  "passedCount": 0,
+                  "totalCount": 1,
+                  "maxTimeMs": null,
+                  "maxMemoryKb": null,
+                  "submittedAt": "2026-10-31T09:00:00.123456+09:00"
+                }
+                """.formatted(lease.submissionId())));
             sqs
                 .deleteMessage(
                     request -> request.queueUrl(outputQueue).receiptHandle(messages.getFirst().receiptHandle())
