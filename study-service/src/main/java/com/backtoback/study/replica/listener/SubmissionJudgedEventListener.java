@@ -4,6 +4,8 @@ import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
 import com.backtoback.study.hint.event.dto.ContestTerminatedPayload;
+import com.backtoback.study.hint.event.dto.DiagnosisClosedPayload;
+import com.backtoback.study.hint.event.dto.DiagnosisStartedPayload;
 import com.backtoback.study.hint.event.dto.ExamTerminatedPayload;
 import com.backtoback.study.hint.event.dto.ExamUpdatedPayload;
 import com.backtoback.study.hint.event.dto.ParticipantCanceledPayload;
@@ -40,6 +42,8 @@ public class SubmissionJudgedEventListener {
     private static final String EXAM_CANCELED_EVENT_TYPE = "ExamCanceled";
     private static final String CONTEST_ENDED_EVENT_TYPE = "ContestEnded";
     private static final String CONTEST_CANCELED_EVENT_TYPE = "ContestCanceled";
+    private static final String DIAGNOSIS_STARTED_EVENT_TYPE = "DiagnosisStarted";
+    private static final String DIAGNOSIS_CLOSED_EVENT_TYPE = "DiagnosisClosed";
     private static final String MDC_CORRELATION_ID = "correlationId";
     private static final String MDC_EVENT_ID = "eventId";
     private static final String MDC_EVENT_TYPE = "eventType";
@@ -103,6 +107,18 @@ public class SubmissionJudgedEventListener {
             if (CONTEST_ENDED_EVENT_TYPE.equals(eventType) || CONTEST_CANCELED_EVENT_TYPE.equals(eventType)) {
                 ContestTerminatedPayload event = objectMapper.treeToValue(payload, ContestTerminatedPayload.class);
                 hintBlockReplicaConsumerService.consumeContestTerminated(event);
+                return;
+            }
+
+            if (DIAGNOSIS_STARTED_EVENT_TYPE.equals(eventType)) {
+                DiagnosisStartedPayload event = objectMapper.treeToValue(payload, DiagnosisStartedPayload.class);
+                hintBlockReplicaConsumerService.consumeDiagnosisStarted(event);
+                return;
+            }
+
+            if (DIAGNOSIS_CLOSED_EVENT_TYPE.equals(eventType)) {
+                DiagnosisClosedPayload event = objectMapper.treeToValue(payload, DiagnosisClosedPayload.class);
+                hintBlockReplicaConsumerService.consumeDiagnosisClosed(event);
                 return;
             }
 

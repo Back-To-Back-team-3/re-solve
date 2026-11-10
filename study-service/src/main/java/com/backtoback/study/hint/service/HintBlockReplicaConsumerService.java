@@ -13,6 +13,8 @@ import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.hint.domain.HintBlockContextType;
 import com.backtoback.study.hint.event.dto.ContestTerminatedPayload;
+import com.backtoback.study.hint.event.dto.DiagnosisClosedPayload;
+import com.backtoback.study.hint.event.dto.DiagnosisStartedPayload;
 import com.backtoback.study.hint.event.dto.ExamTerminatedPayload;
 import com.backtoback.study.hint.event.dto.ExamUpdatedPayload;
 import com.backtoback.study.hint.event.dto.ParticipantCanceledPayload;
@@ -147,6 +149,50 @@ public class HintBlockReplicaConsumerService {
 
         hintBlockReplicaRepository
             .deleteByContextTypeAndContextId(HintBlockContextType.CONTEST, Long.parseLong(payload.contestId()));
+    }
+
+    @Transactional
+    public void consumeDiagnosisStarted(DiagnosisStartedPayload payload) {
+        try {
+            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
+        } catch (DuplicateKeyException e) {
+            log.warn("DiagnosisStarted 중복 수신 무시 eventId={}", payload.eventId());
+            return;
+        }
+
+        Long diagnosisAttemptId = Long.parseLong(payload.diagnosisAttemptId());
+        Long memberId = Long.parseLong(payload.memberId());
+        LocalDateTime startsAt = toLocalDateTime(payload.startsAt());
+        LocalDateTime endsAt = toLocalDateTime(payload.endsAt());
+
+        for (String problemIdStr : payload.problemIds()) {
+            hintBlockReplicaRepository
+                .insertIgnore(
+                    memberId,
+                    HintBlockContextType.DIAGNOSIS.name(),
+                    diagnosisAttemptId,
+                    Long.parseLong(problemIdStr),
+                    startsAt,
+                    endsAt,
+                    1
+                );
+        }
+    }
+
+    @Transactional
+    public void consumeDiagnosisClosed(DiagnosisClosedPayload payload) {
+        try {
+            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
+        } catch (DuplicateKeyException e) {
+            log.warn("DiagnosisClosed 중복 수신 무시 eventId={}", payload.eventId());
+            return;
+        }
+
+        hintBlockReplicaRepository
+            .deleteByContextTypeAndContextId(
+                HintBlockContextType.DIAGNOSIS,
+                Long.parseLong(payload.diagnosisAttemptId())
+            );
     }
 
     private static LocalDateTime toLocalDateTime(String dateTimeStr) {
