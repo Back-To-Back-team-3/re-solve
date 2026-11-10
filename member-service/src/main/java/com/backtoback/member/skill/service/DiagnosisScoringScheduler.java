@@ -33,6 +33,7 @@ public class DiagnosisScoringScheduler {
     )
     public void score() {
         int scored = 0;
+        // shortcut: 계속 실패하는 응시(데이터 손상)는 롤백돼 매번 다시 뽑혀 배치를 차지할 수 있음, 운영 알림을 붙일 때 실패 표시·재시도 한도를 넣는다.
         for (Long id : submissionStore.findScorableAttemptIds(BATCH_SIZE)) {
             try {
                 if (scoringService.scoreIfReady(id)) {
