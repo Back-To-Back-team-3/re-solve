@@ -4336,7 +4336,8 @@
     ```
 
     - `DIAGNOSIS`의 `contextId`는 `diagnosisId`, `sourceSubmissionId`는 `diagnosisSubmissionId`다. 원본 접수·고정 회차를 유지하며, 숨김 테스트 원문은 반환하지 않는다.
-    - 호출자는 자기 서비스의 원래 접수와 조회 결과를 대조한다. 미종결·실패 상태의 판정·통과 수·성능은 null이며, 미발견·조회 실패로 결과를 확정하지 않는다.
+    - 진단 대사는 §3.3.6을 `context=DIAGNOSIS`, `receiptId=diagnosisSubmissionId`로 함께 조회한다. `found=true`일 때 두 응답의 `submissionId`가 같고, 접수 ID 조회의 `userId`·`problemId`·`problemRevisionId`·`contextId`·`receiptId`·`submittedAt`이 원래 접수와 일치하는지 확인한다.
+    - 미종결·실패 상태의 판정·통과 수·성능은 null이다. 미발견·식별자 불일치·조회 실패로 결과를 확정하지 않으며, 응답 형식은 유지한다.
 
 #### 3.3.2 제출 코드 조회 (내부)
 
