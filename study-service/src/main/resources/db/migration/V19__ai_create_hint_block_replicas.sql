@@ -2,8 +2,8 @@ CREATE TABLE hint_block_replicas
 (
     id               BIGINT      NOT NULL AUTO_INCREMENT,
     member_id        BIGINT      NOT NULL COMMENT '참가자 (미입장 ABSENT 포함)',
-    context_type     VARCHAR(30) NOT NULL COMMENT 'EXAM / CONTEST',
-    context_id       BIGINT      NOT NULL COMMENT '시험·대회 ID (외부 참조)',
+    context_type     VARCHAR(30) NOT NULL COMMENT 'EXAM / CONTEST / DIAGNOSIS',
+    context_id       BIGINT      NOT NULL COMMENT '시험·대회·진단 ID (외부 참조)',
     problem_id       BIGINT      NOT NULL COMMENT '포함 문제',
     starts_at        DATETIME(6) NOT NULL COMMENT '차단 시작 (시험 시작 시각)',
     ends_at          DATETIME(6) NOT NULL COMMENT '차단 종료 (시험 종료 시각)',
