@@ -78,7 +78,12 @@ class TagLevelServiceTest {
     @BeforeEach
     void setUp() {
         SkillProperties properties
-            = new SkillProperties("http://problem-service", Duration.ofDays(3), Map.of(TagLevel.LV1, LV1_TO_LV2));
+            = new SkillProperties(
+                "http://problem-service",
+                false,
+                Duration.ofDays(3),
+                Map.of(TagLevel.LV1, LV1_TO_LV2)
+            );
         Clock clock = Clock.fixed(NOW.atZone(SEOUL).toInstant(), SEOUL);
         tagLevelService
             = new TagLevelService(

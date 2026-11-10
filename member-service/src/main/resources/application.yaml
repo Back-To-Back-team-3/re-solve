@@ -49,6 +49,8 @@ resolve:
     study-service-url: ${STUDY_SERVICE_URL:http://study-service:8080}
   skill:
     problem-service-url: ${PROBLEM_SERVICE_URL:http://problem-service:8080}
+    # 진단 시작 허용. 출제 후보·만료 종료·채점 연동이 배포되기 전에는 false
+    diagnosis-enabled: ${MEMBER_DIAGNOSIS_ENABLED:false}
     diagnosis-cooldown: 3d
     # 현재 레벨별 다음 승급 기준 (정책 및 상태 8.3 단계별 승급). 실운영 결과를 보고 조정한다.
     promotions:

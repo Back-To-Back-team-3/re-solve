@@ -775,7 +775,7 @@
     - `DIAGNOSIS_COOLDOWN`(409) / 직전 종료 + 3일 전 (`Retry-After` 포함)
     - `DIAGNOSIS_ALREADY_IN_PROGRESS`(409)
     - `DIAGNOSIS_PROBLEMS_UNAVAILABLE`(409) / 난이도 1·2·3 중 출제 후보가 없는 난이도가 있음 (태그 진입 1.4.2로 Lv.1 시작 안내)
-    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 출제 후보 조회 실패
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 출제 후보 조회 실패, 또는 운영 스위치(`MEMBER_DIAGNOSIS_ENABLED`)가 꺼져 있음
     - `MEMBER_SUSPENDED`(403)
 - **동시성/멱등 보장:** 생성 컬럼 `active_tag_id` + `uk_diagnosis_attempts_member_active_tag`. 동시 시작 두 건 중 하나는 `DIAGNOSIS_ALREADY_IN_PROGRESS`.
 - **외부 의존:**

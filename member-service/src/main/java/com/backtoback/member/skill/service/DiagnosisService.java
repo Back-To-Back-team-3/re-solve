@@ -65,6 +65,11 @@ public class DiagnosisService {
      * 같은 태그의 동시 시작은 {@code uk_diagnosis_attempts_member_active_tag}로 한 건만 남는다.
      */
     public StartedDiagnosis start(Long memberId, Long tagId) {
+        // shortcut: 만료 종료(②)·채점 연동(③) 전에 시작하면 응시가 IN_PROGRESS로 남아 그 태그를 다시 볼 수 없어 운영 스위치로 막는다,
+        // ②·③과 problem 2.6.7이 배포되면 MEMBER_DIAGNOSIS_ENABLED를 켜고 이 검사를 지운다.
+        if (!properties.diagnosisEnabled()) {
+            throw new MemberException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
+        }
         boolean entered = checkStartable(memberId, tagId, now()).isPresent();
         if (!entered && !problemTagClient.exists(tagId)) {
             throw new MemberException(MemberErrorCode.LEVEL_TAG_NOT_FOUND);

@@ -79,6 +79,7 @@ class DiagnosisServiceTest {
         registry.add("resolve.auth.github.client-id", () -> "client-id");
         registry.add("resolve.auth.github.client-secret", () -> "client-secret");
         registry.add("resolve.auth.jwt.secret", () -> "test-jwt-secret-key-must-be-at-least-32-bytes");
+        registry.add("resolve.skill.diagnosis-enabled", () -> "true");
     }
 
     @MockitoBean
