@@ -1,6 +1,7 @@
 """Regression checks for admin seed HTTP requests and validation recovery."""
 
 import importlib.util
+import socket
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import threading
@@ -58,6 +59,40 @@ class SeedDiagnosisProblemsTest(unittest.TestCase):
 
         self.assertEqual(result, passed)
         self.assertEqual([call.args for call in request.call_args_list], [("/progress/1",)] * 4)
+
+    @patch.object(seed.time, "sleep")
+    def test_poll_retries_when_gateway_closes_before_response(self, _sleep):
+        paths = []
+
+        class Gateway(BaseHTTPRequestHandler):
+            def do_GET(self):
+                paths.append(self.path)
+                if len(paths) == 1:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    return
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"data":{"status":"PASSED","resultApplied":true}}')
+
+            def log_message(self, *_):
+                pass
+
+        with HTTPServer(("127.0.0.1", 0), Gateway) as server:
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+
+                def request(path, *, timeout):
+                    return seed.call(base, "test-token", path, timeout=timeout)
+
+                result = seed.wait_for_validation(request, "/progress/1", "PASSED", time.monotonic() + 10)
+            finally:
+                server.shutdown()
+                thread.join()
+
+        self.assertEqual(result["status"], "PASSED")
+        self.assertEqual(paths, ["/progress/1", "/progress/1"])
 
     @patch.object(seed.time, "sleep")
     def test_poll_propagates_permanent_or_repeated_errors(self, _sleep):
