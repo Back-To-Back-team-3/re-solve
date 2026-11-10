@@ -56,7 +56,8 @@ public class InternalSubmissionQueryController {
         ) int size
     ) {
         long afterId = after == null ? 0L : Long.parseLong(after);
-        return ResponseEntity.ok(queries.acceptedHistory(Long.parseLong(userId), afterId, size));
+        var history = queries.acceptedHistory(Long.parseLong(userId), afterId, size);
+        return ResponseEntity.ok(AcceptedSubmissionHistoryResponse.from(history));
     }
 
     /**

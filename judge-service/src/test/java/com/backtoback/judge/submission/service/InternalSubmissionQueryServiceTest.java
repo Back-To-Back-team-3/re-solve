@@ -23,7 +23,6 @@ import org.testcontainers.mysql.MySQLContainer;
 import com.backtoback.judge.global.config.PersistenceConfiguration;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
 import com.backtoback.judge.submission.domain.Submission.Context;
-import com.backtoback.judge.submission.dto.AcceptedSubmissionHistoryResponse;
 
 /** 실제 MySQL에서 회원별 일반 풀이 AC 이력의 조회 범위와 페이지 경계를 검증한다. */
 @DataJpaTest(properties = "spring.jpa.show-sql=false")
@@ -77,15 +76,13 @@ class InternalSubmissionQueryServiceTest {
         insertSubmission(8, 1, Context.PRACTICE, JudgeVerdict.AC);
 
         var first = queries.acceptedHistory(1, 0, 1);
-        assertThat(first.items()).extracting(AcceptedSubmissionHistoryResponse.Item::submissionId).containsExactly("1");
-        assertThat(first.nextCursor()).isEqualTo("1");
+        assertThat(first.items()).extracting(AcceptedSubmissionSummary::id).containsExactly(1L);
+        assertThat(first.nextCursor()).isEqualTo(1L);
 
         insertSubmission(9, 1, Context.PRACTICE, JudgeVerdict.AC);
-        long after = Long.parseLong(first.nextCursor());
+        long after = first.nextCursor();
         var last = queries.acceptedHistory(1, after, 2);
-        assertThat(last.items())
-            .extracting(AcceptedSubmissionHistoryResponse.Item::submissionId)
-            .containsExactly("8", "9");
+        assertThat(last.items()).extracting(AcceptedSubmissionSummary::id).containsExactly(8L, 9L);
         assertThat(last.nextCursor()).isNull();
         assertThat(queries.acceptedHistory(1, after, 2)).isEqualTo(last);
 
@@ -104,16 +101,16 @@ class InternalSubmissionQueryServiceTest {
         insertSubmission(3, 1, Context.PRACTICE, JudgeVerdict.AC);
 
         var first = queries.acceptedHistory(1, 0, 1);
-        assertThat(first.items()).extracting(AcceptedSubmissionHistoryResponse.Item::submissionId).containsExactly("2");
-        assertThat(first.nextCursor()).isEqualTo("2");
+        assertThat(first.items()).extracting(AcceptedSubmissionSummary::id).containsExactly(2L);
+        assertThat(first.nextCursor()).isEqualTo(2L);
         jdbc.update("UPDATE submissions SET status='COMPLETED',verdict='AC' WHERE id=1");
 
-        var next = queries.acceptedHistory(1, Long.parseLong(first.nextCursor()), 2);
-        assertThat(next.items()).extracting(AcceptedSubmissionHistoryResponse.Item::submissionId).containsExactly("3");
+        var next = queries.acceptedHistory(1, first.nextCursor(), 2);
+        assertThat(next.items()).extracting(AcceptedSubmissionSummary::id).containsExactly(3L);
         assertThat(next.nextCursor()).isNull();
         assertThat(queries.acceptedHistory(1, 0, 3).items())
-            .extracting(AcceptedSubmissionHistoryResponse.Item::submissionId)
-            .containsExactly("1", "2", "3");
+            .extracting(AcceptedSubmissionSummary::id)
+            .containsExactly(1L, 2L, 3L);
     }
 
     /**
