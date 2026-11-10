@@ -27,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -116,6 +117,41 @@ class ProblemServiceApplicationTest {
 
     @Autowired
     private ProcessedEventCleanupScheduler processedCleanup;
+
+    @Autowired
+    private TaskScheduler taskScheduler;
+
+    /**
+     * 네 정리 작업이 실행 중이어도 예약한 발행 작업을 시작할 수 있는지 확인한다.
+     *
+     * @throws InterruptedException 예약 작업을 기다리는 중 인터럽트된 경우
+     */
+    @Test
+    @DisplayName("모든 정리 작업이 실행 중이어도 Outbox 발행은 시작할 수 있다")
+    void schedulerCanStartRelayWhileCleanupRuns() throws InterruptedException {
+        var cleanupStarted = new CountDownLatch(4);
+        var finishCleanup = new CountDownLatch(1);
+        var relayStarted = new CountDownLatch(1);
+        try {
+            for (int job = 0; job < 4; job++) {
+                taskScheduler.schedule(() -> {
+                    cleanupStarted.countDown();
+                    try {
+                        finishCleanup.await();
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                    }
+                }, clock.instant());
+            }
+            assertThat(cleanupStarted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            taskScheduler.schedule(relayStarted::countDown, clock.instant());
+
+            assertThat(relayStarted.await(5, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            finishCleanup.countDown();
+        }
+    }
 
     @BeforeEach
     void prepareLockProbe() {
