@@ -42,6 +42,7 @@ class ValidationSchedulerTest {
         given(clock.instant()).willAnswer(call -> now.get());
         given(transactionManager.getDataSource()).willReturn(dataSource);
         given(dataSource.getConnectionTimeout()).willReturn(2000L);
+        given(dataSource.getValidationTimeout()).willReturn(1000L);
         given(transactionManager.getTransaction(any(TransactionDefinition.class))).willAnswer(call -> {
             TransactionSynchronizationManager.unbindResourceIfPossible(dataSource);
             var connection = new ConnectionHolder(mock(java.sql.Connection.class));

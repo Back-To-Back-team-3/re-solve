@@ -7,6 +7,7 @@ spring:
     password: ${DB_PASSWORD}
     hikari:
       connection-timeout: 2000
+      validation-timeout: 1000
   jpa:
     open-in-view: false
     show-sql: false

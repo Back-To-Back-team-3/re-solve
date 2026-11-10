@@ -104,6 +104,7 @@ class JudgeServiceApplicationTests {
             return false;
         }, Runnable::run, Clock.systemUTC(), transactionManager);
         assertThat(dataSource.getConnectionTimeout()).isEqualTo(2000);
+        assertThat(dataSource.getValidationTimeout()).isEqualTo(1000);
         try (var connection = dataSource.getConnection()) {
             assertThat(connection.isClosed()).isFalse();
             long started = System.nanoTime();

@@ -41,11 +41,12 @@ class JudgeWorkSchedulerTest {
     @Mock
     private HikariDataSource dataSource;
 
-    /** 운영과 같은 연결 풀 대기 상한을 설정한다. */
+    /** 운영과 같은 연결 대기·유효성 검사 상한을 설정한다. */
     @BeforeEach
     void configurePool() {
         given(transactionManager.getDataSource()).willReturn(dataSource);
         given(dataSource.getConnectionTimeout()).willReturn(2000L);
+        given(dataSource.getValidationTimeout()).willReturn(1000L);
     }
 
     /** 테스트 스레드에 연결한 JDBC 자원을 해제한다. */
@@ -54,9 +55,9 @@ class JudgeWorkSchedulerTest {
         TransactionSynchronizationManager.unbindResourceIfPossible(dataSource);
     }
 
-    /** 남은 예산을 각 트랜잭션에 적용하고 연결 대기까지 확보할 수 없으면 새 회수를 시작하지 않는지 확인한다. */
+    /** 남은 예산으로 연결 확보·유효성 검사·쿼리를 모두 시작할 수 있는지 확인한다. */
     @Test
-    @DisplayName("연결 대기와 쿼리 시간을 확보할 수 없으면 다음 회수 트랜잭션을 시작하지 않는다")
+    @DisplayName("연결 검사까지 포함해 4초 미만이 남으면 다음 회수 트랜잭션을 시작하지 않는다")
     void limitsRecoveryByRemainingBudget() {
         var elapsed = new AtomicLong();
         given(transactionManager.getTransaction(any(TransactionDefinition.class))).willAnswer(call -> {
@@ -64,10 +65,10 @@ class JudgeWorkSchedulerTest {
             return new SimpleTransactionStatus();
         });
         given(recoverOne.getAsBoolean()).willAnswer(call -> {
-            elapsed.set(Duration.ofSeconds(9).toNanos());
+            elapsed.set(Duration.ofSeconds(8).toNanos());
             return true;
         }).willAnswer(call -> {
-            elapsed.set(Duration.ofMillis(9100).toNanos());
+            elapsed.set(Duration.ofMillis(8100).toNanos());
             return true;
         });
         var scheduler
@@ -84,7 +85,7 @@ class JudgeWorkSchedulerTest {
 
         var definitions = ArgumentCaptor.forClass(TransactionDefinition.class);
         verify(transactionManager, times(2)).getTransaction(definitions.capture());
-        assertThat(definitions.getAllValues()).extracting(TransactionDefinition::getTimeout).containsExactly(12, 3);
+        assertThat(definitions.getAllValues()).extracting(TransactionDefinition::getTimeout).containsExactly(12, 4);
         assertThat(definitions.getAllValues())
             .extracting(TransactionDefinition::getPropagationBehavior)
             .containsOnly(TransactionDefinition.PROPAGATION_REQUIRES_NEW);

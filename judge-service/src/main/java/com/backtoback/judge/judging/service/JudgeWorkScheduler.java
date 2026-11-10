@@ -121,9 +121,9 @@ public class JudgeWorkScheduler {
             var pool = (HikariDataSource)dataSource;
             for (int count = 0; count < 100; count++) {
                 long remaining = deadline - nanoTime.getAsLong();
-                long connectionWait = TimeUnit.MILLISECONDS.toNanos(pool.getConnectionTimeout());
-                // 연결 대기와 JDBC가 사용할 최소 1초를 이번 회차의 예산에서 확보한다.
-                if (remaining < connectionWait + TimeUnit.SECONDS.toNanos(1)) {
+                long acquisitionMillis = pool.getConnectionTimeout() + pool.getValidationTimeout();
+                // Hikari는 풀 대기 후에 별도 제한시간으로 연결을 검사한다.
+                if (remaining < TimeUnit.MILLISECONDS.toNanos(acquisitionMillis) + TimeUnit.SECONDS.toNanos(1)) {
                     return;
                 }
                 int timeoutSeconds = (int)TimeUnit.NANOSECONDS.toSeconds(remaining);
