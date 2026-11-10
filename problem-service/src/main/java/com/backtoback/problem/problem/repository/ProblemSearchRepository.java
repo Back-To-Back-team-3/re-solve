@@ -1,6 +1,7 @@
 package com.backtoback.problem.problem.repository;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
@@ -17,6 +18,14 @@ import lombok.RequiredArgsConstructor;
 @Repository
 @RequiredArgsConstructor
 public class ProblemSearchRepository {
+    private static final String PUBLIC_CURRENT_REVISION = """
+         FROM problems p JOIN problem_revisions r ON r.problem_id=p.id
+         WHERE p.scope='GENERAL' AND p.visibility='PUBLIC'
+         AND r.revision_number=(SELECT MAX(candidate.revision_number) FROM problem_revisions candidate
+             WHERE candidate.problem_id=p.id AND EXISTS (SELECT 1 FROM problem_validations validation
+                 WHERE validation.problem_revision_id=candidate.id AND validation.result_status='PASSED'))
+        """;
+
     private final NamedParameterJdbcTemplate jdbc;
 
     /**
@@ -28,13 +37,7 @@ public class ProblemSearchRepository {
      */
     public Page<Long> search(long member, ProblemSearchRequest input) {
         var filter = input.normalized();
-        var sql = new StringBuilder("""
-             FROM problems p JOIN problem_revisions r ON r.problem_id=p.id
-             WHERE p.scope='GENERAL' AND p.visibility='PUBLIC'
-             AND r.revision_number=(SELECT MAX(candidate.revision_number) FROM problem_revisions candidate
-                 WHERE candidate.problem_id=p.id AND EXISTS (SELECT 1 FROM problem_validations validation
-                     WHERE validation.problem_revision_id=candidate.id AND validation.result_status='PASSED'))
-            """);
+        var sql = new StringBuilder(PUBLIC_CURRENT_REVISION);
         Map<String, Object> params = new HashMap<>();
         if (filter.keyword() != null && !filter.keyword().isBlank()) {
             sql.append(" AND LOCATE(:keyword, r.title)>0");
@@ -76,5 +79,41 @@ public class ProblemSearchRepository {
                     Long.class
                 );
         return new PageImpl<>(ids, PageRequest.of(filter.page(), filter.size()), total);
+    }
+
+    /**
+     * 태그를 가진 현재 회차 중 난이도마다 한 문제를 무작위로 조회한다.
+     *
+     * @param tagId 현재 회차에 연결된 태그 ID
+     * @return 난이도별 후보 목록
+     */
+    public List<DiagnosisCandidate> findDiagnosisCandidates(long tagId) {
+        return jdbc
+            .query(
+                """
+                    SELECT difficulty, problem_id, revision_id, title
+                    FROM (
+                        SELECT r.difficulty, p.id AS problem_id, r.id AS revision_id, r.title,
+                            ROW_NUMBER() OVER (PARTITION BY r.difficulty ORDER BY RAND()) AS rank_in_difficulty
+                    """ + PUBLIC_CURRENT_REVISION + """
+                        AND r.difficulty BETWEEN 1 AND 3
+                        AND EXISTS (SELECT 1 FROM problem_revision_tags t
+                            WHERE t.problem_revision_id=r.id AND t.tag_id=:tagId)
+                    ) ranked
+                    WHERE rank_in_difficulty=1
+                    ORDER BY difficulty
+                    """,
+                Map.of("tagId", tagId),
+                (row, index) -> new DiagnosisCandidate(
+                    row.getInt("difficulty"),
+                    row.getLong("problem_id"),
+                    row.getLong("revision_id"),
+                    row.getString("title")
+                )
+            );
+    }
+
+    /** 진단에 출제 가능한 고정 회차. */
+    public record DiagnosisCandidate(int difficulty, long problemId, long revisionId, String title) {
     }
 }
