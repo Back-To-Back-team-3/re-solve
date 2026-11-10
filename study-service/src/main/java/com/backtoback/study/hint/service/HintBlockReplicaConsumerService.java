@@ -53,6 +53,10 @@ public class HintBlockReplicaConsumerService {
         LocalDateTime startsAt = toLocalDateTime(payload.startsAt());
         LocalDateTime endsAt = toLocalDateTime(payload.endsAt());
 
+        if (payload.problemIds() == null) {
+            log.warn("{} problemIds 누락 — 처리 건너뜀 eventId={}", payload.eventType(), payload.eventId());
+            return;
+        }
         for (String problemIdStr : payload.problemIds()) {
             hintBlockReplicaRepository
                 .insertIgnore(
@@ -104,6 +108,10 @@ public class HintBlockReplicaConsumerService {
             return;
         }
 
+        if (payload.targetMemberIds() == null || payload.problems() == null) {
+            log.warn("ExamUpdated targetMemberIds 또는 problems 누락 — 처리 건너뜀 eventId={}", payload.eventId());
+            return;
+        }
         hintBlockReplicaRepository.deleteByContextTypeAndContextId(HintBlockContextType.EXAM, examId);
 
         LocalDateTime startsAt = toLocalDateTime(payload.startsAt());
@@ -165,6 +173,10 @@ public class HintBlockReplicaConsumerService {
         LocalDateTime startsAt = toLocalDateTime(payload.startsAt());
         LocalDateTime endsAt = toLocalDateTime(payload.endsAt());
 
+        if (payload.problemIds() == null) {
+            log.warn("DiagnosisStarted problemIds 누락 — 처리 건너뜀 eventId={}", payload.eventId());
+            return;
+        }
         for (String problemIdStr : payload.problemIds()) {
             hintBlockReplicaRepository
                 .insertIgnore(
