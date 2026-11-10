@@ -4010,7 +4010,7 @@
               "verdict": null,
               "maxTimeMs": null,
               "maxMemoryKb": null,
-              "submittedAt": "2026-09-28T10:00:00+09:00"
+              "submittedAt": "2026-09-28T10:00:00.000000+09:00"
             }
           ],
           "page": 0, 
@@ -4025,6 +4025,7 @@
     - 문제 제목은 저장하지 않는다. 화면은 문제 서비스 조회로 채운다.
     - 시험·진단의 `verdict`·`maxTimeMs`·`maxMemoryKb`는 목록에서 항상 `null`이다. 판정은 시험 결과 또는 진단 상세 화면에서 각 문맥의 공개 정책에 따라 확인한다.
     - `contextId`(string 또는 null)는 상세 화면 연결용이다. 시험은 시험 ID, 진단은 진단 ID, 일반 풀이는 `null`을 반환한다.
+    - 시험 제출의 `submittedAt`은 원래 접수 시각을 마이크로초 6자리로 반환한다(§0.1).
 
 #### 3.1.5 제출 코드 조회
 
