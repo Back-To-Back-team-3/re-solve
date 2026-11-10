@@ -10,6 +10,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
@@ -119,15 +120,30 @@ public class JudgeMessagingConfiguration {
     }
 
     /**
-     * 작업 실행과 분리한 스레드에서 선점 요청과 기한 초과 종결 주기를 관리한다.
+     * 회수 작업과 분리해 채점 선점과 공통 예약 작업의 주기를 관리한다.
      *
-     * @return 검증 주기 제어용 스케줄러
+     * @return 채점 선점과 공통 예약 작업에 사용할 기본 스케줄러
      */
     @Bean
+    @Primary
     public ThreadPoolTaskScheduler judgeValidationScheduler() {
         var scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(2);
         scheduler.setThreadNamePrefix("judge-validation-schedule-");
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
+    /**
+     * 기한 초과·임대 만료·토큰 회수 작업을 채점 선점과 다른 스레드에서 실행한다.
+     *
+     * @return 회수 전용 스케줄러
+     */
+    @Bean
+    public ThreadPoolTaskScheduler judgeRecoveryScheduler() {
+        var scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(2);
+        scheduler.setThreadNamePrefix("judge-recovery-schedule-");
         scheduler.setRemoveOnCancelPolicy(true);
         return scheduler;
     }

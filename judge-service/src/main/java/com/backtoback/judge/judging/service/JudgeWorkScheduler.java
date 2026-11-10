@@ -102,7 +102,7 @@ public class JudgeWorkScheduler {
     /** 실행 스레드 점유나 Judge0 장애와 독립적으로 기한 초과·임대 만료 작업을 건별 트랜잭션으로 회수한다. */
     @Scheduled(
         fixedDelay = 30000,
-        scheduler = "judgeValidationScheduler"
+        scheduler = "judgeRecoveryScheduler"
     )
     public void expire() {
         recoverBatch(recovery);

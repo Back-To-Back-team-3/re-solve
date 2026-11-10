@@ -38,7 +38,7 @@ public class SubmissionScheduler extends JudgeWorkScheduler {
     @Override
     @Scheduled(
         fixedDelay = 30000,
-        scheduler = "judgeValidationScheduler"
+        scheduler = "judgeRecoveryScheduler"
     )
     @SchedulerLock(
         name = "JudgeLeaseRecoveryScheduler",
@@ -51,7 +51,7 @@ public class SubmissionScheduler extends JudgeWorkScheduler {
     /** 임대 만료와 독립적으로 Judge0 생성 응답 유실을 회수한다. (스케줄러 §3.3) */
     @Scheduled(
         fixedDelay = 30000,
-        scheduler = "judgeValidationScheduler"
+        scheduler = "judgeRecoveryScheduler"
     )
     @SchedulerLock(
         name = "JudgeTokenRecoveryScheduler",
