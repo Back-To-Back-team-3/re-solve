@@ -1,6 +1,6 @@
 # 이벤트 계약서 v1.0
 
-> 최종 수정일: 2026.10.07(수)
+> 최종 수정일: 2026.11.11(화)
 >
 
 ---
@@ -115,6 +115,7 @@ flowchart LR
         QI[integration-queue]
         QX[exam-submission-queue]
         QV[problem-validation-queue]
+        QA[ai-queue]
     end
     M --> TM
     P --> TP
@@ -131,7 +132,7 @@ flowchart LR
     TP --> QS & QC
     TJ --> QM & QP & QC & QS & QN & QI
     TC --> QP & QS & QN
-    TS --> QM & QP & QC & QN
+    TS --> QM & QP & QC & QN & QA
     TI --> QN
 ```
 
@@ -160,6 +161,7 @@ flowchart LR
 | `study-queue` | study | 16 | 120초 | 5회 |
 | `notification-queue` | notification | 19 | 120초 | 5회 |
 | `integration-queue` | integration | 2 | 120초 | 5회 |
+| `ai-queue` | ai | 1 | 120초 | 5회 |
 - `exam-submission-queue`는 SSE-SQS(또는 KMS) 암호화와 judge 전용 수신 권한을 적용한다(코드 포함).
 - 구독 이벤트 목록은 §5 매트릭스가 원본이다. 필터 정책은 매트릭스에서 생성한다.
 
@@ -216,6 +218,7 @@ flowchart LR
 | S6 | `AssignmentDeadlineApproaching` v1 | study | notification | SNS | 마감 24시간 이내 1회 | — | 확정 |
 | S7 | `AssignmentIncompleteRepeated` v1 | study | notification | SNS | 연속 2회 `INCOMPLETE` 발견 | — | 확정 |
 | S8 | `HintReady` v1 | study (AI 모듈) | notification, member(확정 필요) | SNS | 힌트 종결 (`READY`·`FALLBACK`·`BLOCKED`) | — | 확정 |
+| S9 | `HintRequested` v1 | study | ai | SNS | `hint_requests` REQUESTED INSERT와 같은 트랜잭션에서 Outbox 기록. aggregate = `hintRequestId` | — | 확정 |
 | I1 | `GitHubSyncFailed` v1 | integration | notification | SNS | Sync Job 최종 `FAILED` | — | 확정 |
 - API B.2와 다른 행: `StudyMemberJoined` 구독에서 notification 제외(대응 알림 유형 없음, API 7.0), `ContestParticipantRegistered`·`Canceled` 구독에서 notification 제외(대회는 `ContestStarted`로 알림). `MemberUpdated`·`MemberSuspended`의 "전 서비스"는 `member_replicas` 보유 서비스(problem·contest·study, ERD §3)로 한정했다. 근거는 §8.1.
 
@@ -918,6 +921,26 @@ flowchart LR
 | member (확정 필요) | `READY`·`FALLBACK`이면 `hint_usage_replicas` `(memberId, problemId)` INSERT IGNORE(최초 시각 유지) → 해당 문제 AC 점수 1/2로 성취도 재계산 |
 - 순서 주의: 힌트 사용이 AC보다 늦게 와도 결과가 같도록 member는 성취도를 매번 재계산한다. 힌트 사용 시각과 AC 접수 시각의 선후로 1/2점 여부를 가를지는 E·D 확정 필요(§8.2).
 
+#### S9 `HintRequested` v1
+
+- **발행:** `hint_requests` REQUESTED INSERT와 같은 트랜잭션에서 Outbox 기록. aggregate = `hintRequestId`.
+- **경로:** SNS `study-events` 팬아웃 → SQS `ai-queue`.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `hintRequestId` | string | Y | `hint_requests.id` |
+| `memberId` | string | Y |  |
+| `problemId` | string | Y |  |
+| `problemRevisionId` | string | Y | 캐시 키 `hint:cache:{problemRevisionId}:{level}` |
+| `level` | integer (1~3) | Y | 1=접근방향 2=핵심아이디어 3=풀이절차 |
+| `problemTitle` | string | Y |  |
+| `problemBody` | string | Y | Markdown 원문. LLM 프롬프트 입력 |
+| `problemTags` | string[] | Y | 알고리즘 태그 목록. 비어 있으면 `[]` |
+
+| 소비자 | 처리 |
+| --- | --- |
+| ai | LLM 비동기 힌트 생성 — 캐시 조회 후 미적중 시 생성 → `HintReady` 발행 |
+
 ### 4.6 integration (담당 A)
 
 #### I1 `GitHubSyncFailed` v1
@@ -933,49 +956,50 @@ flowchart LR
 
 이 표가 SNS 구독 필터 정책의 원본이다. ● = 구독, ○ = 구독(확정 필요), 빈칸 = 구독 안 함.
 
-| 이벤트 | judge | member | problem | contest | study | notification | integration |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `MemberUpdated` |  |  | ● | ● | ● |  |  |
-| `MemberSuspended` |  |  | ● | ● | ● |  |  |
-| `MemberWithdrawn` |  |  | ● | ● | ● | ● | ● |
-| `LearningProfileUpdated` |  |  |  |  | ● |  |  |
-| `TagLevelChanged` |  |  |  |  |  | ● |  |
-| `DiagnosisSubmissionRequested` | ● |  |  |  |  |  |  |
-| `DiagnosisStarted` |  |  |  |  | ● |  |  |
-| `DiagnosisClosed` |  |  |  |  | ● |  |  |
-| `ProblemStateChanged` v1 / v2 |  |  |  | ● | ● |  |  |
-| `ProblemValidationRequested` v1 | ● |  |  |  |  |  |  |
-| `ProblemValidationCompleted` v1 |  |  | ● |  |  |  |  |
-| `SubmissionJudged` |  | ● | ● |  | ● | ● | ● |
-| `ExamSubmissionJudged` |  |  |  | ● |  |  |  |
-| `ContestSubmissionJudged` |  |  |  | ● |  |  |  |
-| `SubmissionFailed` |  | ● (진단) |  | ● |  | ● |  |
-| `DiagnosisSubmissionJudged` |  | ● |  |  |  |  |  |
-| `ExamSubmissionRequested` | ● |  |  |  |  |  |  |
-| `ContestSubmissionRequested` | ● |  |  |  |  |  |  |
-| `ExamParticipantRegistered` |  |  |  |  | ● | ● |  |
-| `ContestParticipantRegistered` |  |  |  |  | ● |  |  |
-| `ExamParticipantCanceled` |  |  |  |  | ● | ● |  |
-| `ContestParticipantCanceled` |  |  |  |  | ● |  |  |
-| `ExamUpdated` |  |  |  |  | ● | ● |  |
-| `ExamStarted` |  |  |  |  | ● |  |  |
-| `ExamClosed` |  |  |  |  | ● |  |  |
-| `ExamCanceled` |  |  |  |  | ● | ● |  |
-| `ExamFinalized` |  |  |  |  |  | ● |  |
-| `ContestStarted` |  |  |  |  |  | ● |  |
-| `ContestEnded` |  |  | ● |  | ● |  |  |
-| `ContestCanceled` |  |  |  |  | ● | ● |  |
-| `ContestFinalized` |  |  |  |  |  | ● |  |
-| `StudyMemberJoined` |  |  | ● | ● |  |  |  |
-| `StudyMemberLeft` |  |  | ● | ● |  | ● |  |
-| `StudyApplicationDecided` |  |  |  |  |  | ● |  |
-| `StudyClosed` |  |  |  | ● |  |  |  |
-| `AssignmentPublished` |  |  |  |  |  | ● |  |
-| `AssignmentDeadlineApproaching` |  |  |  |  |  | ● |  |
-| `AssignmentIncompleteRepeated` |  |  |  |  |  | ● |  |
-| `HintReady` |  | ○ |  |  |  | ● |  |
-| `GitHubSyncFailed` |  |  |  |  |  | ● |  |
-| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 18 | 19 | 2 |
+| 이벤트 | judge | member | problem | contest | study | notification | integration | ai |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `MemberUpdated` |  |  | ● | ● | ● |  |  |  |
+| `MemberSuspended` |  |  | ● | ● | ● |  |  |  |
+| `MemberWithdrawn` |  |  | ● | ● | ● | ● | ● |  |
+| `LearningProfileUpdated` |  |  |  |  | ● |  |  |  |
+| `TagLevelChanged` |  |  |  |  |  | ● |  |  |
+| `DiagnosisSubmissionRequested` | ● |  |  |  |  |  |  |  |
+| `DiagnosisStarted` |  |  |  |  | ● |  |  |  |
+| `DiagnosisClosed` |  |  |  |  | ● |  |  |  |
+| `ProblemStateChanged` v1 / v2 |  |  |  | ● | ● |  |  |  |
+| `ProblemValidationRequested` v1 | ● |  |  |  |  |  |  |  |
+| `ProblemValidationCompleted` v1 |  |  | ● |  |  |  |  |  |
+| `SubmissionJudged` |  | ● | ● |  | ● | ● | ● |  |
+| `ExamSubmissionJudged` |  |  |  | ● |  |  |  |  |
+| `ContestSubmissionJudged` |  |  |  | ● |  |  |  |  |
+| `SubmissionFailed` |  | ● (진단) |  | ● |  | ● |  |  |
+| `DiagnosisSubmissionJudged` |  | ● |  |  |  |  |  |  |
+| `ExamSubmissionRequested` | ● |  |  |  |  |  |  |  |
+| `ContestSubmissionRequested` | ● |  |  |  |  |  |  |  |
+| `ExamParticipantRegistered` |  |  |  |  | ● | ● |  |  |
+| `ContestParticipantRegistered` |  |  |  |  | ● |  |  |  |
+| `ExamParticipantCanceled` |  |  |  |  | ● | ● |  |  |
+| `ContestParticipantCanceled` |  |  |  |  | ● |  |  |  |
+| `ExamUpdated` |  |  |  |  | ● | ● |  |  |
+| `ExamStarted` |  |  |  |  | ● |  |  |  |
+| `ExamClosed` |  |  |  |  | ● |  |  |  |
+| `ExamCanceled` |  |  |  |  | ● | ● |  |  |
+| `ExamFinalized` |  |  |  |  |  | ● |  |  |
+| `ContestStarted` |  |  |  |  |  | ● |  |  |
+| `ContestEnded` |  |  | ● |  | ● |  |  |  |
+| `ContestCanceled` |  |  |  |  | ● | ● |  |  |
+| `ContestFinalized` |  |  |  |  |  | ● |  |  |
+| `StudyMemberJoined` |  |  | ● | ● |  |  |  |  |
+| `StudyMemberLeft` |  |  | ● | ● |  | ● |  |  |
+| `StudyApplicationDecided` |  |  |  |  |  | ● |  |  |
+| `StudyClosed` |  |  |  | ● |  |  |  |  |
+| `AssignmentPublished` |  |  |  |  |  | ● |  |  |
+| `AssignmentDeadlineApproaching` |  |  |  |  |  | ● |  |  |
+| `AssignmentIncompleteRepeated` |  |  |  |  |  | ● |  |  |
+| `HintReady` |  | ○ |  |  |  | ● |  |  |
+| `HintRequested` |  |  |  |  |  |  |  | ● |
+| `GitHubSyncFailed` |  |  |  |  |  | ● |  |  |
+| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 18 | 19 | 2 | 1 |
 
 ### 5.1 소비자 구현 체크리스트
 

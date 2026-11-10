@@ -30,6 +30,9 @@ repositories {
 }
 
 dependencies {
+    // Common modules
+    implementation project(':common-event')
+
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
@@ -45,6 +48,17 @@ dependencies {
 
     // Redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // AWS Messaging (SQS)
+    implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
+
+    // Spring AI
+    implementation platform('org.springframework.ai:spring-ai-bom:2.0.0')
+    implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+
+    // Resilience4j
+    implementation 'io.github.resilience4j:resilience4j-circuitbreaker:2.3.0'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok'
