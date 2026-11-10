@@ -3,12 +3,15 @@ package com.backtoback.judge.judging.service.execution.java;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import javax.tools.ToolProvider;
@@ -401,6 +404,62 @@ class JavaExecutionProcessTest {
         assertThat(result.exitCode()).isNotZero();
         assertThat(result.stdout()).isEmpty();
         assertThat(result.stderr()).contains("IllegalStateException");
+    }
+
+    /**
+     * 진단 기준 데이터의 정답·오답 코드를 Java 실행 코드로 만들어 실제 반환값을 비교한다.
+     *
+     * @param fixture 기존 골든셋 디렉터리
+     * @throws Exception 기준 파일 읽기, 컴파일 또는 실행에 실패한 경우
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "p1-sum",
+            "p2-array-max",
+            "p3-palindrome"
+        }
+    )
+    @DisplayName("진단 기준 데이터의 정답은 모든 케이스를 통과하고 오답은 한 건 이상 실패한다")
+    void classifiesDiagnosisGoldenFixtures(String fixture) throws Exception {
+        var spec = mapper.readValue(goldenFile(fixture, "spec.json"), FunctionSpec.class);
+        var cases = mapper.readTree(goldenFile(fixture, "testcases.json"));
+        var accepted = goldenFile(fixture, "ac.java");
+        var wrong = goldenFile(fixture, "wa.java");
+        int wrongCases = 0;
+        for (var testCase : cases) {
+            var arguments = new LinkedHashMap<String, String>();
+            testCase
+                .get("arguments")
+                .properties()
+                .forEach(field -> arguments.put(field.getKey(), field.getValue().stringValue()));
+            var expected = mapper.readTree(testCase.get("expected").stringValue());
+            var acceptedResult = execute(generator.generate(spec, accepted, arguments));
+            assertThat(acceptedResult.exitCode()).as(acceptedResult.stderr()).isZero();
+            assertThat(mapper.readTree(acceptedResult.stdout())).isEqualTo(expected);
+            var wrongResult = execute(generator.generate(spec, wrong, arguments));
+            assertThat(wrongResult.exitCode()).as(wrongResult.stderr()).isZero();
+            if (!expected.equals(mapper.readTree(wrongResult.stdout()))) {
+                wrongCases++;
+            }
+        }
+        assertThat(wrongCases).isPositive();
+    }
+
+    /**
+     * 테스트 클래스패스에서 골든셋 원문을 읽는다.
+     *
+     * @param fixture 골든셋 디렉터리
+     * @param filename 원문 파일명
+     * @return UTF-8 원문
+     * @throws IOException 원문을 읽을 수 없는 경우
+     */
+    private String goldenFile(String fixture, String filename) throws IOException {
+        try (
+            var input = Objects.requireNonNull(getClass().getResourceAsStream("/golden/" + fixture + "/" + filename))
+        ) {
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     /**
