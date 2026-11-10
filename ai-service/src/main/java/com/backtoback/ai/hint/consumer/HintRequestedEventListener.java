@@ -53,7 +53,7 @@ public class HintRequestedEventListener {
 
             HintRequestedPayload event = objectMapper.treeToValue(payload, HintRequestedPayload.class);
             log.info("HintRequested 수신 hintRequestId={} level={}", event.hintRequestId(), event.level());
-            // TODO(D-10-7): 캐시 조회 후 미적중 시 LLM 힌트 생성 → HintReady 발행
+            // TODO: 캐시 조회 후 미적중 시 LLM 힌트 생성 → HintReady 발행
         } finally {
             MDC.remove(MDC_EVENT_ID);
             MDC.remove(MDC_EVENT_TYPE);

@@ -939,7 +939,7 @@ flowchart LR
 
 | 소비자 | 처리 |
 | --- | --- |
-| ai | LLM 비동기 힌트 생성 — 캐시 조회 후 미적중 시 생성 → `HintReady` 발행 (D-10-7) |
+| ai | LLM 비동기 힌트 생성 — 캐시 조회 후 미적중 시 생성 → `HintReady` 발행 |
 
 ### 4.6 integration (담당 A)
 
