@@ -4,7 +4,6 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -19,8 +18,6 @@ import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.domain.JudgeLanguage;
-import com.backtoback.judge.judging.repository.ExecutionRuntimeRepository;
-import com.backtoback.judge.judging.service.JudgeLanguageService;
 import com.backtoback.judge.submission.client.SubmissionDependencyClient;
 import com.backtoback.judge.submission.dto.ProblemExecutionProfileResponse;
 import com.backtoback.judge.submission.dto.ProblemValidationResponse;
@@ -37,8 +34,7 @@ import lombok.RequiredArgsConstructor;
 public class SubmissionAcceptanceService {
     private final SubmissionAcceptanceStore store;
     private final SubmissionDependencyClient dependencies;
-    private final ExecutionRuntimeRepository runtimes;
-    private final JudgeLanguageService languages;
+    private final SubmissionAccessService access;
     private final SubmissionRateLimiter rateLimiter;
     private final Clock clock;
 
@@ -71,15 +67,7 @@ public class SubmissionAcceptanceService {
         LocalDateTime submittedAt
             = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
         JudgeLanguage.fromCode(request.language());
-        var status = dependencies.status(memberId);
-        require(status != null && Long.toString(memberId).equals(status.memberId()) && status.status() != null);
-        if ("SUSPENDED".equals(status.status())) {
-            throw new JudgeException(JudgeErrorCode.MEMBER_SUSPENDED);
-        }
-        if ("WITHDRAWN".equals(status.status())) {
-            throw new JudgeException(CommonErrorCode.AUTH_TOKEN_INVALID);
-        }
-        require("ACTIVE".equals(status.status()));
+        access.checkMember(memberId);
         long problemId = SubmissionCreateRequest.parseId(request.problemId());
         long revisionId = SubmissionCreateRequest.parseId(request.problemRevisionId());
         try {
@@ -94,130 +82,21 @@ public class SubmissionAcceptanceService {
             }
             throw exception;
         }
-        var validation = dependencies.validation(problemId, revisionId);
-        validateProblem(validation, request);
-        checkLevels(memberId, validation);
+        var validation = access.checkProblem(memberId, problemId, revisionId);
         Map<String, ProblemExecutionProfileResponse> profiles
-            = profiles(validation.supportedLanguages(), validation.executionProfiles());
+            = access.profiles(validation.supportedLanguages(), validation.executionProfiles());
         var selected = profiles.get(request.language());
         if (selected == null) {
             throw new JudgeException(JudgeErrorCode.UNSUPPORTED_LANGUAGE);
         }
         var tests = tests(validation, request, profiles);
-        var runtime
-            = runtimes
-                .findSnapshot(selected.runtimeKey())
-                .orElseThrow(() -> new JudgeException(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE))
-                .toRuntime();
-        if (!request.language().equals(runtime.language())) {
-            throw new JudgeException(JudgeErrorCode.SUBMISSION_RUNTIME_UNAVAILABLE);
-        }
-        // 참고용 runnerVersion은 현재 생성기와 비교하지 않는다.
-        runtime = languages.requireRuntime(request.language(), runtime);
+        var runtime = access.runtime(request.language(), selected);
         try {
             return store.accept(memberId, key, hash, request, submittedAt, runtime, tests);
         } catch (DataIntegrityViolationException | ObjectOptimisticLockingFailureException exception) {
             // 실패한 저장 트랜잭션이 종료된 뒤 새 조회에서 동시 승자의 응답을 복원한다.
             return store.findReusable(memberId, key, hash).orElseThrow(() -> exception);
         }
-    }
-
-    /**
-     * 문제·회차 소속과 일반 공개 조건 및 테스트 식별자를 확인한다.
-     *
-     * @param value 사전 검증 응답
-     * @param request 접수 원본
-     * @throws JudgeException {@code PROBLEM_NOT_AVAILABLE}: 제출할 수 없거나 존재하지 않는 문제인 경우;
-     *     {@code COMMON_DEPENDENCY_UNAVAILABLE}: 내부 조회 실패 또는 응답 계약 불일치인 경우
-     */
-    private void validateProblem(ProblemValidationResponse value, SubmissionCreateRequest request) {
-        require(
-            value != null && request.problemId().equals(value.problemId())
-                && request.problemRevisionId().equals(value.problemRevisionId())
-        );
-        require(
-            Set.of("GENERAL", "EXAM_ONLY").contains(value.scope() == null ? "" : value.scope()) && Set
-                .of("PUBLIC", "PRIVATE", "ARCHIVED")
-                .contains(value.visibility() == null ? "" : value.visibility())
-        );
-        if (!"GENERAL".equals(value.scope()) || !"PUBLIC".equals(value.visibility())) {
-            throw new JudgeException(JudgeErrorCode.PROBLEM_NOT_AVAILABLE);
-        }
-        require(
-            value.difficulty() != null && value.difficulty() >= 1 && value.difficulty() <= 3 && value.tagIds() != null
-                && !value.tagIds().isEmpty() && value.totalCount() != null && value.totalCount() > 0
-                && value.testAssetIds() != null && value.totalCount() == value.testAssetIds().size()
-        );
-        Set<Long> ids = new HashSet<>();
-        for (String id : value.testAssetIds()) {
-            require(ids.add(internalId(id)));
-        }
-    }
-
-    /**
-     * 모든 문제 태그의 회원 레벨이 난이도를 충족하는지 검사한다.
-     *
-     * @param memberId 인증 회원 ID
-     * @param value 고정 문제 회차
-     * @throws JudgeException {@code LEVEL_PROBLEM_LOCKED}: 한 개 이상 태그의 회원 레벨이 난이도에 미달한 경우;
-     *     {@code COMMON_DEPENDENCY_UNAVAILABLE}: 내부 레벨 응답이 유효하지 않은 경우
-     */
-    private void checkLevels(long memberId, ProblemValidationResponse value) {
-        var response = dependencies.levels(memberId);
-        require(
-            response != null && Long.toString(memberId).equals(response.memberId()) && response.tagLevels() != null
-        );
-        Map<Long, Integer> levels = new HashMap<>();
-        for (var entry : response.tagLevels()) {
-            require(entry != null && entry.level() != null);
-            int level = switch (entry.level()) {
-                case "LV0" -> 0;
-                case "LV1" -> 1;
-                case "LV2" -> 2;
-                case "LV3", "MASTER" -> 3;
-                default -> -1;
-            };
-            require(level >= 0 && levels.putIfAbsent(internalId(entry.tagId()), level) == null);
-        }
-        Set<Long> tags = new HashSet<>();
-        for (String tag : value.tagIds()) {
-            long id = internalId(tag);
-            require(tags.add(id));
-            if (levels.getOrDefault(id, 0) < value.difficulty()) {
-                throw new JudgeException(JudgeErrorCode.LEVEL_PROBLEM_LOCKED);
-            }
-        }
-    }
-
-    /**
-     * 통과 언어와 일대일 대응하는 프로필을 검사한다.
-     *
-     * @param supported 통과 언어 목록
-     * @param profiles 통과 프로필 목록
-     * @return 언어별 프로필
-     * @throws JudgeException {@code COMMON_DEPENDENCY_UNAVAILABLE}: 내부 프로필 응답이 유효하지 않은 경우
-     */
-    private Map<String, ProblemExecutionProfileResponse> profiles(
-        List<String> supported,
-        List<ProblemExecutionProfileResponse> profiles
-    ) {
-        require(supported != null && profiles != null);
-        Set<String> codes = new HashSet<>();
-        for (String code : supported) {
-            require(code != null && Set.of("java", "python3", "cpp").contains(code) && codes.add(code));
-        }
-        Map<String, ProblemExecutionProfileResponse> result = new HashMap<>();
-        for (var profile : profiles) {
-            require(
-                profile != null && profile.language() != null && codes.contains(profile.language())
-                    && profile.runtimeKey() != null && profile.runtimeKey().matches("[0-9a-f]{64}")
-                    && profile.runnerVersion() != null && !profile.runnerVersion().isBlank()
-                    && profile.runnerVersion().length() <= 100
-                    && result.putIfAbsent(profile.language(), profile) == null
-            );
-        }
-        require(result.keySet().equals(codes));
-        return result;
     }
 
     /**
@@ -244,7 +123,7 @@ public class SubmissionAcceptanceService {
             data != null && request.problemId().equals(data.problemId())
                 && request.problemRevisionId().equals(data.problemRevisionId()) && data.cases() != null
                 && data.cases().size() == value.totalCount()
-                && profiles.equals(profiles(data.supportedLanguages(), data.executionProfiles()))
+                && profiles.equals(access.profiles(data.supportedLanguages(), data.executionProfiles()))
         );
         Set<Long> expected = new HashSet<>();
         for (String id : value.testAssetIds()) {

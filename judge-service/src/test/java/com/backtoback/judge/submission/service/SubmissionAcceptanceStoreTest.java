@@ -605,8 +605,7 @@ class SubmissionAcceptanceStoreTest {
             = new SubmissionAcceptanceService(
                 store,
                 dependencies,
-                runtimes,
-                languages,
+                new SubmissionAccessService(dependencies, runtimes, languages),
                 new SubmissionRateLimiter(realRedis),
                 clock
             );
@@ -666,8 +665,7 @@ class SubmissionAcceptanceStoreTest {
             = new SubmissionAcceptanceService(
                 store,
                 dependencies,
-                runtimes,
-                languages,
+                new SubmissionAccessService(dependencies, runtimes, languages),
                 new SubmissionRateLimiter(realRedis),
                 clock
             );
