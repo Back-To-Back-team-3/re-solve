@@ -63,6 +63,26 @@ REDIS_PASSWORD=
 REDIS_HOST=redis
 REDIS_PORT=6379
 
+# 🔐 인증 및 회원 이벤트 (member-service)
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_REDIRECT_URI=http://localhost:8080/api/v1/auth/github/callback
+FRONTEND_ORIGIN=http://localhost:8080
+JWT_SECRET=
+REFRESH_COOKIE_SECURE=true
+DEV_LOGIN_ENABLED=false
+MEMBER_MESSAGING_ENABLED=false
+MEMBER_EVENTS_TOPIC_ARN=
+MEMBER_EVENTS_CONSUMER_ENABLED=false
+MEMBER_QUEUE_URL=
+
+# 🏆 시험·대회 이벤트 (contest-service)
+CONTEST_EVENTS_PUBLISH_ENABLED=false
+CONTEST_EVENTS_TOPIC_ARN=
+JUDGE_SUBMISSION_QUEUE_URL=
+CONTEST_EVENTS_ENABLED=false
+CONTEST_QUEUE_URL=
+
 # 🔗 연동 (integration-service)
 # 필수 값: GitHub Access Token 암호화 키 (AES-256 GCM). Base64로 인코딩된 32바이트 키
 # 예: openssl rand -base64 32
@@ -152,12 +172,17 @@ GRAFANA_ADMIN_PASSWORD=
 - 활성화하면 기존 대기 작업도 실행되므로 Problem 검증 자료 API와 Judge0 주소·사용 언어 활성화 설정을 함께 준비한다. 별도의 실행기 ON/OFF 환경변수는 사용하지 않는다.
 - 실행 동시성·대기열 조회·기한 초과 종결 기준은 정책 및 상태 §3.5를 따른다. 비활성 기간에도 작업 기한을 연장하지 않으며, 다시 활성화했을 때 기한이 지난 작업은 실행하지 않고 종결한다.
 
+### Member 이벤트 발행·수신 연결
+
+- `MEMBER_MESSAGING_ENABLED=true`와 `MEMBER_EVENTS_TOPIC_ARN`(`member-events` SNS 토픽 ARN)으로 회원 이벤트 발행을 활성화한다.
+- `MEMBER_EVENTS_CONSUMER_ENABLED=true`와 `MEMBER_QUEUE_URL`(`member-queue` SQS 큐 URL)로 채점 이벤트 수신을 활성화한다. 활성화 전에 `member-queue`(+DLQ) 생성과 `judge-events` SNS 토픽 구독(필터 정책·Raw Message Delivery·큐 권한)을 먼저 준비한다.
+
 ### Contest 시험 이벤트 발행
 
 - `CONTEST_EVENTS_PUBLISH_ENABLED=true`로 공통 Outbox Relay를 활성화한다.
 - `CONTEST_EVENTS_TOPIC_ARN`은 시험 설정·참가·상태·확정 이벤트를 전달할 SNS 토픽 ARN이다.
 - `JUDGE_SUBMISSION_QUEUE_URL`은 `ExamSubmissionRequested`를 전달할 Judge 제출 SQS 큐 URL이다.
-- 발행을 활성화하면 두 목적지가 모두 필요하다. 소비 활성화는 기존 `CONTEST_EVENTS_ENABLED`로 설정한다.
+- 발행을 활성화하면 두 목적지가 모두 필요하다. 소비 활성화는 기존 `CONTEST_EVENTS_ENABLED`와 `CONTEST_QUEUE_URL`로 설정한다.
 
 ### Contest 시험 순위 캐시
 
