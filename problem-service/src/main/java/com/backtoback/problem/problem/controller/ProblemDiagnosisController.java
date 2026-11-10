@@ -1,12 +1,11 @@
 package com.backtoback.problem.problem.controller;
 
-import org.springframework.context.annotation.Conditional;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.backtoback.problem.problem.config.InternalProblemServiceCondition;
 import com.backtoback.problem.problem.dto.response.DiagnosisCandidatesResponse;
 import com.backtoback.problem.problem.service.ProblemReadStore;
 
@@ -15,7 +14,12 @@ import lombok.RequiredArgsConstructor;
 /** Member가 진단에 출제할 수 있는 문제의 고정 회차를 제공한다. */
 @RestController
 @Profile("!internal-stub")
-@Conditional(InternalProblemServiceCondition.class)
+@ConditionalOnProperty(
+    prefix = "problem.internal-api",
+    name = "enabled",
+    havingValue = "true",
+    matchIfMissing = true
+)
 @RequiredArgsConstructor
 public class ProblemDiagnosisController {
     private final ProblemReadStore store;

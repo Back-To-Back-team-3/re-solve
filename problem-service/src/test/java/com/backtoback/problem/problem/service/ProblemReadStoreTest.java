@@ -47,8 +47,6 @@ import com.backtoback.problem.problem.dto.response.ProblemSummaryListResponse;
 /** 실제 DB에서 통과 사용 회차 검색과 목적별 편입 요약을 검증한다. */
 @SpringBootTest(
     properties = {
-        "problem.internal-api.enabled=true",
-        "problem.internal-api.implementation=real",
         "problem.messaging.validation-queue-url=http://localhost:4566/000000000000/problem-validation-queue",
         "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
         "spring.cloud.aws.region.static=ap-northeast-2",
