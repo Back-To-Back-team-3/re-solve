@@ -61,18 +61,27 @@ class SeedDiagnosisProblemsTest(unittest.TestCase):
         self.assertEqual([call.args for call in request.call_args_list], [("/progress/1",)] * 4)
 
     @patch.object(seed.time, "sleep")
-    def test_poll_retries_when_gateway_closes_before_response(self, _sleep):
+    def test_poll_retries_when_gateway_closes_during_request(self, _sleep):
+        for sent_partial_body in (False, True):
+            with self.subTest(sent_partial_body=sent_partial_body):
+                self._assert_poll_retries_after_disconnect(sent_partial_body)
+
+    def _assert_poll_retries_after_disconnect(self, sent_partial_body):
         paths = []
+        body = b'{"data":{"status":"PASSED","resultApplied":true}}'
 
         class Gateway(BaseHTTPRequestHandler):
             def do_GET(self):
                 paths.append(self.path)
-                if len(paths) == 1:
+                first_request = len(paths) == 1
+                if not first_request or sent_partial_body:
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body[:8] if first_request else body)
+                    self.wfile.flush()
+                if first_request:
                     self.connection.shutdown(socket.SHUT_RDWR)
-                    return
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b'{"data":{"status":"PASSED","resultApplied":true}}')
 
             def log_message(self, *_):
                 pass

@@ -3,6 +3,7 @@
 
 import argparse
 import getpass
+from http.client import IncompleteRead
 import json
 from pathlib import Path
 import time
@@ -73,7 +74,7 @@ def wait_for_validation(request, progress_path, expected_status, deadline):
     while (remaining := deadline - time.monotonic()) > 0:
         try:
             progress = request(progress_path, timeout=min(REQUEST_TIMEOUT_SECONDS, remaining))
-        except (URLError, TimeoutError, ConnectionError) as error:
+        except (URLError, TimeoutError, ConnectionError, IncompleteRead) as error:
             if isinstance(error, HTTPError):
                 if error.code not in POLL_RETRY_STATUSES:
                     raise
@@ -172,7 +173,7 @@ def main():
 
     try:
         seed(request, str(args.tag_id), args.validation_attempts)
-    except (RuntimeError, URLError, TimeoutError, ConnectionError) as error:
+    except (RuntimeError, URLError, TimeoutError, ConnectionError, IncompleteRead) as error:
         if isinstance(error, HTTPError):
             error.close()
         parser.exit(1, f"{error}\n")
