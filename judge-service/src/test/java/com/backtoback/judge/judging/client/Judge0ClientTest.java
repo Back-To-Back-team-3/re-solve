@@ -432,7 +432,7 @@ class Judge0ClientTest {
                     "X-Auth-Token",
                     "",
                     Duration.ofSeconds(1),
-                    Duration.ofSeconds(1),
+                    Duration.ofSeconds(5),
                     new Languages(new Language(true), new Language(true), new Language(true))
                 )
             );

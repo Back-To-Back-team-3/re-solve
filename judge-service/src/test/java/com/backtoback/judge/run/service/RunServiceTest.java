@@ -179,7 +179,8 @@ class RunServiceTest {
                     List.of("1"),
                     function,
                     new Limits(2000, 7000, 8000, 64),
-                    cases
+                    cases,
+                    List.of()
                 )
             );
         when(client.create(any())).thenReturn(new JudgeExecutionCreateResponse("judge-token", runtime));
