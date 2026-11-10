@@ -9,10 +9,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.LongSupplier;
 
+import org.springframework.jdbc.datasource.ConnectionHolder;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.Assert;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,7 +29,7 @@ public class JudgeWorkScheduler {
     private final BooleanSupplier recovery;
     private final Executor executor;
     private final Clock clock;
-    private final PlatformTransactionManager transactionManager;
+    private final JpaTransactionManager transactionManager;
     private final LongSupplier nanoTime;
     private final List<Lane> lanes = List.of(new Lane(), new Lane());
 
@@ -44,7 +47,7 @@ public class JudgeWorkScheduler {
         BooleanSupplier recovery,
         Executor executor,
         Clock clock,
-        PlatformTransactionManager transactionManager
+        JpaTransactionManager transactionManager
     ) {
         this(worker, recovery, executor, clock, transactionManager, System::nanoTime);
     }
@@ -64,7 +67,7 @@ public class JudgeWorkScheduler {
         BooleanSupplier recovery,
         Executor executor,
         Clock clock,
-        PlatformTransactionManager transactionManager,
+        JpaTransactionManager transactionManager,
         LongSupplier nanoTime
     ) {
         this.worker = worker;
@@ -120,13 +123,7 @@ public class JudgeWorkScheduler {
                 var transaction = new TransactionTemplate(transactionManager);
                 transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
                 transaction.setTimeout(timeoutSeconds);
-                // 연결 대기로 예산을 소진한 트랜잭션은 회수 쿼리를 시작하지 않는다.
-                var recovered
-                    = transaction
-                        .execute(
-                            status -> deadline - nanoTime.getAsLong() >= TimeUnit.SECONDS.toNanos(1)
-                                && recoverOne.getAsBoolean()
-                        );
+                var recovered = transaction.execute(status -> recoverWithinBudget(recoverOne, deadline));
                 if (!Boolean.TRUE.equals(recovered)) {
                     return;
                 }
@@ -134,6 +131,30 @@ public class JudgeWorkScheduler {
         } catch (RuntimeException failure) {
             log.warn("채점 작업 회수 실패: type={}", failure.getClass().getSimpleName());
         }
+    }
+
+    /**
+     * DB 연결 확보 후 남은 예산을 같은 트랜잭션의 JDBC 제한시간에 반영한다.
+     *
+     * @param recoverOne 회수 대상 한 건을 처리하는 저장소 호출
+     * @param deadline 회수 회차의 단조 시각 기준 마감
+     * @return 처리할 작업이 있었는지 여부
+     * @throws IllegalStateException JPA 트랜잭션에 JDBC 연결이 바인딩되지 않은 경우
+     */
+    private boolean recoverWithinBudget(BooleanSupplier recoverOne, long deadline) {
+        long remainingSeconds = TimeUnit.NANOSECONDS.toSeconds(deadline - nanoTime.getAsLong());
+        if (remainingSeconds < 1) {
+            return false;
+        }
+        var dataSource = transactionManager.getDataSource();
+        Assert.state(dataSource != null, "회수 트랜잭션의 데이터 소스가 필요합니다.");
+        var connection = (ConnectionHolder)TransactionSynchronizationManager.getResource(dataSource);
+        Assert.state(connection != null, "회수 트랜잭션의 JDBC 연결이 필요합니다.");
+        connection
+            .setTimeoutInMillis(
+                Math.min(TimeUnit.SECONDS.toMillis(remainingSeconds), connection.getTimeToLiveInMillis())
+            );
+        return recoverOne.getAsBoolean();
     }
 
     /**

@@ -12,12 +12,17 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.sql.DataSource;
+
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.jdbc.datasource.ConnectionHolder;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.backtoback.judge.judging.store.ValidationExecutionStore;
 
@@ -26,7 +31,8 @@ class ValidationSchedulerTest {
     private final ValidationWorker worker = mock(ValidationWorker.class);
     private final ValidationExecutionStore store = mock(ValidationExecutionStore.class);
     private final Clock clock = mock(Clock.class);
-    private final PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+    private final JpaTransactionManager transactionManager = mock(JpaTransactionManager.class);
+    private final DataSource dataSource = mock(DataSource.class);
     private final ArrayList<Runnable> tasks = new ArrayList<>();
     private final AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-31T00:00:00Z"));
     private ValidationScheduler scheduler;
@@ -35,9 +41,21 @@ class ValidationSchedulerTest {
     @BeforeEach
     void prepare() {
         given(clock.instant()).willAnswer(call -> now.get());
-        given(transactionManager.getTransaction(any(TransactionDefinition.class)))
-            .willAnswer(call -> new SimpleTransactionStatus());
+        given(transactionManager.getDataSource()).willReturn(dataSource);
+        given(transactionManager.getTransaction(any(TransactionDefinition.class))).willAnswer(call -> {
+            TransactionSynchronizationManager.unbindResourceIfPossible(dataSource);
+            var connection = new ConnectionHolder(mock(java.sql.Connection.class));
+            connection.setTimeoutInSeconds(12);
+            TransactionSynchronizationManager.bindResource(dataSource, connection);
+            return new SimpleTransactionStatus();
+        });
         scheduler = new ValidationScheduler(worker, store, tasks::add, clock, transactionManager);
+    }
+
+    /** 테스트 스레드에 연결한 JDBC 자원을 해제한다. */
+    @AfterEach
+    void clearConnection() {
+        TransactionSynchronizationManager.unbindResourceIfPossible(dataSource);
     }
 
     /** 두 슬롯이 진행 중이면 새 실행을 쌓지 않으며 기한 초과 종결은 계속한다. */

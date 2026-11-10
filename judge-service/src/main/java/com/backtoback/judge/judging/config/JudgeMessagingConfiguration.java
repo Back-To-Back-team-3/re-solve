@@ -10,9 +10,9 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
-import org.springframework.transaction.PlatformTransactionManager;
 
 import com.backtoback.common.event.client.EventDestinationResolver;
 import com.backtoback.common.event.config.OutboxRelayConfiguration;
@@ -148,7 +148,7 @@ public class JudgeMessagingConfiguration {
         ValidationExecutionStore store,
         @Qualifier("judgeValidationExecutor") ThreadPoolTaskExecutor executor,
         Clock clock,
-        PlatformTransactionManager transactionManager
+        JpaTransactionManager transactionManager
     ) {
         return new ValidationScheduler(worker, store, executor, clock, transactionManager);
     }
@@ -184,7 +184,7 @@ public class JudgeMessagingConfiguration {
         SubmissionExecutionStore store,
         @Qualifier("judgeSubmissionExecutor") ThreadPoolTaskExecutor executor,
         Clock clock,
-        PlatformTransactionManager transactionManager
+        JpaTransactionManager transactionManager
     ) {
         return new SubmissionScheduler(worker, store, executor, clock, transactionManager);
     }

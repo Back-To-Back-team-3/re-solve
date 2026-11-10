@@ -3,8 +3,8 @@ package com.backtoback.judge.judging.service;
 import java.time.Clock;
 import java.util.concurrent.Executor;
 
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.transaction.PlatformTransactionManager;
 
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
@@ -28,7 +28,7 @@ public class SubmissionScheduler extends JudgeWorkScheduler {
         SubmissionExecutionStore store,
         Executor executor,
         Clock clock,
-        PlatformTransactionManager transactionManager
+        JpaTransactionManager transactionManager
     ) {
         super(worker::runOnce, store::recoverOne, executor, clock, transactionManager);
         this.store = store;

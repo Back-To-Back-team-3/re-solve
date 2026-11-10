@@ -3,6 +3,7 @@ package com.backtoback.judge.judging.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -12,32 +13,48 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
+import javax.sql.DataSource;
+
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.jdbc.datasource.ConnectionHolder;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** 회수 회차의 실행 예산과 건별 트랜잭션을 검증한다. */
 @ExtendWith(MockitoExtension.class)
 class JudgeWorkSchedulerTest {
     @Mock
-    private PlatformTransactionManager transactionManager;
+    private JpaTransactionManager transactionManager;
     @Mock
     private BooleanSupplier recoverOne;
+
+    private final DataSource dataSource = mock(DataSource.class);
+
+    /** 테스트 스레드에 연결한 JDBC 자원을 해제한다. */
+    @AfterEach
+    void clearConnection() {
+        TransactionSynchronizationManager.unbindResourceIfPossible(dataSource);
+    }
 
     /** 남은 예산을 각 트랜잭션에 적용하고 1초 미만이면 새 회수를 시작하지 않는지 확인한다. */
     @Test
     @DisplayName("회수 건마다 남은 예산을 적용하고 1초 미만이면 다음 건을 시작하지 않는다")
     void limitsRecoveryByRemainingBudget() {
         var elapsed = new AtomicLong();
-        given(transactionManager.getTransaction(any(TransactionDefinition.class)))
-            .willAnswer(call -> new SimpleTransactionStatus());
+        given(transactionManager.getDataSource()).willReturn(dataSource);
+        given(transactionManager.getTransaction(any(TransactionDefinition.class))).willAnswer(call -> {
+            bindConnection();
+            return new SimpleTransactionStatus();
+        });
         given(recoverOne.getAsBoolean()).willAnswer(call -> {
             elapsed.set(Duration.ofSeconds(10).toNanos());
             return true;
@@ -89,5 +106,44 @@ class JudgeWorkSchedulerTest {
         scheduler.expire();
 
         verifyNoInteractions(recoverOne);
+    }
+
+    /** 연결 대기 후에도 남은 회차 예산을 JDBC 제한시간에 적용한다. */
+    @Test
+    @DisplayName("DB 연결 대기에 10초를 쓰면 회수 쿼리는 남은 2초를 사용한다")
+    void limitsQueryAfterWaitingForConnection() {
+        var elapsed = new AtomicLong();
+        given(transactionManager.getDataSource()).willReturn(dataSource);
+        given(transactionManager.getTransaction(any(TransactionDefinition.class))).willAnswer(call -> {
+            elapsed.set(Duration.ofSeconds(10).toNanos());
+            bindConnection();
+            return new SimpleTransactionStatus();
+        });
+        given(recoverOne.getAsBoolean()).willAnswer(call -> {
+            var connection = (ConnectionHolder)TransactionSynchronizationManager.getResource(dataSource);
+            assertThat(connection.getTimeToLiveInSeconds()).isEqualTo(2);
+            return false;
+        });
+        var scheduler
+            = new JudgeWorkScheduler(
+                () -> false,
+                recoverOne,
+                Runnable::run,
+                Clock.systemUTC(),
+                transactionManager,
+                elapsed::get
+            );
+
+        scheduler.expire();
+
+        verify(recoverOne).getAsBoolean();
+    }
+
+    /** JDBC 제한시간이 설정된 트랜잭션 연결을 준비한다. */
+    private void bindConnection() {
+        TransactionSynchronizationManager.unbindResourceIfPossible(dataSource);
+        var connection = new ConnectionHolder(mock(java.sql.Connection.class));
+        connection.setTimeoutInSeconds(12);
+        TransactionSynchronizationManager.bindResource(dataSource, connection);
     }
 }

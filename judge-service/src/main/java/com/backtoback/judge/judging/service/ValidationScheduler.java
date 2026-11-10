@@ -3,7 +3,7 @@ package com.backtoback.judge.judging.service;
 import java.time.Clock;
 import java.util.concurrent.Executor;
 
-import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.orm.jpa.JpaTransactionManager;
 
 import com.backtoback.judge.judging.store.ValidationExecutionStore;
 
@@ -23,7 +23,7 @@ public class ValidationScheduler extends JudgeWorkScheduler {
         ValidationExecutionStore store,
         Executor executor,
         Clock clock,
-        PlatformTransactionManager transactionManager
+        JpaTransactionManager transactionManager
     ) {
         super(worker::runOnce, store::expireOne, executor, clock, transactionManager);
     }
