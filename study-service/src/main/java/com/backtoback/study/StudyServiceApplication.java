@@ -11,6 +11,7 @@ import com.backtoback.common.event.config.OutboxStorageConfiguration;
 import com.backtoback.common.jpa.config.JpaAuditingConfiguration;
 import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
+import com.backtoback.common.web.logging.HttpClientConfiguration;
 
 // Gateway가 전달한 사용자 헤더로만 인증하므로 Boot가 만드는 기본 사용자 계정과 임시 비밀번호는 쓰지 않는다.
 @SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
@@ -20,6 +21,7 @@ import com.backtoback.common.web.logging.CorrelationIdFilter;
         GlobalExceptionHandler.class,
         JpaAuditingConfiguration.class,
         CorrelationIdFilter.class,
+        HttpClientConfiguration.class,
         OutboxStorageConfiguration.class,
         EventConsumerConfiguration.class
     }
