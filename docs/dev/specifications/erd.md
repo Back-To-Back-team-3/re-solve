@@ -2701,12 +2701,12 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `member_id` | BIGINT | Y | 참가자 (미입장 `ABSENT` 포함) |
-| `context_type` | VARCHAR(30) | Y | `EXAM` / `CONTEST` |
-| `context_id` | BIGINT | Y | 시험·대회 ID (외부 참조) |
+| `context_type` | VARCHAR(30) | Y | `EXAM` / `CONTEST` / `DIAGNOSIS` |
+| `context_id` | BIGINT | Y | 시험·대회·진단 ID (외부 참조). DIAGNOSIS는 `diagnosis_attempts.id` |
 | `problem_id` | BIGINT | Y | 포함 문제 |
 | `starts_at` | DATETIME(6) | Y | 차단 시작 (시험 시작 시각) |
 | `ends_at` | DATETIME(6) | Y | 차단 종료 (시험 종료 시각) |
-| `context_revision` | INT | Y | 반영한 `examRevision`·`contestRevision` (`ExamUpdated` 역전 방지) |
+| `context_revision` | INT | Y | 반영한 `examRevision`·`contestRevision` (`ExamUpdated` 역전 방지). DIAGNOSIS 행은 `1` 고정 |
 | `created_at` | DATETIME(6) | Y |  |
 | `updated_at` | DATETIME(6) | Y |  |
 
@@ -3026,7 +3026,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 전달 직전 차단 시 미차감 | `GENERATING → BLOCKED` 트랜잭션에서 `used_count − 1` |
 | 타임아웃·늦은 응답 | 모든 종결 전이는 `WHERE status = 'GENERATING'` 조건부 UPDATE |
 | 시험 중 차단 | `hint_block_replicas` 시각 판정, 조회 실패 시 거절 (fail-closed) |
-| 진단 중 차단 | 판정 경로 미결정 (정책 미결정 사항) |
+| 진단 중 차단 | `hint_block_replicas` 이벤트 방식 (`DiagnosisStarted` → INSERT, `DiagnosisClosed` → DELETE) |
 
 ### 6.7 notification
 
@@ -3234,10 +3234,10 @@ study-service/src/main/resources/db/migration/
   V14__replica_create_member_ac_replicas.sql
   V15__replica_create_member_learning_profile_replicas.sql
   V16__assignment_alter_assignment_problems.sql
-  V17__recommendation_create_study_recommendations.sql
-  V18__ai_create_hint_requests.sql
-  V19__ai_create_hint_daily_usages.sql
-  V20__ai_create_hint_block_replicas.sql
+  V17__ai_create_hint_requests.sql
+  V18__ai_create_hint_daily_usages.sql
+  V19__ai_create_hint_block_replicas.sql
+  V20__recommendation_create_study_recommendations.sql  (D-9-1 착수 시)
   V21__community_create_posts.sql        (P2 착수 시)
   V22__community_create_comments.sql     (P2 착수 시)
 ```
