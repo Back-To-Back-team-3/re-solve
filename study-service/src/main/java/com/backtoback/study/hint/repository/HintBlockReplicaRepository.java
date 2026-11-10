@@ -16,10 +16,10 @@ public interface HintBlockReplicaRepository extends JpaRepository<HintBlockRepli
     @Modifying
     @Query(
         nativeQuery = true,
-        value = "INSERT IGNORE INTO hint_block_replicas" + " (member_id, context_type, context_id, problem_id,"
+        value = "INSERT INTO hint_block_replicas" + " (member_id, context_type, context_id, problem_id,"
             + " starts_at, ends_at, context_revision, created_at, updated_at)"
             + " VALUES (:memberId, :contextType, :contextId, :problemId,"
-            + " :startsAt, :endsAt, :contextRevision, now(6), now(6))"
+            + " :startsAt, :endsAt, :contextRevision, now(6), now(6))" + " ON DUPLICATE KEY UPDATE id = id"
     )
     void insertIgnore(
         @Param("memberId") Long memberId,
