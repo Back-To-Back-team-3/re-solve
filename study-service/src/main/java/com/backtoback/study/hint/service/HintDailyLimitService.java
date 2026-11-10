@@ -26,6 +26,11 @@ public class HintDailyLimitService {
     private final Clock clock;
     private final HintDailyUsageRepository hintDailyUsageRepository;
 
+    public int getTodayUsedCount(Long memberId) {
+        LocalDate today = LocalDate.now(clock.withZone(ClockConfiguration.SERVICE_ZONE));
+        return hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(memberId, today).orElse(0);
+    }
+
     public int reserve(Long memberId) {
         LocalDate today = LocalDate.now(clock.withZone(ClockConfiguration.SERVICE_ZONE));
 

@@ -1,4 +1,6 @@
 package com.backtoback.study.hint.dto;
 
-public record HintAcceptResult(long hintRequestId, boolean cached) {
+import com.backtoback.study.hint.domain.HintRequestStatus;
+
+public record HintAcceptResult(long hintRequestId, HintRequestStatus status, String content, int todayUsedCount) {
 }

@@ -1,7 +1,6 @@
 package com.backtoback.study.hint.service;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -28,15 +27,13 @@ import com.backtoback.study.hint.repository.HintRequestRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 힌트 요청 접수 트랜잭션 (api-spec §6.1.1 step③④⑤ + Redis 캐시 조회 + INSERT).
- * Outbox 이벤트 발행은 HintRequestedPayload·HintReadyPayload 추가 커밋에서 연동한다.
+ * 힌트 요청 접수 트랜잭션 (api-spec §6.1.1 step③④⑤ + Redis 캐시 조회 + INSERT + Outbox 발행).
  */
 @Service
 @RequiredArgsConstructor
 public class HintTransactionalService {
 
     static final String HINT_CACHE_KEY_PREFIX = "hint:cache:";
-    static final Duration HINT_CACHE_TTL = Duration.ofDays(30);
 
     private static final List<HintRequestStatus> TERMINAL_STATUSES
         = List.of(HintRequestStatus.READY, HintRequestStatus.FALLBACK);
@@ -57,21 +54,23 @@ public class HintTransactionalService {
             = hintRequestRepository
                 .findByMemberIdAndProblemRevisionIdAndLevel(memberId, context.problemRevisionId(), level);
         if (existing.isPresent()) {
-            return new HintAcceptResult(existing.get().getId(), existing.get().isCached());
+            HintRequest ex = existing.get();
+            int todayUsedCount = hintDailyLimitService.getTodayUsedCount(memberId);
+            return new HintAcceptResult(ex.getId(), ex.getStatus(), ex.getContent(), todayUsedCount);
         }
 
         // step⑤: 일일 한도 원자 확보
-        hintDailyLimitService.reserve(memberId);
+        int usedCount = hintDailyLimitService.reserve(memberId);
 
-        // Redis 캐시 조회
+        // Redis 캐시 조회 — opsForValue().get()으로 존재 확인과 값 읽기를 원자적으로 처리
         String cacheKey = HINT_CACHE_KEY_PREFIX + context.problemRevisionId() + ":" + level;
-        boolean isCached = Boolean.TRUE.equals(redisTemplate.hasKey(cacheKey));
+        String cachedContent = redisTemplate.opsForValue().get(cacheKey);
 
         String correlationId
             = Objects.requireNonNullElseGet(MDC.get(CorrelationIdFilter.MDC_KEY), () -> UUID.randomUUID().toString());
 
         HintRequest saved;
-        if (isCached) {
+        if (cachedContent != null) {
             OffsetDateTime completedAt = OffsetDateTime.now(clock.withZone(ClockConfiguration.SERVICE_ZONE));
             saved
                 = hintRequestRepository
@@ -103,6 +102,7 @@ public class HintTransactionalService {
                         completedAt
                     )
                 );
+            return new HintAcceptResult(saved.getId(), HintRequestStatus.READY, cachedContent, usedCount);
         } else {
             saved
                 = hintRequestRepository
@@ -125,10 +125,8 @@ public class HintTransactionalService {
                         context.problemTags() != null ? context.problemTags() : List.of()
                     )
                 );
-            redisTemplate.expire(cacheKey, HINT_CACHE_TTL);
+            return new HintAcceptResult(saved.getId(), HintRequestStatus.REQUESTED, null, usedCount);
         }
-
-        return new HintAcceptResult(saved.getId(), isCached);
     }
 
     private void checkLevelOrder(Long memberId, Long problemId, int level) {
