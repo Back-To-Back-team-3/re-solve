@@ -720,17 +720,30 @@ class SubmissionMessageListenerTest {
             var lease = execution.claim().orElseThrow();
             completeWithCompileError(lease);
             var result = receiveMemberResult(sqs, "DiagnosisSubmissionJudged", lease.submissionId());
-            assertThat(result.path("diagnosisId").asString()).isEqualTo("55");
-            assertThat(result.path("diagnosisSubmissionId").asString()).isEqualTo("71");
-            assertThat(result.path("status").asString()).isEqualTo("COMPLETED");
-            assertThat(result.path("verdict").asString()).isEqualTo("CE");
-            assertThat(result.path("passedCount").asInt()).isZero();
-            assertThat(result.path("totalCount").asInt()).isEqualTo(1);
-            assertThat(result.path("maxTimeMs").isNull()).isTrue();
-            assertThat(result.path("maxMemoryKb").isNull()).isTrue();
-            assertThat(result.has("sourceCode")).isFalse();
-            assertThat(result.has("examId")).isFalse();
-            assertThat(result.has("problemTags")).isFalse();
+            var body = (tools.jackson.databind.node.ObjectNode)result;
+            for (String header : List
+                .of("eventId", "eventType", "schemaVersion", "occurredAt", "aggregateId", "correlationId")) {
+                assertThat(body.remove(header)).isNotNull();
+            }
+            assertThat(body).isEqualTo(mapper.readTree("""
+                {
+                  "context": "DIAGNOSIS",
+                  "diagnosisId": "55",
+                  "diagnosisSubmissionId": "71",
+                  "submissionId": "%d",
+                  "userId": "9",
+                  "problemId": "101",
+                  "problemRevisionId": "1001",
+                  "judgeAttempt": 1,
+                  "status": "COMPLETED",
+                  "verdict": "CE",
+                  "passedCount": 0,
+                  "totalCount": 1,
+                  "maxTimeMs": null,
+                  "maxMemoryKb": null,
+                  "submittedAt": "2026-10-31T09:00:00.123456+09:00"
+                }
+                """.formatted(lease.submissionId())));
             assertThat(jdbc.queryForList("SELECT event_type FROM outbox_events", String.class))
                 .containsExactly("DiagnosisSubmissionJudged");
         }
