@@ -245,8 +245,8 @@
 | 로그인 | GitHub OAuth2 단일. 인가 범위 `read:user`, `user:email` |
 | 토큰 | Access 1시간(응답 본문), Refresh 14일(`HttpOnly`·`Secure`·`SameSite=Strict` 쿠키), Redis 회전 |
 | 레벨 | 태그별 `LV0`~`MASTER`, 저장값 증감 없이 재계산 |
-| 이벤트 발행 | `MemberUpdated`, `LearningProfileUpdated`, `TagLevelChanged`, `MemberWithdrawn`, `MemberSuspended`, `DiagnosisSubmissionRequested`(확정 필요) |
-| 이벤트 구독 | `SubmissionJudged`(레벨·성취도 재계산), `SubmissionFailed`(진단), `HintReady`(힌트 사용 감점, 확정 필요) |
+| 이벤트 발행 | `MemberUpdated`, `LearningProfileUpdated`, `TagLevelChanged`, `MemberWithdrawn`, `MemberSuspended`, `DiagnosisSubmissionRequested` |
+| 이벤트 구독 | `SubmissionJudged`(레벨·성취도 재계산), `DiagnosisSubmissionJudged`(진단 결과), `SubmissionFailed`(진단 실패), `HintReady`(힌트 사용 감점, 확정 필요) |
 | 외부 서비스 | GitHub OAuth (`github.com/login/oauth`, `api.github.com/user`) |
 
 ### 1.1 외부 API — 인증
@@ -921,7 +921,7 @@
     - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409), `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `SUBMISSION_RATE_LIMITED`(429)
 - **동시성/멱등 보장:** `uk_diagnosis_submissions_attempt_problem_seq`. Draft 반영·제출·Outbox를 한 트랜잭션에 저장.
 - **발행:**
-    - `DiagnosisSubmissionRequested` — 접수 트랜잭션 (judge 채점 요청, 경로·이벤트명 확정 필요)
+    - `DiagnosisSubmissionRequested` — 접수 트랜잭션 (SQS `exam-submission-queue`, 이벤트 계약 M6)
 
 #### 1.5.6 진단 최종 제출 (종료)
 
@@ -947,7 +947,7 @@
     - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409)
 - **동시성/멱등 보장:** `WHERE status = 'IN_PROGRESS'` 조건부 UPDATE. 수동 종료와 만료 스케줄러가 경합해도 1회만 종료된다.
 - **발행:**
-    - `DiagnosisSubmissionRequested` — 자동 제출 문항마다
+    - `DiagnosisSubmissionRequested` — 자동 제출 문항마다 (SQS `exam-submission-queue`, 이벤트 계약 M6)
     - `TagLevelChanged`·`LearningProfileUpdated` — 모든 제출 채점 후 `SCORED` 전이 시
 - **프론트 계약:**
     - 결과 확정은 SSE `LEVEL_CHANGED`(진단 결과) 알림으로 받고 진단 상세·복구(1.5.2)로 결과를 조회한다.
@@ -9030,11 +9030,12 @@
 | --- | --- | --- | --- | --- | --- |
 | `ExamSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 시험 제출·자동 제출 접수 트랜잭션 | C |
 | `ContestSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 대회 제출 접수 트랜잭션 | C |
-| `DiagnosisSubmissionRequested` v1 (확정 필요) | member | judge | SQS (경로 확정 필요) | 진단 문항 제출·자동 제출 | E |
+| `DiagnosisSubmissionRequested` v1 | member | judge | SQS `exam-submission-queue` | 진단 문항 제출·자동 제출 접수 트랜잭션 | E |
 | `SubmissionJudged` v1 | judge | notification, study, member, integration, problem | SNS 팬아웃 | `PRACTICE` 회차 정상 종결과 결과 커밋 | B |
 | `ExamSubmissionJudged` v1 | judge | contest | SNS 팬아웃 | `EXAM` 회차 정상 종결 | B |
 | `ContestSubmissionJudged` v1 | judge | contest | SNS 팬아웃 | `CONTEST` 회차 정상 종결 | B |
-| `SubmissionFailed` v1 | judge | notification, contest (진단 채점 시 member) | SNS 팬아웃 | 실행 시도 상한 초과로 `FAILED` | B |
+| `DiagnosisSubmissionJudged` v1 | judge | member | `judge-events` → `member-queue` | `DIAGNOSIS` 회차 정상 종결 | B |
+| `SubmissionFailed` v1 | judge | notification, contest(시험·대회), member(진단) | SNS 팬아웃 | 실행 시도 상한 또는 전체 처리 기한 초과로 `FAILED` | B |
 | `ProblemStateChanged` v2 | problem | study, contest | SNS 팬아웃 | 공개 상태·사용 회차·통과 언어 변경 | B |
 | `ProblemValidationRequested` v1 | problem | judge | 검증 SQS 직접 | 관리자 접수·새 회차 자동 검증 요청 커밋 | B |
 | `ProblemValidationCompleted` v1 | judge | problem | SNS 팬아웃 | 검증 최종 판정·결과 Outbox 커밋 | B |
