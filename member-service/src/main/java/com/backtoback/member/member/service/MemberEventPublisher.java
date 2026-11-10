@@ -26,6 +26,8 @@ public class MemberEventPublisher {
     static final String MEMBER_SUSPENDED = "MemberSuspended";
     static final String LEARNING_PROFILE_UPDATED = "LearningProfileUpdated";
     static final String MEMBER_WITHDRAWN = "MemberWithdrawn";
+    public static final String DIAGNOSIS_SUBMISSION_REQUESTED = "DiagnosisSubmissionRequested";
+    static final String DIAGNOSIS_SUBMISSION_AGGREGATE = "DIAGNOSIS_SUBMISSION";
     static final String SCHEMA_VERSION = "v1";
     // 이벤트 계약 공통 규칙: +09:00, 마이크로초 6자리 (occurredAt과 같은 형식)
     private static final DateTimeFormatter EVENT_TIME_FORMAT
@@ -94,6 +96,43 @@ public class MemberEventPublisher {
                     String.valueOf(member.getId()),
                     EVENT_TIME_FORMAT.format(member.getWithdrawnAt().atZone(ClockConfiguration.SERVICE_ZONE)),
                     member.getProfileVersion()
+                )
+            );
+    }
+
+    /**
+     * 진단 문항 채점 요청 (M6). SQS {@code exam-submission-queue}로 보낸다. aggregate = 진단 제출 ID.
+     */
+    public void diagnosisSubmissionRequested(
+        long diagnosisId,
+        long diagnosisSubmissionId,
+        long memberId,
+        long problemId,
+        long problemRevisionId,
+        String language,
+        String sourceCode,
+        long draftSeq,
+        String submissionType,
+        LocalDateTime receivedAt
+    ) {
+        outboxEventWriter
+            .append(
+                DIAGNOSIS_SUBMISSION_AGGREGATE,
+                DIAGNOSIS_SUBMISSION_REQUESTED,
+                SCHEMA_VERSION,
+                String.valueOf(diagnosisSubmissionId),
+                correlationId(),
+                new DiagnosisSubmissionRequestedPayload(
+                    String.valueOf(diagnosisId),
+                    String.valueOf(diagnosisSubmissionId),
+                    String.valueOf(memberId),
+                    String.valueOf(problemId),
+                    String.valueOf(problemRevisionId),
+                    language,
+                    sourceCode,
+                    String.valueOf(draftSeq),
+                    submissionType,
+                    EVENT_TIME_FORMAT.format(receivedAt.atZone(ClockConfiguration.SERVICE_ZONE))
                 )
             );
     }

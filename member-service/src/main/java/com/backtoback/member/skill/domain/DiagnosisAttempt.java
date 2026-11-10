@@ -87,6 +87,17 @@ public class DiagnosisAttempt extends BaseTimeEntity {
     }
 
     /**
+     * 진단을 종료한다 (API 명세서 1.5.6, 스케줄러 1.1). 호출하는 쪽이 응시 행을 잠그고 {@code IN_PROGRESS}인지 확인한다.
+     *
+     * @param closedAt 쿨타임 기준 시각. 만료 종료는 실행 시각이 아니라 {@code ends_at}이다.
+     */
+    public void close(String closeReason, LocalDateTime closedAt) {
+        this.status = DiagnosisStatus.CLOSED;
+        this.closeReason = closeReason;
+        this.closedAt = closedAt;
+    }
+
+    /**
      * 코드를 저장·제출할 수 있는지. 만료 스케줄러가 닫기 전이라도 제한 시각이 지나면 받지 않는다.
      */
     public boolean isOpenAt(LocalDateTime now) {

@@ -9,6 +9,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param topicArn {@code resolve-{env}-member-events} 토픽 ARN. 켜져 있으면 필수다.
  */
 @ConfigurationProperties(prefix = "resolve.messaging")
-public record MessagingProperties(boolean enabled, String topicArn) {
+public record MessagingProperties(boolean enabled, String topicArn, String examSubmissionQueueUrl) {
 
 }

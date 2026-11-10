@@ -14,6 +14,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.common.exception.BusinessException;
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.member.member.service.MemberEventPublisher;
 import com.backtoback.member.member.service.MemberService;
 import com.backtoback.member.skill.client.ProblemDiagnosisClient;
 import com.backtoback.member.skill.client.ProblemTagClient;
@@ -22,6 +23,7 @@ import com.backtoback.member.skill.repository.DiagnosisAttemptRepository;
 import com.backtoback.member.skill.repository.DiagnosisProblemRepository;
 import com.backtoback.member.skill.repository.MemberTagLevelRepository;
 import com.backtoback.member.skill.store.DiagnosisDraftStore;
+import com.backtoback.member.skill.store.DiagnosisSubmissionStore;
 
 class DiagnosisDisabledTest {
 
@@ -38,6 +40,8 @@ class DiagnosisDisabledTest {
                 mock(DiagnosisProblemRepository.class),
                 tagLevels,
                 mock(DiagnosisDraftStore.class),
+                mock(DiagnosisSubmissionStore.class),
+                mock(MemberEventPublisher.class),
                 mock(MemberService.class),
                 problemTagClient,
                 problemDiagnosisClient,

@@ -918,7 +918,7 @@
     - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409), `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `SUBMISSION_RATE_LIMITED`(429)
 - **동시성/멱등 보장:** `uk_diagnosis_submissions_attempt_problem_seq`. Draft 반영·제출·Outbox를 한 트랜잭션에 저장.
 - **발행:**
-    - `DiagnosisSubmissionRequested` — 접수 트랜잭션 (SQS `exam-submission-queue`, 이벤트 계약 M6)
+    - `DiagnosisSubmissionRequested` — 접수 트랜잭션 (judge 채점 요청, SQS `exam-submission-queue`, 이벤트 계약 M6). 전송 성공 후 `REQUESTED`
 
 #### 1.5.6 진단 최종 제출 (종료)
 
