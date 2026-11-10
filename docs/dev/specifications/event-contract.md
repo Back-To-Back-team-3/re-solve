@@ -975,7 +975,7 @@ flowchart LR
 | `AssignmentIncompleteRepeated` |  |  |  |  |  | ● |  |
 | `HintReady` |  | ○ |  |  |  | ● |  |
 | `GitHubSyncFailed` |  |  |  |  |  | ● |  |
-| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 16 | 19 | 2 |
+| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 18 | 19 | 2 |
 
 ### 5.1 소비자 구현 체크리스트
 
