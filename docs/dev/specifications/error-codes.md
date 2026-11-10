@@ -75,8 +75,8 @@
 | `SUBMISSION_REJUDGE_NOT_ALLOWED` | 409 | 재채점 대상이 아님 (`PRACTICE`, 정상 판정, 결과 확정 후) |
 | `SUBMISSION_RUNTIME_UNAVAILABLE` | 409 | 지정된 실행 환경 스냅샷 부재·언어 불일치 또는 고정 런타임 미지원으로 신규 접수·재채점·재처리 불가 |
 | `SUBMISSION_REJUDGE_INPUT_UNAVAILABLE` | 409 | 원본 회차 데이터가 없거나 손상 |
-| `RUN_RATE_LIMITED` | 429 | 코드 실행(Run) 요청 한도 초과 |
-| `RUN_IN_PROGRESS` | 429 | 같은 회원의 Run이 실행 중 (`run:{memberId}` 락) |
+| `RUN_RATE_LIMITED` | 429 | 일반 Run 요청 시 같은 회원의 일반·시험 Run이 이미 실행 중 (동시 1개) |
+| `RUN_IN_PROGRESS` | 429 | 시험 내부 Run 요청 시 같은 회원의 일반·시험 Run이 이미 실행 중 (`run:{memberId}` 락, 동시 1개) |
 | `JUDGE0_CONNECTION_FAILED` | 503 | Judge0 연결 실패 또는 통신 시간 초과 |
 | `JUDGE0_RESPONSE_FAILED` | 503 | Judge0의 HTTP 오류 또는 올바르지 않은 응답 |
 | `JUDGE0_CONFIGURATION_INVALID` | 503 | Judge0 서버 주소 미설정으로 실행 요청 불가 |
