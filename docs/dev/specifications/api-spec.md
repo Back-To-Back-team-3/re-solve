@@ -3762,7 +3762,7 @@
 | 외부 경로 | `/api/v1/submissions/**`, `/api/v1/me/submissions`, `/api/v1/runs`, `/api/v1/judge/languages`, `/api/v1/admin/judge-jobs/**`, `/api/v1/admin/submissions/**` |
 | 내부 경로 | `/internal/v1/submissions/**` |
 | 소유 테이블 | 스키마 `judge` (`submissions`, `judge_jobs`, `judge_job_runs`, `judge_test_results`) |
-| 문맥 | `PRACTICE`(외부 API), `EXAM`·`CONTEST`(SQS `exam-submission-queue`), `DIAGNOSIS`(member 경유, 경로 확정 필요) |
+| 문맥 | `PRACTICE`(외부 API), `EXAM`·`CONTEST`·`DIAGNOSIS`(SQS `exam-submission-queue`). 시험·대회는 contest, 진단은 member가 접수한다. |
 | 지원 언어 | `java`(Java 17), `python3`(Python 3), `cpp`(C++17). 런타임 버전과 Judge0 `language_id`는 Judge0 목록에서 조회하여 선택한다. 서비스의 언어 활성화 설정과 지원 실행 환경의 존재 여부를 함께 확인한다. |
 | 채점 | 202는 접수 완료이며 채점 완료가 아니다. 작업 원천은 `judge_jobs`, SKIP LOCKED 선점·임대, 실행 시도 상한 3회. |
 | 회차 용어 | 채점 회차 `judgeAttempt`(재채점마다 +1), 실행 시도 `tryCount`(회차 안 재시도). 기존 초안의 `attemptId`·`attemptNo`는 `judgeAttempt`로 통일 |
@@ -4118,7 +4118,7 @@
 
 - **Method / URI:** `POST /api/v1/runs`
 - **인증:** 로그인 필요 (`SUSPENDED` 차단)
-- **Rate Limit:** `run:{userId}` 키 기반 원자적 제한(한도 수치 확정 필요, 쿨다운 없음)
+- **Rate Limit:** `run:{memberId}` 키로 일반·시험 Run을 합쳐 사용자당 동시에 1개만 허용한다. 초과 시 `RUN_RATE_LIMITED`(429), 종료 후 쿨다운 없이 다음 실행을 허용한다.
 - **대응 테이블:** 없음 (결과 저장·이벤트 발행 없음)
 - **설명:** 공개 테스트케이스 또는 사용자 직접 입력으로 코드를 실행한다. 제출 이력에 포함하지 않고 Judge0를 동기 호출한다(T2-14).
 - **요청 바디:**
@@ -4175,8 +4175,9 @@
     - `CUSTOM`은 기대값이 없어 `verdict`가 `null`(실행 오류면 `RE`·`TLE` 등)
     - `stdout`은 디버그 출력이며 테스트별 64KiB 제한을 적용한다. `actualReturnText`는 회차의 `outputLimitKb`로 별도 제한하며 두 출력은 합산하지 않는다. 어느 하나라도 초과하면 `RE`(출력 초과)로 처리한다. 크기 계산은 [정책 및 상태 > 3.2 채점 실행](../planning/policy-and-state.md#32-채점-실행)을 따른다.
     - `timeMs`는 Judge0 실행 시간(초)을 밀리초로 변환한 뒤 올림한 정수다. 측정값이 없으면 null을 유지한다(정책 및 상태 §3.2).
+- **동시성/멱등 보장:** 사용자별 실행 제한을 원자적으로 획득하고, 정상 완료·예외 시 소유 토큰이 일치할 때만 해제한다. 인스턴스 중단 후 회수는 스케줄러 §3.5를 따른다. Redis에서 제한을 확인할 수 없으면 실행을 허용하지 않고 503으로 처리한다.
 - **에러:**
-    - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `RUN_RATE_LIMITED`(429), `PROBLEM_NOT_AVAILABLE`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge0 장애
+    - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `RUN_RATE_LIMITED`(429), `PROBLEM_NOT_AVAILABLE`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge0 장애·실행 제한 확인 실패
 
 ### 3.2 관리자 API — 진단·복구·재채점
 
@@ -4318,27 +4319,29 @@
 #### 3.3.1 시험·대회 제출 결과 조회
 
 - **Method / URI:** `GET /internal/v1/submissions/{submissionId}/result`
-- **인증:** 내부 호출 (contest)
+- **인증:** 내부 호출 (contest, member). contest는 `EXAM`·`CONTEST`, member는 `DIAGNOSIS`를 조회한다.
 - **대응 테이블:** `submissions`, `judge_jobs`
-- **설명:** 이벤트 유실 복구·결과 확정 전 대사용. 점수·공개 판단은 contest가 한다.
+- **설명:** 시험·대회·진단의 이벤트 유실 복구·결과 확정 전 대사용. 점수·사용자 공개 판단은 문맥을 소유한 contest·member가 한다. 진단 내부 대사는 사용자 공개 전에도 허용하며 Member의 기존 공개 정책을 변경하지 않는다.
 - **요청 파라미터:**
     
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `submissionId` | string | Y | — | Path |
-    | `contextId` | string | Y | — | 시험·대회 ID (불일치 시 404) |
+    | `contextId` | string | Y | — | 시험·대회·진단 ID (불일치 시 404) |
 - **응답 (200):**
     
     ```json
       { "submissionId": "2002", "context": "EXAM", "contextId": "401", "sourceSubmissionId": "4001", "status": "COMPLETED", "judgeAttempt": 1, "verdict": "AC", "passedCount": 12, "totalCount": 12, "maxTimeMs": 12, "maxMemoryKb": 8192, "submittedAt": "2026-09-28T10:00:00+09:00" }
     ```
-    
+
+    - `DIAGNOSIS`의 `contextId`는 `diagnosisId`, `sourceSubmissionId`는 `diagnosisSubmissionId`다. 원본 접수·고정 회차를 유지하며, 숨김 테스트 원문은 반환하지 않는다.
+    - 호출자는 자기 서비스의 원래 접수와 조회 결과를 대조한다. 미종결·실패 상태의 판정·통과 수·성능은 null이며, 미발견·조회 실패로 결과를 확정하지 않는다.
 
 #### 3.3.2 제출 코드 조회 (내부)
 
 - **Method / URI:** `GET /internal/v1/submissions/{submissionId}/source`
-- **인증:** 내부 호출 (contest, problem)
+- **인증:** 내부 호출 (contest, problem, member)
 - **대응 테이블:** `submissions`
 - **설명:** 호출 목적별로 조건을 확인한 뒤 코드를 반환한다.
 - **요청 파라미터:**
@@ -4346,18 +4349,20 @@
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `purpose` | string | Y | — | `EXAM_REVIEW`(contest, 시험 결과 화면) / `SOLUTION_SHARE`(problem, 풀이 공유) |
+    | `purpose` | string | Y | — | `EXAM_REVIEW`(contest, 시험 결과 화면) / `SOLUTION_SHARE`(problem, 풀이 공유) / `DIAGNOSIS_REVIEW`(member, 진단 복기) |
     | `memberId` | string | Y | — | 호출 서비스가 인증으로 확인한 요청자 |
-    | `contextId` | string | N | — | `EXAM_REVIEW`일 때 시험 ID |
+    | `contextId` | string | N | — | `EXAM_REVIEW`·`DIAGNOSIS_REVIEW`일 때 각각 시험·진단 ID 필수 |
     - `SOLUTION_SHARE`: 제출 소유자 = `memberId`, `context = PRACTICE`, 최신 판정 `AC`일 때만 반환
     - `EXAM_REVIEW`: 제출 소유자 = `memberId`, `contextId` 일치. 공개 시점 판단은 contest 책임
+    - `DIAGNOSIS_REVIEW`: `context = DIAGNOSIS`, 제출 소유자 = `memberId`, `contextId = diagnosisId` 일치. member가 본인 진단·원래 접수·문제·고정 회차와 기존 사용자 공개 조건을 확인한다. Judge가 새로운 Member 검증 API를 호출하지 않는다.
+- **응답 헤더:** `Cache-Control: no-store`
 - **응답 (200):**
     
     ```json
       { "submissionId": "91023", "problemId": "301", "problemRevisionId": "1001", "language": "python3", "sourceCode": "…", "verdict": "AC" }
     ```
     
-- **실패 시 처리:** 조건 불일치는 404. 호출 서비스는 fail-closed
+- **실패 시 처리:** 조건 불일치는 404. 호출 서비스는 fail-closed. 숨김 테스트 원문은 반환하지 않으며 일반 제출 코드 API의 `PRACTICE` 범위는 확대하지 않는다.
 
 #### 3.3.3 GitHub 동기화용 정답 코드 조회
 
@@ -4490,16 +4495,16 @@
 #### 3.3.6 접수 ID 기준 시험·대회 채점 상태 조회
 
 - **Method / URI:** `GET /internal/v1/judge/submissions/by-receipt`
-- **인증:** 내부 호출 (contest)
+- **인증:** 내부 호출 (contest, member)
 - **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
 - **대응 테이블:** `submissions`, `judge_jobs`
-- **설명:** Judge 제출 ID를 아직 받지 못했거나 결과 이벤트가 유실된 C 접수를 원래 접수 ID로 대사한다. §3.3.1의 제출 ID 기준 조회를 대체하지 않는다.
+- **설명:** Judge 제출 ID를 아직 받지 못했거나 결과 이벤트가 유실된 시험·대회·진단 접수를 원래 접수 ID로 대사한다. §3.3.1의 제출 ID 기준 조회를 대체하지 않는다.
 - **요청 파라미터:**
 
     | 필드 | 위치 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `context` | Query | string | Y | EXAM / CONTEST |
-    | `receiptId` | Query | string | Y | C의 원래 시험·대회 접수 ID |
+    | `context` | Query | string | Y | EXAM / CONTEST / DIAGNOSIS |
+    | `receiptId` | Query | string | Y | contest의 원래 시험·대회 접수 ID 또는 member의 `diagnosisSubmissionId` |
 
 - **응답 (200):**
 
@@ -4509,13 +4514,13 @@
     | `submissionId` | string | found=true일 때 Judge 제출 ID |
     | `context / contextId / receiptId` | string | found=true일 때 원래 실행 문맥·접수 식별자 |
     | `userId / problemId / problemRevisionId` | string | found=true일 때 원래 회원·문제·고정 회차 |
-    | `submittedAt` | string (date-time) | found=true일 때 C가 확정한 원래 접수 시각 |
+    | `submittedAt` | string (date-time) | found=true일 때 contest·member가 확정한 원래 접수 시각 |
     | `status` | string | found=true일 때 Judge 제출 상태 |
     | `judgeAttempt` | integer | found=true일 때 채점 회차 |
     | `verdict` | string 또는 null | 미종결·실패는 null |
     | `passedCount / totalCount` | integer 또는 null | 미종결·실패는 null |
 
-- **실패 시 처리:** C는 원래 접수와 문맥·회원·문제·고정 회차·접수 시각을 대조하고 불일치를 격리한다. 미발견·조회 실패를 정상 채점 결과로 처리하거나 결과를 확정하지 않는다.
+- **실패 시 처리:** contest·member는 자기 서비스의 원래 접수와 문맥·회원·문제·고정 회차·접수 시각을 대조하고 불일치를 격리한다. 진단은 `contextId = diagnosisId`, `receiptId = diagnosisSubmissionId`를 사용한다. 미발견·조회 실패를 정상 채점 결과로 처리하거나 결과를 확정하지 않는다.
 
 
 #### 3.3.7 실패 시험 제출 재처리 (내부)
@@ -4550,6 +4555,7 @@
 - **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
 - **대응 테이블:** 없음. Draft·제출·점수·통계를 저장하거나 이벤트를 발행하지 않는다.
 - **설명:** §4.7.1의 RUN 검증을 거쳐 공개 예제·사용자 입력만 동기 실행한다. 숨김 테스트는 실행하지 않는다.
+- **Rate Limit:** §3.1.8과 같은 `run:{memberId}` 제한을 공유해 일반·시험 Run을 합쳐 사용자당 동시에 1개만 허용한다. 정상 완료·예외 시 소유 토큰이 일치할 때만 해제하며 종료 후 쿨다운은 없다. 중단 회수는 스케줄러 §3.5를 따른다.
 - **요청 본문:**
 
     | 필드 | 타입 | 필수 | 설명 |

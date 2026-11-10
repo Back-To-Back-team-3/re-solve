@@ -292,7 +292,7 @@
 | 트랜잭션 경계 | ① 선점 Tx: `RUNNING`·`lease_token` 신규·`lease_until = now + 120초`·`try_count`는 그대로, 제출 `JUDGING` ② Tx 밖: 채점 데이터 조회·Judge0 실행·폴링 ③ 결과 Tx: 상태·임대 토큰·처리 기한 조건부 UPDATE + 제출 반영 + Outbox |
 | 임대 연장 | 실행 중 30초마다 `UPDATE … SET lease_until = now + 120초 WHERE id = :id AND status = 'RUNNING' AND lease_token = :token AND deadline_at > :now`. 0행이면 즉시 실행 중단 |
 | 상태 전이 | 성공: 작업 `SUCCEEDED`, 제출 `COMPLETED`(+판정). `SYSTEM_ERROR`: `try_count + 1`, `RETRY_WAITING`·`next_run_at = now + 10초/30초`, 제출 `QUEUED`. `try_count > 3`: 작업·제출 `FAILED` |
-| 발행 이벤트 | 문맥별 `SubmissionJudged` / `ExamSubmissionJudged` / `ContestSubmissionJudged`(+진단 확정 필요), 실패 시 `SubmissionFailed` |
+| 발행 이벤트 | 문맥별 `SubmissionJudged` / `ExamSubmissionJudged` / `ContestSubmissionJudged` / `DiagnosisSubmissionJudged`, 실패 시 `SubmissionFailed` |
 | 지표 | 대기→선점 p95(평시 ≤ 10초, 마감 폭주 ≤ 60초), 실행 시간, 시도 결과별 건수 |
 
 **동작:**
@@ -300,7 +300,7 @@
 1. 선점 후 `judge_job_runs`에 시도 1행을 만들고 고정 회차 채점 데이터(2.6.2)를 조회한다. 조회 실패는 `SYSTEM_ERROR` 처리.
 2. 테스트별로 `judge_test_results.token_status`를 보고 `NOT_CREATED`면 Judge0 실행 생성, `CREATED`면 기존 token으로 폴링만 한다(조회 실패로 새 실행 생성 금지, T2-09-03). 생성 응답이 유실되면 `UNKNOWN`으로 기록하고 3.3이 복구한다.
 3. 전체 테스트 종결 후 판정 정규화(MLE 메모리 보정 포함) → 결과 Tx에서 `WHERE status = 'RUNNING' AND lease_token = :token AND deadline_at > :now`로 저장. 0행이면 결과를 버린다. 실행 생성·폴링을 시작하기 전에도 기한을 확인하며, 기한이 지났으면 추가 호출을 중단하고 3.2의 실패 종결 대상으로 둔다.
-4. Judge0 서킷이 열리면 새 선점을 멈춘다(정책 §3.4). 실행 중 작업은 임대 만료로 회수되도록 둔다. 3.2의 기한 초과 작업 종결은 서킷 상태나 선점 중단과 무관하게 계속 수행한다.
+4. Judge0 서킷이 열리면 새 선점을 멈추고 호출하지 않은 작업의 실행 시도를 소진하지 않는다. 차단·복구 확인의 횟수·시간과 인스턴스별 공유 범위는 정책 §3.4를 따른다. 실행 중 작업은 토큰을 보존하고 임대 만료로 회수되도록 둔다. 3.2의 기한 초과 작업 종결은 서킷 상태나 선점 중단과 무관하게 계속 수행한다.
 
 **동시성 설계 포인트:**
 
@@ -376,17 +376,21 @@
 | 실행 방식 | `fixedDelay = 1분` |
 | 잠금 | ShedLock `RunLockReconciliationScheduler`, `lockAtMostFor = 50초` |
 | 대상 | Redis `run:{memberId}` 키 (값 = 소유 토큰·인스턴스 ID·시작 시각) 중 시작 후 40초 초과 |
-| 처리 | 소유 인스턴스의 실행 레지스트리(`run:active:{instanceId}`, 하트비트 10초)에 토큰이 없으면 Lua `compare-and-delete`로 해제 |
+| 실행 레지스트리 | `run:active:{instanceId}`에 실행 토큰을 등록하고 10초 하트비트마다 30초 만료를 갱신한다. 인스턴스 ID는 기동마다 새로 만든다. |
+| 처리 | 소유 인스턴스의 실행 레지스트리가 만료됐거나 토큰이 없으면 관측한 소유 토큰을 Lua `compare-and-delete`로 대조해 제한을 해제한다. |
 - Run에 TTL 쿨다운을 두지 않는다는 정책(§3.2)을 지키면서, 인스턴스 비정상 종료로 영원히 `RUN_IN_PROGRESS`가 되는 것을 막는다. 40초 = 실행 기한 30초 + 중단 처리 여유.
 - 정상 경로 해제와 경합해도 소유 토큰 비교 삭제라 다른 실행의 락을 지우지 않는다.
+- Redis 조회 실패를 레지스트리 만료·실행 종료로 간주하지 않고 다음 정리에서 다시 확인한다. 소유권을 잃은 실행은 재개하거나 다른 실행의 제한을 해제하지 않는다.
 
 ### 3.6 `JudgeBacklogMonitorScheduler` — 적체 지표
 
 | 항목 | 값 |
 | --- | --- |
 | 실행 방식 | `fixedDelay = 1분` (ShedLock, 1대) |
-| 처리 | 상태별 작업 수, 가장 오래된 `PENDING` 대기 시간, 서킷 상태를 게이지로 기록. 상태 변경 없음 |
+| 처리 | 상태별 작업 수와 가장 오래된 `PENDING` 대기 시간을 집계한다. 인스턴스별 서킷 상태와 신규 실패 발생 건수를 함께 관측하며, 수집이 작업 상태를 변경하지 않는다. |
 | 알림 | 채점 대기 60초 초과 2분 지속, `FAILED` 신규 발생 (정책 §11) — Grafana 경보 규칙 |
+- 기존 `judge_jobs_pending_count`와 `scheduler_backlog_oldest_seconds`의 이름·`scheduler` 라벨과 경보 임계값을 유지한다. 대기 작업이 없으면 두 지표는 0이다.
+- 상태별 작업 수는 DB 현재 상태를 게이지로 집계한다. 신규 실패는 작업이 `FAILED`로 전이한 건수이며 같은 종결 상태를 재조회한 횟수를 세지 않는다. 서킷은 각 인스턴스의 현재 상태를 제공하고 회원·제출 ID를 지표 라벨로 사용하지 않는다.
 
 > SQS `exam-submission-queue` 소비는 스케줄러가 아니라 리스너다. 소비 Tx 규칙은 이벤트 계약서 C1·C2.
 > 
