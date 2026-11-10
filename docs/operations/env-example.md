@@ -176,10 +176,11 @@ GRAFANA_ADMIN_PASSWORD=
 
 #### 시험 제출 DLQ 재전달 감사
 
-1. 이벤트 계약 §7.3에 따라 원인을 수정하고, 이벤트 ID·시험 접수 ID를 기존 제출·작업 상태와 대조한다. 이미 `FAILED`로 종결된 제출은 정책 §3.4의 관리자 재처리 대상으로 확인한다.
-2. 권한 있는 운영자가 SQS redrive를 시작해 작업 핸들을 보관하고 완료를 확인한다. 재전달은 최초 제출·작업을 보존한다.
-3. Judge DB에 접속한 같은 MySQL 세션에서 `@redrive_actor_id`(운영자 회원 ID), `@redrive_event_id`(원래 이벤트 UUID), `@redrive_receipt_id`(시험 접수 ID), `@redrive_task_handle`(SQS 작업 핸들), `@redrive_reason`(1~500자)을 설정하고 `judge-service/src/main/resources/operations/audit-exam-submission-redrive.sql`을 실행한다. 이동 작업에 포함된 시험 이벤트마다 감사 행을 남긴다.
-4. 감사 저장 결과가 불확실하면 같은 작업 핸들과 이벤트 ID로 감사 SQL을 다시 실행한다. 이미 저장된 감사 행은 최초 집행자와 사유를 보존한다.
+1. 이벤트 계약 §7.3에 따라 원인을 수정하고, 파악한 이벤트 ID·시험 접수 ID를 운영 기록에 남긴다. 같은 DLQ에서 이동 작업은 한 번에 하나만 실행한다. 이번 작업에만 사용하는 비어 있는 Standard SQS 확인 큐를 목적지로 준비한다.
+2. `StartMessageMoveTask`에서 확인 큐를 목적지로 지정한다. 반환된 `TaskHandle`과 출발·목적지 ARN을 보관하고, `ListMessageMoveTasks`에서 같은 작업의 `StartedTimestamp`를 기록한다. 완료 상태에는 핸들이 없으므로 출발·목적지 ARN과 시작 시각으로 대조한다. 첫 조회 전에 끝났으면 이번 작업 전용 목적지와 시작 요청 시각 이후의 유일한 결과를 대조한다. 작업을 특정할 수 없거나 `FAILED`·`CANCELLED`라면 이미 이동한 메시지를 확인 큐에 보존하고 별도로 대사한다.
+3. 완료된 작업의 확인 큐에서 실제 메시지를 받아 시험 이벤트 ID·접수 ID를 작업 핸들과 함께 기록하고, 기존 제출·작업 상태와 대조한다. SQS의 대략적인 이동 건수만으로 이벤트 목록을 확정하지 않는다. 이미 `FAILED`로 종결된 제출은 정책 §3.4의 관리자 재처리 대상으로 확인하고, 다른 문맥의 메시지는 해당 문맥의 절차로 분리한다. 재전달할 시험 메시지는 원래 이벤트 ID를 유지한 본문과 메시지 속성으로 원래 제출 큐에 전송한다. 제출 코드와 메시지 원문은 감사 기록에 남기지 않는다.
+4. 원래 큐 전송이 확인된 시험 이벤트마다 같은 MySQL 세션에서 `@redrive_actor_id`(운영자 회원 ID), `@redrive_event_id`(원래 이벤트 UUID), `@redrive_receipt_id`(시험 접수 ID), `@redrive_task_handle`(SQS 작업 핸들), `@redrive_reason`(1~500자)을 설정하고 `judge-service/src/main/resources/operations/audit-exam-submission-redrive.sql`을 실행한다. 전송과 감사 저장을 확인한 뒤 확인 큐의 메시지를 삭제한다.
+5. 전송 또는 감사 저장 결과가 불확실하면 확인 큐에 메시지를 남기고 같은 이벤트 ID와 작업 핸들로 다시 처리한다. 재전달은 최초 제출·작업을 보존하며, 이미 저장된 감사 행은 최초 집행자와 사유를 보존한다.
 
 ### Member 이벤트 발행·수신 연결
 

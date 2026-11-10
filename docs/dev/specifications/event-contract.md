@@ -1069,7 +1069,7 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 
 1. 대시보드에서 DLQ 메시지의 `eventType`·`eventId`·`correlationId`로 원인 로그를 찾는다.
 2. 원인(코드 버그·데이터 불일치)을 수정해 배포한다.
-3. SQS redrive로 원래 큐에 되돌린다. 이미 반영된 메시지는 `processed_events`로 흡수된다.
+3. SQS redrive로 원래 큐에 되돌린다. 시험 제출은 [시험 제출 DLQ 재전달 감사](../../operations/env-example.md#시험-제출-dlq-재전달-감사) 절에 따라 확인 큐에서 이동 메시지를 대조한 뒤 원래 제출 큐에 전송한다. 이미 반영된 메시지는 `processed_events`로 흡수된다.
 4. `processed_events` 보관(14일)을 넘긴 메시지는 재처리 전 해당 순서 값을 확인해 중복 반영이 없음을 검증한다.
 5. 재처리 사실을 `audit_logs`(judge: DLQ 재처리)에 남긴다.
 

@@ -408,7 +408,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 ### 3.3 감사 로그 (`audit_logs`) `[IMMUTABLE]`
 
-관리자 작업, 강제 종료, 재처리 등 추적이 필요한 행위를 보존한다. 감사 대상 작업과 같은 트랜잭션에서 기록하며, 각 서비스가 자기 DB에 둔다(공통-6).
+관리자 작업, 강제 종료, 재처리 등 추적이 필요한 행위를 보존한다. 감사 대상 작업과 같은 트랜잭션에서 기록하며, 각 서비스가 자기 DB에 둔다(공통-6). Judge의 시험 제출 DLQ 재전달은 외부 SQS 작업이므로 원래 큐 전송을 확인한 뒤 별도로 감사 행을 기록한다.
 
 | **컬럼** | **타입** | **NOT NULL** | **설명** |
 | --- | --- | --- | --- |
@@ -425,6 +425,14 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 - 제약 및 인덱스
     - `idx_audit_logs_target(target_type, target_id, created_at)`
     - `idx_audit_logs_actor_created_at(actor_id, created_at)`
+
+**Judge 전용 컬럼**
+
+| **컬럼** | **타입** | **NOT NULL** | **설명** |
+| --- | --- | --- | --- |
+| `exam_redrive_task_digest` | BINARY(32) GENERATED STORED | N | `action = 'DLQ_REDRIVE'`이고 `target_type = 'EXAM_SUBMISSION_REQUEST'`이면 `after_state.moveTaskHandle`의 SHA-256 해시. 다른 감사 행은 NULL |
+
+- `uk_audit_logs_exam_redrive(target_id, exam_redrive_task_digest)`는 시험 제출 DLQ 감사에서 정규화한 이벤트 UUID와 SQS 이동 작업 핸들의 조합을 유일하게 보장한다.
 
 ### 3.4 스케줄러 잠금 (`shedlock`)
 
