@@ -28,6 +28,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import com.backtoback.common.event.service.EventConsumer;
 import com.backtoback.common.event.service.EventMessageDecoder;
 import com.backtoback.common.event.service.OutboxRelay;
+import com.backtoback.common.scheduling.scheduler.ProcessedEventCleanupScheduler;
 
 import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
 
@@ -72,6 +73,8 @@ class ValidationCompletedHandlerTest {
     @Autowired
     private EventMessageDecoder decoder;
     @Autowired
+    private ProcessedEventCleanupScheduler processedCleanup;
+    @Autowired
     private ValidationCompletedHandler handler;
     @MockitoBean
     private OutboxRelay relay;
@@ -82,7 +85,7 @@ class ValidationCompletedHandlerTest {
      * @throws Exception 동시 작업 실패
      */
     @Test
-    @DisplayName("두 언어 동시 통과와 이전 회차의 늦은 결과가 사용 정보를 되돌리지 않는다")
+    @DisplayName("동시·지연 검증 결과와 소비 기록 정리 후 재전달이 사용 정보를 중복 변경하지 않는다")
     void concurrentResults() throws Exception {
         jdbc.update("""
             insert into problem_revisions (id,problem_id,revision_number,body_asset_id,title,difficulty,function_spec,
@@ -161,6 +164,22 @@ class ValidationCompletedHandlerTest {
             .isEqualTo("REJECTED");
         assertThat(jdbc.queryForObject("select count(*) from outbox_events", Integer.class)).isEqualTo(2);
 
+        // 소비 기록을 지운 뒤에는 같은 결과가 업무 상태를 통해 중복 반영을 막아야 한다.
+        var eventId = decoder.decode(javaResult).metadata().eventId().toString();
+        jdbc.update("UPDATE processed_events SET processed_at=NOW()-INTERVAL 15 DAY WHERE event_id=?", eventId);
+        processedCleanup.cleanup();
+        assertThat(
+            jdbc.queryForObject("SELECT COUNT(*) FROM processed_events WHERE event_id=?", Integer.class, eventId)
+        ).isZero();
+
+        consumer.consume(javaResult, acknowledgements::incrementAndGet);
+
+        assertThat(acknowledgements.get()).isEqualTo(7);
+        assertThat(
+            jdbc.queryForObject("SELECT COUNT(*) FROM processed_events WHERE event_id=?", Integer.class, eventId)
+        ).isOne();
+        assertThat(jdbc.queryForObject("SELECT row_version FROM problems WHERE id=1", Integer.class)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(2);
     }
 
     /**
