@@ -111,6 +111,8 @@ public class EventRecordCleanupService {
             }
             var transaction = new TransactionTemplate(transactionManager);
             transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            // 삭제 범위의 갭 잠금이 발행 완료 갱신과 소비 기록 삽입을 막지 않도록 한다.
+            transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
             transaction.setTimeout((int)Math.max(1, Duration.ofNanos(remaining).toSeconds()));
             var deleted = transaction.execute(status -> deleteBatch.getAsInt());
             if (deleted == null) {
