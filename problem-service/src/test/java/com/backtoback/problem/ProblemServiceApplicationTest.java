@@ -7,6 +7,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -25,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -42,6 +45,9 @@ import org.testcontainers.localstack.LocalStackContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.event.service.OutboxRelay;
+import com.backtoback.common.scheduling.scheduler.OutboxCleanupScheduler;
+import com.backtoback.common.scheduling.scheduler.ProcessedEventCleanupScheduler;
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.global.lock.RedisTransactionLock;
@@ -103,6 +109,50 @@ class ProblemServiceApplicationTest {
     @Autowired
     private RedissonClient redisson;
 
+    @Autowired
+    private Clock clock;
+
+    @Autowired
+    private OutboxCleanupScheduler outboxCleanup;
+
+    @Autowired
+    private ProcessedEventCleanupScheduler processedCleanup;
+
+    @Autowired
+    private TaskScheduler taskScheduler;
+
+    /**
+     * 네 정리 작업이 실행 중이어도 예약한 발행 작업을 시작할 수 있는지 확인한다.
+     *
+     * @throws InterruptedException 예약 작업을 기다리는 중 인터럽트된 경우
+     */
+    @Test
+    @DisplayName("모든 정리 작업이 실행 중이어도 Outbox 발행은 시작할 수 있다")
+    void schedulerCanStartRelayWhileCleanupRuns() throws InterruptedException {
+        var cleanupStarted = new CountDownLatch(4);
+        var finishCleanup = new CountDownLatch(1);
+        var relayStarted = new CountDownLatch(1);
+        try {
+            for (int job = 0; job < 4; job++) {
+                taskScheduler.schedule(() -> {
+                    cleanupStarted.countDown();
+                    try {
+                        finishCleanup.await();
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                    }
+                }, clock.instant());
+            }
+            assertThat(cleanupStarted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            taskScheduler.schedule(relayStarted::countDown, clock.instant());
+
+            assertThat(relayStarted.await(5, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            finishCleanup.countDown();
+        }
+    }
+
     @BeforeEach
     void prepareLockProbe() {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
@@ -148,9 +198,47 @@ class ProblemServiceApplicationTest {
         assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("25");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM setup_probe", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_logs", Integer.class)).isZero();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM shedlock", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT COUNT(*) FROM shedlock WHERE name NOT IN ('OutboxCleanupScheduler', 'ProcessedEventCleanupScheduler')
+            """, Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM problem_revision_tags", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM problem_state_operations", Integer.class)).isZero();
+    }
+
+    /** 실제 Problem DB에서 공통 스케줄러가 만료된 이벤트만 삭제하는지 검증한다. */
+    @Test
+    @DisplayName("발행·소비 완료 기록은 보관기간이 지난 것만 삭제하고 실패·대기 Outbox는 보존한다")
+    void cleansExpiredEventRecords() {
+        var now = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE);
+        var old = now.minusDays(15);
+        jdbc.update("""
+            INSERT INTO outbox_events (
+                event_id, event_type, schema_version, aggregate_type, aggregate_id, correlation_id,
+                payload, status, retry_count, occurred_at, published_at, created_at, updated_at
+            ) VALUES
+                ('cleanup-old', 'ProblemValidationRequested', 'v1', 'PROBLEM', '1', 'cleanup', '{}',
+                    'PUBLISHED', 0, ?, ?, ?, ?),
+                ('cleanup-recent', 'ProblemValidationRequested', 'v1', 'PROBLEM', '1', 'cleanup', '{}',
+                    'PUBLISHED', 0, ?, ?, ?, ?),
+                ('cleanup-pending', 'ProblemValidationRequested', 'v1', 'PROBLEM', '1', 'cleanup', '{}',
+                    'PENDING', 0, ?, NULL, ?, ?),
+                ('cleanup-failed', 'ProblemValidationRequested', 'v1', 'PROBLEM', '1', 'cleanup', '{}',
+                    'FAILED', 3, ?, NULL, ?, ?)
+            """, old, old, old, old, old, now, old, now, old, old, old, old, old, old);
+        jdbc.update("""
+            INSERT INTO processed_events (event_id, event_type, processed_at, created_at)
+            VALUES ('cleanup-old', 'ValidationCompleted', ?, ?),
+                   ('cleanup-recent', 'ValidationCompleted', ?, ?)
+            """, old, old, now, old);
+
+        outboxCleanup.cleanup();
+        processedCleanup.cleanup();
+
+        assertThat(jdbc.queryForList("SELECT event_id FROM outbox_events WHERE correlation_id='cleanup'", String.class))
+            .containsExactlyInAnyOrder("cleanup-recent", "cleanup-pending", "cleanup-failed");
+        assertThat(
+            jdbc.queryForList("SELECT event_id FROM processed_events WHERE event_id LIKE 'cleanup-%'", String.class)
+        ).containsExactly("cleanup-recent");
     }
 
     @Test
