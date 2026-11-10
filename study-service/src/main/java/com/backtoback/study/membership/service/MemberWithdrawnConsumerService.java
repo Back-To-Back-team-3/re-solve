@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.study.hint.repository.HintBlockReplicaRepository;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.StudyMembershipHistory;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
@@ -40,6 +41,7 @@ public class MemberWithdrawnConsumerService {
     private final StudyMembershipHistoryRepository historyRepository;
     private final MemberReplicaRepository memberReplicaRepository;
     private final MemberLearningProfileReplicaRepository learningProfileReplicaRepository;
+    private final HintBlockReplicaRepository hintBlockReplicaRepository;
 
     @Transactional
     public void consume(MemberWithdrawnPayload payload) {
@@ -91,10 +93,10 @@ public class MemberWithdrawnConsumerService {
         });
 
         learningProfileReplicaRepository.deleteByMemberId(memberId);
+        hintBlockReplicaRepository.deleteByMemberId(memberId);
 
         memberReplicaRepository.upsertWithdrawn(memberId, payload.sourceVersion(), leftAt);
 
         // TODO(#추천이슈): study_recommendations 삭제 — 추천 기능 구현 시 처리
-        // TODO(#힌트이슈): hint_block_replicas 삭제 — 힌트 차단 구현 시 처리
     }
 }
