@@ -54,7 +54,7 @@ class InternalSubmissionQueryControllerTest {
      * @throws Exception 요청 실행 실패
      */
     @Test
-    @DisplayName("미접수는 found=false만 반환하고 진단 문맥은 거절한다")
+    @DisplayName("미접수는 found=false만 반환하고 일반 풀이 문맥은 거절한다")
     void distinguishesMissingReceipt() throws Exception {
         mvc
             .perform(get(RECEIPT).param("context", "EXAM").param("receiptId", "4001"))
@@ -62,7 +62,7 @@ class InternalSubmissionQueryControllerTest {
             .andExpect(jsonPath("$.found").value(false))
             .andExpect(jsonPath("$.length()").value(1));
         mvc
-            .perform(get(RECEIPT).param("context", "DIAGNOSIS").param("receiptId", "4001"))
+            .perform(get(RECEIPT).param("context", "PRACTICE").param("receiptId", "4001"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
             .andExpect(jsonPath("$.error.details[0].field").value("context"));
@@ -94,22 +94,29 @@ class InternalSubmissionQueryControllerTest {
     /**
      * 결과 이벤트가 도착하기 전에도 접수 ID와 제출 ID로 완료 상태를 확인한다.
      *
+     * @param context 시험 또는 진단 문맥
      * @throws Exception 요청 실행 실패
      */
-    @Test
-    @DisplayName("접수 대사는 원본 식별자와 완료 판정을, 제출 조회는 현재 회차 결과만 반환한다")
-    void returnsCompletedReceiptAndResult() throws Exception {
-        var submission = submission(Submission.Context.EXAM, Submission.Status.COMPLETED);
-        given(submissions.findByContextAndSourceSubmissionId(Submission.Context.EXAM, 4001))
-            .willReturn(Optional.of(submission));
+    @ParameterizedTest
+    @EnumSource(
+        value = Submission.Context.class,
+        names = {
+            "EXAM",
+            "DIAGNOSIS"
+        }
+    )
+    @DisplayName("시험·진단 접수 대사는 원본 식별자와 완료 판정을, 제출 조회는 현재 회차 결과만 반환한다")
+    void returnsCompletedReceiptAndResult(Submission.Context context) throws Exception {
+        var submission = submission(context, Submission.Status.COMPLETED);
+        given(submissions.findByContextAndSourceSubmissionId(context, 4001)).willReturn(Optional.of(submission));
         given(submissions.findById(2002L)).willReturn(Optional.of(submission));
 
         mvc
-            .perform(get(RECEIPT).param("context", "EXAM").param("receiptId", "4001"))
+            .perform(get(RECEIPT).param("context", context.name()).param("receiptId", "4001"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.found").value(true))
             .andExpect(jsonPath("$.submissionId").value("2002"))
-            .andExpect(jsonPath("$.context").value("EXAM"))
+            .andExpect(jsonPath("$.context").value(context.name()))
             .andExpect(jsonPath("$.contextId").value("401"))
             .andExpect(jsonPath("$.receiptId").value("4001"))
             .andExpect(jsonPath("$.userId").value("7"))
@@ -170,41 +177,50 @@ class InternalSubmissionQueryControllerTest {
     }
 
     /**
-     * 시험·대회 문맥이 아니거나 문맥 ID가 다르면 결과를 감춘다.
+     * 진단 ID가 다르거나 외부 문맥이 아니면 결과를 감춘다.
      *
      * @throws Exception 요청 실행 실패
      */
     @Test
-    @DisplayName("다른 시험 ID 또는 진단 문맥은 제출 결과를 조회할 수 없다")
+    @DisplayName("다른 진단 ID 또는 일반 풀이 문맥은 내부 제출 결과를 조회할 수 없다")
     void rejectsMismatchedResult() throws Exception {
         given(submissions.findById(2002L))
-            .willReturn(Optional.of(submission(Submission.Context.EXAM, Submission.Status.COMPLETED)))
-            .willReturn(Optional.of(submission(Submission.Context.DIAGNOSIS, Submission.Status.COMPLETED)));
+            .willReturn(Optional.of(submission(Submission.Context.DIAGNOSIS, Submission.Status.COMPLETED)))
+            .willReturn(Optional.of(submission(Submission.Context.PRACTICE, Submission.Status.COMPLETED)));
         mvc.perform(get(RESULT).param("contextId", "402")).andExpect(status().isNotFound());
         mvc.perform(get(RESULT).param("contextId", "401")).andExpect(status().isNotFound());
     }
 
     /**
-     * 시험 코드가 소유자 및 시험 ID와 일치할 때만 공개되는지 확인한다.
+     * 시험·진단 코드가 소유자 및 문맥 ID와 일치할 때만 공개되는지 확인한다.
      *
+     * @param context 시험 또는 진단 문맥
      * @throws Exception 요청 실행 실패
      */
-    @Test
-    @DisplayName("본인 시험 코드에만 접근할 수 있고 성공 응답의 캐시를 금지한다")
-    void restrictsExamReviewSource() throws Exception {
-        given(submissions.findByIdAndMemberIdAndContext(2002, 7, Submission.Context.EXAM))
-            .willReturn(Optional.of(submission(Submission.Context.EXAM, Submission.Status.COMPLETED)));
+    @ParameterizedTest
+    @EnumSource(
+        value = Submission.Context.class,
+        names = {
+            "EXAM",
+            "DIAGNOSIS"
+        }
+    )
+    @DisplayName("본인 시험·진단 코드에만 접근할 수 있고 성공 응답의 캐시를 금지한다")
+    void restrictsReviewSource(Submission.Context context) throws Exception {
+        String purpose = context.name() + "_REVIEW";
+        given(submissions.findByIdAndMemberIdAndContext(2002, 7, context))
+            .willReturn(Optional.of(submission(context, Submission.Status.COMPLETED)));
         mvc
-            .perform(get(SOURCE).param("purpose", "EXAM_REVIEW").param("memberId", "7").param("contextId", "401"))
+            .perform(get(SOURCE).param("purpose", purpose).param("memberId", "7").param("contextId", "401"))
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(jsonPath("$.sourceCode").value("sample code"))
             .andExpect(jsonPath("$.problemRevisionId").value("1001"));
         mvc
-            .perform(get(SOURCE).param("purpose", "EXAM_REVIEW").param("memberId", "8").param("contextId", "401"))
+            .perform(get(SOURCE).param("purpose", purpose).param("memberId", "8").param("contextId", "401"))
             .andExpect(status().isNotFound());
         mvc
-            .perform(get(SOURCE).param("purpose", "EXAM_REVIEW").param("memberId", "7").param("contextId", "402"))
+            .perform(get(SOURCE).param("purpose", purpose).param("memberId", "7").param("contextId", "402"))
             .andExpect(status().isNotFound());
     }
 
@@ -224,10 +240,10 @@ class InternalSubmissionQueryControllerTest {
                         301,
                         1001,
                         context,
-                        401L,
-                        4001L,
-                        null,
-                        null,
+                        context == Submission.Context.PRACTICE ? null : 401L,
+                        context == Submission.Context.PRACTICE ? null : 4001L,
+                        context == Submission.Context.PRACTICE ? "practice-key" : null,
+                        context == Submission.Context.PRACTICE ? "a".repeat(64) : null,
                         "java",
                         "sample code",
                         LocalDateTime.parse("2026-09-28T10:00:00")
