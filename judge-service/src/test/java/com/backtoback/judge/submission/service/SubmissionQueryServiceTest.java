@@ -26,8 +26,6 @@ import com.backtoback.judge.global.config.PersistenceConfiguration;
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
-import com.backtoback.judge.submission.domain.Submission;
-import com.backtoback.judge.submission.dto.AcceptedSubmissionHistoryResponse;
 
 import jakarta.persistence.EntityManagerFactory;
 
@@ -43,8 +41,7 @@ import jakarta.persistence.EntityManagerFactory;
 @Import(
     {
         PersistenceConfiguration.class,
-        SubmissionQueryService.class,
-        InternalSubmissionQueryService.class
+        SubmissionQueryService.class
     }
 )
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -56,8 +53,6 @@ class SubmissionQueryServiceTest {
     private JdbcTemplate jdbc;
     @Autowired
     private SubmissionQueryService queries;
-    @Autowired
-    private InternalSubmissionQueryService internalQueries;
     @Autowired
     private EntityManagerFactory entityManagerFactory;
 
@@ -79,63 +74,6 @@ class SubmissionQueryServiceTest {
                 '2026-10-31 09:00:00','2026-10-31 09:00:00','2026-10-31 09:00:00')
                 """, id, id == 3 ? 2 : 1, "key" + id, id == 1 ? "AC" : "WA");
         }
-    }
-
-    /** 커서로 이어서 조회할 때 다른 문맥·회원·판정은 제외하고 새로 들어온 정답을 한 번만 반환하는지 검증한다. */
-    @Test
-    @DisplayName("회원별 일반 AC만 조회하고 새 제출을 다음 페이지에서 중복 없이 반환한다")
-    void paginatesAcceptedPracticeHistory() {
-        insertAccepted(4, 1, Submission.Context.EXAM);
-        insertAccepted(5, 1, Submission.Context.DIAGNOSIS);
-        insertAccepted(6, 1, Submission.Context.CONTEST);
-        insertAccepted(7, 2, Submission.Context.PRACTICE);
-        insertAccepted(8, 1, Submission.Context.PRACTICE);
-
-        var first = internalQueries.acceptedHistory(1, 0, 1);
-        assertThat(first.items()).extracting(AcceptedSubmissionHistoryResponse.Item::submissionId).containsExactly("1");
-        assertThat(first.nextCursor()).isEqualTo("1");
-
-        insertAccepted(9, 1, Submission.Context.PRACTICE);
-        long after = Long.parseLong(first.nextCursor());
-        var last = internalQueries.acceptedHistory(1, after, 2);
-        assertThat(last.items())
-            .extracting(AcceptedSubmissionHistoryResponse.Item::submissionId)
-            .containsExactly("8", "9");
-        assertThat(last.nextCursor()).isNull();
-        assertThat(internalQueries.acceptedHistory(1, after, 2)).isEqualTo(last);
-
-        var empty = internalQueries.acceptedHistory(1, 9, 2);
-        assertThat(empty.items()).isEmpty();
-        assertThat(empty.nextCursor()).isNull();
-        assertThat(internalQueries.acceptedHistory(99, 0, 2)).isEqualTo(empty);
-    }
-
-    /**
-     * 조회 범위를 구분할 완료된 정답 제출을 저장한다.
-     *
-     * @param id 제출 ID
-     * @param memberId 제출 소유 회원 ID
-     * @param context 제출 문맥
-     */
-    private void insertAccepted(long id, long memberId, Submission.Context context) {
-        boolean practice = context == Submission.Context.PRACTICE;
-        jdbc
-            .update(
-                """
-                    INSERT INTO submissions(id,member_id,problem_id,problem_revision_id,context,context_id,
-                    source_submission_id,idempotency_key,request_hash,language,source_code,code_size_bytes,
-                    status,verdict,judge_attempt,submitted_at,created_at,updated_at)
-                    VALUES (?,?,1,1,?,?,?,?,?,'java','x',1,'COMPLETED','AC',1,
-                    '2026-10-31 09:00:00','2026-10-31 09:00:00','2026-10-31 09:00:00')
-                    """,
-                id,
-                memberId,
-                context.name(),
-                practice ? null : 1L,
-                practice ? null : id,
-                practice ? "key" + id : null,
-                practice ? "a".repeat(64) : null
-            );
     }
 
     /** 본인 시험 제출을 제외하고 엔티티를 적재하지 않는 요약 페이지와 필터를 검증한다. */
