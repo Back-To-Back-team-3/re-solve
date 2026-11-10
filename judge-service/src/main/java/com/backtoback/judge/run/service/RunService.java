@@ -22,6 +22,7 @@ import com.backtoback.judge.judging.client.SubmissionJudgingDataClient;
 import com.backtoback.judge.judging.client.TestAssetClient;
 import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
+import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse;
 import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse.TestCase;
 import com.backtoback.judge.judging.service.JudgeClient;
 import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
@@ -29,6 +30,8 @@ import com.backtoback.judge.judging.service.execution.JudgeResultEvaluator;
 import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
+import com.backtoback.judge.judging.service.execution.dto.JudgeTestResult;
 import com.backtoback.judge.run.dto.RunRequest;
 import com.backtoback.judge.run.dto.RunResponse;
 import com.backtoback.judge.run.store.RunLockStore;
@@ -181,6 +184,41 @@ public class RunService {
                 .filter(value -> value.language() == language)
                 .findFirst()
                 .orElseThrow(() -> new JudgeException(JudgeErrorCode.UNSUPPORTED_LANGUAGE));
+        var inputs = prepareInputs(request, data, generator, guard);
+        List<RunResponse.Result> results = new ArrayList<>();
+        String compileMessage = null;
+        for (var input : inputs) {
+            var result = executeCase(input, runtime, data, guard);
+            results
+                .add(
+                    new RunResponse.Result(
+                        input.assetId() == null ? "CUSTOM" : "SAMPLE",
+                        input.assetId(),
+                        input.index(),
+                        result.verdict(),
+                        result.actualReturnText(),
+                        input.expected(),
+                        result.timeMs(),
+                        result.memoryKiB(),
+                        result.debugOutput()
+                    )
+                );
+            if (compileMessage == null && result.verdict() == JudgeVerdict.CE) {
+                compileMessage = result.compileMessage();
+            }
+        }
+        guard.run();
+        return new RunResponse(List.copyOf(results), compileMessage);
+    }
+
+    /** 사용자 입력 오류는 파일 조회 전에 거절하고, 응답은 공개 예제 순번부터 반환한다. */
+    private List<Input> prepareInputs(
+        RunRequest request,
+        SubmissionJudgingDataResponse data,
+        ExecutionCodeGenerator generator,
+        Runnable guard
+    )
+        throws InterruptedException {
         List<Input> inputs = new ArrayList<>();
         if (request.customInputs() != null) {
             int index = 0;
@@ -201,100 +239,97 @@ public class RunService {
             }
         }
         if (request.useSamples()) {
-            List<Input> samples = new ArrayList<>();
-            for (var test : data
-                .cases()
-                .stream()
-                .filter(value -> Boolean.TRUE.equals(value.isSample()))
-                .sorted(Comparator.comparingInt(TestCase::testOrder))
-                .toList()) {
-                guard.run();
-                var content = assets.read(test.asset());
-                if (content.expectedReturnText() == null) {
-                    throw unavailable();
-                }
-                try {
-                    samples
-                        .add(
-                            new Input(
-                                test.testAssetId(),
-                                null,
-                                content.expectedReturnText(),
-                                generator.generate(data.functionSpec(), request.sourceCode(), content.argumentTexts())
-                            )
-                        );
-                } catch (IllegalArgumentException failure) {
-                    throw unavailable();
-                }
-            }
-            inputs.addAll(0, samples);
+            inputs.addAll(0, prepareSamples(request, data, generator, guard));
         }
-        var limits = data.executionLimits();
-        List<RunResponse.Result> results = new ArrayList<>();
-        String compileMessage = null;
-        for (var input : inputs) {
+        return inputs;
+    }
+
+    /** 공개 예제의 원문만 읽으며 원격 자료 오류를 사용자 입력 오류와 구분한다. */
+    private List<Input> prepareSamples(
+        RunRequest request,
+        SubmissionJudgingDataResponse data,
+        ExecutionCodeGenerator generator,
+        Runnable guard
+    )
+        throws InterruptedException {
+        List<Input> samples = new ArrayList<>();
+        for (var test : data
+            .cases()
+            .stream()
+            .filter(value -> Boolean.TRUE.equals(value.isSample()))
+            .sorted(Comparator.comparingInt(TestCase::testOrder))
+            .toList()) {
             guard.run();
-            String token;
-            try {
-                token
-                    = client
-                        .create(
-                            input.source().toRequest(runtime, limits.timeMs(), limits.wallTimeMs(), limits.memoryKb())
-                        )
-                        .token();
-            } catch (JudgeException failure) {
-                if (failure.getErrorCode().getStatus().is5xxServerError()) {
-                    throw unavailable();
-                }
-                throw failure;
+            var content = assets.read(test.asset());
+            if (content.expectedReturnText() == null) {
+                throw unavailable();
             }
-            while (true) {
-                guard.run();
-                JudgeExecutionResultResponse raw;
-                try {
-                    raw = client.find(token);
-                } catch (JudgeException failure) {
-                    throw unavailable();
-                }
-                var result
-                    = input.assetId() == null ? evaluator.evaluateCustom(raw, limits.memoryKb(), limits.outputLimitKb())
-                        : evaluator
-                            .evaluate(
-                                raw,
-                                data.functionSpec().returnType(),
-                                input.expected(),
-                                limits.memoryKb(),
-                                limits.outputLimitKb()
-                            );
-                guard.run();
-                if (result.state() == State.SYSTEM_ERROR) {
-                    throw unavailable();
-                }
-                if (result.state() == State.COMPLETED) {
-                    results
-                        .add(
-                            new RunResponse.Result(
-                                input.assetId() == null ? "CUSTOM" : "SAMPLE",
-                                input.assetId(),
-                                input.index(),
-                                result.verdict(),
-                                result.actualReturnText(),
-                                input.expected(),
-                                result.timeMs(),
-                                result.memoryKiB(),
-                                result.debugOutput()
-                            )
-                        );
-                    if (compileMessage == null && result.verdict() == JudgeVerdict.CE) {
-                        compileMessage = result.compileMessage();
-                    }
-                    break;
-                }
-                Thread.sleep(100);
+            try {
+                samples
+                    .add(
+                        new Input(
+                            test.testAssetId(),
+                            null,
+                            content.expectedReturnText(),
+                            generator.generate(data.functionSpec(), request.sourceCode(), content.argumentTexts())
+                        )
+                    );
+            } catch (IllegalArgumentException failure) {
+                throw unavailable();
             }
         }
+        return samples;
+    }
+
+    /** 실행은 한 번만 생성한다. 대기 중에는 같은 토큰을 조회하고 기한과 소유권을 다시 확인한다. */
+    private JudgeTestResult executeCase(
+        Input input,
+        JudgeRuntime runtime,
+        SubmissionJudgingDataResponse data,
+        Runnable guard
+    )
+        throws InterruptedException {
+        var limits = data.executionLimits();
         guard.run();
-        return new RunResponse(List.copyOf(results), compileMessage);
+        String token;
+        try {
+            token
+                = client
+                    .create(input.source().toRequest(runtime, limits.timeMs(), limits.wallTimeMs(), limits.memoryKb()))
+                    .token();
+        } catch (JudgeException failure) {
+            if (failure.getErrorCode().getStatus().is5xxServerError()) {
+                throw unavailable();
+            }
+            throw failure;
+        }
+        while (true) {
+            guard.run();
+            JudgeExecutionResultResponse raw;
+            try {
+                raw = client.find(token);
+            } catch (JudgeException failure) {
+                throw unavailable();
+            }
+            var result
+                = input.assetId() == null ? evaluator.evaluateCustom(raw, limits.memoryKb(), limits.outputLimitKb())
+                    : evaluator
+                        .evaluate(
+                            raw,
+                            data.functionSpec().returnType(),
+                            input.expected(),
+                            limits.memoryKb(),
+                            limits.outputLimitKb()
+                        );
+            guard.run();
+            if (result.state() == State.SYSTEM_ERROR) {
+                throw unavailable();
+            }
+            if (result.state() == State.COMPLETED) {
+                return result;
+            }
+            Thread.sleep(100);
+        }
     }
 
     /** 원격 응답 원문이나 실행 코드를 오류에 포함하지 않는다. */

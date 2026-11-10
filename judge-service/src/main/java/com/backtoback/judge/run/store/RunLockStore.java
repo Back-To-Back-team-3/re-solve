@@ -151,7 +151,7 @@ public class RunLockStore {
         return execute(RECOVER, lease) == 1;
     }
 
-    /** 소유 값·토큰·시작 시각을 같은 Lua 호출에서 전달한다. */
+    /** Lua가 소유권 변경과 정상 no-op을 구분하며, 불완전한 Redis 응답은 성공으로 처리하지 않는다. */
     private long execute(DefaultRedisScript<Long> script, Lease lease) {
         try {
             Long result
@@ -172,12 +172,12 @@ public class RunLockStore {
         }
     }
 
-    /** 회원의 일반·시험 실행이 공유하는 키를 만든다. */
+    /** 일반 Run과 시험 Run은 같은 회원 키를 사용해야 서로 동시에 선점하지 않는다. */
     private String key(long memberId) {
         return "run:" + memberId;
     }
 
-    /** 기동마다 분리되는 토큰별 하트비트 레지스트리 키를 만든다. */
+    /** 재시작한 인스턴스는 이전 인스턴스의 실행 토큰을 갱신하지 않는다. */
     private String registry(String owner) {
         return "run:active:" + owner;
     }
