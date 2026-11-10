@@ -208,6 +208,11 @@ services:
     environment:
       <<: *db-redis-environment
       SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/contest_db
+      CONTEST_EVENTS_PUBLISH_ENABLED: ${CONTEST_EVENTS_PUBLISH_ENABLED:-false}
+      CONTEST_EVENTS_TOPIC_ARN: ${CONTEST_EVENTS_TOPIC_ARN:-}
+      JUDGE_SUBMISSION_QUEUE_URL: ${JUDGE_SUBMISSION_QUEUE_URL:-}
+      CONTEST_EVENTS_ENABLED: ${CONTEST_EVENTS_ENABLED:-false}
+      CONTEST_QUEUE_URL: ${CONTEST_QUEUE_URL:-}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
       mysql:
