@@ -20,6 +20,8 @@ Stub 테스트만 실행할 때는 다음 명령을 쓴다.
 
 실제 구현을 등록할 때는 일반 프로필에서 `problem.internal-api.enabled=true`, `problem.internal-api.implementation=real`과 실제 `InternalProblemService` Bean을 함께 제공한다. 설정 조합이 일치하지 않으면 컨트롤러와 Stub Bean 모두 등록하지 않아 누락 의존성으로 기동이 실패하지 않는다.
 
+진단 후보 조회(§2.6.7)와 관리자 검증 자료 조회(§2.6.8)는 일반 프로필에서 기본 제공한다. `internal-stub` 프로필이나 `problem.internal-api.enabled=false`에서는 실제 구현을 등록하지 않는다.
+
 ## 고정 입력과 응답
 
 | 시나리오 | 입력 | 결과 |
