@@ -134,20 +134,21 @@ public class DiagnosisService {
         String sourceCode,
         long seq
     ) {
+        // 제한 시각은 잠금을 기다린 뒤가 아니라 요청을 접수한 시각으로 판단한다(API 명세서 1.5.4).
+        LocalDateTime receivedAt = now();
         DiagnosisAttempt attempt
             = attemptRepository
                 .findForUpdateByIdAndMemberId(diagnosisId, memberId)
                 .orElseThrow(() -> new MemberException(MemberErrorCode.DIAGNOSIS_NOT_FOUND));
         getProblem(attempt, problemId);
-        LocalDateTime now = now();
-        if (!attempt.isOpenAt(now)) {
+        if (!attempt.isOpenAt(receivedAt)) {
             throw new MemberException(MemberErrorCode.DIAGNOSIS_CLOSED);
         }
         if (sourceCode.getBytes(StandardCharsets.UTF_8).length > MAX_SOURCE_BYTES) {
             throw new MemberException(MemberErrorCode.CODE_TOO_LARGE);
         }
         // shortcut: 응시자당 초당 1회 Rate Limit 미적용(seq 조건으로 순서는 보장), 부하 측정에서 저장이 몰리면 Redis 제한을 넣는다.
-        return draftStore.save(attempt.getId(), problemId, language, sourceCode, seq, now);
+        return draftStore.save(attempt.getId(), problemId, language, sourceCode, seq, receivedAt);
     }
 
     /**

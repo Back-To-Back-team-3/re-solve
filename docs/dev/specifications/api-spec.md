@@ -880,7 +880,7 @@
     - 늦게 도착한 이전 Draft는 `applied: false`와 서버 `seq`를 반환한다.
 - **에러:**
     - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409), `CODE_TOO_LARGE`(413)
-- **동시성/멱등 보장:** `WHERE seq < :incomingSeq` 조건부 UPDATE. 서버 접수 시각이 `ends_at`을 넘으면 거절.
+- **동시성/멱등 보장:** 응시 행을 잠근 뒤 문항의 모든 언어 중 가장 큰 `seq`보다 클 때만 저장(순번은 문항 단위). 같은 `seq` 재전송·늦게 도착한 이전 `seq`는 `applied: false`. 서버 접수 시각(잠금 대기 전)이 `ends_at`을 넘거나 응시가 `IN_PROGRESS`가 아니면 거절.
 
 #### 1.5.5 진단 문항 제출
 

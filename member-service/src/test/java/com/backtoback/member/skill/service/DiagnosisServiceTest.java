@@ -283,6 +283,39 @@ class DiagnosisServiceTest {
     }
 
     @Test
+    @DisplayName("같은 문항에 순번이 다른 Draft가 동시에 와도 응시 잠금으로 가장 큰 순번만 남는다")
+    void concurrentDraftsKeepHighestSeq() throws Exception {
+        Long memberId = member(9009L, MemberStatus.ACTIVE);
+        given(problemTagClient.exists(12L)).willReturn(true);
+        given(problemDiagnosisClient.candidates(12L)).willReturn(CANDIDATES);
+        Long diagnosisId = diagnosisService.start(memberId, 12L).attempt().getId();
+        int requests = 10;
+        CountDownLatch start = new CountDownLatch(1);
+        List<Callable<Object>> tasks = new ArrayList<>();
+        for (int seq = 1; seq <= requests; seq++) {
+            long current = seq;
+            tasks.add(() -> {
+                start.await();
+                return diagnosisService.saveDraft(memberId, diagnosisId, 301L, "java", "v" + current, current);
+            });
+        }
+        ExecutorService executor = Executors.newFixedThreadPool(requests);
+        try {
+            List<Future<Object>> results = tasks.stream().map(executor::submit).toList();
+            start.countDown();
+            for (Future<Object> result : results) {
+                result.get(30, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdown();
+        }
+
+        Draft latest = diagnosisService.getDetail(memberId, diagnosisId).drafts().get(301L);
+        assertThat(latest.seq()).isEqualTo(10L);
+        assertThat(latest.sourceCode()).isEqualTo("v10");
+    }
+
+    @Test
     @DisplayName("이력은 본인 응시만 태그로 걸러 최신 시작순으로 준다")
     void historyFiltersByTag() {
         Long memberId = member(9007L, MemberStatus.ACTIVE);
