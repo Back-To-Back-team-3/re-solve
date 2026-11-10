@@ -733,7 +733,7 @@
 
 ### 1.5 외부 API — 진단 테스트
 
-> `member-service`가 접수하고 채점을 요청하는 초안. **진단 제출 접수 경로·이벤트명 결정 필요.**
+> `member-service`가 진단 제출을 접수하고 `DiagnosisSubmissionRequested`(M6)를 `exam-submission-queue`로 전송한다. Judge는 정상 종결을 J5, 시스템 실패를 J4로 발행한다(이벤트 계약서 M6·J5·J4).
 > 
 
 #### 1.5.1 진단 시작
@@ -3772,7 +3772,7 @@
 | 회차 용어 | 채점 회차 `judgeAttempt`(재채점마다 +1), 실행 시도 `tryCount`(회차 안 재시도). 기존 초안의 `attemptId`·`attemptNo`는 `judgeAttempt`로 통일 |
 | 재채점 | `PRACTICE`는 재채점하지 않는다. 채점 서버 장애로 실패한 `EXAM` 제출만 대상 (T2-11) |
 | 결과 공개 | 숨김 테스트의 입력·출력은 어떤 API로도 반환하지 않는다. 시험·대회 판정 공개 시점은 contest 정책을 따른다 |
-| 이벤트 발행 | `SubmissionJudged`(PRACTICE), `ExamSubmissionJudged`, `ContestSubmissionJudged`, `SubmissionFailed` |
+| 이벤트 발행 | `SubmissionJudged`(PRACTICE), `ExamSubmissionJudged`, `ContestSubmissionJudged`, `DiagnosisSubmissionJudged`, `SubmissionFailed` |
 
 ### 3.1 외부 API — 언어·제출·실행
 
