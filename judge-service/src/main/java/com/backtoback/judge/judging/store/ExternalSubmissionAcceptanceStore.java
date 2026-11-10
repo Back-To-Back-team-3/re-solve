@@ -30,6 +30,7 @@ public class ExternalSubmissionAcceptanceStore {
      *
      * @param draft 문맥에 맞게 변환한 원래 접수
      * @throws IllegalArgumentException 제출이 유효하지 않은 경우
+     * @throws com.backtoback.judge.global.error.JudgeException {@code UNSUPPORTED_LANGUAGE}: 지원하지 않는 언어인 경우
      * @throws org.springframework.dao.DataAccessException 제출·작업 저장이 실패한 경우
      */
     @Transactional(propagation = Propagation.MANDATORY)

@@ -39,7 +39,10 @@ import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.judge.judging.domain.ExecutionRuntime;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
+import com.backtoback.judge.judging.dto.FunctionSpec;
+import com.backtoback.judge.judging.dto.ProblemValidationDataResponse;
 import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse;
+import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.repository.ExecutionRuntimeRepository;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
 import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
@@ -405,9 +408,9 @@ class SubmissionMessageListenerTest {
             .isEqualTo("code");
     }
 
-    /** 실제 제출 큐의 중복 접수를 하나로 묶고 시험 판정을 결과 토픽에 발행한다. */
+    /** 중복 접수를 하나로 묶고 태그가 없는 시험 문제도 자료 검증을 거쳐 J2를 발행하는지 확인한다. */
     @Test
-    @DisplayName("시험 요청의 이벤트·접수 중복을 흡수하고 고정 런타임으로 확정한 J2를 SNS로 전달한다")
+    @DisplayName("태그 없는 시험 문제의 중복 접수를 흡수하고 고정 런타임으로 확정한 J2를 SNS로 전달한다")
     void receivesExamAndPublishesResult() {
         // given: 같은 접수를 여러 이벤트로 전달한다.
         try (var sqs = sqsClient()) {
@@ -458,13 +461,22 @@ class SubmissionMessageListenerTest {
                     "1001",
                     "시험 문제",
                     1,
-                    List.of("구현"),
-                    List.of("3"),
-                    null,
-                    null,
-                    List.of(new SubmissionJudgingDataResponse.TestCase("42", 1, true, null)),
+                    List.of(),
+                    List.of(),
+                    new FunctionSpec("solution", List.of(), new TypeSpec(TypeSpec.Kind.INT32, null, null, null, null)),
+                    new ProblemValidationDataResponse.Limits(1000, 6000, 1024, 64),
+                    List
+                        .of(
+                            new SubmissionJudgingDataResponse.TestCase(
+                                "42",
+                                1,
+                                true,
+                                new SubmissionJudgingDataResponse.Asset("test", "v1", "a".repeat(64))
+                            )
+                        ),
                     List.of(new ProblemExecutionProfileResponse("java", snapshot.getSnapshotHash(), "java-runner-v1"))
                 );
+            data.validate(input.problemId(), input.revisionId());
             assertThat(execution.initializeExternal(lease, data, input.language())).contains(runtime);
             execution.validateCases(lease, data);
             assertThat(execution.input(lease).runtime()).isEqualTo(runtime);

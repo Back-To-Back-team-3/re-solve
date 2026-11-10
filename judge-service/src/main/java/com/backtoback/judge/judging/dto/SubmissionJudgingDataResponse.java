@@ -23,7 +23,7 @@ public record SubmissionJudgingDataResponse(
 ) {
 
     /**
-     * 자료의 회차 연결과 실행·이벤트 필수값을 검증한다.
+     * 자료의 회차 연결과 실행·이벤트 필수값을 검증한다. 태그가 없는 회차는 두 태그 배열이 비어 있어야 한다.
      *
      * @param requestedProblem 요청한 문제 식별자
      * @param requestedRevision 요청한 고정 회차 식별자
@@ -38,7 +38,7 @@ public record SubmissionJudgingDataResponse(
             );
         Assert.hasText(problemTitle, "문제 제목이 필요합니다.");
         Assert.isTrue(problemDifficulty != null && problemDifficulty >= 1 && problemDifficulty <= 3, "난이도가 올바르지 않습니다.");
-        Assert.notEmpty(problemTagIds, "태그가 필요합니다.");
+        Assert.notNull(problemTagIds, "태그 ID 목록이 필요합니다.");
         Assert.isTrue(problemTags != null && problemTags.size() == problemTagIds.size(), "태그 대응이 필요합니다.");
         long previous = 0;
         for (int index = 0; index < problemTagIds.size(); index++) {
