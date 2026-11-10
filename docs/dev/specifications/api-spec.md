@@ -3978,15 +3978,15 @@
 - **Method / URI:** `GET /api/v1/me/submissions`
 - **인증:** 로그인 필요
 - **대응 테이블:** `submissions`
-- **설명:** 모든 문맥의 본인 제출을 문맥과 함께 보여준다. 시험·대회 제출의 판정은 해당 문맥 공개 정책 전까지 `null`로 가린다.
+- **설명:** 일반 풀이·시험·진단의 본인 제출을 문맥과 함께 보여준다.
 - **요청 파라미터:**
     
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `problemId` | string | N | — | 문제 필터 |
-    | `context` | string | N | — | `PRACTICE` / `EXAM` / `CONTEST` / `DIAGNOSIS` |
-    | `verdict` | string | N | — | 판정 필터 |
+    | `context` | string | N | — | `PRACTICE` / `EXAM` / `DIAGNOSIS`. `CONTEST`를 지정하면 빈 목록 |
+    | `verdict` | string | N | — | 지정하면 `PRACTICE`에만 적용한다. 시험·진단 제출은 목록과 페이지 집계에서 제외한다 |
     | `page` | int | N | 0 |  |
     | `size` | int | N | 20 |  |
     
@@ -3999,18 +3999,19 @@
         "success": true,
         "message": null,
         "data": {
-          "content": [ 
-    	      { 
-    		      "submissionId": "2001", 
-    		      "problemId": "301", 
-    		      "language": "python3", 
-    		      "context": "PRACTICE", 
-    		      "status": "COMPLETED", 
-    		      "verdict": "AC", 
-    		      "maxTimeMs": 12, 
-    		      "maxMemoryKb": 8192, 
-    		      "submittedAt": "2026-09-28T10:00:00+09:00" 
-    	      } 
+          "content": [
+            {
+              "submissionId": "2001",
+              "problemId": "301",
+              "language": "python3",
+              "context": "EXAM",
+              "contextId": "401",
+              "status": "COMPLETED",
+              "verdict": null,
+              "maxTimeMs": null,
+              "maxMemoryKb": null,
+              "submittedAt": "2026-09-28T10:00:00+09:00"
+            }
           ],
           "page": 0, 
           "size": 20, 
@@ -4022,7 +4023,8 @@
     ```
     
     - 문제 제목은 저장하지 않는다. 화면은 문제 서비스 조회로 채운다.
-    - 시험·대회 판정 공개 여부를 judge가 모르므로, 해당 제출의 `verdict`는 항상 `null`로 두고 contest 화면에서 확인하게 한다(**공개 정책 연동 방식 확정 필요**).
+    - 시험·진단의 `verdict`·`maxTimeMs`·`maxMemoryKb`는 목록에서 항상 `null`이다. 판정은 시험 결과 또는 진단 상세 화면에서 각 문맥의 공개 정책에 따라 확인한다.
+    - `contextId`(string 또는 null)는 상세 화면 연결용이다. 시험은 시험 ID, 진단은 진단 ID, 일반 풀이는 `null`을 반환한다.
 
 #### 3.1.5 제출 코드 조회
 
