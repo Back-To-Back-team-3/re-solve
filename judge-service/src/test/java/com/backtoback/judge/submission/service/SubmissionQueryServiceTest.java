@@ -99,6 +99,9 @@ class SubmissionQueryServiceTest {
         assertThat(first.content()).extracting(SubmissionListResponse::submissionId).containsExactly("5", "4");
         assertThat(first.content()).extracting(SubmissionListResponse::contextId).containsExactly("51", "41");
         assertThat(first.content()).extracting(SubmissionListResponse::context).containsExactly("DIAGNOSIS", "EXAM");
+        assertThat(first.content())
+            .extracting(SubmissionListResponse::submittedAt)
+            .containsExactly("2026-10-31T09:00:00+09:00", "2026-10-31T09:00:00.000000+09:00");
         assertThat(first.content()).allSatisfy(item -> {
             assertThat(item.status()).isEqualTo("COMPLETED");
             assertThat(item.verdict()).isNull();
@@ -110,6 +113,7 @@ class SubmissionQueryServiceTest {
         assertThat(second.hasNext()).isFalse();
         assertThat(second.content()).extracting(SubmissionListResponse::submissionId).containsExactly("2", "1");
         var practice = second.content().getLast();
+        assertThat(practice.submittedAt()).isEqualTo("2026-10-31T09:00:00+09:00");
         assertThat(practice.contextId()).isNull();
         assertThat(practice.verdict()).isEqualTo(JudgeVerdict.AC);
         assertThat(practice.maxTimeMs()).isEqualTo(12);

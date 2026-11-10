@@ -56,12 +56,12 @@ class SubmissionQueryControllerTest {
     }
 
     /**
-     * 목록 응답의 연결 ID와 가린 필드의 JSON 형식을 확인한다.
+     * 시험 목록 응답의 연결 ID, 가린 필드, 소수점 6자리 접수 시각을 확인한다.
      *
      * @throws Exception MockMvc 요청 실패
      */
     @Test
-    @DisplayName("시험 목록 행은 contextId와 가린 판정·실행 지표를 반환한다")
+    @DisplayName("시험 목록 행은 연결 ID와 가린 판정·지표, 소수점 6자리 접수 시각을 반환한다")
     void returnsMaskedContextSummary() throws Exception {
         var item
             = SubmissionListResponse
@@ -85,6 +85,7 @@ class SubmissionQueryControllerTest {
             .perform(get("/api/v1/me/submissions").header("X-User-Id", "7").header("X-User-Role", "USER"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.content[0].contextId").value("3"))
+            .andExpect(jsonPath("$.data.content[0].submittedAt").value("2026-09-28T10:00:00.000000+09:00"))
             .andExpect(jsonPath("$.data.content[0].sourceSubmissionId").doesNotHaveJsonPath())
             .andExpect(jsonPath("$.data.content[0].verdict").value(nullValue()))
             .andExpect(jsonPath("$.data.content[0].maxTimeMs").value(nullValue()))
