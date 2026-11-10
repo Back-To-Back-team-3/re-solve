@@ -1,6 +1,7 @@
 package com.backtoback.judge.judging.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -14,6 +15,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import com.backtoback.judge.judging.store.ValidationExecutionStore;
 
@@ -22,6 +26,7 @@ class ValidationSchedulerTest {
     private final ValidationWorker worker = mock(ValidationWorker.class);
     private final ValidationExecutionStore store = mock(ValidationExecutionStore.class);
     private final Clock clock = mock(Clock.class);
+    private final PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
     private final ArrayList<Runnable> tasks = new ArrayList<>();
     private final AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-31T00:00:00Z"));
     private ValidationScheduler scheduler;
@@ -30,7 +35,9 @@ class ValidationSchedulerTest {
     @BeforeEach
     void prepare() {
         given(clock.instant()).willAnswer(call -> now.get());
-        scheduler = new ValidationScheduler(worker, store, tasks::add, clock);
+        given(transactionManager.getTransaction(any(TransactionDefinition.class)))
+            .willAnswer(call -> new SimpleTransactionStatus());
+        scheduler = new ValidationScheduler(worker, store, tasks::add, clock, transactionManager);
     }
 
     /** 두 슬롯이 진행 중이면 새 실행을 쌓지 않으며 기한 초과 종결은 계속한다. */

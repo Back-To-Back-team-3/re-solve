@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.backtoback.common.event.client.EventDestinationResolver;
 import com.backtoback.common.event.config.OutboxRelayConfiguration;
@@ -138,6 +139,7 @@ public class JudgeMessagingConfiguration {
      * @param store 검증 저장소
      * @param executor 두 작업의 실행 전용 스레드
      * @param clock 공통 시각
+     * @param transactionManager 기한 초과 처리 트랜잭션 관리자
      * @return 검증 예약 작업
      */
     @Bean
@@ -145,9 +147,10 @@ public class JudgeMessagingConfiguration {
         ValidationWorker worker,
         ValidationExecutionStore store,
         @Qualifier("judgeValidationExecutor") ThreadPoolTaskExecutor executor,
-        Clock clock
+        Clock clock,
+        PlatformTransactionManager transactionManager
     ) {
-        return new ValidationScheduler(worker, store, executor, clock);
+        return new ValidationScheduler(worker, store, executor, clock, transactionManager);
     }
 
     /**
@@ -172,6 +175,7 @@ public class JudgeMessagingConfiguration {
      * @param store 제출 실행 저장소
      * @param executor 제출 전용 실행 스레드 풀
      * @param clock 공통 시각
+     * @param transactionManager 회수 한 건마다 트랜잭션을 시작할 관리자
      * @return 제출 실행 및 회수 예약 작업
      */
     @Bean
@@ -179,9 +183,10 @@ public class JudgeMessagingConfiguration {
         SubmissionWorker worker,
         SubmissionExecutionStore store,
         @Qualifier("judgeSubmissionExecutor") ThreadPoolTaskExecutor executor,
-        Clock clock
+        Clock clock,
+        PlatformTransactionManager transactionManager
     ) {
-        return new SubmissionScheduler(worker, store, executor, clock);
+        return new SubmissionScheduler(worker, store, executor, clock, transactionManager);
     }
 
 }

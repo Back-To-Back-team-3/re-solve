@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.util.concurrent.Executor;
 
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
@@ -20,14 +21,16 @@ public class SubmissionScheduler extends JudgeWorkScheduler {
      * @param store 제출 실행 저장소
      * @param executor 제출 전용 실행 스레드 풀
      * @param clock 공통 시각
+     * @param transactionManager 회수 한 건마다 트랜잭션을 시작할 관리자
      */
     public SubmissionScheduler(
         SubmissionWorker worker,
         SubmissionExecutionStore store,
         Executor executor,
-        Clock clock
+        Clock clock,
+        PlatformTransactionManager transactionManager
     ) {
-        super(worker::runOnce, store::recoverOne, executor, clock);
+        super(worker::runOnce, store::recoverOne, executor, clock, transactionManager);
         this.store = store;
     }
 
