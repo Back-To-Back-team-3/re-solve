@@ -16,10 +16,10 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.Assert;
 
-import com.backtoback.common.event.dto.ExamSubmissionJudgedPayload;
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
+import com.backtoback.judge.judging.dto.ExamSubmissionJudgedPayload;
 import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse;
 import com.backtoback.judge.judging.repository.ExecutionRuntimeRepository;
 import com.backtoback.judge.judging.service.SubmissionVerdict;

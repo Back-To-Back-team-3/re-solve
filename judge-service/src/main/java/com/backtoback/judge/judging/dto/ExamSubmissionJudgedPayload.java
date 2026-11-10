@@ -1,4 +1,4 @@
-package com.backtoback.common.event.dto;
+package com.backtoback.judge.judging.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
