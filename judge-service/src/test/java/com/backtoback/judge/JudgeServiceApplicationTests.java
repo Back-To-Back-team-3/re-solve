@@ -5,8 +5,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +20,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -27,11 +31,19 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.localstack.LocalStackContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.judge.judging.service.JudgeWorkScheduler;
+import com.zaxxer.hikari.HikariDataSource;
+
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsAsyncClient;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 
-@SpringBootTest(properties = "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration")
+@SpringBootTest(
+    properties = {
+        "spring.flyway.locations=classpath:db/migration,classpath:db/testmigration",
+        "spring.datasource.hikari.maximum-pool-size=1"
+    }
+)
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
 @Testcontainers
@@ -71,6 +83,36 @@ class JudgeServiceApplicationTests {
 
     @Autowired
     private ApplicationContext context;
+
+    @Autowired
+    private HikariDataSource dataSource;
+
+    @Autowired
+    private JpaTransactionManager transactionManager;
+
+    /**
+     * 풀이 고갈되면 연결 대기 상한에 도달한 회수 트랜잭션이 쿼리 없이 끝나는지 확인한다.
+     *
+     * @throws SQLException 테스트에서 연결을 빌리거나 반환하지 못한 경우
+     */
+    @Test
+    @DisplayName("DB 연결 풀이 고갈되어도 채점 회수는 12초 안에 쿼리 없이 종료한다")
+    void stopsRecoveryWhenConnectionPoolIsExhausted() throws SQLException {
+        var called = new AtomicBoolean();
+        var scheduler = new JudgeWorkScheduler(() -> false, () -> {
+            called.set(true);
+            return false;
+        }, Runnable::run, Clock.systemUTC(), transactionManager);
+        assertThat(dataSource.getConnectionTimeout()).isEqualTo(2000);
+        try (var connection = dataSource.getConnection()) {
+            assertThat(connection.isClosed()).isFalse();
+            long started = System.nanoTime();
+            scheduler.expire();
+            assertThat(Duration.ofNanos(System.nanoTime() - started))
+                .isBetween(Duration.ofSeconds(1), Duration.ofSeconds(12));
+            assertThat(called).isFalse();
+        }
+    }
 
     /** 기본 비활성 설정에서 원격 실행과 예약 작업이 시작되지 않는지 확인한다. */
     @Test

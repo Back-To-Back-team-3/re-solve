@@ -17,6 +17,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.Assert;
 
+import com.zaxxer.hikari.HikariDataSource;
+
 import lombok.extern.slf4j.Slf4j;
 
 /** 활성화 설정으로 등록할 때만 채점 실행과 기한 초과 종결과 임대 회수를 예약한다. DB 잠금으로 인스턴스 간 선점을 분리한다. */
@@ -114,16 +116,21 @@ public class JudgeWorkScheduler {
     protected void recoverBatch(BooleanSupplier recoverOne) {
         long deadline = nanoTime.getAsLong() + RECOVERY_BUDGET_NANOS;
         try {
+            var dataSource = transactionManager.getDataSource();
+            Assert.state(dataSource instanceof HikariDataSource, "채점 회수에는 Hikari 연결 풀이 필요합니다.");
+            var pool = (HikariDataSource)dataSource;
             for (int count = 0; count < 100; count++) {
-                int timeoutSeconds = (int)TimeUnit.NANOSECONDS.toSeconds(deadline - nanoTime.getAsLong());
-                // 트랜잭션 제한시간은 초 단위이므로 남은 예산이 1초 미만이면 다음 회차에 처리한다.
-                if (timeoutSeconds < 1) {
+                long remaining = deadline - nanoTime.getAsLong();
+                long connectionWait = TimeUnit.MILLISECONDS.toNanos(pool.getConnectionTimeout());
+                // 연결 대기와 JDBC가 사용할 최소 1초를 이번 회차의 예산에서 확보한다.
+                if (remaining < connectionWait + TimeUnit.SECONDS.toNanos(1)) {
                     return;
                 }
+                int timeoutSeconds = (int)TimeUnit.NANOSECONDS.toSeconds(remaining);
                 var transaction = new TransactionTemplate(transactionManager);
                 transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
                 transaction.setTimeout(timeoutSeconds);
-                var recovered = transaction.execute(status -> recoverWithinBudget(recoverOne, deadline));
+                var recovered = transaction.execute(status -> recoverWithinBudget(recoverOne, deadline, pool));
                 if (!Boolean.TRUE.equals(recovered)) {
                     return;
                 }
@@ -138,17 +145,16 @@ public class JudgeWorkScheduler {
      *
      * @param recoverOne 회수 대상 한 건을 처리하는 저장소 호출
      * @param deadline 회수 회차의 단조 시각 기준 마감
+     * @param pool 회수 트랜잭션이 사용하는 연결 풀
      * @return 처리할 작업이 있었는지 여부
      * @throws IllegalStateException JPA 트랜잭션에 JDBC 연결이 바인딩되지 않은 경우
      */
-    private boolean recoverWithinBudget(BooleanSupplier recoverOne, long deadline) {
+    private boolean recoverWithinBudget(BooleanSupplier recoverOne, long deadline, HikariDataSource pool) {
         long remainingSeconds = TimeUnit.NANOSECONDS.toSeconds(deadline - nanoTime.getAsLong());
         if (remainingSeconds < 1) {
             return false;
         }
-        var dataSource = transactionManager.getDataSource();
-        Assert.state(dataSource != null, "회수 트랜잭션의 데이터 소스가 필요합니다.");
-        var connection = (ConnectionHolder)TransactionSynchronizationManager.getResource(dataSource);
+        var connection = (ConnectionHolder)TransactionSynchronizationManager.getResource(pool);
         Assert.state(connection != null, "회수 트랜잭션의 JDBC 연결이 필요합니다.");
         connection
             .setTimeoutInMillis(

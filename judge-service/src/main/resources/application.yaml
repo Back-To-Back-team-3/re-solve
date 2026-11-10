@@ -5,6 +5,8 @@ spring:
     url: ${SPRING_DATASOURCE_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+    hikari:
+      connection-timeout: 2000
   jpa:
     open-in-view: false
     show-sql: false

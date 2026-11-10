@@ -13,9 +13,8 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
-import javax.sql.DataSource;
-
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,6 +28,8 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import com.zaxxer.hikari.HikariDataSource;
+
 /** 회수 회차의 실행 예산과 건별 트랜잭션을 검증한다. */
 @ExtendWith(MockitoExtension.class)
 class JudgeWorkSchedulerTest {
@@ -37,7 +38,15 @@ class JudgeWorkSchedulerTest {
     @Mock
     private BooleanSupplier recoverOne;
 
-    private final DataSource dataSource = mock(DataSource.class);
+    @Mock
+    private HikariDataSource dataSource;
+
+    /** 운영과 같은 연결 풀 대기 상한을 설정한다. */
+    @BeforeEach
+    void configurePool() {
+        given(transactionManager.getDataSource()).willReturn(dataSource);
+        given(dataSource.getConnectionTimeout()).willReturn(2000L);
+    }
 
     /** 테스트 스레드에 연결한 JDBC 자원을 해제한다. */
     @AfterEach
@@ -45,21 +54,20 @@ class JudgeWorkSchedulerTest {
         TransactionSynchronizationManager.unbindResourceIfPossible(dataSource);
     }
 
-    /** 남은 예산을 각 트랜잭션에 적용하고 1초 미만이면 새 회수를 시작하지 않는지 확인한다. */
+    /** 남은 예산을 각 트랜잭션에 적용하고 연결 대기까지 확보할 수 없으면 새 회수를 시작하지 않는지 확인한다. */
     @Test
-    @DisplayName("회수 건마다 남은 예산을 적용하고 1초 미만이면 다음 건을 시작하지 않는다")
+    @DisplayName("연결 대기와 쿼리 시간을 확보할 수 없으면 다음 회수 트랜잭션을 시작하지 않는다")
     void limitsRecoveryByRemainingBudget() {
         var elapsed = new AtomicLong();
-        given(transactionManager.getDataSource()).willReturn(dataSource);
         given(transactionManager.getTransaction(any(TransactionDefinition.class))).willAnswer(call -> {
             bindConnection();
             return new SimpleTransactionStatus();
         });
         given(recoverOne.getAsBoolean()).willAnswer(call -> {
-            elapsed.set(Duration.ofSeconds(10).toNanos());
+            elapsed.set(Duration.ofSeconds(9).toNanos());
             return true;
         }).willAnswer(call -> {
-            elapsed.set(Duration.ofMillis(11500).toNanos());
+            elapsed.set(Duration.ofMillis(9100).toNanos());
             return true;
         });
         var scheduler
@@ -76,7 +84,7 @@ class JudgeWorkSchedulerTest {
 
         var definitions = ArgumentCaptor.forClass(TransactionDefinition.class);
         verify(transactionManager, times(2)).getTransaction(definitions.capture());
-        assertThat(definitions.getAllValues()).extracting(TransactionDefinition::getTimeout).containsExactly(12, 2);
+        assertThat(definitions.getAllValues()).extracting(TransactionDefinition::getTimeout).containsExactly(12, 3);
         assertThat(definitions.getAllValues())
             .extracting(TransactionDefinition::getPropagationBehavior)
             .containsOnly(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -110,18 +118,17 @@ class JudgeWorkSchedulerTest {
 
     /** 연결 대기 후에도 남은 회차 예산을 JDBC 제한시간에 적용한다. */
     @Test
-    @DisplayName("DB 연결 대기에 10초를 쓰면 회수 쿼리는 남은 2초를 사용한다")
+    @DisplayName("연결 확보 후 회수 쿼리는 남은 예산만 사용한다")
     void limitsQueryAfterWaitingForConnection() {
         var elapsed = new AtomicLong();
-        given(transactionManager.getDataSource()).willReturn(dataSource);
         given(transactionManager.getTransaction(any(TransactionDefinition.class))).willAnswer(call -> {
-            elapsed.set(Duration.ofSeconds(10).toNanos());
+            elapsed.set(Duration.ofMillis(1750).toNanos());
             bindConnection();
             return new SimpleTransactionStatus();
         });
         given(recoverOne.getAsBoolean()).willAnswer(call -> {
             var connection = (ConnectionHolder)TransactionSynchronizationManager.getResource(dataSource);
-            assertThat(connection.getTimeToLiveInSeconds()).isEqualTo(2);
+            assertThat(connection.getTimeToLiveInSeconds()).isEqualTo(10);
             return false;
         });
         var scheduler

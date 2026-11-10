@@ -12,8 +12,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
-import javax.sql.DataSource;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +23,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.backtoback.judge.judging.store.ValidationExecutionStore;
+import com.zaxxer.hikari.HikariDataSource;
 
 /** 실행 슬롯 상한과 대기열 백오프, 독립적인 기한 초과 처리를 확인한다. */
 class ValidationSchedulerTest {
@@ -32,7 +31,7 @@ class ValidationSchedulerTest {
     private final ValidationExecutionStore store = mock(ValidationExecutionStore.class);
     private final Clock clock = mock(Clock.class);
     private final JpaTransactionManager transactionManager = mock(JpaTransactionManager.class);
-    private final DataSource dataSource = mock(DataSource.class);
+    private final HikariDataSource dataSource = mock(HikariDataSource.class);
     private final ArrayList<Runnable> tasks = new ArrayList<>();
     private final AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-31T00:00:00Z"));
     private ValidationScheduler scheduler;
@@ -42,6 +41,7 @@ class ValidationSchedulerTest {
     void prepare() {
         given(clock.instant()).willAnswer(call -> now.get());
         given(transactionManager.getDataSource()).willReturn(dataSource);
+        given(dataSource.getConnectionTimeout()).willReturn(2000L);
         given(transactionManager.getTransaction(any(TransactionDefinition.class))).willAnswer(call -> {
             TransactionSynchronizationManager.unbindResourceIfPossible(dataSource);
             var connection = new ConnectionHolder(mock(java.sql.Connection.class));
