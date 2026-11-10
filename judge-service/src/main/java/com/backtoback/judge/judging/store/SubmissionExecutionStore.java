@@ -152,7 +152,8 @@ public class SubmissionExecutionStore {
                         SELECT j.id,j.submission_id,j.judge_attempt,j.try_count,j.deadline_at
                         FROM judge_jobs j STRAIGHT_JOIN submissions s ON s.id=j.submission_id
                         WHERE j.status IN ('PENDING','RETRY_WAITING') AND j.next_run_at<=? AND j.deadline_at>?
-                        AND j.try_count<=3 AND j.judge_attempt=s.judge_attempt AND s.context IN ('PRACTICE','EXAM')
+                        AND j.try_count<=3 AND j.judge_attempt=s.judge_attempt
+                        AND s.context IN ('PRACTICE','EXAM','DIAGNOSIS')
                         ORDER BY j.next_run_at,j.id LIMIT 1 FOR UPDATE SKIP LOCKED
                         """,
                     (row, index) -> new SubmissionLease(
@@ -477,7 +478,14 @@ public class SubmissionExecutionStore {
                 payload.put("problemTagIds", data.problemTagIds());
                 yield "SubmissionJudged";
             }
-            default -> throw new IllegalStateException("결과 발행을 지원하지 않는 채점 문맥입니다.");
+            case DIAGNOSIS -> {
+                payload.put("context", "DIAGNOSIS");
+                payload.put("diagnosisId", submission.getContextId().toString());
+                payload.put("diagnosisSubmissionId", submission.getSourceSubmissionId().toString());
+                payload.put("status", "COMPLETED");
+                yield "DiagnosisSubmissionJudged";
+            }
+            case EXAM, CONTEST -> throw new IllegalStateException("결과 발행을 지원하지 않는 채점 문맥입니다.");
         };
         events
             .append("Submission", eventType, "v1", Long.toString(lease.submissionId()), lease.correlationId(), payload);
@@ -535,7 +543,7 @@ public class SubmissionExecutionStore {
                     """
                         SELECT j.id,j.submission_id,j.judge_attempt,j.try_count,j.lease_token,j.deadline_at
                         FROM judge_jobs j STRAIGHT_JOIN submissions s ON s.id=j.submission_id
-                        WHERE s.context IN ('PRACTICE','EXAM')
+                        WHERE s.context IN ('PRACTICE','EXAM','DIAGNOSIS')
                         AND ((s.judge_attempt=j.judge_attempt AND j.status='RUNNING'
                             AND j.lease_until>? AND j.deadline_at>?)
                             OR j.status IN ('RETRY_WAITING','FAILED','SUCCEEDED'))
@@ -605,7 +613,7 @@ public class SubmissionExecutionStore {
                 .query(
                     """
                         SELECT j.* FROM judge_jobs j STRAIGHT_JOIN submissions s ON s.id=j.submission_id
-                        WHERE s.context IN ('PRACTICE','EXAM') AND s.judge_attempt=j.judge_attempt
+                        WHERE s.context IN ('PRACTICE','EXAM','DIAGNOSIS') AND s.judge_attempt=j.judge_attempt
                         AND j.status IN ('PENDING','RUNNING','RETRY_WAITING')
                         AND (j.deadline_at<=? OR (j.status='RUNNING' AND (j.lease_until<=? OR j.started_at<=?)))
                         ORDER BY j.deadline_at,j.id LIMIT 1 FOR UPDATE SKIP LOCKED
