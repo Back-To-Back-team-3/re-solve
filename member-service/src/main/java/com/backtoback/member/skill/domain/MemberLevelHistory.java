@@ -86,6 +86,16 @@ public class MemberLevelHistory {
     /**
      * 진단 없이 진입한 기록. 이전 레벨이 없다.
      */
+    /**
+     * 진단 결과로 레벨이 바뀐 이력 (근거: 진단 응시).
+     */
+    public static MemberLevelHistory diagnosis(MemberTagLevel tagLevel, TagLevel fromLevel, Long diagnosisAttemptId) {
+        MemberLevelHistory history
+            = new MemberLevelHistory(tagLevel.getId(), fromLevel, tagLevel.getLevel(), LevelChangeReason.DIAGNOSIS);
+        history.diagnosisAttemptId = diagnosisAttemptId;
+        return history;
+    }
+
     public static MemberLevelHistory entrySkip(MemberTagLevel tagLevel) {
         return new MemberLevelHistory(tagLevel.getId(), null, tagLevel.getLevel(), LevelChangeReason.ENTRY_SKIP);
     }

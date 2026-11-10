@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -107,7 +108,7 @@ class DiagnosisServiceTest {
     @DisplayName("처음 진입한 태그는 LV0으로 두고 난이도 1·2·3 문항을 고정해 60분 진단을 시작하며, 태그 레벨 목록에 진행 중으로 보인다")
     void startsDiagnosis() {
         Long memberId = member(9001L, MemberStatus.ACTIVE);
-        given(problemTagClient.exists(3L)).willReturn(true);
+        given(problemTagClient.findName(3L)).willReturn(Optional.of("태그"));
         given(problemDiagnosisClient.candidates(3L)).willReturn(CANDIDATES);
 
         StartedDiagnosis started = diagnosisService.start(memberId, 3L);
@@ -132,10 +133,10 @@ class DiagnosisServiceTest {
     @DisplayName("없는 태그·문항 부족·LV3·쿨타임·정지 회원은 각 오류이고 응시와 태그 레벨을 만들지 않는다")
     void rejectsUnstartable() {
         Long memberId = member(9002L, MemberStatus.ACTIVE);
-        given(problemTagClient.exists(99L)).willReturn(false);
+        given(problemTagClient.findName(99L)).willReturn(Optional.empty());
         assertError(() -> diagnosisService.start(memberId, 99L), MemberErrorCode.LEVEL_TAG_NOT_FOUND);
 
-        given(problemTagClient.exists(4L)).willReturn(true);
+        given(problemTagClient.findName(4L)).willReturn(Optional.of("태그"));
         given(problemDiagnosisClient.candidates(4L))
             .willReturn(Arrays.asList(CANDIDATES.get(0), null, CANDIDATES.get(2)));
         assertError(() -> diagnosisService.start(memberId, 4L), MemberErrorCode.DIAGNOSIS_PROBLEMS_UNAVAILABLE);
@@ -160,7 +161,7 @@ class DiagnosisServiceTest {
             );
 
         Long suspended = member(9003L, MemberStatus.SUSPENDED);
-        given(problemTagClient.exists(3L)).willReturn(true);
+        given(problemTagClient.findName(3L)).willReturn(Optional.of("태그"));
         given(problemDiagnosisClient.candidates(3L)).willReturn(CANDIDATES);
         assertError(() -> diagnosisService.start(suspended, 3L), MemberErrorCode.MEMBER_SUSPENDED);
 
@@ -179,7 +180,7 @@ class DiagnosisServiceTest {
     @DisplayName("같은 태그의 진단을 동시에 시작해도 한 건만 남고 나머지는 DIAGNOSIS_ALREADY_IN_PROGRESS")
     void concurrentStartKeepsOne() throws Exception {
         Long memberId = member(9004L, MemberStatus.ACTIVE);
-        given(problemTagClient.exists(7L)).willReturn(true);
+        given(problemTagClient.findName(7L)).willReturn(Optional.of("태그"));
         given(problemDiagnosisClient.candidates(7L)).willReturn(CANDIDATES);
         int requests = 4;
         CountDownLatch start = new CountDownLatch(1);
@@ -225,7 +226,7 @@ class DiagnosisServiceTest {
     void savesDrafts() {
         Long memberId = member(9005L, MemberStatus.ACTIVE);
         Long other = member(9006L, MemberStatus.ACTIVE);
-        given(problemTagClient.exists(8L)).willReturn(true);
+        given(problemTagClient.findName(8L)).willReturn(Optional.of("태그"));
         given(problemDiagnosisClient.candidates(8L)).willReturn(CANDIDATES);
         Long diagnosisId = diagnosisService.start(memberId, 8L).attempt().getId();
 
@@ -287,7 +288,7 @@ class DiagnosisServiceTest {
     @DisplayName("같은 문항에 순번이 다른 Draft가 동시에 와도 응시 잠금으로 가장 큰 순번만 남는다")
     void concurrentDraftsKeepHighestSeq() throws Exception {
         Long memberId = member(9009L, MemberStatus.ACTIVE);
-        given(problemTagClient.exists(12L)).willReturn(true);
+        given(problemTagClient.findName(12L)).willReturn(Optional.of("태그"));
         given(problemDiagnosisClient.candidates(12L)).willReturn(CANDIDATES);
         Long diagnosisId = diagnosisService.start(memberId, 12L).attempt().getId();
         int requests = 10;
@@ -321,8 +322,8 @@ class DiagnosisServiceTest {
     void historyFiltersByTag() {
         Long memberId = member(9007L, MemberStatus.ACTIVE);
         Long other = member(9008L, MemberStatus.ACTIVE);
-        given(problemTagClient.exists(10L)).willReturn(true);
-        given(problemTagClient.exists(11L)).willReturn(true);
+        given(problemTagClient.findName(10L)).willReturn(Optional.of("태그"));
+        given(problemTagClient.findName(11L)).willReturn(Optional.of("태그"));
         given(problemDiagnosisClient.candidates(10L)).willReturn(CANDIDATES);
         given(problemDiagnosisClient.candidates(11L)).willReturn(CANDIDATES);
         Long first = diagnosisService.start(memberId, 10L).attempt().getId();

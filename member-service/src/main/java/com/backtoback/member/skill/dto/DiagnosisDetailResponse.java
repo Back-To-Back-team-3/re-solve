@@ -52,7 +52,8 @@ public record DiagnosisDetailResponse(
                 );
             }).toList(),
             attempt.getStatus() == DiagnosisStatus.SCORED
-                ? new Result(attempt.getScore(), attempt.getResultLevel().name(), null) : null
+                ? new Result(attempt.getScore(), attempt.getResultLevel().name(), attempt.getAppliedLevel().name())
+                : null
         );
     }
 
@@ -72,7 +73,7 @@ public record DiagnosisDetailResponse(
     }
 
     /**
-     * @param appliedLevel 진단 반영 후 레벨. 결과 확정(③)을 구현할 때 채운다.
+     * @param appliedLevel 진단 반영 후 레벨 {@code max(이전 레벨, resultLevel)}
      */
     public record Result(BigDecimal score, String resultLevel, String appliedLevel) {
     }

@@ -122,6 +122,99 @@ public class DiagnosisSubmissionStore {
             );
     }
 
+    /**
+     * 채점 결과를 반영할 진단 제출 (J5·J4 대조용).
+     *
+     * @param judgeAttempt 반영한 채점 회차. 채점 전이면 {@code null}
+     */
+    public Optional<ResultTarget> findResultTarget(long diagnosisSubmissionId) {
+        List<ResultTarget> found
+            = jdbcTemplate
+                .query(
+                    "select s.diagnosis_attempt_id, s.problem_id, s.judge_attempt, "
+                        + "s.draft_seq = (select max(o.draft_seq) from diagnosis_submissions o "
+                        + "where o.diagnosis_attempt_id = s.diagnosis_attempt_id "
+                        + "and o.problem_id = s.problem_id) latest " + "from diagnosis_submissions s where s.id = ?",
+                    (row, index) -> new ResultTarget(
+                        row.getLong("diagnosis_attempt_id"),
+                        row.getLong("problem_id"),
+                        row.getObject("judge_attempt", Integer.class),
+                        row.getBoolean("latest")
+                    ),
+                    diagnosisSubmissionId
+                );
+        return found.stream().findFirst();
+    }
+
+    /**
+     * 채점 결과를 기록한다. {@code JUDGED}는 판정을, {@code FAILED}는 판정 없이 상태만 남긴다.
+     */
+    public void recordResult(
+        long diagnosisSubmissionId,
+        long submissionId,
+        int judgeAttempt,
+        String status,
+        String verdict,
+        LocalDateTime now
+    ) {
+        jdbcTemplate
+            .update(
+                "update diagnosis_submissions set status = ?, submission_id = ?, judge_attempt = ?, verdict = ?, "
+                    + "updated_at = ? where id = ?",
+                status,
+                submissionId,
+                judgeAttempt,
+                verdict,
+                now,
+                diagnosisSubmissionId
+            );
+    }
+
+    /**
+     * 아직 채점이 끝나지 않은({@code ACCEPTED}·{@code REQUESTED}) 제출 수.
+     */
+    public long countPending(long attemptId) {
+        return jdbcTemplate
+            .queryForObject(
+                "select count(*) from diagnosis_submissions "
+                    + "where diagnosis_attempt_id = ? and status in ('ACCEPTED', 'REQUESTED')",
+                Long.class,
+                attemptId
+            );
+    }
+
+    /**
+     * 채점 장애({@code FAILED}) 제출이 있는지. 있으면 쿨타임을 면제한다(정책 및 상태 8.3).
+     */
+    public boolean anyFailed(long attemptId) {
+        return jdbcTemplate
+            .queryForObject(
+                "select count(*) from diagnosis_submissions where diagnosis_attempt_id = ? and status = 'FAILED'",
+                Long.class,
+                attemptId
+            ) > 0;
+    }
+
+    /**
+     * 종료됐고 모든 제출이 종결된 응시 (채점 확정 보정, 스케줄러 1.2).
+     */
+    public List<Long> findScorableAttemptIds(int limit) {
+        return jdbcTemplate
+            .queryForList(
+                "select a.id from diagnosis_attempts a where a.status = 'CLOSED' and not exists ("
+                    + "select 1 from diagnosis_submissions s where s.diagnosis_attempt_id = a.id "
+                    + "and s.status in ('ACCEPTED', 'REQUESTED')) order by a.closed_at, a.id limit ?",
+                Long.class,
+                limit
+            );
+    }
+
     public record Submission(long id, String status, LocalDateTime receivedAt) {
+    }
+
+    /**
+     * @param latest 문항에서 가장 큰 {@code draft_seq}의 제출인지 (문항 최종 판정)
+     */
+    public record ResultTarget(long attemptId, long problemId, Integer judgeAttempt, boolean latest) {
     }
 }

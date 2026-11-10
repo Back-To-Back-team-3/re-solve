@@ -1,11 +1,13 @@
 package com.backtoback.member.skill.client;
 
 import java.time.Duration;
+import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -51,22 +53,31 @@ public class ProblemTagClient {
     }
 
     /**
-     * 200 본문의 {@code tagId}가 요청과 같으면 {@code true}, problem이 {@code PROBLEM_TAG_NOT_FOUND}로 응답하면 {@code false}를 반환한다.
-     * 그 밖의 응답(본문이 다른 200, 204, 경로가 없는 404 포함)과 통신 오류는 {@code COMMON_DEPENDENCY_UNAVAILABLE}로 실패시킨다.
+     * 태그가 있는지 (태그 진입 1.4.2). {@link #findName}과 같은 규칙으로 판단한다.
      */
     public boolean exists(Long tagId) {
+        return findName(tagId).isPresent();
+    }
+
+    /**
+     * 200 본문의 {@code tagId}가 요청과 같으면 태그 이름을, problem이 {@code PROBLEM_TAG_NOT_FOUND}로 응답하면 빈 값을 반환한다.
+     * 그 밖의 응답(본문이 다른 200, 이름이 없는 200, 204, 경로가 없는 404 포함)과 통신 오류는 {@code COMMON_DEPENDENCY_UNAVAILABLE}로
+     * 실패시킨다.
+     */
+    public Optional<String> findName(Long tagId) {
         try {
             return restClient.get().uri("/internal/v1/tags/{tagId}", tagId).exchange((request, response) -> {
                 if (response.getStatusCode().isSameCodeAs(HttpStatus.OK)) {
                     TagBody body = response.bodyTo(TagBody.class);
-                    if (body != null && String.valueOf(tagId).equals(body.tagId())) {
-                        return true;
+                    if (body != null && String.valueOf(tagId).equals(body.tagId())
+                        && StringUtils.hasText(body.name())) {
+                        return Optional.of(body.name());
                     }
                 }
                 if (response.getStatusCode().isSameCodeAs(HttpStatus.NOT_FOUND)) {
                     ErrorEnvelope body = response.bodyTo(ErrorEnvelope.class);
                     if (body != null && body.error() != null && TAG_NOT_FOUND.equals(body.error().code())) {
-                        return false;
+                        return Optional.empty();
                     }
                 }
                 log.warn("Problem tag lookup failed: status={}", response.getStatusCode().value());
@@ -79,7 +90,7 @@ public class ProblemTagClient {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record TagBody(String tagId) {
+    record TagBody(String tagId, String name) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
