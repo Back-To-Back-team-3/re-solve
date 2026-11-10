@@ -183,6 +183,8 @@ flowchart LR
 | M4 | `LearningProfileUpdated` v1 | member | study | SNS | 프로필 입력·변경, 레벨 확정·변경 | `profileVersion` | 확정 |
 | M5 | `TagLevelChanged` v1 | member | notification | SNS | 진단 결과·승급·하향·쿨타임 해제 | — | 확정 |
 | M6 | `DiagnosisSubmissionRequested` v1 | member | judge | SQS `exam-submission-queue` | 진단 문항 제출·자동 제출 | — | 확정 |
+| M7 | `DiagnosisStarted` v1 | member | study | SNS | 진단 세션 시작 (`IN_PROGRESS` 진입) | — | 확정 |
+| M8 | `DiagnosisClosed` v1 | member | study | SNS | 진단 세션 종료 (`IN_PROGRESS → CLOSED`) | — | 확정 |
 | P1 | `ProblemStateChanged` v1 / v2 | problem | study, contest | SNS | v1 기존 공개 계약 / v2 공개 상태·사용 회차·통과 언어 변경 | `sourceVersion` | v1 기존 계약 / v2 소비자 전환 확인 필요 |
 | P2 | `ProblemValidationRequested` v1 | problem | judge | 검증 SQS 직접 | 검증 접수·자동 재검증 요청 저장 | `validationId` 멱등 | 제공·소비 담당 확인 필요 |
 | P3 | `ProblemValidationCompleted` v1 | judge | problem | SNS | 검증 최종 판정 저장 | `validationId` 종결 1회 | 제공·소비 담당 확인 필요 |
@@ -365,6 +367,38 @@ flowchart LR
 | 소비자 | 처리 |
 | --- | --- |
 | judge | `uk_submissions_context_source_submission(DIAGNOSIS, id)`로 멱등 생성, 레벨 접근 제한 미적용 |
+
+#### M7 `DiagnosisStarted` v1
+
+- **발행:** `diagnosis_attempts` 상태 `IN_PROGRESS` 진입 트랜잭션. aggregate = `diagnosisAttemptId`.
+- **경로:** SNS 팬아웃.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `diagnosisAttemptId` | string | Y | `diagnosis_attempts.id` |
+| `memberId` | string | Y |  |
+| `tagId` | string | Y | 진단 태그 ID |
+| `problemIds` | string[] | Y | 진단 세션 문제 ID 목록 |
+| `startsAt` | string (date-time) | Y | `diagnosis_attempts.started_at` |
+| `endsAt` | string (date-time) | Y | `diagnosis_attempts.ends_at` |
+
+| 소비자 | 처리 |
+| --- | --- |
+| study | `hint_block_replicas` 문제별 INSERT (`context_type=DIAGNOSIS`, `context_id=diagnosisAttemptId`, `context_revision=1` 고정) |
+
+#### M8 `DiagnosisClosed` v1
+
+- **발행:** `diagnosis_attempts` 상태 `IN_PROGRESS → CLOSED` 또는 만료 전이 트랜잭션. aggregate = `diagnosisAttemptId`.
+- **경로:** SNS 팬아웃.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `diagnosisAttemptId` | string | Y | `diagnosis_attempts.id` |
+| `memberId` | string | Y |  |
+
+| 소비자 | 처리 |
+| --- | --- |
+| study | `hint_block_replicas DELETE WHERE context_type = 'DIAGNOSIS' AND context_id = diagnosisAttemptId` |
 
 ### 4.2 problem (담당 B)
 
@@ -907,6 +941,8 @@ flowchart LR
 | `LearningProfileUpdated` |  |  |  |  | ● |  |  |
 | `TagLevelChanged` |  |  |  |  |  | ● |  |
 | `DiagnosisSubmissionRequested` | ● |  |  |  |  |  |  |
+| `DiagnosisStarted` |  |  |  |  | ● |  |  |
+| `DiagnosisClosed` |  |  |  |  | ● |  |  |
 | `ProblemStateChanged` v1 / v2 |  |  |  | ● | ● |  |  |
 | `ProblemValidationRequested` v1 | ● |  |  |  |  |  |  |
 | `ProblemValidationCompleted` v1 |  |  | ● |  |  |  |  |
@@ -939,7 +975,7 @@ flowchart LR
 | `AssignmentIncompleteRepeated` |  |  |  |  |  | ● |  |
 | `HintReady` |  | ○ |  |  |  | ● |  |
 | `GitHubSyncFailed` |  |  |  |  |  | ● |  |
-| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 16 | 19 | 2 |
+| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 18 | 19 | 2 |
 
 ### 5.1 소비자 구현 체크리스트
 
@@ -1021,8 +1057,8 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 | --- | --- | --- |
 | 4 | `SubmissionJudged`에 `problemTagIds`·`language`·`problemTitle`·`judgedAt` 추가 | J1 표 (하위 호환 추가) |
 | 6 | `HintReady` member 구독, `completedAt` 추가, 힌트 사용 1/2점 판정 기준(AC보다 먼저 쓴 힌트만?) | S8 |
-| 7 | `hint_block_replicas.participant_id` 컬럼 추가 (참가 취소 우선 규칙 구현) | C5 처리 |
-| 8 | 진단 중 힌트 차단 판정 경로 | 후보: member `DiagnosisStarted`/`DiagnosisClosed` 이벤트로 study 복제본, 또는 study → member 내부 조회 |
+| 7 | ~~`hint_block_replicas.participant_id` 컬럼 추가 (참가 취소 우선 규칙 구현)~~ 생략 확정 — UK `(member_id, context_type, context_id, problem_id)`로 충분 (2026-11-10) | C5 처리 |
+| 8 | ~~진단 중 힌트 차단 판정 경로~~ 이벤트 방식 선택됨 — M7 `DiagnosisStarted`·M8 `DiagnosisClosed` (2026-11-10) | M7·M8 §4.1 |
 | 9 | SNS 토픽·큐 이름, 최대 수신 횟수(5회) | §2 |
 | 10 | `study_membership_replicas` 재동기화 API | §7.2 |
 | 11 | `practice_result_replicas` 재동기화용 판정 무관 조회 | §7.2 |
