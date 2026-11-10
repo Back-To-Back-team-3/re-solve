@@ -375,7 +375,7 @@ class SubmissionMessageListenerTest {
 
     /** DLQ 이동 후 실제 SQS 재전달과 운영자 감사 저장을 검증한다. */
     @Test
-    @DisplayName("반복 실패한 시험 요청을 DLQ에서 재전달하면 접수 한 건과 감사 기록이 남는다")
+    @DisplayName("시험 DLQ 재전달과 UUID 표기가 다른 감사 재시도에도 최초 접수와 감사 행을 보존한다")
     void redrivesAndAudits() {
         jdbc.update("DELETE FROM audit_logs");
         // given: DB 작업 INSERT가 실패해 SQS가 원본 메시지를 격리한다.
@@ -410,13 +410,16 @@ class SubmissionMessageListenerTest {
             assertThat(taskHandle).isNotBlank();
             await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
                 assertThat(sqs.listMessageMoveTasks(request -> request.sourceArn(deadLetterArn)).results())
-                    .anyMatch(
-                        task -> "COMPLETED".equals(task.status()) && task.approximateNumberOfMessagesMoved() == 1
-                    );
+                    .singleElement()
+                    .satisfies(task -> {
+                        assertThat(task.status()).isEqualTo("COMPLETED");
+                        assertThat(task.approximateNumberOfMessagesMoved()).isEqualTo(1);
+                    });
                 assertThat(count("judge_jobs")).isEqualTo(1);
             });
-            auditRedrive(eventId, taskHandle, 25L);
-            auditRedrive(eventId, taskHandle, 26L);
+            auditRedrive(eventId.toString(), taskHandle, 25L);
+            auditRedrive(eventId.toString(), taskHandle, 26L);
+            auditRedrive(eventId.toString().replace("-", ""), " " + taskHandle + " ", 27L);
             sqs.sendMessage(request -> request.queueUrl(submissionQueue).messageBody(event));
 
             // then: 이동 완료 후 같은 이벤트가 다시 배달돼도 최초 제출과 작업이 유지된다.
@@ -462,18 +465,18 @@ class SubmissionMessageListenerTest {
     /**
      * 운영에서 사용하는 SQL로 테스트 재전달의 감사 행을 기록한다.
      *
-     * @param eventId 재전달 원본 이벤트 ID
+     * @param eventId 운영자가 입력한 원본 이벤트 ID 문자열
      * @param taskHandle LocalStack의 이동 작업 핸들
      * @param actorId 감사 기록 집행자
      */
-    private void auditRedrive(UUID eventId, String taskHandle, long actorId) {
+    private void auditRedrive(String eventId, String taskHandle, long actorId) {
         jdbc.execute((ConnectionCallback<Void>)connection -> {
             try (var statement = connection.prepareStatement("""
                 SET @redrive_actor_id=?, @redrive_event_id=?, @redrive_receipt_id=?,
                     @redrive_task_handle=?, @redrive_reason=?
                 """)) {
                 statement.setLong(1, actorId);
-                statement.setString(2, eventId.toString());
+                statement.setString(2, eventId);
                 statement.setLong(3, 71L);
                 statement.setString(4, taskHandle);
                 statement.setString(5, "DB 장애 복구");
