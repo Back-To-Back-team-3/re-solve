@@ -26,6 +26,7 @@ import org.springframework.dao.DuplicateKeyException;
 
 import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
+import com.backtoback.study.hint.repository.HintBlockReplicaRepository;
 import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.StudyMembership;
@@ -59,6 +60,8 @@ class MemberWithdrawnConsumerServiceTest {
     private MemberReplicaRepository memberReplicaRepository;
     @Mock
     private MemberLearningProfileReplicaRepository learningProfileReplicaRepository;
+    @Mock
+    private HintBlockReplicaRepository hintBlockReplicaRepository;
 
     @InjectMocks
     private MemberWithdrawnConsumerService service;
@@ -93,6 +96,7 @@ class MemberWithdrawnConsumerServiceTest {
         verify(membershipRepository).cancelIfPending(pending1.getId());
         verify(historyRepository).save(any());
         verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
+        verify(hintBlockReplicaRepository).deleteByMemberId(MEMBER_ID);
         verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(10L), any(LocalDateTime.class));
     }
 
@@ -115,6 +119,7 @@ class MemberWithdrawnConsumerServiceTest {
         verify(membershipCommandService, never()).applyLeaveInternal(any(), any(), any(), any());
         verify(historyRepository, never()).save(any());
         verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
+        verify(hintBlockReplicaRepository).deleteByMemberId(MEMBER_ID);
         verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(5L), any(LocalDateTime.class));
     }
 
