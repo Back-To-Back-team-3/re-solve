@@ -2,19 +2,26 @@ package com.backtoback.study.hint.service;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
+import org.slf4j.MDC;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.study.hint.client.HintContextResponse;
 import com.backtoback.study.hint.domain.HintRequest;
 import com.backtoback.study.hint.domain.HintRequestStatus;
 import com.backtoback.study.hint.dto.HintAcceptResult;
+import com.backtoback.study.hint.event.HintReadyPayload;
+import com.backtoback.study.hint.event.HintRequestedPayload;
 import com.backtoback.study.hint.exception.HintLevelSkippedException;
 import com.backtoback.study.hint.repository.HintRequestRepository;
 
@@ -38,6 +45,7 @@ public class HintTransactionalService {
     private final StringRedisTemplate redisTemplate;
     private final HintRequestRepository hintRequestRepository;
     private final HintDailyLimitService hintDailyLimitService;
+    private final OutboxEventWriter outboxEventWriter;
 
     @Transactional
     public HintAcceptResult accept(Long memberId, Long problemId, HintContextResponse context, int level) {
@@ -59,19 +67,64 @@ public class HintTransactionalService {
         String cacheKey = HINT_CACHE_KEY_PREFIX + context.problemRevisionId() + ":" + level;
         boolean isCached = Boolean.TRUE.equals(redisTemplate.hasKey(cacheKey));
 
+        String correlationId
+            = Objects.requireNonNullElseGet(MDC.get(CorrelationIdFilter.MDC_KEY), () -> UUID.randomUUID().toString());
+
         HintRequest saved;
         if (isCached) {
-            LocalDateTime now = LocalDateTime.now(clock.withZone(ClockConfiguration.SERVICE_ZONE));
+            OffsetDateTime completedAt = OffsetDateTime.now(clock.withZone(ClockConfiguration.SERVICE_ZONE));
             saved
                 = hintRequestRepository
-                    .save(HintRequest.cacheHit(memberId, problemId, context.problemRevisionId(), level, now));
-            // TODO(commit5): HintReady Outbox 발행
+                    .save(
+                        HintRequest
+                            .cacheHit(
+                                memberId,
+                                problemId,
+                                context.problemRevisionId(),
+                                level,
+                                completedAt.toLocalDateTime()
+                            )
+                    );
+            outboxEventWriter
+                .append(
+                    "HINT_REQUEST",
+                    "HintReady",
+                    "v1",
+                    String.valueOf(saved.getId()),
+                    correlationId,
+                    new HintReadyPayload(
+                        String.valueOf(saved.getId()),
+                        String.valueOf(memberId),
+                        String.valueOf(problemId),
+                        String.valueOf(context.problemRevisionId()),
+                        level,
+                        "READY",
+                        true,
+                        completedAt
+                    )
+                );
         } else {
             saved
                 = hintRequestRepository
                     .save(HintRequest.requested(memberId, problemId, context.problemRevisionId(), level));
-            // TODO(commit5): HintRequested Outbox 발행
-            // 캐시 등록 (ai-service가 생성 완료 후 직접 set하므로 여기서는 TTL 연장 없음)
+            outboxEventWriter
+                .append(
+                    "HINT_REQUEST",
+                    "HintRequested",
+                    "v1",
+                    String.valueOf(saved.getId()),
+                    correlationId,
+                    new HintRequestedPayload(
+                        String.valueOf(saved.getId()),
+                        String.valueOf(memberId),
+                        String.valueOf(problemId),
+                        String.valueOf(context.problemRevisionId()),
+                        level,
+                        context.problemTitle(),
+                        context.problemBody(),
+                        context.problemTags() != null ? context.problemTags() : List.of()
+                    )
+                );
             redisTemplate.expire(cacheKey, HINT_CACHE_TTL);
         }
 
