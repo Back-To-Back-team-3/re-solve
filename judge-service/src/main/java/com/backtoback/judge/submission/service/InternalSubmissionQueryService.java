@@ -1,5 +1,6 @@
 package com.backtoback.judge.submission.service;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.PageRequest;
@@ -10,7 +11,6 @@ import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
 import com.backtoback.judge.submission.domain.Submission;
-import com.backtoback.judge.submission.dto.AcceptedSubmissionHistoryResponse;
 import com.backtoback.judge.submission.repository.SubmissionRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -30,7 +30,7 @@ public class InternalSubmissionQueryService {
      * @return 제출 ID 오름차순의 AC 목록과 다음 커서
      */
     @Transactional(readOnly = true)
-    public AcceptedSubmissionHistoryResponse acceptedHistory(long userId, long after, int size) {
+    public AcceptedSubmissionHistory acceptedHistory(long userId, long after, int size) {
         var rows
             = submissions
                 .findByMemberIdAndContextAndStatusAndVerdictAndIdGreaterThanOrderByIdAsc(
@@ -41,7 +41,9 @@ public class InternalSubmissionQueryService {
                     after,
                     PageRequest.of(0, size + 1)
                 );
-        return AcceptedSubmissionHistoryResponse.from(rows, size);
+        boolean hasNext = rows.size() > size;
+        var items = hasNext ? List.copyOf(rows.subList(0, size)) : rows;
+        return new AcceptedSubmissionHistory(items, hasNext ? items.getLast().id() : null);
     }
 
     /**

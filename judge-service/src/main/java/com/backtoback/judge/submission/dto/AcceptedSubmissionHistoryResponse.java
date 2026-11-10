@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 import com.backtoback.common.time.ClockConfiguration;
+import com.backtoback.judge.submission.service.AcceptedSubmissionHistory;
 import com.backtoback.judge.submission.service.AcceptedSubmissionSummary;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -13,16 +14,15 @@ public record AcceptedSubmissionHistoryResponse(
     @JsonInclude(JsonInclude.Include.ALWAYS) String nextCursor
 ) {
     /**
-     * 한 행을 더 조회한 결과에서 다음 페이지의 존재 여부를 판정한다.
+     * 서비스가 조회한 정답 이력과 커서를 내부 API 응답으로 변환한다.
      *
-     * @param rows 제출 ID 오름차순으로 조회한 정답 이력
-     * @param size 최대 응답 행 수
-     * @return 마지막 페이지의 다음 커서를 {@code null}로 반환하는 이력 페이지
+     * @param history 정답 이력과 숫자 커서를 담은 서비스 결과
+     * @return 제출 식별자와 커서를 문자열로 표현한 이력 페이지
      */
-    public static AcceptedSubmissionHistoryResponse from(List<AcceptedSubmissionSummary> rows, int size) {
-        var page = rows.stream().limit(size).map(Item::from).toList();
-        String cursor = rows.size() > size ? page.getLast().submissionId() : null;
-        return new AcceptedSubmissionHistoryResponse(page, cursor);
+    public static AcceptedSubmissionHistoryResponse from(AcceptedSubmissionHistory history) {
+        var items = history.items().stream().map(Item::from).toList();
+        String cursor = history.nextCursor() == null ? null : history.nextCursor().toString();
+        return new AcceptedSubmissionHistoryResponse(items, cursor);
     }
 
     /** 복제본 재동기화에 필요한 정답 제출의 식별 정보. */
