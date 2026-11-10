@@ -1,7 +1,14 @@
 package com.backtoback.ai.hint.consumer;
 
+import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.LocalDateTime;
+
 import org.slf4j.MDC;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.ai.hint.dto.HintRequestedPayload;
 
@@ -13,7 +20,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * SQS {@code ai-queue}에서 HintRequested 이벤트를 수신하여 힌트 생성 흐름에 위임한다
- * (event-contract.md §S9).
+ * (event-contract.md §S9, §1.4 소비 규칙).
  */
 @Slf4j
 @Component
@@ -26,8 +33,11 @@ public class HintRequestedEventListener {
     private static final String MDC_EVENT_TYPE = "eventType";
 
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbcTemplate;
+    private final Clock clock;
 
     @SqsListener("${ai.sqs.queue-name:ai-queue}")
+    @Transactional
     public void onMessage(String messageBody) {
         JsonNode payload = extractPayload(messageBody);
 
@@ -46,6 +56,24 @@ public class HintRequestedEventListener {
         }
 
         try {
+            // event-contract.md §1.4: processed_events INSERT를 업무 반영 첫 문장으로 실행한다.
+            // hintRequestId가 UUID라 EventMetadata 유효성 검사를 통과하지 못하므로 JdbcTemplate으로 직접 삽입한다.
+            LocalDateTime now = LocalDateTime.now(clock);
+            try {
+                jdbcTemplate
+                    .update(
+                        "INSERT INTO processed_events"
+                            + " (event_id, event_type, processed_at, created_at) VALUES (?, ?, ?, ?)",
+                        eventId,
+                        eventType,
+                        Timestamp.valueOf(now),
+                        Timestamp.valueOf(now)
+                    );
+            } catch (DuplicateKeyException e) {
+                log.warn("중복 수신 무시 eventId={} eventType={}", eventId, eventType);
+                return;
+            }
+
             if (!HINT_REQUESTED_EVENT_TYPE.equals(eventType)) {
                 log.warn("처리 대상이 아닌 이벤트 무시 eventType={}", eventType);
                 return;
