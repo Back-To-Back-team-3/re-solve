@@ -176,7 +176,13 @@ class ValidationMessageListenerTest {
             sqs.sendMessage(request -> request.queueUrl(inputQueue).messageBody(message()));
             sqs.sendMessage(request -> request.queueUrl(inputQueue).messageBody(message()));
             await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
-                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM processed_events", Integer.class)).isEqualTo(2);
+                assertThat(
+                    jdbc
+                        .queryForObject(
+                            "SELECT COUNT(*) FROM processed_events WHERE event_type='ProblemValidationRequested'",
+                            Integer.class
+                        )
+                ).isEqualTo(2);
                 assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_validation_jobs", Integer.class))
                     .isEqualTo(1);
                 var counts
@@ -212,8 +218,13 @@ class ValidationMessageListenerTest {
             await()
                 .atMost(Duration.ofSeconds(15))
                 .untilAsserted(
-                    () -> assertThat(jdbc.queryForObject("SELECT status FROM outbox_events", String.class))
-                        .isEqualTo("PUBLISHED")
+                    () -> assertThat(
+                        jdbc
+                            .queryForObject(
+                                "SELECT status FROM outbox_events WHERE event_type='ProblemValidationCompleted'",
+                                String.class
+                            )
+                    ).isEqualTo("PUBLISHED")
                 );
             var messages = sqs.receiveMessage(request -> request.queueUrl(outputQueue).waitTimeSeconds(5)).messages();
             assertThat(messages).hasSize(1);
@@ -222,6 +233,10 @@ class ValidationMessageListenerTest {
             assertThat(result.get("eventType").asString()).isEqualTo("ProblemValidationCompleted");
             assertThat(result.get("correlationId").asString()).isEqualTo("request-sqs");
             assertThat(result.get("status").asString()).isEqualTo("ERROR");
+            sqs
+                .deleteMessage(
+                    request -> request.queueUrl(outputQueue).receiptHandle(messages.getFirst().receiptHandle())
+                );
         }
     }
 
