@@ -374,3 +374,7 @@ docker compose down --volumes
 ---
 
 end.
+
+### Judge 이벤트 보관 정리
+
+Judge는 메시징 활성화와 독립적으로 공통 Outbox·소비 기록 정리를 등록한다. 발행 완료는 7일, 소비 완료는 14일 보관하며 경계와 같은 시각 및 미발행·실패 Outbox는 보존한다. ShedLock은 Judge 업무 DB의 기존 테이블을 사용한다. 실패 Outbox의 수동 재발행은 별도의 운영 계약으로 다룬다.
