@@ -39,6 +39,14 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
     Optional<HintRequest> findByIdAndMemberId(Long id, Long memberId);
 
     /**
+     * REQUESTED → GENERATING 전이 — REQUESTED 상태인 행만 갱신한다 (api-spec §6.2.1).
+     * 반환값 0이면 이미 다른 상태로 전이됐거나 존재하지 않는 행이다.
+     */
+    @Modifying
+    @Query("UPDATE HintRequest r SET r.status = 'GENERATING' WHERE r.id = :id AND r.status = 'REQUESTED'")
+    int updateStatusToGenerating(@Param("id") Long id);
+
+    /**
      * 조건부 완료 갱신 — {@code expectedStatus}인 행만 갱신하여 경쟁 처리를 방지한다 (event-contract §S8).
      * 반환값 0이면 이미 다른 상태로 전이됐거나 존재하지 않는 행이다.
      */
