@@ -46,7 +46,8 @@ public enum StudyErrorCode implements ErrorCode {
     HINT_BLOCKED_DURING_DIAGNOSIS(HttpStatus.FORBIDDEN, "진단 진행 중에는 힌트를 사용할 수 없습니다."),
     HINT_LEVEL_SKIPPED(HttpStatus.CONFLICT, "이전 단계 힌트를 먼저 받아야 합니다."),
     HINT_DAILY_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "일일 힌트 요청 한도(20회)를 초과했습니다."),
-    HINT_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "힌트 요청을 찾을 수 없거나 본인 요청이 아닙니다.");
+    HINT_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "힌트 요청을 찾을 수 없거나 본인 요청이 아닙니다."),
+    HINT_FEATURE_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "힌트 기능이 비활성화되어 있습니다.");
 
     private final HttpStatus status;
     private final String message;
