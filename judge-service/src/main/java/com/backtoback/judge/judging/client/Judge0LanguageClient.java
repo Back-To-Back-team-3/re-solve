@@ -69,8 +69,14 @@ public class Judge0LanguageClient {
             // HTTP 오류는 응답 본문을 노출하지 않고 상태 코드만 오류 처리기에 전달한다.
             throw responseFailure(exception.getStatusCode().value());
         } catch (RestClientException exception) {
-            // JSON 변환 실패 등 나머지 클라이언트 오류는 상태 코드를 특정하지 않고 처리한다.
-            throw responseFailure(null);
+            // 응답 원문을 남기지 않고 변환과 읽기 실패의 예외 유형을 기록한다.
+            LOG
+                .warn(
+                    "Judge0 언어 목록 응답 처리 실패: exception={}, cause={}",
+                    exception.getClass().getSimpleName(),
+                    exception.getMostSpecificCause().getClass().getSimpleName()
+                );
+            throw new JudgeException(JudgeErrorCode.JUDGE0_RESPONSE_FAILED);
         }
     }
 

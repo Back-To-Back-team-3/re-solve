@@ -23,6 +23,8 @@ import com.backtoback.judge.judging.service.JudgeLanguageService;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
 
+import tools.jackson.databind.json.JsonMapper;
+
 /**
  * judge0LiveTest 작업에서만 실행하는 실제 서버 연동 테스트다.
  * JUDGE0_BASE_URL이 필요하며 인증을 사용하는 서버는 JUDGE0_AUTH_TOKEN을 지정한다.
@@ -63,7 +65,14 @@ class Judge0LiveTest {
                     new Languages(new Language(true), new Language(true), new Language(true))
                 )
             );
-        var restClient = configuration.judge0RestClient(RestClient.builder());
+        var restClient
+            = configuration
+                .judge0RestClient(
+                    RestClient.builder().defaultStatusHandler(status -> status.value() == 422, (request, response) -> {
+                        var body = JsonMapper.builder().build().readTree(response.getBody());
+                        throw new AssertionError("Judge0 요청 검증 실패 필드: " + body.propertyNames());
+                    })
+                );
         var languages
             = new JudgeLanguageService(
                 properties(baseUrl, language.equals("java"), language.equals("python3"), language.equals("cpp")),

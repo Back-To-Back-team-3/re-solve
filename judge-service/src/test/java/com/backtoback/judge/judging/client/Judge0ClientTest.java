@@ -108,6 +108,9 @@ class Judge0ClientTest {
         assertThat(completed.exitCode()).isZero();
 
         RecordedRequest create = requests.getFirst();
+        assertThat(create.upgrade()).isNull();
+        assertThat(create.contentLength())
+            .isEqualTo(Integer.toString(create.body().getBytes(StandardCharsets.UTF_8).length));
         assertThat(create.method()).isEqualTo("POST");
         assertThat(create.uri()).isEqualTo("/submissions?base64_encoded=true&wait=false");
         assertThat(create.authToken()).isEqualTo("test-secret");
@@ -589,6 +592,8 @@ class Judge0ClientTest {
                         exchange.getRequestMethod(),
                         exchange.getRequestURI().toString(),
                         exchange.getRequestHeaders().getFirst("X-Auth-Token"),
+                        exchange.getRequestHeaders().getFirst("Upgrade"),
+                        exchange.getRequestHeaders().getFirst("Content-Length"),
                         new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)
                     )
                 );
@@ -614,6 +619,13 @@ class Judge0ClientTest {
     private record StubResponse(int status, String body, long delayMs) {
     }
 
-    private record RecordedRequest(String method, String uri, String authToken, String body) {
+    private record RecordedRequest(
+        String method,
+        String uri,
+        String authToken,
+        String upgrade,
+        String contentLength,
+        String body
+    ) {
     }
 }
