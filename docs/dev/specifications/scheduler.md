@@ -180,6 +180,8 @@
 > 
 - `UnlinkedAssetCleanupScheduler` — 매일 04:30, 미연결 본문·테스트·이미지·검증 코드의 유예 경과 파일 정리
 - `TagCreationRecordCleanupScheduler` — 매시 정각, 만료된 태그 생성 멱등 기록 정리
+- `OutboxCleanupScheduler` — 7일 경과 발행 완료 Outbox 이벤트 정리 (→ 공통 §0.2.2)
+- `ProcessedEventCleanupScheduler` — 14일 경과 소비 기록 정리 (→ 공통 §0.2.3)
 
 > 문제 공개·회차 전이는 관리자 API가 즉시 수행하므로 상태 전이 스케줄러는 없다. 검수 워크플로(P2, 보류)를 도입하면 심사 만료 스케줄러를 추가한다.
 > 

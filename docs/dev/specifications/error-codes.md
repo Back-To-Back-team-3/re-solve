@@ -58,6 +58,8 @@
 | `PROBLEM_TAG_NOT_FOUND` | 404 | 태그를 찾을 수 없음 |
 | `PROBLEM_TAG_DUPLICATED` | 409 | 같은 이름의 태그 존재 |
 | `PROBLEM_TAG_IN_USE` | 409 | 회차에서 사용 중인 태그 삭제 |
+| `OUTBOX_EVENT_NOT_FOUND` | 404 | 대상 Outbox 이벤트가 없거나 발생 7일 초과 |
+| `OUTBOX_EVENT_NOT_REPROCESSABLE` | 409 | `FAILED` 상태가 아닌 Outbox 이벤트 재처리 요청 |
 | `SOLUTION_SHARE_NOT_FOUND` | 404 | 공유 풀이를 찾을 수 없거나 열람 권한 없음 |
 | `SOLUTION_SHARE_NOT_ALLOWED` | 409 | 본인 `PRACTICE` AC 제출이 아님 |
 | `SOLUTION_ALREADY_SHARED` | 409 | 같은 스터디에 같은 제출 공유 중 |
