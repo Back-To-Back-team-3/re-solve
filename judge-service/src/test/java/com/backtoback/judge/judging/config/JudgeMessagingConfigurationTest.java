@@ -33,6 +33,7 @@ class JudgeMessagingConfigurationTest {
             "SubmissionJudged",
             "ExamSubmissionJudged",
             "ContestSubmissionJudged",
+            "DiagnosisSubmissionJudged",
             "SubmissionFailed"
         }
     )
@@ -50,14 +51,14 @@ class JudgeMessagingConfigurationTest {
 
     /** 요청 또는 미확정 이벤트를 결과로 오발행하지 않는지 검증한다. */
     @Test
-    @DisplayName("요청 이벤트와 아직 구현하지 않은 진단 결과는 발행하지 않는다")
+    @DisplayName("요청 이벤트는 결과 토픽으로 발행하지 않는다")
     void rejectsUnregisteredEvents() {
         var resolver
             = new JudgeMessagingConfiguration()
                 .judgeEventDestinationResolver(new JudgeMessagingProperties(TOPIC, "", ""));
         assertThatThrownBy(() -> resolver.resolve(event("ProblemValidationRequested", "v1")))
             .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> resolver.resolve(event("DiagnosisSubmissionJudged", "v1")))
+        assertThatThrownBy(() -> resolver.resolve(event("DiagnosisSubmissionRequested", "v1")))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
