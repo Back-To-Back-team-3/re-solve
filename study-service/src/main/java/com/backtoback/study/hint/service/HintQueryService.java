@@ -1,11 +1,13 @@
 package com.backtoback.study.hint.service;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.hint.domain.HintRequest;
@@ -30,6 +32,7 @@ public class HintQueryService {
 
     private final HintRequestRepository hintRequestRepository;
     private final HintDailyUsageRepository hintDailyUsageRepository;
+    private final Clock clock;
 
     /**
      * 회원의 문제별 힌트 이력을 조회한다 (api-spec §6.1.2).
@@ -45,7 +48,12 @@ public class HintQueryService {
         Integer nextAvailableLevel = calculateNextAvailableLevel(requests);
 
         int todayUsedCount
-            = hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(memberId, LocalDate.now()).orElse(0);
+            = hintDailyUsageRepository
+                .findUsedCountByMemberIdAndUsageDate(
+                    memberId,
+                    LocalDate.now(clock.withZone(ClockConfiguration.SERVICE_ZONE))
+                )
+                .orElse(0);
 
         return new HintHistoryResponse(
             String.valueOf(problemId),

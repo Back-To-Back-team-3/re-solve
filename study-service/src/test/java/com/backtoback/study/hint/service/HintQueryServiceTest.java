@@ -2,13 +2,17 @@ package com.backtoback.study.hint.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.hint.domain.HintRequest;
@@ -41,8 +46,16 @@ class HintQueryServiceTest {
     @Mock
     private HintDailyUsageRepository hintDailyUsageRepository;
 
+    @Mock
+    private Clock clock;
+
     @InjectMocks
     private HintQueryService hintQueryService;
+
+    @BeforeEach
+    void setUpClock() {
+        given(clock.withZone(ClockConfiguration.SERVICE_ZONE)).willReturn(Clock.systemDefaultZone());
+    }
 
     // --- getHistory ---
 
@@ -51,7 +64,7 @@ class HintQueryServiceTest {
     void getHistory_empty() {
         given(hintRequestRepository.findAllByMemberIdAndProblemIdOrderByLevelAscCreatedAtAsc(MEMBER_ID, PROBLEM_ID))
             .willReturn(List.of());
-        given(hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(MEMBER_ID, LocalDate.now()))
+        given(hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(eq(MEMBER_ID), any(LocalDate.class)))
             .willReturn(Optional.of(0));
 
         HintHistoryResponse response = hintQueryService.getHistory(MEMBER_ID, PROBLEM_ID);
@@ -69,7 +82,7 @@ class HintQueryServiceTest {
         HintRequest req2 = stubRequest(2L, 2, HintRequestStatus.READY);
         given(hintRequestRepository.findAllByMemberIdAndProblemIdOrderByLevelAscCreatedAtAsc(MEMBER_ID, PROBLEM_ID))
             .willReturn(List.of(req1, req2));
-        given(hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(MEMBER_ID, LocalDate.now()))
+        given(hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(eq(MEMBER_ID), any(LocalDate.class)))
             .willReturn(Optional.empty());
 
         HintHistoryResponse response = hintQueryService.getHistory(MEMBER_ID, PROBLEM_ID);
@@ -86,7 +99,7 @@ class HintQueryServiceTest {
         HintRequest req3 = stubRequest(3L, 3, HintRequestStatus.READY);
         given(hintRequestRepository.findAllByMemberIdAndProblemIdOrderByLevelAscCreatedAtAsc(MEMBER_ID, PROBLEM_ID))
             .willReturn(List.of(req1, req2, req3));
-        given(hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(MEMBER_ID, LocalDate.now()))
+        given(hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(eq(MEMBER_ID), any(LocalDate.class)))
             .willReturn(Optional.of(3));
 
         HintHistoryResponse response = hintQueryService.getHistory(MEMBER_ID, PROBLEM_ID);
@@ -101,7 +114,7 @@ class HintQueryServiceTest {
         HintRequest blocked = stubRequest(2L, 1, HintRequestStatus.BLOCKED);
         given(hintRequestRepository.findAllByMemberIdAndProblemIdOrderByLevelAscCreatedAtAsc(MEMBER_ID, PROBLEM_ID))
             .willReturn(List.of(ready, blocked));
-        given(hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(MEMBER_ID, LocalDate.now()))
+        given(hintDailyUsageRepository.findUsedCountByMemberIdAndUsageDate(eq(MEMBER_ID), any(LocalDate.class)))
             .willReturn(Optional.empty());
 
         HintHistoryResponse response = hintQueryService.getHistory(MEMBER_ID, PROBLEM_ID);
