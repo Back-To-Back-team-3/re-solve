@@ -90,7 +90,7 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform {
-        excludeTags 'judge0-live'
+        excludeTags 'judge0-live', 'run-live'
     }
 }
 
@@ -111,6 +111,23 @@ tasks.register('judge0LiveTest', Test) {
     testLogging {
         events 'passed', 'failed', 'skipped'
         showStandardStreams = true
+    }
+}
+
+// Gateway와 실제 Judge0가 준비된 로컬 환경에서만 명시적으로 실행한다.
+tasks.register('runLiveTest', Test) {
+    group = 'verification'
+    description = '일반·시험 Run의 실제 서비스 연동을 검증한다.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'run-live'
+    }
+    systemProperty 'judge.run.live', 'true'
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    testLogging {
+        events 'passed', 'failed', 'skipped'
     }
 }
 

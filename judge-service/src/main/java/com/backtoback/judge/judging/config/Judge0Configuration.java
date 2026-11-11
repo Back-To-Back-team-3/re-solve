@@ -32,12 +32,20 @@ public class Judge0Configuration {
         HttpClient httpClient
             = HttpClient
                 .newBuilder()
+                // Judge0의 Puma 서버에 HTTP/2 업그레이드 없이 요청을 전달한다.
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(properties.connectTimeout())
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(properties.readTimeout());
-        builder = builder.clone().requestFactory(factory);
+        builder = builder.clone().requestFactory(factory).requestInterceptor((request, body, execution) -> {
+            if (body.length > 0) {
+                // 구형 서버가 JSON 본문을 읽을 수 있도록 직렬화한 바이트 길이를 명시한다.
+                request.getHeaders().setContentLength(body.length);
+            }
+            return execution.execute(request, body);
+        });
         if (properties.baseUrl() != null && !properties.baseUrl().isBlank()) {
             builder.baseUrl(properties.baseUrl());
         }
