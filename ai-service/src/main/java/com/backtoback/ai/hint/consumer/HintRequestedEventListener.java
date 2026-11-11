@@ -5,6 +5,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 
 import com.backtoback.ai.hint.dto.HintRequestedPayload;
+import com.backtoback.ai.hint.service.HintLlmService;
 
 import io.awspring.cloud.sqs.annotation.SqsListener;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class HintRequestedEventListener {
 
     private final ObjectMapper objectMapper;
     private final ProcessedEventInserter processedEventInserter;
+    private final HintLlmService hintLlmService;
 
     @SqsListener("${ai.sqs.queue-name:ai-queue}")
     public void onMessage(String messageBody) {
@@ -63,7 +65,7 @@ public class HintRequestedEventListener {
 
             HintRequestedPayload event = objectMapper.treeToValue(payload, HintRequestedPayload.class);
             log.info("HintRequested 수신 hintRequestId={} level={}", event.hintRequestId(), event.level());
-            // TODO: 캐시 조회 후 미적중 시 LLM 힌트 생성 → HintReady 발행
+            hintLlmService.process(event);
         } finally {
             MDC.remove(MDC_EVENT_ID);
             MDC.remove(MDC_EVENT_TYPE);
