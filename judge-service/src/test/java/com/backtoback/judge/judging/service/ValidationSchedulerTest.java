@@ -3,10 +3,10 @@ package com.backtoback.judge.judging.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import java.sql.Connection;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -16,6 +16,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -26,12 +29,20 @@ import com.backtoback.judge.judging.store.ValidationExecutionStore;
 import com.zaxxer.hikari.HikariDataSource;
 
 /** 실행 슬롯 상한과 대기열 백오프, 독립적인 기한 초과 처리를 확인한다. */
+@ExtendWith(MockitoExtension.class)
 class ValidationSchedulerTest {
-    private final ValidationWorker worker = mock(ValidationWorker.class);
-    private final ValidationExecutionStore store = mock(ValidationExecutionStore.class);
-    private final Clock clock = mock(Clock.class);
-    private final JpaTransactionManager transactionManager = mock(JpaTransactionManager.class);
-    private final HikariDataSource dataSource = mock(HikariDataSource.class);
+    @Mock
+    private ValidationWorker worker;
+    @Mock
+    private ValidationExecutionStore store;
+    @Mock
+    private Clock clock;
+    @Mock
+    private JpaTransactionManager transactionManager;
+    @Mock
+    private HikariDataSource dataSource;
+    @Mock
+    private Connection connection;
     private final ArrayList<Runnable> tasks = new ArrayList<>();
     private final AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-31T00:00:00Z"));
     private ValidationScheduler scheduler;
@@ -39,18 +50,21 @@ class ValidationSchedulerTest {
     /** 실제 대기 없이 슬롯 실행 시각을 제어한다. */
     @BeforeEach
     void prepare() {
-        given(clock.instant()).willAnswer(call -> now.get());
+        scheduler = new ValidationScheduler(worker, store, tasks::add, clock, transactionManager);
+    }
+
+    /** 회수 시나리오에 필요한 연결 풀과 트랜잭션의 JDBC 자원을 준비한다. */
+    private void prepareRecovery() {
         given(transactionManager.getDataSource()).willReturn(dataSource);
         given(dataSource.getConnectionTimeout()).willReturn(2000L);
         given(dataSource.getValidationTimeout()).willReturn(1000L);
         given(transactionManager.getTransaction(any(TransactionDefinition.class))).willAnswer(call -> {
             TransactionSynchronizationManager.unbindResourceIfPossible(dataSource);
-            var connection = new ConnectionHolder(mock(java.sql.Connection.class));
-            connection.setTimeoutInSeconds(12);
-            TransactionSynchronizationManager.bindResource(dataSource, connection);
+            var holder = new ConnectionHolder(connection);
+            holder.setTimeoutInSeconds(12);
+            TransactionSynchronizationManager.bindResource(dataSource, holder);
             return new SimpleTransactionStatus();
         });
-        scheduler = new ValidationScheduler(worker, store, tasks::add, clock, transactionManager);
     }
 
     /** 테스트 스레드에 연결한 JDBC 자원을 해제한다. */
@@ -63,6 +77,8 @@ class ValidationSchedulerTest {
     @Test
     @DisplayName("동시 실행은 두 슬롯으로 제한하고 기한 초과 종결은 별도로 호출한다")
     void boundsConcurrency() {
+        given(clock.instant()).willAnswer(call -> now.get());
+        prepareRecovery();
         scheduler.dispatch();
         scheduler.dispatch();
         assertThat(tasks).hasSize(2);
@@ -78,6 +94,7 @@ class ValidationSchedulerTest {
     @Test
     @DisplayName("빈 대기열은 1초·2초·5초 뒤 재조회한다")
     void backsOffEmptyQueue() {
+        given(clock.instant()).willAnswer(call -> now.get());
         scheduler.dispatch();
         runPending();
         now.set(now.get().plusSeconds(1));
@@ -102,6 +119,7 @@ class ValidationSchedulerTest {
     @Test
     @DisplayName("실행 예외 이후 슬롯을 반환하고 다음 회차를 수행한다")
     void recoversFailedSlot() {
+        given(clock.instant()).willAnswer(call -> now.get());
         given(worker.runOnce()).willThrow(new IllegalStateException("private-data"));
         scheduler.dispatch();
         runPending();
@@ -114,6 +132,7 @@ class ValidationSchedulerTest {
     @Test
     @DisplayName("기한 초과 처리 장애 이후 다음 주기를 다시 수행한다")
     void retriesExpiry() {
+        prepareRecovery();
         given(store.expireOne()).willThrow(new IllegalStateException("offline")).willReturn(true, false);
         scheduler.expire();
         scheduler.expire();
