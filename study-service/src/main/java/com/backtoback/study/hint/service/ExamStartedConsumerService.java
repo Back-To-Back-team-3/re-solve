@@ -5,7 +5,6 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Optional;
 
 import org.slf4j.MDC;
 import org.springframework.dao.DuplicateKeyException;
@@ -66,42 +65,40 @@ public class ExamStartedConsumerService {
             = hintBlockReplicaRepository.findByContextTypeAndContextId(HintBlockContextType.EXAM, examId);
 
         for (HintBlockReplica replica : replicas) {
-            Optional<HintRequest> opt
+            List<HintRequest> generatingList
                 = hintRequestRepository
                     .findByMemberIdAndProblemIdAndStatus(
                         replica.getMemberId(),
                         replica.getProblemId(),
                         HintRequestStatus.GENERATING
                     );
-            if (opt.isEmpty()) {
-                continue;
-            }
-            HintRequest hintRequest = opt.get();
+            for (HintRequest hintRequest : generatingList) {
+                int updated
+                    = hintRequestRepository.blockIfGeneratingById(hintRequest.getId(), BLOCKED_REASON, completedAt);
+                if (updated == 0) {
+                    log.info("BLOCKED 전이 대상 없음 (경쟁 처리 완료) hintRequestId={}", hintRequest.getId());
+                    continue;
+                }
 
-            int updated = hintRequestRepository.blockIfGeneratingById(hintRequest.getId(), BLOCKED_REASON, completedAt);
-            if (updated == 0) {
-                log.info("BLOCKED 전이 대상 없음 (경쟁 처리 완료) hintRequestId={}", hintRequest.getId());
-                continue;
-            }
-
-            outboxEventWriter
-                .append(
-                    HINT_REQUEST_AGGREGATE_TYPE,
-                    HINT_READY_EVENT_TYPE,
-                    HINT_READY_VERSION,
-                    String.valueOf(hintRequest.getId()),
-                    correlationId,
-                    new HintReadyPayload(
+                outboxEventWriter
+                    .append(
+                        HINT_REQUEST_AGGREGATE_TYPE,
+                        HINT_READY_EVENT_TYPE,
+                        HINT_READY_VERSION,
                         String.valueOf(hintRequest.getId()),
-                        String.valueOf(hintRequest.getMemberId()),
-                        String.valueOf(hintRequest.getProblemId()),
-                        String.valueOf(hintRequest.getProblemRevisionId()),
-                        hintRequest.getLevel(),
-                        "BLOCKED",
-                        hintRequest.isCached(),
-                        completedAtOffset
-                    )
-                );
+                        correlationId,
+                        new HintReadyPayload(
+                            String.valueOf(hintRequest.getId()),
+                            String.valueOf(hintRequest.getMemberId()),
+                            String.valueOf(hintRequest.getProblemId()),
+                            String.valueOf(hintRequest.getProblemRevisionId()),
+                            hintRequest.getLevel(),
+                            "BLOCKED",
+                            hintRequest.isCached(),
+                            completedAtOffset
+                        )
+                    );
+            }
         }
     }
 

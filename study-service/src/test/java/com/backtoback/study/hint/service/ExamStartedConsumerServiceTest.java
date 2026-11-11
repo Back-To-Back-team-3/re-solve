@@ -12,7 +12,6 @@ import static org.mockito.Mockito.verify;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
@@ -81,7 +80,7 @@ class ExamStartedConsumerServiceTest {
         given(
             hintRequestRepository
                 .findByMemberIdAndProblemIdAndStatus(MEMBER_ID, PROBLEM_ID, HintRequestStatus.GENERATING)
-        ).willReturn(Optional.of(hintRequest));
+        ).willReturn(List.of(hintRequest));
         given(hintRequestRepository.blockIfGeneratingById(eq(HINT_REQUEST_ID), eq("EXAM"), any(LocalDateTime.class)))
             .willReturn(1);
 
@@ -106,7 +105,7 @@ class ExamStartedConsumerServiceTest {
         given(
             hintRequestRepository
                 .findByMemberIdAndProblemIdAndStatus(MEMBER_ID, PROBLEM_ID, HintRequestStatus.GENERATING)
-        ).willReturn(Optional.empty());
+        ).willReturn(List.of());
 
         // when
         service.consume(payload);
@@ -129,7 +128,7 @@ class ExamStartedConsumerServiceTest {
         given(
             hintRequestRepository
                 .findByMemberIdAndProblemIdAndStatus(MEMBER_ID, PROBLEM_ID, HintRequestStatus.GENERATING)
-        ).willReturn(Optional.of(hintRequest));
+        ).willReturn(List.of(hintRequest));
         given(hintRequestRepository.blockIfGeneratingById(eq(HINT_REQUEST_ID), eq("EXAM"), any(LocalDateTime.class)))
             .willReturn(0);
 

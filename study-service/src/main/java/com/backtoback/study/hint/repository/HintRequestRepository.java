@@ -38,7 +38,7 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
      */
     Optional<HintRequest> findByIdAndMemberId(Long id, Long memberId);
 
-    Optional<HintRequest> findByMemberIdAndProblemIdAndStatus(Long memberId, Long problemId, HintRequestStatus status);
+    List<HintRequest> findByMemberIdAndProblemIdAndStatus(Long memberId, Long problemId, HintRequestStatus status);
 
     /**
      * 조건부 완료 갱신 — {@code expectedStatus}인 행만 갱신하여 경쟁 처리를 방지한다 (event-contract §S8).
