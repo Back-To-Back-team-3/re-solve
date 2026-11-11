@@ -115,7 +115,7 @@ public class SubmissionExecutionStore {
      * 종결 작업의 시도 이력과 기한은 보존한다. (스케줄러 §3.4)
      *
      * @param candidate 잠금 없이 선정한 후보
-     * @param data 성공 결과 이벤트의 고정 문제 메타데이터, 성공 보정 외에는 null
+     * @param data 성공 결과 이벤트의 고정 문제 메타데이터, 성공 보정 외에는 {@code null}
      * @return 현재 상태의 불일치를 보정했는지 여부
      */
     @Transactional(timeout = 5)
