@@ -53,8 +53,10 @@ import com.backtoback.judge.judging.service.execution.dto.JudgeTestResult;
 import com.backtoback.judge.judging.store.ExternalSubmissionAcceptanceStore;
 import com.backtoback.judge.judging.store.SubmissionExecutionStore;
 import com.backtoback.judge.submission.domain.Submission.Context;
+import com.backtoback.judge.submission.domain.Submission.Status;
 import com.backtoback.judge.submission.domain.SubmissionDraft;
 import com.backtoback.judge.submission.dto.ProblemExecutionProfileResponse;
+import com.backtoback.judge.submission.service.InternalSubmissionQueryService;
 
 import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -108,6 +110,8 @@ class SubmissionMessageListenerTest {
     private SubmissionMessageListener submissions;
     @Autowired
     private ExternalSubmissionAcceptanceStore acceptance;
+    @Autowired
+    private InternalSubmissionQueryService internalQueries;
 
     /**
      * 리스너 시작 전에 Standard 큐·토픽·결과 구독을 준비한다.
@@ -556,6 +560,10 @@ class SubmissionMessageListenerTest {
                         .attributes();
                 assertThat(counts.values()).containsExactlyInAnyOrder("0", "0");
             });
+            var original = internalQueries.byReceipt(Context.EXAM, 71).orElseThrow();
+            assertThat(original.getStatus()).isEqualTo(Status.QUEUED);
+            assertThat(internalQueries.byReceipt(Context.CONTEST, 71)).isEmpty();
+
             // when: 고정 회차의 런타임으로 시험 작업을 종결한다.
             assertThat(jdbc.queryForObject("SELECT unknown_retry_count FROM judge_jobs", Integer.class)).isZero();
             var lease = execution.claim().orElseThrow();
@@ -613,6 +621,12 @@ class SubmissionMessageListenerTest {
             ).isTrue();
             assertThat(execution.complete(lease, data)).isTrue();
             assertThat(execution.complete(lease, data)).isFalse();
+            // then: J2를 받기 전에도 같은 접수로 완료 상태를 조회할 수 있다.
+            var reconciled = internalQueries.byReceipt(Context.EXAM, 71).orElseThrow();
+            assertThat(reconciled.getId()).isEqualTo(original.getId());
+            assertThat(reconciled.getStatus()).isEqualTo(Status.COMPLETED);
+            assertThat(reconciled.getVerdict()).isEqualTo(JudgeVerdict.CE);
+
             // then: 문맥 필터를 통과한 J2의 계약 필드를 확인한다.
             var messages
                 = sqs

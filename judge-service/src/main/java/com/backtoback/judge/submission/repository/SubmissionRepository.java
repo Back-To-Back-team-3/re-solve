@@ -19,6 +19,15 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long>, J
     Optional<Submission> findByIdAndMemberIdAndContext(long id, long memberId, Submission.Context context);
 
     /**
+     * 원본 접수에 연결된 제출을 문맥과 접수 ID로 조회한다.
+     *
+     * @param context 원본 접수 문맥
+     * @param sourceSubmissionId 원본 접수 ID
+     * @return 원본 접수에 연결된 제출
+     */
+    Optional<Submission> findByContextAndSourceSubmissionId(Submission.Context context, long sourceSubmissionId);
+
+    /**
      * 회원에게 현재 연결된 멱등 키의 제출을 조회한다.
      *
      * @param memberId 인증 회원 ID
