@@ -33,6 +33,8 @@ study:
   hint:
     feature:
       enabled: true
+  judge-client:
+    base-url: ${JUDGE_SERVICE_URL:http://judge-service:8080}
 
 springdoc:
   api-docs:
