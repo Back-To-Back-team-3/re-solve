@@ -8,9 +8,11 @@ import com.backtoback.study.hint.event.dto.DiagnosisClosedPayload;
 import com.backtoback.study.hint.event.dto.DiagnosisStartedPayload;
 import com.backtoback.study.hint.event.dto.ExamTerminatedPayload;
 import com.backtoback.study.hint.event.dto.ExamUpdatedPayload;
+import com.backtoback.study.hint.event.dto.HintReadyConsumedPayload;
 import com.backtoback.study.hint.event.dto.ParticipantCanceledPayload;
 import com.backtoback.study.hint.event.dto.ParticipantRegisteredPayload;
 import com.backtoback.study.hint.service.HintBlockReplicaConsumerService;
+import com.backtoback.study.hint.service.HintReadyConsumerService;
 import com.backtoback.study.membership.service.MemberWithdrawnConsumerService;
 import com.backtoback.study.replica.event.dto.MemberWithdrawnPayload;
 import com.backtoback.study.replica.event.dto.SubmissionJudgedPayload;
@@ -33,6 +35,7 @@ public class SubmissionJudgedEventListener {
 
     private static final String MEMBER_WITHDRAWN_EVENT_TYPE = "MemberWithdrawn";
     private static final String SUPPORTED_EVENT_TYPE = "SubmissionJudged";
+    private static final String HINT_READY_EVENT_TYPE = "HintReady";
     private static final String EXAM_PARTICIPANT_REGISTERED_EVENT_TYPE = "ExamParticipantRegistered";
     private static final String CONTEST_PARTICIPANT_REGISTERED_EVENT_TYPE = "ContestParticipantRegistered";
     private static final String EXAM_PARTICIPANT_CANCELED_EVENT_TYPE = "ExamParticipantCanceled";
@@ -52,6 +55,7 @@ public class SubmissionJudgedEventListener {
     private final MemberWithdrawnConsumerService memberWithdrawnConsumerService;
     private final SubmissionJudgedConsumerService consumerService;
     private final HintBlockReplicaConsumerService hintBlockReplicaConsumerService;
+    private final HintReadyConsumerService hintReadyConsumerService;
 
     @SqsListener("${study.sqs.queue-name:study-queue}")
     public void onMessage(String messageBody) {
@@ -119,6 +123,12 @@ public class SubmissionJudgedEventListener {
             if (DIAGNOSIS_CLOSED_EVENT_TYPE.equals(eventType)) {
                 DiagnosisClosedPayload event = objectMapper.treeToValue(payload, DiagnosisClosedPayload.class);
                 hintBlockReplicaConsumerService.consumeDiagnosisClosed(event);
+                return;
+            }
+
+            if (HINT_READY_EVENT_TYPE.equals(eventType)) {
+                HintReadyConsumedPayload event = objectMapper.treeToValue(payload, HintReadyConsumedPayload.class);
+                hintReadyConsumerService.consume(event);
                 return;
             }
 
