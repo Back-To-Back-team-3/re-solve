@@ -105,4 +105,45 @@ public class HintRequest extends BaseTimeEntity {
 
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
+
+    private HintRequest(
+        Long memberId,
+        Long problemId,
+        Long problemRevisionId,
+        int level,
+        HintRequestStatus status,
+        boolean cached,
+        LocalDateTime completedAt
+    ) {
+        this.memberId = memberId;
+        this.problemId = problemId;
+        this.problemRevisionId = problemRevisionId;
+        this.level = level;
+        this.status = status;
+        this.cached = cached;
+        this.fallback = false;
+        this.completedAt = completedAt;
+    }
+
+    public static HintRequest requested(Long memberId, Long problemId, Long problemRevisionId, int level) {
+        return new HintRequest(memberId, problemId, problemRevisionId, level, HintRequestStatus.REQUESTED, false, null);
+    }
+
+    public static HintRequest cacheHit(
+        Long memberId,
+        Long problemId,
+        Long problemRevisionId,
+        int level,
+        LocalDateTime completedAt
+    ) {
+        return new HintRequest(
+            memberId,
+            problemId,
+            problemRevisionId,
+            level,
+            HintRequestStatus.READY,
+            true,
+            completedAt
+        );
+    }
 }

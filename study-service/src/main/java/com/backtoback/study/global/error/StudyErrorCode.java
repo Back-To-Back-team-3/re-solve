@@ -38,7 +38,15 @@ public enum StudyErrorCode implements ErrorCode {
     STUDY_UPDATE_CONFLICT(HttpStatus.CONFLICT, "다른 수정 요청과 충돌했습니다. 최신 정보를 조회 후 다시 시도해 주세요."),
     STUDY_LEADER_ROLE_CHANGE_NOT_ALLOWED(HttpStatus.CONFLICT, "스터디장의 역할은 직접 변경할 수 없습니다. 위임 API를 사용하세요."),
     STUDY_MANAGER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "운영진은 최대 2명까지만 임명할 수 있습니다."),
-    STUDY_ACTIVE_EXAM_EXISTS(HttpStatus.CONFLICT, "예정 또는 진행 중인 시험이 남아 있어 스터디를 종료할 수 없습니다.");
+    STUDY_ACTIVE_EXAM_EXISTS(HttpStatus.CONFLICT, "예정 또는 진행 중인 시험이 남아 있어 스터디를 종료할 수 없습니다."),
+
+    // 힌트 (hint)
+    HINT_PROBLEM_NOT_AVAILABLE(HttpStatus.NOT_FOUND, "힌트를 제공할 수 없는 문제입니다."),
+    HINT_BLOCKED_DURING_EXAM(HttpStatus.FORBIDDEN, "참가 중인 시험·대회 문제는 힌트를 사용할 수 없습니다."),
+    HINT_BLOCKED_DURING_DIAGNOSIS(HttpStatus.FORBIDDEN, "진단 진행 중에는 힌트를 사용할 수 없습니다."),
+    HINT_LEVEL_SKIPPED(HttpStatus.CONFLICT, "이전 단계 힌트를 먼저 받아야 합니다."),
+    HINT_DAILY_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "일일 힌트 요청 한도(20회)를 초과했습니다."),
+    HINT_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "힌트 요청을 찾을 수 없거나 본인 요청이 아닙니다.");
 
     private final HttpStatus status;
     private final String message;

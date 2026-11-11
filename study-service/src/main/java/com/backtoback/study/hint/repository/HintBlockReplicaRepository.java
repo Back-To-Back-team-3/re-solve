@@ -1,6 +1,7 @@
 package com.backtoback.study.hint.repository;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,6 +13,18 @@ import com.backtoback.study.hint.domain.HintBlockContextType;
 import com.backtoback.study.hint.domain.HintBlockReplica;
 
 public interface HintBlockReplicaRepository extends JpaRepository<HintBlockReplica, Long> {
+
+    /** 차단 판정: starts_at &lt;= now &amp;&amp; ends_at + 10분 &gt; now (ERD 4.6.3). gracedNow = now - 10분. */
+    @Query(
+        "SELECT r FROM HintBlockReplica r" + " WHERE r.memberId = :memberId AND r.problemId = :problemId"
+            + " AND r.startsAt <= :now AND r.endsAt > :gracedNow"
+    )
+    List<HintBlockReplica> findActiveBlocks(
+        @Param("memberId") Long memberId,
+        @Param("problemId") Long problemId,
+        @Param("now") LocalDateTime now,
+        @Param("gracedNow") LocalDateTime gracedNow
+    );
 
     @Modifying
     @Query(
