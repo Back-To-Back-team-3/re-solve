@@ -31,12 +31,11 @@ public class AdminOutboxEventStore {
     }
 
     public boolean resetFailedToPending(long id, LocalDateTime now) {
-        return jdbc
-            .update(
-                "UPDATE outbox_events SET status = 'PENDING', retry_count = 0, updated_at = ? WHERE id = ? AND status = 'FAILED'",
-                Timestamp.valueOf(now),
-                id
-            ) > 0;
+        return jdbc.update("""
+            UPDATE outbox_events
+            SET status = 'PENDING', retry_count = 0, updated_at = ?
+            WHERE id = ? AND status = 'FAILED'
+            """, Timestamp.valueOf(now), id) > 0;
     }
 
     public record OutboxEventRow(long id, String status, LocalDateTime occurredAt) {
