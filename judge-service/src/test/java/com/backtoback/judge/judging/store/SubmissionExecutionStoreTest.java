@@ -136,6 +136,28 @@ class SubmissionExecutionStoreTest {
         assertThat(store.saveResult(lease, 1, "token", result)).isFalse();
     }
 
+    /** 실행 전에 만료된 시험 제출은 원래 접수 식별자를 가진 J4로 종결한다. */
+    @Test
+    @DisplayName("기한 초과 시험은 EXAM 문맥과 원래 접수 ID를 가진 실패 이벤트로 종결한다")
+    void expiresExamWithOriginalReceipt() {
+        jdbc.update("""
+            UPDATE submissions SET context='EXAM',context_id=55,source_submission_id=71,
+                idempotency_key=NULL,request_hash=NULL WHERE id=1
+            """);
+        given(clock.instant()).willReturn(START.plusSeconds(601));
+        assertThat(store.recoverOne()).isTrue();
+        assertThat(store.recoverOne()).isFalse();
+        assertThat(jdbc.queryForObject("SELECT status FROM submissions WHERE id=1", String.class)).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_job_runs", Integer.class)).isZero();
+        String message = jdbc.queryForObject("SELECT payload FROM outbox_events", String.class);
+        var event = JsonMapper.builder().build().readTree(message);
+        assertThat(event.get("eventType").asString()).isEqualTo("SubmissionFailed");
+        assertThat(event.get("context").asString()).isEqualTo("EXAM");
+        assertThat(event.get("contextId").asString()).isEqualTo("55");
+        assertThat(event.get("receiptId").asString()).isEqualTo("71");
+        assertThat(event.get("errorCode").asString()).isEqualTo("DEADLINE_EXCEEDED");
+    }
+
     @Test
     @DisplayName("현재 회차가 바뀌면 이전 실행 토큰과 결과를 반영하지 않는다")
     void rejectsOldAttempt() {
@@ -169,6 +191,7 @@ class SubmissionExecutionStoreTest {
                 List.of("3"),
                 null,
                 null,
+                List.of(),
                 List.of()
             );
         assertThat(store.complete(lease, data)).isTrue();
@@ -235,8 +258,12 @@ class SubmissionExecutionStoreTest {
 
     /** 회수 전 토큰과 늦은 실행기의 쓰기를 함께 검증한다. */
     @Test
-    @DisplayName("임대 회수 후 기존 토큰과 64KiB를 넘는 컴파일 메시지를 보존한다")
-    void recoversLease() {
+    @DisplayName("시험 임대 회수 후 기존 토큰과 64KiB를 넘는 컴파일 메시지를 보존한다")
+    void recoversExamLease() {
+        jdbc.update("""
+            UPDATE submissions SET context='EXAM',context_id=55,source_submission_id=71,
+                idempotency_key=NULL,request_hash=NULL WHERE id=1
+            """);
         jdbc.update("""
             INSERT INTO judge_test_results(judge_job_id,test_asset_id,test_order,is_sample,token_status,
                 created_at,updated_at)
@@ -275,19 +302,7 @@ class SubmissionExecutionStoreTest {
         assertThat(jdbc.queryForList("""
             SELECT created_try_count FROM judge_test_results ORDER BY test_order
             """, Integer.class)).containsExactly(1, 1);
-        var data
-            = new com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse(
-                "1",
-                "1",
-                "제목",
-                1,
-                List.of("구현"),
-                List.of("3"),
-                null,
-                null,
-                List.of()
-            );
-        assertThat(store.complete(second, data)).isTrue();
+        assertThat(store.complete(second, null)).isTrue();
         assertThat(jdbc.queryForObject("SELECT compile_message FROM submissions", String.class)).isEqualTo(diagnostic);
     }
 

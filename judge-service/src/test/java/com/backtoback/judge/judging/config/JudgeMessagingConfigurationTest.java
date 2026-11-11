@@ -41,7 +41,7 @@ class JudgeMessagingConfigurationTest {
         var resolver
             = new JudgeMessagingConfiguration()
                 .judgeEventDestinationResolver(
-                    new JudgeMessagingProperties(TOPIC, "https://sqs.example/000000000000/problem-validation-queue")
+                    new JudgeMessagingProperties(TOPIC, "https://sqs.example/000000000000/problem-validation-queue", "")
                 );
         assertThat(resolver.resolve(event(type, "v1")))
             .isEqualTo(new EventDestination(EventDestination.Channel.SNS, TOPIC));
@@ -50,10 +50,11 @@ class JudgeMessagingConfigurationTest {
 
     /** 요청 또는 미확정 이벤트를 결과로 오발행하지 않는지 검증한다. */
     @Test
-    @DisplayName("요청 이벤트와 미확정 진단 결과는 결과 토픽으로 보내지 않는다")
+    @DisplayName("요청 이벤트와 아직 구현하지 않은 진단 결과는 발행하지 않는다")
     void rejectsUnregisteredEvents() {
         var resolver
-            = new JudgeMessagingConfiguration().judgeEventDestinationResolver(new JudgeMessagingProperties(TOPIC, ""));
+            = new JudgeMessagingConfiguration()
+                .judgeEventDestinationResolver(new JudgeMessagingProperties(TOPIC, "", ""));
         assertThatThrownBy(() -> resolver.resolve(event("ProblemValidationRequested", "v1")))
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> resolver.resolve(event("DiagnosisSubmissionJudged", "v1")))
@@ -77,7 +78,7 @@ class JudgeMessagingConfigurationTest {
     @DisplayName("빈 주소·큐 이름·FIFO 큐·공백 주소를 거절한다")
     void rejectsInvalidQueueAddress(String queue) {
         try (var factory = Validation.buildDefaultValidatorFactory()) {
-            assertThat(factory.getValidator().validate(new JudgeMessagingProperties(TOPIC, queue))).isNotEmpty();
+            assertThat(factory.getValidator().validate(new JudgeMessagingProperties(TOPIC, queue, ""))).isNotEmpty();
         }
     }
 

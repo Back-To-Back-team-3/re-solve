@@ -66,6 +66,23 @@ public class SubmissionWorker {
             }
             var input = store.input(lease);
             var data = dataClient.find(input.problemId(), input.revisionId());
+            if (input.runtime() == null) {
+                if (!heartbeat.active()) {
+                    return true;
+                }
+                var runtime = store.initializeExternal(lease, data, input.language());
+                if (runtime.isEmpty()) {
+                    return true;
+                }
+                input
+                    = new SubmissionExecutionInput(
+                        input.problemId(),
+                        input.revisionId(),
+                        input.language(),
+                        input.sourceCode(),
+                        runtime.orElseThrow()
+                    );
+            }
             store.validateCases(lease, data);
             languages.requireRuntime(input.language(), input.runtime());
             if (!heartbeat.active() || !store.prepare(lease)) {

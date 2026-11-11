@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -112,7 +113,8 @@ class SubmissionWorkerTest {
                             false,
                             new SubmissionJudgingDataResponse.Asset("second", "v1", "b".repeat(64))
                         )
-                    )
+                    ),
+                List.of()
             );
         given(store.claim()).willReturn(Optional.of(lease));
         given(store.active(lease)).willReturn(true);
@@ -175,6 +177,26 @@ class SubmissionWorkerTest {
         verify(client, never()).create(any());
         verify(store).saveResult(lease, 2, "second", result);
         verify(store).complete(lease, data);
+    }
+
+    /** 미확정 외부 제출은 고정 환경을 저장한 뒤 그 환경으로 Judge0를 호출한다. */
+    @Test
+    @DisplayName("외부 제출은 런타임과 테스트를 먼저 확정한 뒤 해당 런타임으로 실행한다")
+    void initializesExternalBeforeExecution() {
+        given(store.input(lease)).willReturn(new SubmissionExecutionInput(1, 1, "java", "code", null));
+        given(store.initializeExternal(lease, data, "java")).willReturn(Optional.of(runtime));
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        given(store.beginCreate(lease, 1)).willReturn(true);
+        given(client.create(any())).willThrow(new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED));
+
+        assertThat(worker.runOnce()).isTrue();
+
+        var order = inOrder(store, languages, client);
+        order.verify(store).initializeExternal(lease, data, "java");
+        order.verify(store).validateCases(lease, data);
+        order.verify(languages).requireRuntime("java", runtime);
+        order.verify(client).create(any());
     }
 
     /** 생성기 오류가 Judge0 장애로 기록되거나 외부 실행을 생성하지 않는지 확인한다. */
