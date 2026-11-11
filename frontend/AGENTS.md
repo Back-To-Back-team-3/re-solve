@@ -49,7 +49,7 @@ Put new files in the existing structure below. If a new top-level directory is n
 | `src/app/` | App Router routes (page, layout, loading, error) |
 | `src/features/` | Feature components per screen |
 | `src/components/` | Shared UI components |
-| `src/services/` | API types (`types.ts`), mock API (`mock-api.ts`), data hooks (`hooks.ts`) |
+| `src/services/` | API types (`types.ts`), API functions (`api.ts`), client hooks (`hooks.ts`), mock API (`mock-api.ts`) |
 | `src/mocks/` | Mock data (`fixtures.ts`) |
 | `src/stores/` | Client state (Zustand) |
 | `src/styles/` | `globals.css`, `tokens.css`, `fonts.css` |
