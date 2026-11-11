@@ -3761,9 +3761,11 @@
 
 #### 2.8.1 실패 Outbox 재처리
 
-- **Method / URI:** `POST /api/v1/admin/outbox-events/{outboxEventId}/reprocesses`
+> 서비스별 경로와 재요청 처리는 확정했다. 기존 Problem 구현의 경로 전환·동시성 보완은 아직 적용하지 않았다. 아래 동시성 처리 상세는 구현 보완안이며, Judge 계약은 §3.2.6을 따른다.
+
+- **Method / URI:** `POST /api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses`
 - **인증:** `ADMIN`
-- **Idempotency:** 없음
+- **Idempotency:** 없음. `Idempotency-Key`와 최초 응답 보존을 추가하지 않는다. 재요청 시 현재 상태가 `PENDING`·`PUBLISHED`이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)을 반환한다. 재발행이 다시 실패해 `FAILED`가 되면 상태·유효 기간을 재검증해 새 운영 조치를 허용한다.
 - **대응 테이블:** `outbox_events`, `audit_logs`
 - **설명:** `FAILED` 상태이고 발생 7일 이내인 Outbox 이벤트를 `PENDING`으로 되돌려 Outbox Relay가 재발행하도록 한다. 원래 `event_id`를 유지하므로 소비자가 `processed_events`로 중복 소비를 방지한다.
 - **요청 바디:**
@@ -3781,6 +3783,23 @@
 - **에러:**
     - `OUTBOX_EVENT_NOT_FOUND`(404): 존재하지 않는 ID이거나 발생 7일 초과
     - `OUTBOX_EVENT_NOT_REPROCESSABLE`(409): `FAILED` 외 상태
+- **서비스별 경로 구분 — 확정:** 각 서비스의 `outbox_events.id`는 자기 DB 안에서만 유일하다. 서비스는 경로로 구분하고, 바디로 임의의 서비스나 스키마를 지정하지 않는다.
+
+    | 대상 | 현재 구현 경로 | 확정 경로 | Gateway 반영 |
+    | --- | --- | --- | --- |
+    | Problem | `/api/v1/admin/outbox-events/{outboxEventId}/reprocesses` | `/api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses` | 기존 `/api/v1/admin/problems/**` 분류 활용. Controller 경로 전환 필요 |
+    | Judge | 없음 | `/api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses` | `/api/v1/admin/judge/outbox-events/**`를 Judge 목적지에 추가 필요 |
+
+    - 기존 Problem 경로의 Gateway 라우트는 현재 없다. 경로 전환 시 운영 호출 도구·Controller·Gateway의 일치를 확인한다. 기존 경로를 두 서비스에 중복 라우팅하거나 다른 서비스 DB를 대신 조회하지 않는다.
+    - Gateway 라우트 반영은 담당 A와 협의할 구현 항목이며 이 문서 보완만으로 적용된 것으로 간주하지 않는다.
+- **동시성/멱등 보장 — 구현 보완안:**
+    - 자기 서비스의 Outbox 대상 행을 `SELECT ... FOR UPDATE`로 잠그고, 잠금 획득 후 공통 `Clock` 기준 서울 시각을 정한다. 대상 없음·발생 7일 초과는 404, `FAILED` 외 상태는 409다. 발생 시각이 정확히 `now - 7일`이면 허용한다.
+    - 상태를 다시 확인한 뒤 `WHERE id = :id AND status = 'FAILED' AND occurred_at >= :cutoff` 조건부 UPDATE로 `status=PENDING`, `retry_count=0`, `published_at=NULL`, `updated_at=now`를 반영한다.
+    - 영향 행이 정확히 1건일 때만 감사와 202 응답을 확정한다. 0건이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)로 롤백하며 성공 응답·감사를 남기지 않는다. 현재 Problem 구현의 `resetFailedToPending()` 반환값 무시를 보완한다.
+    - 상태 변경과 `audit_logs` INSERT는 같은 트랜잭션이다. `actor_id`는 인증한 관리자, `action=OUTBOX_REPROCESS`, `target_type=OUTBOX_EVENT`, `target_id`는 Outbox 행 ID, `reason`은 요청 사유, `client_ip`는 신뢰할 수 있는 요청 주소로 기록한다. 감사 저장 실패 시 상태 변경도 롤백한다.
+    - `reason`은 공백만 허용하지 않는 1~500자다(ERD §3.3의 저장 길이). Problem의 기존 `NotBlank` 검증에 최대 길이 검증을 추가하는 보완안이다.
+    - `event_id`·`payload`·`occurred_at`·`correlation_id`는 보존하고 기존 공통 Relay가 재발행한다. Relay도 같은 Outbox 행을 잠그므로 행 단위로 직렬화된다.
+- **비고:** 동시 운영 요청의 성공·409 분기, 실제 전환 1건당 감사 1건, 감사 실패 전체 롤백, Relay 경합, 정확히 7일인 경계값을 구현 회귀 테스트로 확인한다. 이 보완안에서는 테이블·컬럼·환경변수를 추가하지 않는다.
 
 ## 3. 제출·채점 (judge)
 
@@ -4348,6 +4367,81 @@
     - `SUBMISSION_NOT_FOUND`(404), `SUBMISSION_REJUDGE_NOT_ALLOWED`(409) / 이미 종결된 작업
 
 - **동시성/멱등 보장:** 채점 작업 → 복구 요청 → 제출 순서로 잠근다. `RUNNING` 복구는 현재 시도를 `SYSTEM_ERROR`로 종결하고 다음 시도로 전환하므로 상한 3회에서는 거절한다. 대기 작업은 시도 수를 유지하며, `UNKNOWN`은 기존 30초 유예를 보존한다. 기한·최신 회차·종결 여부를 잠금 후 재검증하고 작업·제출·감사를 함께 커밋한다.
+
+#### 3.2.6 실패 Outbox 재처리
+
+> Problem §2.8.1을 기준으로 서비스별 경로와 재요청 처리를 확정했다. 현재 Judge에는 구현되지 않았으며 Controller·Gateway 반영이 필요하다. 나머지 상세 사항은 구현 전 검토안이다. 기존 채점 작업 복구(§3.2.5)와 별개의 작업이다.
+
+- **Method / URI:** `POST /api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses`
+- **인증:** `ADMIN`
+- **Idempotency:** 없음. `Idempotency-Key`와 최초 응답 보존을 추가하지 않는다. 재요청 시 현재 상태가 `PENDING`·`PUBLISHED`이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)을 반환한다. 재발행이 다시 실패해 `FAILED`가 되면 상태·유효 기간을 재검증해 새 운영 조치를 허용한다. 기존 `eventId`에 의한 소비자 중복 제거는 이벤트 계약 §1.1·§1.4를 따른다.
+- **Rate Limit:** 없음
+- **대응 테이블:** `outbox_events`, `audit_logs` (Judge 자기 DB)
+- **설명:** 발생 7일 이내이고 `FAILED`인 Judge Outbox 이벤트를 `PENDING`으로 전환해 재발행을 접수한다. 원래 이벤트 식별자·본문을 보존하며 기존 공통 Relay가 저장된 메시지를 비동기로 발행한다. Outbox 변경과 관리자 조치 감사는 같은 트랜잭션에서 확정한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Content-Type` | Y | `application/json` | 요청 본문 형식 |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `outboxEventId` | Path | string | Y | — | Judge DB의 Outbox 행 ID. 양수 BIGINT 범위. 이벤트 UUID인 `eventId`와 구분 |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `reason` | string | Y | 공백만 허용하지 않는 1~500자 조치 사유 |
+
+    ```json
+    {
+      "reason": "발행 권한 복구 후 결과 이벤트 재전달"
+    }
+    ```
+
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json; charset=UTF-8` | 응답 본문 형식 |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (202):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `outboxEventId` | string | 재처리 접수가 확정된 Judge Outbox 행 ID |
+
+    ```json
+    {
+      "success": true,
+      "message": "재처리를 접수했습니다.",
+      "data": {
+        "outboxEventId": "1001"
+      }
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 양수 BIGINT 범위가 아닌 ID 또는 사유 검증 실패
+    - `AUTH_TOKEN_INVALID`(401), `AUTH_TOKEN_EXPIRED`(401) / Gateway 인증 실패
+    - `AUTH_ACCESS_DENIED`(403) / ADMIN 권한 없음
+    - `OUTBOX_EVENT_NOT_FOUND`(404) / Judge DB에 대상이 없거나 발생 7일 초과
+    - `OUTBOX_EVENT_NOT_REPROCESSABLE`(409) / `FAILED` 외 상태 또는 조건부 UPDATE 영향 행 0건
+    - `COMMON_INTERNAL_SERVER_ERROR`(500) / 상태 변경·감사 저장 등 예상하지 못한 내부 오류. 전체 롤백
+- **동시성/멱등 보장:** §2.8.1의 동시성 처리 보완안과 같은 단일 행 잠금·잠금 후 시각 확인·조건부 UPDATE·감사 원자 저장 규칙을 적용한다. 재요청 시 현재 상태가 `PENDING`·`PUBLISHED`이면 409이며 최초 202 응답을 재사용하지 않는다. 새 운영 요청이나 Relay가 상태를 변경했으면 최신 상태로 판단한다.
+- **발행:** 기존 Outbox 행을 `PENDING`으로 전환한 뒤 공통 Relay가 원래 메시지를 발행한다. 결과 이벤트의 `judgeAttempt` 등 순서 값을 변경하지 않는다.
+- **외부 의존:** 없음 (API 트랜잭션에서 SNS·SQS·다른 서비스 호출 없음)
+- **프론트 계약:** 202는 재처리 접수이며 실제 발행 완료를 의미하지 않는다.
+- **비고:**
+    - 범용 운영 인터페이스를 새 공통 모듈로 만드는 것은 이번 문서 보완 범위에 포함하지 않는다. 각 서비스는 자기 DB에서 권한·유효 기간·감사를 처리하고 기존 `common-event` Relay를 재사용한다.
+    - 기존 `OutboxEventWriter.append()`는 새 이벤트 ID를 발급하므로 이 재발행 경로에서 호출하지 않는다. 기존 행의 이벤트 ID·본문·발생 시각·상관관계 ID를 보존한다.
+    - `submissions`·`judge_jobs`·`judge_test_results`를 변경하거나 Judge0 실행을 다시 만들지 않는다. 실패 Outbox 재발행은 제출 재채점·채점 작업 복구·SQS DLQ redrive와 구분한다.
+    - 구현 시 동시 요청·Relay 경합·감사 실패 전체 롤백·7일 경계와 다른 서비스 DB를 조회하지 않는 경계를 검증한다. 테이블·컬럼·환경변수 추가는 없다.
 
 ### 3.3 내부 API
 
@@ -9017,8 +9111,8 @@
 | 서비스 | 절 | API |
 | --- | --- | --- |
 | member | 1.6.1 ~ 1.6.3 | 회원 목록, 정지·해제, 권한 변경 |
-| problem | 2.3.1 ~ 2.3.11, 2.4, 2.5.2 ~ 2.5.4 | 문제 등록·회차·공개·비공개·보관·검증, 이미지, 태그 |
-| judge | 3.2.1 ~ 3.2.5 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구 |
+| problem | 2.3.1 ~ 2.3.11, 2.4, 2.5.2 ~ 2.5.4, 2.8.1 | 문제 등록·회차·공개·비공개·보관·검증, 이미지, 태그, 실패 Outbox 재처리 |
+| judge | 3.2.1 ~ 3.2.6 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구, 실패 Outbox 재처리 |
 | contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, 시험 실패 재처리·작업 조회, `FAILED` 0점 확정, 결과 재확정. 시험 운영자 경로는 §4.6.3·§4.6.7 참조 |
 | study | 5.6.1 ~ 5.6.2 | 스터디 강제 종료, AC 복제본 재동기화 |
 | notification | 7.2.1 | 시스템 전역 공지 알림 브로드캐스트 |
