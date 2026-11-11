@@ -96,7 +96,7 @@ com.backtoback.{service}
     └── error/        ← {Service}ErrorCode enum implements ErrorCode
 ```
 
-Throw `BusinessException` (from `common-web`) with a `{Service}ErrorCode` value. Never catch exceptions in controllers to build error responses.
+Throw the service-specific exception extending `BusinessException` (e.g., `StudyException`) with a `{Service}ErrorCode` value. Never catch exceptions in controllers to build error responses.
 
 ### Consistency model
 
@@ -116,5 +116,5 @@ Throw `BusinessException` (from `common-web`) with a `{Service}ErrorCode` value.
 - `@Transactional` only on `public` methods; not on the class. Write methods that intentionally skip a transaction must have a comment explaining why.
 - Current time via injected `Clock`, not `LocalDateTime.now()`.
 - Config values via `@ConfigurationProperties` record + `@Validated`, never `@Value`.
-- Tests: unit tests use `MockitoExtension` + BDDMockito; controller tests use `@WebMvcTest` + `@MockitoBean`; DB tests use Testcontainers with `@Testcontainers(disabledWithoutDocker = true)`.
+- Tests: unit tests use `MockitoExtension` + BDDMockito; controller tests use `@WebMvcTest` + `@MockitoBean` (exception: study-service uses standalone MockMvc because `JpaAuditingConfiguration` causes JPA metamodel errors with `@WebMvcTest`); DB tests use Testcontainers with `@Testcontainers(disabledWithoutDocker = true)`.
 - `@DisplayName` on every test method in Korean describing condition → result.
