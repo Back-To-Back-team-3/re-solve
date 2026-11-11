@@ -93,7 +93,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `member.member_tag_levels` | `tag_id` | `problem.tags.id` | `SubmissionJudged` 태그 스냅샷 · 진단 출제 API | N |
 | `member.diagnosis_problems` | `problem_id`, `problem_revision_id` | `problem.problems.id`, `problem.problem_revisions.id` | 진단 출제 내부 API | N (난이도 스냅샷 포함) |
-| `member.diagnosis_submissions` | `submission_id` | `judge.submissions.id` | 진단 채점 결과 이벤트 (분리 방식 미결정) | N |
+| `member.diagnosis_submissions` | `submission_id` | `judge.submissions.id` | `DiagnosisSubmissionJudged`(J5) · `SubmissionFailed`(J4, `DIAGNOSIS`) | N |
 | `member.practice_result_replicas` | `submission_id`, `problem_id` | judge / problem | `SubmissionJudged` | **Y** |
 | `member.hint_usage_replicas` | `problem_id` | `problem.problems.id` | 힌트 사용 이벤트 (계약 확정 필요) | **Y** |
 | `problem.problems` | `author_id` | `member.members.id` | 관리자 요청의 `X-User-Id` | N |
@@ -103,7 +103,7 @@ flowchart LR
 | `problem.member_replicas` | `member_id` | `member.members.id` | 회원 정보 이벤트 | **Y** |
 | `judge.submissions` | `member_id` | `member.members.id` | `X-User-Id` · 채점 요청 이벤트 | N |
 | `judge.submissions` | `problem_id`, `problem_revision_id` | problem | 제출 요청 + 사전 검증 내부 API | N |
-| `judge.submissions` | `source_submission_id` | `contest.exam_submissions.id` / `contest.contest_submissions.id` / `member.diagnosis_submissions.id` | `ExamSubmissionRequested`·`ContestSubmissionRequested` · 진단 접수 | N |
+| `judge.submissions` | `source_submission_id` | `contest.exam_submissions.id` / `contest.contest_submissions.id` / `member.diagnosis_submissions.id` | `ExamSubmissionRequested`·`ContestSubmissionRequested`·`DiagnosisSubmissionRequested` | N |
 | `judge.judge_test_results` | `test_asset_id` | `problem.problem_test_assets.id` | 채점 정보 내부 API | N |
 | `contest.exams` | `study_id`, `creator_id` | `study.studies.id`, `member.members.id` | 시험 생성 요청 | N |
 | `contest.exam_problems` · `contest.contest_problems` | `problem_id`, `problem_revision_id` | problem | 문제 선택 API | N (제목 스냅샷 포함) |
@@ -683,7 +683,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 #### 4.1.9 진단 제출 (`diagnosis_submissions`)
 
-> 진단 제출 접수 경로는 미결정. 아래는 `member-service`가 접수하고 채점을 요청하는 초안 기준.
+> `member-service`가 진단 제출을 접수하고 Outbox Relay로 `DiagnosisSubmissionRequested`(M6)를 `exam-submission-queue`에 전송한다. 식별자 매핑은 이벤트 계약 M6·J4·J5를 따른다.
 > 
 
 | 컬럼 | 타입 | NOT NULL | 설명 |

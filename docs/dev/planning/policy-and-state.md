@@ -166,7 +166,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 제출 문맥 | 제출은 `context`(`PRACTICE` / `EXAM` / `CONTEST` / `DIAGNOSIS`)와 문맥 ID를 가진다. |
 | 진입점 | `PRACTICE`: 클라이언트 → `judge-service` `POST /submissions`, <br>`EXAM`·`CONTEST`: 클라이언트 → `contest-service`가 접수·검증 후 `ExamSubmissionRequested`/`ContestSubmissionRequested` 이벤트로 `judge-service`에 채점 요청. `judge-service`는 이 이벤트로만 `EXAM`·`CONTEST` 제출을 생성한다., <br> `DIAGNOSIS`: 진단 세션을 소유한 `member-service`가 접수·검증 후 `DiagnosisSubmissionRequested`로 채점을 요청한다. 시험·대회·진단 모두 SQS `exam-submission-queue`를 사용한다(이벤트 계약 M6·C1·C2). |
 | 제출 대상 | `PRACTICE`는 `scope = GENERAL`·`visibility = PUBLIC` 문제 중 해당 태그의 사용자 레벨이 허용하는 난이도까지만(§8.3). `EXAM`·`CONTEST`는 시험·대회에 고정된 문제 회차만. `DIAGNOSIS`는 진단이 출제한 문제만(레벨 제한 미적용). `PRIVATE`·`ARCHIVED` 문제의 `PRACTICE` 제출은 `PROBLEM_NOT_AVAILABLE`(404) |
-| 멱등 처리 | **일반 풀이(`PRACTICE`)**는 `Idempotency-Key` 헤더가 필수다. 접수 후 24시간 동안 같은 사용자·같은 키·같은 본문 요청에는 기존 제출을 반환한다. 유효 기간 안에 같은 키로 다른 본문을 보내면 `IDEMPOTENCY_KEY_CONFLICT`(422)로 처리한다. 유효 기간이 지나 같은 키로 들어온 요청은 사전 검증을 다시 수행하여 새 제출로 접수한다. **시험·대회 제출**은 각각 `examSubmissionId`·`contestSubmissionId`를 멱등키로 사용한다. 같은 접수 ID의 요청이 다시 전달되면 기존 제출로 처리하며, 일반 풀이의 24시간 만료 규칙을 적용하지 않는다. |
+| 멱등 처리 | **일반 풀이(`PRACTICE`)**는 `Idempotency-Key` 헤더가 필수다. 접수 후 24시간 동안 같은 사용자·같은 키·같은 본문 요청에는 기존 제출을 반환한다. 유효 기간 안에 같은 키로 다른 본문을 보내면 `IDEMPOTENCY_KEY_CONFLICT`(422)로 처리한다. 유효 기간이 지나 같은 키로 들어온 요청은 사전 검증을 다시 수행하여 새 제출로 접수한다. **시험·대회·진단 제출**은 문맥과 원본 접수 ID(`examSubmissionId`·`contestSubmissionId`·`diagnosisSubmissionId`) 조합으로 중복을 확인한다. 같은 접수 요청이 다시 전달되면 기존 제출을 유지하며, 일반 풀이의 24시간 만료 규칙을 적용하지 않는다. |
 | Rate Limit | 사용자당 분당 10회, 동일 문제 5초 간격. 시험·대회 제출은 `contest-service`에서 같은 기준을 적용한다(자동 제출은 제외). 초과 시 `SUBMISSION_RATE_LIMITED`(429)와 `Retry-After` |
 | 접수 응답 | 검증 통과 시 제출(`QUEUED`)·채점 작업(`judge_jobs`, `PENDING`)·테스트별 결과 자리를 한 트랜잭션에 저장하고 `202 Accepted`와 접수 ID를 반환한다. 채점 결과는 접수 응답에 포함하지 않는다. |
 | 코드 실행(Run) | 제출과 분리된 실행 경로다. 공개 테스트케이스와 사용자 직접 입력 테스트만 실행하고, 제출 이력·결과 저장·이벤트 발행이 없다. 채점 파이프라인을 거치지 않고 Judge0를 동기 호출한다. |
@@ -648,7 +648,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 시간 형식 | 시간 필드는 오프셋 포함 ISO-8601, 마이크로초 자릿수로 쓴다. |
 | 전달 보장 | 최소 1회 전달. 순서는 보장하지 않는다. |
 | 멱등 소비 | 소비자는 `processed_events(event_id)` 유일 제약 기록과 반영을 같은 트랜잭션에서 수행한다. 이미 기록된 이벤트는 반영 없이 성공 처리한다. |
-| 순서 역전 | 채점 결과 이벤트(`SubmissionJudged`·`ExamSubmissionJudged`·`ContestSubmissionJudged`)를 소비할 때 같은 `submissionId`에 대해 저장된 `judgeAttempt`보다 작거나 같은 회차의 결과는 반영하지 않는다. 다른 이벤트는 순서 비교가 필요한 경우 해당 이벤트 계약에 순서 값을 정의한다. |
+| 순서 역전 | 채점 결과 이벤트(`SubmissionJudged`·`ExamSubmissionJudged`·`ContestSubmissionJudged`·`DiagnosisSubmissionJudged`)를 소비할 때 같은 `submissionId`에 대해 저장된 `judgeAttempt`보다 작거나 같은 회차의 결과는 반영하지 않는다. 다른 이벤트는 순서 비교가 필요한 경우 해당 이벤트 계약에 순서 값을 정의한다. |
 | 소비 실패 | 재시도 후에도 실패한 메시지는 큐별 DLQ로 격리하고 운영 알림을 보낸다. 재처리는 관리자 절차로만 한다. |
 | 스키마 변경 | 필드 추가는 하위 호환으로만 한다. 필드 삭제·의미 변경은 새 `eventType` 또는 `schemaVersion`으로 발행하고 소비 서비스 담당자 승인을 받는다. |
 | 데이터 소유 | 다른 서비스의 DB·스키마에 직접 접근하지 않는다. 필요한 값은 API 조회 또는 이벤트 복제본을 쓴다. |
@@ -660,12 +660,13 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 이벤트 | 발행 | 소비 | 경로 |
 | --- | --- | --- | --- |
 | `ExamSubmissionRequested` / `ContestSubmissionRequested` | contest | judge | SQS `exam-submission-queue` |
+| `DiagnosisSubmissionRequested` | member | judge | SQS `exam-submission-queue` |
 | `ProblemStateChanged` | problem | study(문제집 문제 `ACTIVE ↔ EXCLUDED`·힌트 캐시 무효화), contest | SNS 팬아웃 |
 | `SubmissionJudged` (`PRACTICE` 전용) | judge | notification, study, member, integration, problem | SNS 팬아웃 |
 | `ExamSubmissionJudged` | judge | contest | SNS 팬아웃 |
 | `ContestSubmissionJudged` | judge | contest | SNS 팬아웃 |
 | `DiagnosisSubmissionJudged` | judge | member | SNS 팬아웃 |
-| `SubmissionFailed` | judge | notification, contest, member(진단) | SNS 팬아웃 |
+| `SubmissionFailed` | judge | notification, contest, member(`DIAGNOSIS`) | SNS 팬아웃 |
 | `ExamParticipantRegistered` / `ExamParticipantCanceled` | contest | study(힌트 차단 복제본), notification(시험 시작 전 예약·취소) | SNS 팬아웃 |
 | `ExamStarted` / `ExamClosed` / `ExamFinalized` | contest | study(힌트 차단 복제본), notification | SNS 팬아웃 |
 | `ExamUpdated` / `ExamCanceled` | contest | study(힌트 차단 복제본), notification | SNS 팬아웃 |

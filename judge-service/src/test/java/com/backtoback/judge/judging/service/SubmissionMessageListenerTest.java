@@ -47,6 +47,7 @@ import com.backtoback.judge.judging.dto.ProblemValidationDataResponse;
 import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse;
 import com.backtoback.judge.judging.dto.TypeSpec;
 import com.backtoback.judge.judging.repository.ExecutionRuntimeRepository;
+import com.backtoback.judge.judging.service.dto.SubmissionLease;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
 import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.backtoback.judge.judging.service.execution.dto.JudgeTestResult;
@@ -65,6 +66,7 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /** 실제 SQS 수신부터 업무 저장·메시지 삭제·SNS 결과 발행까지 서비스 구성을 검증한다. */
@@ -86,6 +88,7 @@ class SubmissionMessageListenerTest {
         = new LocalStackContainer("localstack/localstack:3.8").withServices("sns", "sqs");
     private static String inputQueue;
     private static String outputQueue;
+    private static String memberQueue;
     private static String validationDeadLetterQueue;
     private static String submissionQueue;
     private static String deadLetterQueue;
@@ -141,31 +144,49 @@ class SubmissionMessageListenerTest {
             deadLetterQueue = sqs.createQueue(request -> request.queueName("exam-submission-queue-dlq")).queueUrl();
             deadLetterArn = queueArn(sqs, deadLetterQueue);
             submissionQueue = createSourceQueue(sqs, "exam-submission-queue", deadLetterArn);
-            outputQueue = sqs.createQueue(request -> request.queueName("contest-queue")).queueUrl();
             var topic = sns.createTopic(request -> request.name("judge-events")).topicArn();
-            var queueArn = queueArn(sqs, outputQueue);
-            var policy = """
-                {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"sns.amazonaws.com"},
-                 "Action":"sqs:SendMessage","Resource":"%s","Condition":{"ArnEquals":{"aws:SourceArn":"%s"}}}]}
-                """.formatted(queueArn, topic);
-            sqs
-                .setQueueAttributes(
-                    request -> request.queueUrl(outputQueue).attributes(Map.of(QueueAttributeName.POLICY, policy))
-                );
-            sns
-                .subscribe(
-                    request -> request
-                        .topicArn(topic)
-                        .protocol("sqs")
-                        .endpoint(queueArn)
-                        .attributes(Map.of("RawMessageDelivery", "true", "FilterPolicy", """
-                            {"eventType":["ExamSubmissionJudged"],"context":["EXAM"]}
-                            """))
-                );
+            outputQueue = subscribe(sqs, sns, topic, "contest-queue", """
+                {"eventType":["ExamSubmissionJudged"],"context":["EXAM"]}
+                """);
+            memberQueue = subscribe(sqs, sns, topic, "member-queue", """
+                {"eventType":["DiagnosisSubmissionJudged","SubmissionFailed"],"context":["DIAGNOSIS"]}
+                """);
             registry.add("judge.messaging.topic-arn", () -> topic);
             registry.add("judge.messaging.validation-queue-url", () -> inputQueue);
             registry.add("judge.messaging.submission-queue-url", () -> submissionQueue);
         }
+    }
+
+    /**
+     * Judge 토픽에서 이벤트 종류와 문맥이 일치하는 결과만 받는 큐를 연결한다.
+     *
+     * @param sqs 테스트 SQS 클라이언트
+     * @param sns 테스트 SNS 클라이언트
+     * @param topic Judge 결과 토픽 ARN
+     * @param queueName 소비자 큐 이름
+     * @param filterPolicy 이벤트 종류와 문맥 구독 조건
+     * @return 결과 큐 URL
+     */
+    private static String subscribe(SqsClient sqs, SnsClient sns, String topic, String queueName, String filterPolicy) {
+        var queue = sqs.createQueue(request -> request.queueName(queueName)).queueUrl();
+        var arn = queueArn(sqs, queue);
+        var policy = """
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"sns.amazonaws.com"},
+             "Action":"sqs:SendMessage","Resource":"%s","Condition":{"ArnEquals":{"aws:SourceArn":"%s"}}}]}
+            """.formatted(arn, topic);
+        sqs
+            .setQueueAttributes(
+                request -> request.queueUrl(queue).attributes(Map.of(QueueAttributeName.POLICY, policy))
+            );
+        sns
+            .subscribe(
+                request -> request
+                    .topicArn(topic)
+                    .protocol("sqs")
+                    .endpoint(arn)
+                    .attributes(Map.of("RawMessageDelivery", "true", "FilterPolicy", filterPolicy))
+            );
+        return queue;
     }
 
     /**
@@ -567,60 +588,7 @@ class SubmissionMessageListenerTest {
             // when: 고정 회차의 런타임으로 시험 작업을 종결한다.
             assertThat(jdbc.queryForObject("SELECT unknown_retry_count FROM judge_jobs", Integer.class)).isZero();
             var lease = execution.claim().orElseThrow();
-            var input = execution.input(lease);
-            assertThat(input.revisionId()).isEqualTo(1001L);
-            assertThat(input.runtime()).isNull();
-
-            var runtime = new JudgeRuntime("java", 62, "Java (OpenJDK 17)", "17", null);
-            var snapshot = ExecutionRuntime.snapshot(runtime, LocalDateTime.of(2026, 10, 31, 9, 0));
-            new TransactionTemplate(manager).executeWithoutResult(status -> runtimes.insertIfAbsent(snapshot));
-            var data
-                = new SubmissionJudgingDataResponse(
-                    "101",
-                    "1001",
-                    "시험 문제",
-                    1,
-                    List.of(),
-                    List.of(),
-                    new FunctionSpec("solution", List.of(), new TypeSpec(TypeSpec.Kind.INT32, null, null, null, null)),
-                    new ProblemValidationDataResponse.Limits(1000, 6000, 1024, 64),
-                    List
-                        .of(
-                            new SubmissionJudgingDataResponse.TestCase(
-                                "42",
-                                1,
-                                true,
-                                new SubmissionJudgingDataResponse.Asset("test", "v1", "a".repeat(64))
-                            )
-                        ),
-                    List.of(new ProblemExecutionProfileResponse("java", snapshot.getSnapshotHash(), "java-runner-v1"))
-                );
-            data.validate(input.problemId(), input.revisionId());
-            assertThat(execution.initializeExternal(lease, data, input.language())).contains(runtime);
-            execution.validateCases(lease, data);
-            assertThat(execution.input(lease).runtime()).isEqualTo(runtime);
-            assertThat(execution.prepare(lease)).isTrue();
-            assertThat(execution.beginCreate(lease, 1)).isTrue();
-            assertThat(execution.saveToken(lease, 1, "token")).isTrue();
-            assertThat(
-                execution
-                    .saveResult(
-                        lease,
-                        1,
-                        "token",
-                        new JudgeTestResult(
-                            State.COMPLETED,
-                            JudgeVerdict.CE,
-                            1,
-                            java.math.BigDecimal.ONE,
-                            null,
-                            null,
-                            "compile error"
-                        )
-                    )
-            ).isTrue();
-            assertThat(execution.complete(lease, data)).isTrue();
-            assertThat(execution.complete(lease, data)).isFalse();
+            completeWithCompileError(lease);
             // then: J2를 받기 전에도 같은 접수로 완료 상태를 조회할 수 있다.
             var reconciled = internalQueries.byReceipt(Context.EXAM, 71).orElseThrow();
             assertThat(reconciled.getId()).isEqualTo(original.getId());
@@ -669,15 +637,181 @@ class SubmissionMessageListenerTest {
         }
     }
 
+    /**
+     * 태그가 없는 고정 회차의 자료를 검증하고 컴파일 오류로 끝난 외부 제출의 결과를 확정한다.
+     *
+     * @param lease 선점한 외부 제출의 채점 임대
+     */
+    private void completeWithCompileError(SubmissionLease lease) {
+        var input = execution.input(lease);
+        assertThat(input.revisionId()).isEqualTo(1001L);
+        assertThat(input.runtime()).isNull();
+
+        var runtime = new JudgeRuntime("java", 62, "Java (OpenJDK 17)", "17", null);
+        var snapshot = ExecutionRuntime.snapshot(runtime, LocalDateTime.of(2026, 10, 31, 9, 0));
+        new TransactionTemplate(manager).executeWithoutResult(status -> runtimes.insertIfAbsent(snapshot));
+        var data
+            = new SubmissionJudgingDataResponse(
+                "101",
+                "1001",
+                "고정 회차 문제",
+                1,
+                List.of(),
+                List.of(),
+                new FunctionSpec("solution", List.of(), new TypeSpec(TypeSpec.Kind.INT32, null, null, null, null)),
+                new ProblemValidationDataResponse.Limits(1000, 6000, 1024, 64),
+                List
+                    .of(
+                        new SubmissionJudgingDataResponse.TestCase(
+                            "42",
+                            1,
+                            true,
+                            new SubmissionJudgingDataResponse.Asset("test", "v1", "a".repeat(64))
+                        )
+                    ),
+                List.of(new ProblemExecutionProfileResponse("java", snapshot.getSnapshotHash(), "java-runner-v1"))
+            );
+        data.validate(input.problemId(), input.revisionId());
+        assertThat(execution.initializeExternal(lease, data, input.language())).contains(runtime);
+        execution.validateCases(lease, data);
+        assertThat(execution.input(lease).runtime()).isEqualTo(runtime);
+        assertThat(execution.prepare(lease)).isTrue();
+        assertThat(execution.beginCreate(lease, 1)).isTrue();
+        assertThat(execution.saveToken(lease, 1, "token")).isTrue();
+        assertThat(
+            execution
+                .saveResult(
+                    lease,
+                    1,
+                    "token",
+                    new JudgeTestResult(
+                        State.COMPLETED,
+                        JudgeVerdict.CE,
+                        1,
+                        java.math.BigDecimal.ONE,
+                        null,
+                        null,
+                        "compile error"
+                    )
+                )
+        ).isTrue();
+        assertThat(execution.complete(lease, data)).isTrue();
+        assertThat(execution.complete(lease, data)).isFalse();
+    }
+
+    /** 공용 큐의 진단 중복 접수가 하나의 고정 회차 작업과 J5 결과로 이어진다. */
+    @Test
+    @DisplayName("공용 큐의 진단 중복 접수를 한 번 채점하고 J5를 회원 큐에 발행한다")
+    void receivesDiagnosisAndPublishesResult() {
+        try (var sqs = sqsClient()) {
+            String original = diagnosisMessage(UUID.randomUUID());
+            sqs.sendMessage(request -> request.queueUrl(submissionQueue).messageBody(original));
+            sqs.sendMessage(request -> request.queueUrl(submissionQueue).messageBody(original));
+            sqs
+                .sendMessage(
+                    request -> request.queueUrl(submissionQueue).messageBody(diagnosisMessage(UUID.randomUUID()))
+                );
+            await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+                assertThat(count("processed_events")).isEqualTo(2);
+                assertThat(count("submissions")).isEqualTo(1);
+                assertThat(count("judge_jobs")).isEqualTo(1);
+            });
+
+            var lease = execution.claim().orElseThrow();
+            completeWithCompileError(lease);
+            var result = receiveMemberResult(sqs, "DiagnosisSubmissionJudged", lease.submissionId());
+            var body = (tools.jackson.databind.node.ObjectNode)result;
+            for (String header : List
+                .of("eventId", "eventType", "schemaVersion", "occurredAt", "aggregateId", "correlationId")) {
+                assertThat(body.remove(header)).isNotNull();
+            }
+            assertThat(body).isEqualTo(mapper.readTree("""
+                {
+                  "context": "DIAGNOSIS",
+                  "diagnosisId": "55",
+                  "diagnosisSubmissionId": "71",
+                  "submissionId": "%d",
+                  "userId": "9",
+                  "problemId": "101",
+                  "problemRevisionId": "1001",
+                  "judgeAttempt": 1,
+                  "status": "COMPLETED",
+                  "verdict": "CE",
+                  "passedCount": 0,
+                  "totalCount": 1,
+                  "maxTimeMs": null,
+                  "maxMemoryKb": null,
+                  "submittedAt": "2026-10-31T09:00:00.123456+09:00"
+                }
+                """.formatted(lease.submissionId())));
+            assertThat(jdbc.queryForList("SELECT event_type FROM outbox_events", String.class))
+                .containsExactly("DiagnosisSubmissionJudged");
+        }
+    }
+
+    /** 기한을 넘긴 진단은 기존 실패 이벤트에 진단 문맥 ID와 접수 ID를 싣는다. */
+    @Test
+    @DisplayName("진단 채점 기한이 지나면 J4의 contextId와 receiptId로 진단 접수를 알린다")
+    void publishesDiagnosisFailure() {
+        var acknowledgement = mock(Acknowledgement.class);
+        submissions.receive(diagnosisMessage(UUID.randomUUID()), acknowledgement);
+        verify(acknowledgement).acknowledge();
+        Long submissionId = jdbc.queryForObject("SELECT id FROM submissions", Long.class);
+        jdbc.update("UPDATE judge_jobs SET deadline_at = created_at");
+        assertThat(execution.recoverOne()).isTrue();
+        assertThat(execution.recoverOne()).isFalse();
+        assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("FAILED");
+
+        try (var sqs = sqsClient()) {
+            var result = receiveMemberResult(sqs, "SubmissionFailed", submissionId);
+            assertThat(result.path("contextId").asString()).isEqualTo("55");
+            assertThat(result.path("receiptId").asString()).isEqualTo("71");
+            assertThat(result.path("status").asString()).isEqualTo("FAILED");
+            assertThat(result.path("errorCode").asString()).isEqualTo("DEADLINE_EXCEEDED");
+            assertThat(result.has("verdict")).isFalse();
+        }
+    }
+
+    /**
+     * 회원 큐에서 문맥 필터를 통과한 결과를 읽고 원래 접수의 공통 필드를 대조한다.
+     *
+     * @param sqs 테스트 SQS 클라이언트
+     * @param type 기대하는 결과 이벤트 종류
+     * @param submissionId Judge가 생성한 제출 ID
+     * @return 진단 결과 이벤트 본문
+     */
+    private JsonNode receiveMemberResult(SqsClient sqs, String type, long submissionId) {
+        var messages
+            = sqs
+                .receiveMessage(
+                    request -> request.queueUrl(memberQueue).waitTimeSeconds(10).messageAttributeNames("All")
+                )
+                .messages();
+        assertThat(messages).hasSize(1);
+        var message = messages.getFirst();
+        sqs.deleteMessage(request -> request.queueUrl(memberQueue).receiptHandle(message.receiptHandle()));
+        assertThat(message.messageAttributes().get("context").stringValue()).isEqualTo("DIAGNOSIS");
+        var event = mapper.readTree(message.body());
+        assertThat(event.path("eventType").asString()).isEqualTo(type);
+        assertThat(event.path("context").asString()).isEqualTo("DIAGNOSIS");
+        assertThat(event.path("submissionId").asString()).isEqualTo(Long.toString(submissionId));
+        assertThat(event.path("userId").asString()).isEqualTo("9");
+        assertThat(event.path("problemId").asString()).isEqualTo("101");
+        assertThat(event.path("problemRevisionId").asString()).isEqualTo("1001");
+        assertThat(event.path("judgeAttempt").asInt()).isEqualTo(1);
+        assertThat(event.path("submittedAt").asString()).isEqualTo("2026-10-31T09:00:00.123456+09:00");
+        return event;
+    }
+
     /** 미지원 문맥과 잘못된 시험 이벤트는 소비 기록·ACK를 남기지 않는다. */
     @Test
-    @DisplayName("미등록 진단 요청과 잘못된 시험 요청은 ACK하지 않고 소비 기록을 남기지 않는다")
+    @DisplayName("지원하지 않는 진단 이벤트 버전과 잘못된 시험 요청은 ACK하지 않고 소비 기록을 남기지 않는다")
     void rejectsUnprocessedRequests() {
         UUID unsupported = UUID.randomUUID();
         UUID invalid = UUID.randomUUID();
         var acknowledgement = mock(Acknowledgement.class);
         assertThatThrownBy(
-            () -> submissions.receive(examMessage(unsupported, "DiagnosisSubmissionRequested"), acknowledgement)
+            () -> submissions.receive(diagnosisMessage(unsupported).replace("\"v1\"", "\"v2\""), acknowledgement)
         ).isInstanceOf(IllegalArgumentException.class);
         String wrongReceipt
             = examMessage(invalid, "ExamSubmissionRequested")
@@ -694,6 +828,22 @@ class SubmissionMessageListenerTest {
                     invalid.toString()
                 )
         ).isZero();
+    }
+
+    /**
+     * 원래 접수 시각을 보존한 지연 자동 제출 메시지를 만든다.
+     *
+     * @param eventId 전달 식별자
+     * @return 공용 제출 큐에 전달할 진단 요청
+     */
+    private String diagnosisMessage(UUID eventId) {
+        return """
+            {"eventId":"%s","eventType":"DiagnosisSubmissionRequested","schemaVersion":"v1",
+             "occurredAt":"2026-10-31T09:30:00.000000+09:00","aggregateId":"71","correlationId":"diagnosis-71",
+             "diagnosisId":"55","diagnosisSubmissionId":"71","userId":"9",
+             "problemId":"101","problemRevisionId":"1001","language":"java","sourceCode":"code",
+             "draftSeq":"1","submissionType":"AUTO","receivedAt":"2026-10-31T09:00:00.123456+09:00"}
+            """.formatted(eventId);
     }
 
     /**

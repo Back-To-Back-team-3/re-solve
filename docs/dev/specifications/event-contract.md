@@ -56,7 +56,7 @@
 
 | 순서 값 | 이벤트 | 비교 단위 | 반영 조건 | 동일 값 처리 |
 | --- | --- | --- | --- | --- |
-| `judgeAttempt` | `SubmissionJudged`, `ExamSubmissionJudged`, `ContestSubmissionJudged`, `SubmissionFailed` | `submissionId` | 수신 > 저장 | 무시 (contest는 상충 시 격리) |
+| `judgeAttempt` | `SubmissionJudged`, `ExamSubmissionJudged`, `ContestSubmissionJudged`, `DiagnosisSubmissionJudged`, `SubmissionFailed` | `submissionId` | 수신 > 저장 | 무시 (contest는 상충 시 격리) |
 | `sourceVersion` | `MemberUpdated`, `MemberSuspended`, `MemberWithdrawn`, `ProblemStateChanged`, `StudyClosed` | 원천 애그리게이트 | 수신 > 저장 | 무시 |
 | `profileVersion` | `LearningProfileUpdated` | `memberId` | 수신 > 저장 | 무시 |
 | `contextRevision` / `examRevision` / `contestRevision` | 참가·설정·상태 이벤트 | `examId`·`contestId` | 수신 ≥ 저장 (종단 이벤트는 항상 우선) | 반영 (멱등) |

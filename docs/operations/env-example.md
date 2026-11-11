@@ -163,12 +163,14 @@ GRAFANA_ADMIN_PASSWORD=
 | `JUDGE_MESSAGING_ENABLED` | `false` | 검증·제출 SQS 수신과 작업 실행·기한 초과 종결·제출 임대 회수·결과 SNS Outbox Relay를 활성화 |
 | `JUDGE_EVENTS_TOPIC_ARN` | 빈 값 | 활성화 시 필수. 기존 `judge-events` Standard SNS 토픽 ARN |
 | `PROBLEM_VALIDATION_QUEUE_URL` | 빈 값 | 활성화 시 필수. 기존 `problem-validation-queue` Standard SQS 큐 URL |
-| `JUDGE_SUBMISSION_QUEUE_URL` | 빈 값 | 시험 채점 요청을 받을 기존 `exam-submission-queue` Standard SQS 큐 URL. 비어 있으면 제출 큐 수신기는 시작하지 않음 |
+| `JUDGE_SUBMISSION_QUEUE_URL` | 빈 값 | 시험·진단 채점 요청을 받을 공용 `exam-submission-queue` Standard SQS 큐 URL. 비어 있으면 제출 큐 수신기는 시작하지 않음 |
 
 - 비활성 상태에서도 검증 저장 테이블·공통 소비기·Outbox 기록기·진행 조회 API는 유지한다. SQS 수신·자동 작업 실행·기한 초과 정리·임대 회수·결과 발행은 모두 중지한다. 환경변수를 바꾼 뒤 서비스를 재시작해 적용한다.
 - 활성화 전에 담당 A가 제공한 큐·토픽·구독 필터·DLQ·권한을 확인한다. 리스너는 없는 큐를 자동 생성하지 않는다.
-- 검증·시험 채점 요청은 DB 커밋 후 수동 ACK하며 ACK 배치를 끈다. 결과는 업무 트랜잭션의 Outbox 기록 후 공통 Relay로 발행한다.
+- 검증·제출 채점 요청은 DB 커밋 후 수동 ACK하며 ACK 배치를 끈다. 결과는 업무 트랜잭션의 Outbox 기록 후 공통 Relay로 발행한다.
 - 제출 큐에는 Judge에 등록된 요청만 보내도록 구성한다. 아직 처리기가 배포되지 않은 문맥의 요청은 재수신·DLQ 경로를 따른다. 결과 이벤트 구독 필터와 재전달 권한은 담당 A와 확인한다.
+- 진단 연동은 Member의 `DiagnosisSubmissionJudged`(J5)·진단 `SubmissionFailed`(J4) 핸들러를 먼저 배포한 뒤 활성화한다. 처리기 배포 전에 구독을 열면 공통 소비기가 결과를 반영하지 않은 채 소비 기록을 저장하고 ACK할 수 있다.
+- `judge-events` → `member-queue`에서 기존 `SubmissionJudged`(J1, `context=PRACTICE`) 수신 조건을 유지하고, `context=DIAGNOSIS`의 J5·J4 조건을 OR로 추가한다. 구독과 Judge의 M6 수신기가 준비되면 Member의 `DiagnosisSubmissionRequested`(M6) 발행을 시작한다. J4의 `contextId`는 진단 ID, `receiptId`는 진단 제출 접수 ID다.
 - AWS 리전·자격 증명·엔드포인트는 기존 설정을 사용한다. 로컬은 LocalStack, 운영은 서비스 실행 환경의 자격 증명 체인을 사용한다.
 - IDE 실행 시 환경변수를 전달한다. 현재 Compose는 Judge에 `PROBLEM_VALIDATION_QUEUE_URL`을 전달한다. `JUDGE_MESSAGING_ENABLED`·`JUDGE_EVENTS_TOPIC_ARN`·`JUDGE_SUBMISSION_QUEUE_URL`은 전달하지 않으므로 `.env`만 수정해서는 Judge 메시징을 활성화할 수 없다. Compose·운영 배포의 변수 전달과 리소스 준비는 담당 A와 연결한다.
 - 활성화하면 기존 대기 작업도 실행되므로 Problem 검증 자료 API와 Judge0 주소·사용 언어 활성화 설정을 함께 준비한다. 별도의 실행기 ON/OFF 환경변수는 사용하지 않는다.
