@@ -6,13 +6,13 @@ import org.springframework.stereotype.Component;
 
 import com.backtoback.ai.global.config.AiSnsProperties;
 import com.backtoback.ai.hint.event.HintReadyPublishPayload;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * ai-events SNS에 HintReady 이벤트를 발행한다 (event-contract.md §A1).
