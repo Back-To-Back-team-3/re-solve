@@ -23,6 +23,7 @@ import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.common.web.security.user.UserRole;
 import com.backtoback.study.hint.domain.HintRequestStatus;
 import com.backtoback.study.hint.dto.HintAcceptResult;
+import com.backtoback.study.hint.service.HintQueryService;
 import com.backtoback.study.hint.service.HintRequestService;
 
 /**
@@ -38,7 +39,7 @@ class HintControllerTest {
     @BeforeEach
     void setUp() {
         hintRequestService = mock(HintRequestService.class);
-        HintController controller = new HintController(hintRequestService);
+        HintController controller = new HintController(hintRequestService, mock(HintQueryService.class));
         mockMvc
             = MockMvcBuilders
                 .standaloneSetup(controller)
