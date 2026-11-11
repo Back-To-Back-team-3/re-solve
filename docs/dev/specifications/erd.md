@@ -361,7 +361,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- |
 | `outbox_events` |   • member: `LearningProfileUpdated`·`TagLevelChanged`·회원 이벤트 / <br>• problem: `ProblemStateChanged` / <br>• judge: 채점 결과 이벤트 / <br>• contest: 시험·대회 이벤트·채점 요청 / <br>• study: 스터디·문제집·힌트 이벤트 / <br>• integration: `GitHubSyncFailed` |
 | `processed_events` | 이벤트를 소비하는 모든 서비스 |
-| `audit_logs` |   • member: 회원 정지·권한 변경 / <br>• problem: 문제 공개·비공개·보관 / <br>• judge: 재채점·DLQ·실패 재처리 / <br>• contest: 재확정·0점 확정 /<br>• study: 강제 종료(9.5.1)·복제본 재동기화(9.5.2) |
+| `audit_logs` |   • member: 회원 정지·권한 변경 / <br>• problem: 문제 공개·비공개·보관·Outbox 재처리 / <br>• judge: 재채점·DLQ·실패 재처리 / <br>• contest: 재확정·0점 확정 /<br>• study: 강제 종료(9.5.1)·복제본 재동기화(9.5.2) |
 | `shedlock` | 상태 전이 스케줄러와 만료 데이터 정리 배치 (Outbox Relay는 `SKIP LOCKED`로 처리하므로 대상 아님) |
 | `member_replicas` |   • 닉네임·회원 상태 표시 (problem: 공유 풀이·댓글 작성자 / <br>• contest: 순위표 / study: 구성원·게시글) |
 

@@ -3754,6 +3754,34 @@
 - 기본 코드의 생성 책임은 Judge다. 기존 `ExecutionCodeGenerator.starterCode(FunctionSpec)`를 연결하며 응답 언어 집합은 요청과 정확히 일치해야 한다. Problem이 기본 코드를 생성하거나 이전 회차·미통과 언어 코드로 대체하지 않는다.
 - 제공 계약은 §3.3.5를 따른다. 요청 언어 집합과 응답이 정확히 일치하고 각 `sourceCode`가 문자열인지 검사한다.
 
+### 2.8 관리자 API — Outbox 운영
+
+> 작성: 담당 D (B 지원) · 서비스: `problem-service`
+>
+
+#### 2.8.1 실패 Outbox 재처리
+
+- **Method / URI:** `POST /api/v1/admin/outbox-events/{outboxEventId}/reprocesses`
+- **인증:** `ADMIN`
+- **Idempotency:** 없음
+- **대응 테이블:** `outbox_events`, `audit_logs`
+- **설명:** `FAILED` 상태이고 발생 7일 이내인 Outbox 이벤트를 `PENDING`으로 되돌려 Outbox Relay가 재발행하도록 한다. 원래 `event_id`를 유지하므로 소비자가 `processed_events`로 중복 소비를 방지한다.
+- **요청 바디:**
+
+    ```json
+      { "reason": "DLQ 원인 수정 후 재처리" }
+    ```
+
+- **응답 (202):**
+
+    ```json
+      { "success": true, "message": "재처리를 접수했습니다.", "data": { "outboxEventId": "1001" } }
+    ```
+
+- **에러:**
+    - `OUTBOX_EVENT_NOT_FOUND`(404): 존재하지 않는 ID이거나 발생 7일 초과
+    - `OUTBOX_EVENT_NOT_REPROCESSABLE`(409): `FAILED` 외 상태
+
 ## 3. 제출·채점 (judge)
 
 > 작성: 담당 B · 서비스: `judge-service`
