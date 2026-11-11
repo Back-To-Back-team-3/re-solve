@@ -1,0 +1,3 @@
+services:
+  judge0-worker:
+    cgroup: private
