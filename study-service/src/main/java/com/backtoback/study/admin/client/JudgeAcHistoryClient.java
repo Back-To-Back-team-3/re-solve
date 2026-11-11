@@ -32,6 +32,11 @@ public class JudgeAcHistoryClient {
         this.client = builder.clone().baseUrl(properties.baseUrl()).requestFactory(factory).build();
     }
 
+    /** 테스트에서 미리 구성된 RestClient를 직접 주입할 때 사용한다. */
+    JudgeAcHistoryClient(RestClient restClient) {
+        this.client = restClient;
+    }
+
     /**
      * 회원별 PRACTICE AC 이력 한 페이지를 조회한다.
      *
