@@ -147,6 +147,7 @@
 | `HINT_LEVEL_SKIPPED` | 409 | 앞 단계 힌트를 받기 전에 다음 단계 요청 |
 | `HINT_DAILY_LIMIT_EXCEEDED` | 429 | 일일 힌트 요청 한도(20회) 초과 |
 | `HINT_REQUEST_NOT_FOUND` | 404 | 힌트 요청이 없거나 본인 요청이 아님 |
+| `HINT_FEATURE_DISABLED` | 503 | 힌트 기능 비활성화(기능 토글 off) |
 
 #### **Notification · GitHub**
 
