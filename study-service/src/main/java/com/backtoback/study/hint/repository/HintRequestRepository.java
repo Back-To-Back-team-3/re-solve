@@ -1,9 +1,11 @@
 package com.backtoback.study.hint.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -35,4 +37,23 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
      * 단건 조회 — memberId 조건으로 본인 요청 여부를 DB 레벨에서 확인한다 (api-spec §6.1.3).
      */
     Optional<HintRequest> findByIdAndMemberId(Long id, Long memberId);
+
+    /**
+     * 조건부 완료 갱신 — {@code expectedStatus}인 행만 갱신하여 경쟁 처리를 방지한다 (event-contract §S8).
+     * 반환값 0이면 이미 다른 상태로 전이됐거나 존재하지 않는 행이다.
+     */
+    @Modifying
+    @Query(
+        "UPDATE HintRequest r" + " SET r.status = :newStatus, r.content = :content, r.completedAt = :completedAt,"
+            + " r.cached = :isCached, r.fallback = :isFallback" + " WHERE r.id = :id AND r.status = :expectedStatus"
+    )
+    int completeIfGenerating(
+        @Param("id") Long id,
+        @Param("newStatus") HintRequestStatus newStatus,
+        @Param("content") String content,
+        @Param("completedAt") LocalDateTime completedAt,
+        @Param("isCached") boolean isCached,
+        @Param("isFallback") boolean isFallback,
+        @Param("expectedStatus") HintRequestStatus expectedStatus
+    );
 }
