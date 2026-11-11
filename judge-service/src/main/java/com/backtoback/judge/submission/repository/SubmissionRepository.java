@@ -1,8 +1,10 @@
 package com.backtoback.judge.submission.repository;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
@@ -10,13 +12,35 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import com.backtoback.judge.judging.domain.JudgeVerdict;
 import com.backtoback.judge.submission.domain.Submission;
+import com.backtoback.judge.submission.service.AcceptedSubmissionSummary;
 
 import jakarta.persistence.LockModeType;
 
 /** {@code Submission} 저장과 식별자 조회를 제공한다. */
 public interface SubmissionRepository extends JpaRepository<Submission, Long>, JpaSpecificationExecutor<Submission> {
     Optional<Submission> findByIdAndMemberIdAndContext(long id, long memberId, Submission.Context context);
+
+    /**
+     * 제출 ID 오름차순으로 커서 뒤의 제출 요약만 읽는다.
+     *
+     * @param memberId 재동기화할 회원 ID
+     * @param context 대상 제출 문맥
+     * @param status 대상 제출 상태
+     * @param verdict 대상 판정
+     * @param after 마지막으로 반환한 제출 ID
+     * @param page 조회할 행 수를 제한하는 첫 페이지 조건
+     * @return 원본 코드와 테스트를 제외한 요약 목록
+     */
+    List<AcceptedSubmissionSummary> findByMemberIdAndContextAndStatusAndVerdictAndIdGreaterThanOrderByIdAsc(
+        long memberId,
+        Submission.Context context,
+        Submission.Status status,
+        JudgeVerdict verdict,
+        long after,
+        Pageable page
+    );
 
     /**
      * 원본 접수에 연결된 제출을 문맥과 접수 ID로 조회한다.
