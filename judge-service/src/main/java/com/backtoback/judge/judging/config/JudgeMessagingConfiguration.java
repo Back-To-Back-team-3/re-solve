@@ -223,6 +223,20 @@ public class JudgeMessagingConfiguration {
     }
 
     /**
+     * 원격 자료 조회가 채점 선점·임대 회수를 지연시키지 않도록 유지보수 예약 작업을 격리한다.
+     *
+     * @return 상태 대사와 관측 작업에 사용할 전용 스케줄러
+     */
+    @Bean
+    public ThreadPoolTaskScheduler judgeMaintenanceScheduler() {
+        var scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("judge-maintenance-");
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
+    /**
      * 메시징이 활성화된 환경에서만 검증 실행과 기한 초과 정리를 예약한다.
      *
      * @param worker 작업 상위 실행기

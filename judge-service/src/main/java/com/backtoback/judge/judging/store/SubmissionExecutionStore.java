@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import org.slf4j.MDC;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +27,7 @@ import com.backtoback.judge.judging.repository.ExecutionRuntimeRepository;
 import com.backtoback.judge.judging.service.SubmissionVerdict;
 import com.backtoback.judge.judging.service.dto.SubmissionExecutionInput;
 import com.backtoback.judge.judging.service.dto.SubmissionLease;
+import com.backtoback.judge.judging.service.dto.SubmissionReconciliationCandidate;
 import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.backtoback.judge.judging.service.execution.dto.JudgeTestResult;
 import com.backtoback.judge.submission.domain.Submission;
@@ -45,6 +47,112 @@ public class SubmissionExecutionStore {
     private final SubmissionRepository submissions;
     private final OutboxEventWriter events;
     private final ExecutionRuntimeRepository runtimes;
+
+    /**
+     * 오래된 제출 중 최신 작업의 상태가 다른 후보를 잠금 없이 제한 조회한다. (스케줄러 §3.4)
+     *
+     * @return 고정 처리량 안의 상태 대사 후보
+     */
+    @Transactional(readOnly = true)
+    public List<SubmissionReconciliationCandidate> reconciliationCandidates() {
+        return jdbc
+            .query(
+                """
+                        SELECT s.id,s.judge_attempt,s.status,j.id job_id,j.status job_status,
+                    s.problem_id,s.problem_revision_id
+                        FROM submissions s LEFT JOIN judge_jobs j
+                    ON j.submission_id=s.id AND j.judge_attempt=s.judge_attempt
+                        WHERE s.context IN ('PRACTICE','EXAM','DIAGNOSIS')
+                        AND s.status IN ('QUEUED','JUDGING','RETRY_WAITING') AND s.updated_at<?
+                        AND (j.id IS NULL OR j.status IN ('SUCCEEDED','FAILED')
+                            OR (s.status IN ('JUDGING','RETRY_WAITING') AND j.status IN ('PENDING','RETRY_WAITING')))
+                        ORDER BY s.updated_at,s.id LIMIT 100
+                        """,
+                (row, index) -> new SubmissionReconciliationCandidate(
+                    row.getLong("id"),
+                    row.getObject("job_id", Long.class),
+                    row.getInt("judge_attempt"),
+                    row.getString("status"),
+                    row.getString("job_status"),
+                    row.getLong("problem_id"),
+                    row.getLong("problem_revision_id")
+                ),
+                now().minusMinutes(2)
+            );
+    }
+
+    /**
+     * 작업·제출 순서로 잠근 뒤 관측 상태와 회차가 그대로인 제출만 보정한다.
+     * 종결 작업의 시도 이력과 기한은 보존한다. (스케줄러 §3.4)
+     *
+     * @param candidate 잠금 없이 선정한 후보
+     * @param data 성공 결과 이벤트의 고정 문제 메타데이터, 성공 보정 외에는 null
+     * @return 현재 상태의 불일치를 보정했는지 여부
+     */
+    @Transactional(timeout = 5)
+    public boolean reconcile(SubmissionReconciliationCandidate candidate, SubmissionJudgingDataResponse data) {
+        var jobs = jdbc.queryForList("""
+            SELECT * FROM judge_jobs WHERE id=? AND submission_id=? AND judge_attempt=? FOR UPDATE SKIP LOCKED
+            """, candidate.jobId(), candidate.submissionId(), candidate.judgeAttempt());
+        if (jobs.isEmpty()) {
+            return false;
+        }
+        var job = jobs.getFirst();
+        var locked
+            = jdbc
+                .queryForList(
+                    """
+                        SELECT id FROM submissions WHERE id=? AND judge_attempt=? AND status=? AND updated_at<?
+                        FOR UPDATE SKIP LOCKED
+                        """,
+                    Long.class,
+                    candidate.submissionId(),
+                    candidate.judgeAttempt(),
+                    candidate.observedStatus(),
+                    now().minusMinutes(2)
+                );
+        if (locked.isEmpty() || !candidate.jobStatus().equals(job.get("status"))) {
+            return false;
+        }
+        var lease
+            = new SubmissionLease(
+                candidate.jobId(),
+                candidate.submissionId(),
+                candidate.judgeAttempt(),
+                ((Number)job.get("try_count")).intValue(),
+                null,
+                (LocalDateTime)job.get("deadline_at")
+            );
+        if ("SUCCEEDED".equals(candidate.jobStatus())) {
+            return writeCompleted(lease, data, false);
+        }
+        if ("FAILED".equals(candidate.jobStatus())) {
+            jdbc.update("""
+                UPDATE submissions SET status='FAILED',verdict=NULL,updated_at=?
+                WHERE id=? AND status=? AND judge_attempt=?
+                """, now(), candidate.submissionId(), candidate.observedStatus(), candidate.judgeAttempt());
+            appendFailure(lease, (String)job.get("last_error"));
+            return true;
+        }
+        return jdbc.update("""
+            UPDATE submissions SET status='QUEUED',updated_at=?
+            WHERE id=? AND status IN ('JUDGING','RETRY_WAITING') AND judge_attempt=?
+            """, now(), candidate.submissionId(), candidate.judgeAttempt()) == 1;
+    }
+
+    /**
+     * 최신 작업이 없는 제출이 여전히 미종결인지 현재 읽기로 확인한다.
+     *
+     * @param candidate 작업 누락을 관측한 제출
+     * @return 운영 확인이 필요한 누락 상태인지 여부
+     */
+    @Transactional(readOnly = true)
+    public boolean missingReconciliationJob(SubmissionReconciliationCandidate candidate) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+            SELECT EXISTS(SELECT 1 FROM submissions s WHERE s.id=? AND s.judge_attempt=? AND s.status=?
+            AND NOT EXISTS(SELECT 1 FROM judge_jobs j WHERE j.submission_id=s.id AND j.judge_attempt=s.judge_attempt))
+            """, Boolean.class, candidate.submissionId(), candidate.judgeAttempt(), candidate.observedStatus()));
+    }
 
     /**
      * 제출 코드와 이미 확정한 실행 환경을 조회한다.
@@ -390,6 +498,22 @@ public class SubmissionExecutionStore {
         if (!owns(lease)) {
             return false;
         }
+        return writeCompleted(lease, data, true);
+    }
+
+    /**
+     * 정상 실행과 상태 대사가 완료 결과 집계·이벤트 저장을 공유한다.
+     *
+     * @param lease 잠근 작업의 현재 회차
+     * @param data 고정 문제 메타데이터
+     * @param recordExecution 정상 실행이면 시도 이력과 작업 종결도 기록할지 여부
+     * @return 완료 결과를 저장했는지 여부
+     */
+    private boolean writeCompleted(SubmissionLease lease, SubmissionJudgingDataResponse data, boolean recordExecution) {
+        String correlationId = recordExecution ? lease.correlationId() : MDC.get("correlationId");
+        if (correlationId == null) {
+            correlationId = "sched-JudgeReconciliation-" + UUID.randomUUID();
+        }
         var verdicts = jdbc.queryForList("""
             SELECT CASE WHEN token_status='DONE' THEN verdict ELSE NULL END
             FROM judge_test_results WHERE judge_job_id=? ORDER BY test_order
@@ -403,16 +527,19 @@ public class SubmissionExecutionStore {
             """, lease.jobId());
         Object time = verdict == JudgeVerdict.CE ? null : metrics.get("time");
         Object memory = verdict == JudgeVerdict.CE ? null : metrics.get("memory");
-        if (!owns(lease)) {
+        if (recordExecution && !owns(lease)) {
             return false;
         }
-        var instant = now();
+        var instant
+            = recordExecution ? now() : jdbc
+                .queryForObject("SELECT finished_at FROM judge_jobs WHERE id=?", LocalDateTime.class, lease.jobId());
+        Assert.notNull(instant, "성공 작업의 종결 시각이 필요합니다.");
         jdbc
             .update(
                 """
                     UPDATE submissions SET status='COMPLETED',verdict=?,passed_count=?,total_count=?,max_time_ms=?,
                     max_memory_kb=?,compile_message=CASE WHEN ? THEN (
-                        SELECT pending_compile_message FROM judge_jobs WHERE id=?
+                        SELECT COALESCE(pending_compile_message,submissions.compile_message) FROM judge_jobs WHERE id=?
                     ) ELSE NULL END,
                     judged_at=?,updated_at=? WHERE id=?
                     """,
@@ -424,14 +551,16 @@ public class SubmissionExecutionStore {
                 verdict == JudgeVerdict.CE,
                 lease.jobId(),
                 instant,
-                instant,
+                now(),
                 lease.submissionId()
             );
-        recordRun(lease, "SUCCEEDED", null, instant);
-        jdbc.update("""
-            UPDATE judge_jobs SET status='SUCCEEDED',finished_at=?,lease_token=NULL,lease_until=NULL,
-            last_error=NULL,pending_compile_message=NULL,updated_at=? WHERE id=?
-            """, instant, instant, lease.jobId());
+        if (recordExecution) {
+            recordRun(lease, "SUCCEEDED", null, instant);
+            jdbc.update("""
+                UPDATE judge_jobs SET status='SUCCEEDED',finished_at=?,lease_token=NULL,lease_until=NULL,
+                last_error=NULL,pending_compile_message=NULL,updated_at=? WHERE id=?
+                """, instant, instant, lease.jobId());
+        }
         var submission = submissions.findById(lease.submissionId()).orElseThrow();
         if (submission.getContext() == Context.EXAM) {
             var examResult
@@ -458,7 +587,7 @@ public class SubmissionExecutionStore {
                     "ExamSubmissionJudged",
                     "v1",
                     Long.toString(lease.submissionId()),
-                    lease.correlationId(),
+                    correlationId,
                     examResult
                 );
             return true;
@@ -488,7 +617,7 @@ public class SubmissionExecutionStore {
                     "DiagnosisSubmissionJudged",
                     "v1",
                     Long.toString(lease.submissionId()),
-                    lease.correlationId(),
+                    correlationId,
                     diagnosisResult
                 );
             return true;
@@ -511,8 +640,7 @@ public class SubmissionExecutionStore {
             }
             case EXAM, DIAGNOSIS, CONTEST -> throw new IllegalStateException("결과 발행을 지원하지 않는 채점 문맥입니다.");
         };
-        events
-            .append("Submission", eventType, "v1", Long.toString(lease.submissionId()), lease.correlationId(), payload);
+        events.append("Submission", eventType, "v1", Long.toString(lease.submissionId()), correlationId, payload);
         return true;
     }
 
@@ -543,7 +671,7 @@ public class SubmissionExecutionStore {
                 """, instant.plusSeconds(lease.tryCount() == 1 ? 10 : 30), errorCode, instant, lease.jobId());
             jdbc
                 .update(
-                    "UPDATE submissions SET status='RETRY_WAITING',updated_at=? WHERE id=?",
+                    "UPDATE submissions SET status='QUEUED',updated_at=? WHERE id=?",
                     instant,
                     lease.submissionId()
                 );
@@ -728,6 +856,20 @@ public class SubmissionExecutionStore {
                 instant,
                 lease.submissionId()
             );
+        appendFailure(lease, error);
+    }
+
+    /**
+     * 이미 잠근 제출의 문맥에 맞는 실패 이벤트를 기록한다.
+     *
+     * @param lease 실패한 작업의 현재 회차
+     * @param error 원문을 포함하지 않는 실패 코드
+     */
+    private void appendFailure(SubmissionLease lease, String error) {
+        String correlationId = MDC.get("correlationId");
+        if (correlationId == null) {
+            correlationId = lease.correlationId();
+        }
         var submission = submissions.findById(lease.submissionId()).orElseThrow();
         var payload = payload(lease, submission);
         payload.put("context", submission.getContext().name());
@@ -745,7 +887,7 @@ public class SubmissionExecutionStore {
                 "SubmissionFailed",
                 "v1",
                 Long.toString(lease.submissionId()),
-                lease.correlationId(),
+                correlationId,
                 payload
             );
     }
