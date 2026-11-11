@@ -30,6 +30,8 @@ study:
     queue-name: ${STUDY_SQS_QUEUE_NAME:study-queue}
   hint-context-client:
     problem-base-url: ${PROBLEM_SERVICE_URL:http://problem-service:8080}
+  judge-client:
+    base-url: ${JUDGE_SERVICE_URL:http://judge-service:8080}
 
 springdoc:
   api-docs:
