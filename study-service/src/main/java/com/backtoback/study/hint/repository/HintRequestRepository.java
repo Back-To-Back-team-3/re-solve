@@ -66,7 +66,8 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
     @Modifying
     @Query(
         "UPDATE HintRequest r SET r.status = 'BLOCKED', r.blockedReason = :blockedReason,"
-            + " r.completedAt = :completedAt WHERE r.id = :id AND r.status = 'GENERATING'"
+            + " r.completedAt = :completedAt, r.updatedAt = :completedAt"
+            + " WHERE r.id = :id AND r.status = 'GENERATING'"
     )
     int blockIfGeneratingById(
         @Param("id") Long id,
