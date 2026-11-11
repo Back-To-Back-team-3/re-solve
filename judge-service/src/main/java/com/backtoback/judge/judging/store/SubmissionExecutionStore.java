@@ -1,6 +1,7 @@
 package com.backtoback.judge.judging.store;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -43,6 +44,14 @@ import lombok.RequiredArgsConstructor;
 public class SubmissionExecutionStore {
     private static final String TOKEN_RECOVERY = "TOKEN_RECOVERY";
     private static final DateTimeFormatter EVENT_TIME = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSxxx");
+    private static final String RECONCILIATION_FROM = """
+        FROM submissions s LEFT JOIN judge_jobs j
+        ON j.submission_id=s.id AND j.judge_attempt=s.judge_attempt
+        WHERE s.context IN ('PRACTICE','EXAM','DIAGNOSIS')
+        AND s.status IN ('QUEUED','JUDGING','RETRY_WAITING') AND s.updated_at<?
+        AND (j.id IS NULL OR j.status IN ('SUCCEEDED','FAILED')
+            OR (s.status IN ('JUDGING','RETRY_WAITING') AND j.status IN ('PENDING','RETRY_WAITING')))
+        """;
     private final JdbcTemplate jdbc;
     private final Clock clock;
     private final SubmissionRepository submissions;
@@ -63,17 +72,9 @@ public class SubmissionExecutionStore {
     public List<SubmissionReconciliationCandidate> reconciliationCandidates(long afterSubmissionId) {
         return jdbc
             .query(
-                """
-                        SELECT s.id,s.judge_attempt,s.status,j.id job_id,j.status job_status,
-                    s.problem_id,s.problem_revision_id
-                        FROM submissions s LEFT JOIN judge_jobs j
-                    ON j.submission_id=s.id AND j.judge_attempt=s.judge_attempt
-                        WHERE s.id>? AND s.context IN ('PRACTICE','EXAM','DIAGNOSIS')
-                        AND s.status IN ('QUEUED','JUDGING','RETRY_WAITING') AND s.updated_at<?
-                        AND (j.id IS NULL OR j.status IN ('SUCCEEDED','FAILED')
-                            OR (s.status IN ('JUDGING','RETRY_WAITING') AND j.status IN ('PENDING','RETRY_WAITING')))
-                        ORDER BY s.id LIMIT 100
-                        """,
+                "SELECT s.id,s.judge_attempt,s.status,j.id job_id,j.status job_status,"
+                    + "s.problem_id,s.problem_revision_id " + RECONCILIATION_FROM
+                    + " AND s.id>? ORDER BY s.id LIMIT 100",
                 (row, index) -> new SubmissionReconciliationCandidate(
                     row.getLong("id"),
                     row.getObject("job_id", Long.class),
@@ -83,9 +84,30 @@ public class SubmissionExecutionStore {
                     row.getLong("problem_id"),
                     row.getLong("problem_revision_id")
                 ),
-                afterSubmissionId,
-                now().minusMinutes(2)
+                now().minusMinutes(2),
+                afterSubmissionId
             );
+    }
+
+    /**
+     * 순회 위치와 무관하게 가장 오래된 상태 불일치 제출의 경과 시간을 조회한다.
+     *
+     * @return 가장 오래된 후보의 경과 초, 후보가 없으면 0
+     * @throws QueryTimeoutException DB 조회 제한시간을 초과한 경우
+     */
+    @Transactional(
+        readOnly = true,
+        timeout = 5
+    )
+    public double reconciliationBacklogAgeSeconds() {
+        var oldest
+            = jdbc
+                .queryForObject(
+                    "SELECT MIN(s.updated_at) " + RECONCILIATION_FROM,
+                    LocalDateTime.class,
+                    now().minusMinutes(2)
+                );
+        return oldest == null ? 0 : Math.max(0, Duration.between(oldest, now()).toMillis() / 1000.0);
     }
 
     /**

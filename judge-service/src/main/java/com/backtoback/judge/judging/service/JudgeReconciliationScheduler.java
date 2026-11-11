@@ -13,7 +13,10 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.backtoback.judge.judging.client.SubmissionJudgingDataClient;
 import com.backtoback.judge.judging.store.SubmissionExecutionStore;
 
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,10 +29,24 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class JudgeReconciliationScheduler {
+    private static final String SCHEDULER = "JudgeReconciliationScheduler";
     private final SubmissionExecutionStore store;
     private final SubmissionJudgingDataClient dataClient;
     private final MeterRegistry meters;
     private long lastSubmissionId;
+
+    /** 원격 자료 조회 없이 공통 적체 지표의 제한시간 있는 DB 조회를 등록한다. */
+    @PostConstruct
+    void registerBacklogGauge() {
+        Gauge
+            .builder(
+                "scheduler.backlog.oldest.seconds",
+                store,
+                SubmissionExecutionStore::reconciliationBacklogAgeSeconds
+            )
+            .tag("scheduler", SCHEDULER)
+            .register(meters);
+    }
 
     /** 원격 조회는 잠금 밖에서 수행하고 건별 장애를 격리한다. (스케줄러 §0.1·§3.4) */
     @Scheduled(
@@ -42,6 +59,7 @@ public class JudgeReconciliationScheduler {
         lockAtMostFor = "4m"
     )
     public void reconcile() {
+        var sample = Timer.start(meters);
         long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(2);
         try (var ignored = MDC.putCloseable("correlationId", "sched-JudgeReconciliation-" + UUID.randomUUID())) {
             var candidates = store.reconciliationCandidates(lastSubmissionId);
@@ -57,7 +75,9 @@ public class JudgeReconciliationScheduler {
                 lastSubmissionId = candidate.submissionId();
                 try {
                     if (candidate.jobId() == null) {
-                        if (store.missingReconciliationJob(candidate)) {
+                        boolean missing = store.missingReconciliationJob(candidate);
+                        recordItem(missing ? "missing" : "skipped");
+                        if (missing) {
                             meters.counter("judge.reconciliation.missing.jobs").increment();
                             log
                                 .warn(
@@ -71,11 +91,23 @@ public class JudgeReconciliationScheduler {
                     var data
                         = "SUCCEEDED".equals(candidate.jobStatus())
                             ? dataClient.find(candidate.problemId(), candidate.revisionId()) : null;
-                    store.reconcile(candidate, data);
+                    recordItem(store.reconcile(candidate, data) ? "corrected" : "skipped");
                 } catch (RuntimeException failure) {
+                    recordItem("failed");
                     log.warn("채점 상태 대사 실패: submissionId={}", candidate.submissionId(), failure);
                 }
             }
+        } finally {
+            sample.stop(Timer.builder("scheduler.run.duration").tag("scheduler", SCHEDULER).register(meters));
         }
+    }
+
+    /**
+     * 실제 확인한 후보의 처리 결과를 공통 지표로 기록한다.
+     *
+     * @param result 보정·건너뜀·실패·작업 누락 구분
+     */
+    private void recordItem(String result) {
+        meters.counter("scheduler.items", "scheduler", SCHEDULER, "result", result).increment();
     }
 }

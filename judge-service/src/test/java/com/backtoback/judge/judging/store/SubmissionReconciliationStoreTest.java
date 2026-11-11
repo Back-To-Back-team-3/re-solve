@@ -264,6 +264,16 @@ class SubmissionReconciliationStoreTest {
         assertThat(store.reconciliationCandidates(0)).hasSize(100);
     }
 
+    /** 순회 위치가 바뀌어도 전체 후보의 가장 오래된 불일치를 관측한다. */
+    @Test
+    @DisplayName("대사 적체 지표는 커서 밖 후보도 포함하고 후보가 없으면 0이다")
+    void measuresBacklogIndependentlyOfCursor() {
+        assertThat(store.reconciliationCandidates(1)).isEmpty();
+        assertThat(store.reconciliationBacklogAgeSeconds()).isEqualTo(180);
+        assertThat(store.reconcile(store.reconciliationCandidates(0).getFirst(), null)).isTrue();
+        assertThat(store.reconciliationBacklogAgeSeconds()).isZero();
+    }
+
     /**
      * 실제 MySQL 테이블 잠금으로 조회가 막혀도 트랜잭션의 조회 제한시간에 종료되는지 확인한다.
      *
