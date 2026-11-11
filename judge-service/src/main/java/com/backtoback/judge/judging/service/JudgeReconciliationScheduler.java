@@ -50,7 +50,7 @@ public class JudgeReconciliationScheduler {
                 return;
             }
             for (var candidate : candidates) {
-                if (deadline - System.nanoTime() < TimeUnit.SECONDS.toNanos(10)) {
+                if (deadline - System.nanoTime() < TimeUnit.SECONDS.toNanos(15)) {
                     break;
                 }
                 // 실패한 후보도 지나가고 다음 회차에 뒤의 후보를 계속 확인한다.

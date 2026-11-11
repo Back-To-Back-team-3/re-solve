@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.slf4j.MDC;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,8 +54,12 @@ public class SubmissionExecutionStore {
      *
      * @param afterSubmissionId 마지막으로 확인한 제출 ID, 처음부터 조회하면 0
      * @return 지정 ID 뒤의 최대 100개 상태 대사 후보
+     * @throws QueryTimeoutException DB 조회 제한시간을 초과한 경우
      */
-    @Transactional(readOnly = true)
+    @Transactional(
+        readOnly = true,
+        timeout = 5
+    )
     public List<SubmissionReconciliationCandidate> reconciliationCandidates(long afterSubmissionId) {
         return jdbc
             .query(
@@ -147,8 +152,12 @@ public class SubmissionExecutionStore {
      *
      * @param candidate 작업 누락을 관측한 제출
      * @return 운영 확인이 필요한 누락 상태인지 여부
+     * @throws QueryTimeoutException DB 조회 제한시간을 초과한 경우
      */
-    @Transactional(readOnly = true)
+    @Transactional(
+        readOnly = true,
+        timeout = 5
+    )
     public boolean missingReconciliationJob(SubmissionReconciliationCandidate candidate) {
         return Boolean.TRUE.equals(jdbc.queryForObject("""
             SELECT EXISTS(SELECT 1 FROM submissions s WHERE s.id=? AND s.judge_attempt=? AND s.status=?

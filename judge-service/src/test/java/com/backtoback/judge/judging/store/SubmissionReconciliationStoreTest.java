@@ -7,12 +7,15 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -22,6 +25,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -258,6 +262,43 @@ class SubmissionReconciliationStoreTest {
             .isEqualTo("QUEUED");
         assertThat(store.reconciliationCandidates(102)).isEmpty();
         assertThat(store.reconciliationCandidates(0)).hasSize(100);
+    }
+
+    /**
+     * 실제 MySQL 테이블 잠금으로 조회가 막혀도 트랜잭션의 조회 제한시간에 종료되는지 확인한다.
+     *
+     * @param missingJob 작업 누락 확인이면 참, 목록 조회이면 거짓
+     * @throws Exception 별도 DB 연결과 실행 스레드를 준비하거나 정리하지 못한 경우
+     */
+    @ParameterizedTest
+    @ValueSource(
+        booleans = {
+            false,
+            true
+        }
+    )
+    @DisplayName("목록·작업 누락 조회는 DB 테이블 잠금 대기 중에도 제한시간에 실패한다")
+    void timesOutBlockedReads(boolean missingJob) throws Exception {
+        var candidate = store.reconciliationCandidates(0).getFirst();
+        try (
+            var connection = MYSQL.createConnection(""); var statement = connection.createStatement();
+            var executor = Executors.newSingleThreadExecutor()
+        ) {
+            statement.execute("LOCK TABLES submissions WRITE");
+            try {
+                var read = executor.submit(() -> {
+                    if (missingJob) {
+                        return store.missingReconciliationJob(candidate);
+                    }
+                    return store.reconciliationCandidates(0);
+                });
+                assertThatThrownBy(() -> read.get(12, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class)
+                    .hasCauseInstanceOf(QueryTimeoutException.class);
+            } finally {
+                statement.execute("UNLOCK TABLES");
+            }
+        }
     }
 
     @TestConfiguration
