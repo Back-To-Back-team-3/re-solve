@@ -63,20 +63,24 @@ class AdminJudgeJobControllerTest {
     @Test
     @DisplayName("관리자 복구는 인증 관리자 ID와 멱등키를 사용하고 최초 상태를 202로 반환한다")
     void acceptsRecovery() throws Exception {
-        given(operations.recover(1, 7, "key", "복구")).willReturn("RETRY_WAITING");
+        given(operations.recover(1, 7, "key", "복구", "192.0.2.10")).willReturn("RETRY_WAITING");
         mvc
             .perform(
                 post("/api/v1/admin/judge-jobs/1/recoveries")
                     .header("X-User-Id", "7")
                     .header("X-User-Role", "ADMIN")
                     .header("Idempotency-Key", "key")
+                    .with(request -> {
+                        request.setRemoteAddr("192.0.2.10");
+                        return request;
+                    })
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"reason\":\"복구\"}")
             )
             .andExpect(status().isAccepted())
             .andExpect(jsonPath("$.data.judgeJobId").value("1"))
             .andExpect(jsonPath("$.data.status").value("RETRY_WAITING"));
-        verify(operations).recover(1, 7, "key", "복구");
+        verify(operations).recover(1, 7, "key", "복구", "192.0.2.10");
     }
 
     /**

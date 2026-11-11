@@ -22,6 +22,7 @@ import com.backtoback.judge.admin.service.JudgeJobOperationService;
 import com.backtoback.judge.submission.controller.SubmissionQueryId;
 import com.backtoback.judge.submission.dto.SubmissionCreateRequest;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -52,7 +53,7 @@ public class AdminJudgeJobController {
      *
      * @param judgeJobId 양수 BIGINT 작업 ID
      * @return 원문을 제외한 작업 상세
-     * @throws com.backtoback.judge.global.error.JudgeException 작업이 없으면 SUBMISSION_NOT_FOUND
+     * @throws com.backtoback.judge.global.error.JudgeException 작업이 없으면 {@code SUBMISSION_NOT_FOUND}
      */
     @GetMapping("/api/v1/admin/judge-jobs/{judgeJobId}")
     public ResponseEntity<ApiResponse<AdminJudgeJobDetailResponse>> detail(
@@ -69,6 +70,7 @@ public class AdminJudgeJobController {
      * @param judgeJobId 복구할 작업 ID
      * @param key 최초 응답을 식별할 멱등키
      * @param request 복구 사유
+     * @param servletRequest 감사에 기록할 네트워크 요청
      * @return 최초 복구 요청의 응답
      * @throws com.backtoback.judge.global.error.JudgeException 미존재·복구 불가·멱등키 충돌인 경우
      */
@@ -82,7 +84,8 @@ public class AdminJudgeJobController {
             regexp = "[\\x20-\\x7E]{1,100}",
             message = "멱등키는 ASCII 1~100자여야 합니다."
         ) String key,
-        @RequestBody @Valid JudgeJobRecoveryRequest request
+        @RequestBody @Valid JudgeJobRecoveryRequest request,
+        HttpServletRequest servletRequest
     ) {
         String state
             = operations
@@ -90,7 +93,8 @@ public class AdminJudgeJobController {
                     Long.parseLong(judgeJobId),
                     SubmissionCreateRequest.parseId(user.userId()),
                     key,
-                    request.reason()
+                    request.reason(),
+                    servletRequest.getRemoteAddr()
                 );
         return ResponseEntity
             .accepted()

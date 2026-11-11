@@ -77,8 +77,8 @@ public record AdminJudgeJobDetailResponse(
     /**
      * 저장 시각을 서울 시간대 응답으로 변환한다.
      *
-     * @param value 저장된 시각 또는 null
-     * @return 시간대가 있는 시각 또는 null
+     * @param value 저장된 시각 또는 {@code null}
+     * @return 시간대가 있는 시각 또는 {@code null}
      */
     private static OffsetDateTime time(LocalDateTime value) {
         return value == null ? null : value.atZone(ClockConfiguration.SERVICE_ZONE).toOffsetDateTime();

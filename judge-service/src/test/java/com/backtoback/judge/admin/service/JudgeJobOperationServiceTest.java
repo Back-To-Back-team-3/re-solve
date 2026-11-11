@@ -108,11 +108,11 @@ class JudgeJobOperationServiceTest {
         try (var executor = Executors.newFixedThreadPool(2)) {
             var first = executor.submit(() -> {
                 start.await();
-                return operations.recover(1, 9, "key", "복구");
+                return operations.recover(1, 9, "key", "복구", "192.0.2.10");
             });
             var second = executor.submit(() -> {
                 start.await();
-                return operations.recover(1, 9, "key", "복구");
+                return operations.recover(1, 9, "key", "복구", "192.0.2.10");
             });
             assertThat(first.get(10, TimeUnit.SECONDS)).isEqualTo("RETRY_WAITING");
             assertThat(second.get(10, TimeUnit.SECONDS)).isEqualTo("RETRY_WAITING");
@@ -120,11 +120,31 @@ class JudgeJobOperationServiceTest {
         assertThat(jdbc.queryForObject("SELECT try_count FROM judge_jobs", Integer.class)).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_logs", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_job_runs", Integer.class)).isEqualTo(1);
+        var audit = jdbc.queryForMap("""
+            SELECT before_state->>'$.status' AS before_status,before_state->>'$.tryCount' AS before_try,
+                before_state->>'$.nextRunAt' AS before_next,before_state->>'$.leaseUntil' AS before_lease,
+                after_state->>'$.status' AS after_status,after_state->>'$.tryCount' AS after_try,
+                after_state->>'$.nextRunAt' AS after_next,JSON_EXTRACT(after_state,'$.leaseUntil') AS after_lease,
+                client_ip FROM audit_logs
+            """);
+        assertThat(audit)
+            .containsEntry("before_status", "RUNNING")
+            .containsEntry("before_try", "1")
+            .containsEntry("before_next", "2026-10-31 09:00:00.000000")
+            .containsEntry("before_lease", "2026-10-31 09:05:00.000000")
+            .containsEntry("after_status", "RETRY_WAITING")
+            .containsEntry("after_try", "2")
+            .containsEntry("after_next", "2026-10-31 09:03:00.000000")
+            .containsEntry("after_lease", "null")
+            .containsEntry("client_ip", "192.0.2.10");
         var lease = new SubmissionLease(1, 1, 1, 1, "old", LocalDateTime.of(2026, 10, 31, 9, 10));
         assertThat(executions.saveToken(lease, 1, "late-token")).isFalse();
         jdbc.update("UPDATE judge_jobs SET status='SUCCEEDED' WHERE id=1");
-        assertThat(operations.recover(1, 9, "key", "복구")).isEqualTo("RETRY_WAITING");
-        assertThatThrownBy(() -> operations.recover(1, 9, "key", "다른 사유")).isInstanceOf(JudgeException.class);
+        assertThat(operations.recover(1, 9, "key", "복구", "192.0.2.11")).isEqualTo("RETRY_WAITING");
+        assertThat(jdbc.queryForMap("SELECT client_ip FROM audit_logs")).containsEntry("client_ip", "192.0.2.10");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_logs", Integer.class)).isEqualTo(1);
+        assertThatThrownBy(() -> operations.recover(1, 9, "key", "다른 사유", "192.0.2.10"))
+            .isInstanceOf(JudgeException.class);
     }
 
     /** 감사 저장 실패는 상태와 멱등 기록을 함께 롤백한다. */
@@ -135,7 +155,8 @@ class JudgeJobOperationServiceTest {
             CREATE TRIGGER reject_recovery_audit BEFORE INSERT ON audit_logs
             FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='rejected'
             """);
-        assertThatThrownBy(() -> operations.recover(1, 9, "key", "복구")).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> operations.recover(1, 9, "key", "복구", "192.0.2.10"))
+            .isInstanceOf(RuntimeException.class);
         assertThat(jdbc.queryForObject("SELECT status FROM judge_jobs", String.class)).isEqualTo("RUNNING");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_job_runs", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_recovery_requests", Integer.class)).isZero();
@@ -146,11 +167,14 @@ class JudgeJobOperationServiceTest {
     @DisplayName("시도 상한·기한 초과·이미 종결된 작업의 복구를 거절한다")
     void rejectsIneligibleJobs() {
         jdbc.update("UPDATE judge_jobs SET try_count=3 WHERE id=1");
-        assertThatThrownBy(() -> operations.recover(1, 9, "key", "복구")).isInstanceOf(JudgeException.class);
+        assertThatThrownBy(() -> operations.recover(1, 9, "key", "복구", "192.0.2.10"))
+            .isInstanceOf(JudgeException.class);
         jdbc.update("UPDATE judge_jobs SET try_count=1,deadline_at='2026-10-31 09:03:00' WHERE id=1");
-        assertThatThrownBy(() -> operations.recover(1, 9, "key", "복구")).isInstanceOf(JudgeException.class);
+        assertThatThrownBy(() -> operations.recover(1, 9, "key", "복구", "192.0.2.10"))
+            .isInstanceOf(JudgeException.class);
         jdbc.update("UPDATE judge_jobs SET status='SUCCEEDED' WHERE id=1");
-        assertThatThrownBy(() -> operations.recover(1, 9, "key", "복구")).isInstanceOf(JudgeException.class);
+        assertThatThrownBy(() -> operations.recover(1, 9, "key", "복구", "192.0.2.10"))
+            .isInstanceOf(JudgeException.class);
     }
 
     /** 필터 목록과 상세 오류 정보를 안전하게 조회한다. */
@@ -174,7 +198,7 @@ class JudgeJobOperationServiceTest {
                 created_try_count,created_at,updated_at)
             VALUES (1,1,1,false,'UNKNOWN',1,'2026-10-31 09:00:00','2026-10-31 09:02:00')
             """);
-        operations.recover(1, 9, "key", "복구");
+        operations.recover(1, 9, "key", "복구", "192.0.2.10");
         var next = executions.claim().orElseThrow();
         assertThat(next.tryCount()).isEqualTo(2);
         assertThat(executions.prepare(next)).isTrue();
@@ -193,11 +217,11 @@ class JudgeJobOperationServiceTest {
         try (var executor = Executors.newFixedThreadPool(2)) {
             var first = executor.submit(() -> {
                 start.await();
-                return operations.recover(1, 9, "first", "복구");
+                return operations.recover(1, 9, "first", "복구", "192.0.2.10");
             });
             var second = executor.submit(() -> {
                 start.await();
-                return operations.recover(1, 9, "second", "복구");
+                return operations.recover(1, 9, "second", "복구", "192.0.2.10");
             });
             assertThat(first.get(10, TimeUnit.SECONDS)).isEqualTo("RETRY_WAITING");
             assertThat(second.get(10, TimeUnit.SECONDS)).isEqualTo("RETRY_WAITING");

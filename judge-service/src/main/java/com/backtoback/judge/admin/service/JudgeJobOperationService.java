@@ -134,11 +134,12 @@ public class JudgeJobOperationService {
      * @param actorId Gateway가 인증한 관리자 ID
      * @param key 검증한 멱등키
      * @param reason 검증한 복구 사유
+     * @param clientIp 요청의 네트워크 주소
      * @return 최초 성공 응답의 상태
      * @throws JudgeException 미존재·종결·기한 초과·시도 상한 또는 멱등키 충돌인 경우
      */
     @Transactional(timeout = 5)
-    public String recover(long jobId, long actorId, String key, String reason) {
+    public String recover(long jobId, long actorId, String key, String reason, String clientIp) {
         String normalized = reason.strip();
         String hash = hash(normalized);
         var instant = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE);
@@ -193,10 +194,30 @@ public class JudgeJobOperationService {
                 instant,
                 job.get("submission_id")
             );
-        jdbc.update("""
-            INSERT INTO audit_logs(actor_id,action,target_type,target_id,after_state,reason,created_at)
-            VALUES (?,'JUDGE_JOB_RECOVERY','JUDGE_JOB',?,JSON_OBJECT('status','RETRY_WAITING','requestId',?),?,?)
-            """, actorId, Long.toString(jobId), request.get("id"), normalized, instant);
+        jdbc
+            .update(
+                """
+                    INSERT INTO audit_logs(actor_id,action,target_type,target_id,before_state,after_state,
+                        reason,client_ip,created_at)
+                    SELECT ?,'JUDGE_JOB_RECOVERY','JUDGE_JOB',?,
+                        JSON_OBJECT('status',?,'tryCount',?,'nextRunAt',CAST(? AS DATETIME(6)),
+                    'leaseUntil',CAST(? AS DATETIME(6))),
+                        JSON_OBJECT('status',status,'tryCount',try_count,'nextRunAt',next_run_at,
+                            'leaseUntil',lease_until,'requestId',?),?,?,?
+                    FROM judge_jobs WHERE id=?
+                    """,
+                actorId,
+                Long.toString(jobId),
+                status,
+                attempt,
+                job.get("next_run_at"),
+                job.get("lease_until"),
+                request.get("id"),
+                normalized,
+                clientIp,
+                instant,
+                jobId
+            );
         jdbc.update("UPDATE judge_recovery_requests SET response_status='RETRY_WAITING' WHERE id=?", request.get("id"));
         return "RETRY_WAITING";
     }
@@ -233,7 +254,7 @@ public class JudgeJobOperationService {
      * 예외 원문이나 응답 본문을 작업 조회에 노출하지 않는다.
      *
      * @param error 저장된 오류 코드 또는 원문
-     * @return 안전한 코드 또는 null
+     * @return 안전한 코드 또는 {@code null}
      */
     private String safeError(String error) {
         return error == null || error.matches("[A-Z0-9_]{1,100}") ? error : "SYSTEM_ERROR";
