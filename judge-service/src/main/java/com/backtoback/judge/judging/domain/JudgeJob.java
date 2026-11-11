@@ -62,6 +62,11 @@ public class JudgeJob extends BaseTimeEntity {
     private Status status;
     @Column(nullable = false)
     private int tryCount;
+    @Column(
+        nullable = false,
+        updatable = false
+    )
+    private int unknownRetryCount;
     @Column(length = 64)
     private String leaseToken;
     @Column(columnDefinition = "DATETIME(6)")
@@ -100,6 +105,7 @@ public class JudgeJob extends BaseTimeEntity {
         judgeAttempt = submission.getJudgeAttempt();
         status = Status.PENDING;
         tryCount = 1;
+        unknownRetryCount = 0;
         this.nextRunAt = nextRunAt;
         this.deadlineAt = deadlineAt;
     }
