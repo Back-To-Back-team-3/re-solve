@@ -20,6 +20,14 @@ public enum JudgeErrorCode implements ErrorCode {
     SUBMISSION_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "제출 요청 한도를 초과했습니다."),
     // 일반·시험이 공유하는 사용자별 동시 실행 제한을 넘은 요청이다.
     RUN_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "이미 코드를 실행하고 있습니다."),
+    // 내부 시험 Run의 중복 요청은 Contest가 사용하는 오류 코드로 반환한다.
+    RUN_IN_PROGRESS(HttpStatus.TOO_MANY_REQUESTS, "이미 코드를 실행하고 있습니다."),
+    // 시험 입장이나 실행 시간 조건을 충족하지 못한 요청이다.
+    CONTEXT_ACCESS_DENIED(HttpStatus.FORBIDDEN, "시험 실행 권한이 없습니다."),
+    // 요청 회차가 시험 문맥에서 확인되지 않았다.
+    PROBLEM_REVISION_NOT_INCLUDED(HttpStatus.NOT_FOUND, "시험에 포함된 문제 회차를 찾을 수 없습니다."),
+    // 시험 또는 개인 실행 시간이 끝난 요청이다.
+    EXAM_CLOSED(HttpStatus.CONFLICT, "시험 실행 시간이 종료되었습니다."),
     // 동기 실행의 전체 기한을 넘긴 요청이다.
     RUN_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "코드 실행 제한 시간을 초과했습니다."),
     SUBMISSION_NOT_FOUND(HttpStatus.NOT_FOUND, "제출을 찾을 수 없습니다."),

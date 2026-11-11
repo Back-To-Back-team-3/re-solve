@@ -3,6 +3,7 @@ package com.backtoback.judge.run.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -16,6 +17,7 @@ import java.util.concurrent.Executors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.client.SubmissionJudgingDataClient;
@@ -36,11 +38,15 @@ import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultRe
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
 import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.backtoback.judge.judging.service.execution.python.PythonExecutionCodeGenerator;
+import com.backtoback.judge.run.client.ExamRunContextClient;
+import com.backtoback.judge.run.dto.ExamRunRequest;
 import com.backtoback.judge.run.dto.RunRequest;
 import com.backtoback.judge.run.dto.RunRequest.CustomInput;
 import com.backtoback.judge.run.store.RunLockStore;
 import com.backtoback.judge.run.store.RunLockStore.Lease;
 import com.backtoback.judge.submission.service.SubmissionAccessService;
+
+import tools.jackson.databind.node.IntNode;
 
 /** 외부 의존을 대체해 공개 범위와 실행 결과, 제한 해제의 경계를 검증한다. */
 class RunServiceTest {
@@ -159,6 +165,132 @@ class RunServiceTest {
         }
         verifyNoInteractions(data, assets, client);
         verify(locks).release(lease);
+    }
+
+    /** 시험의 고정 회차에서 공개 예제와 직접 입력만 실행하고 내부 결과를 반환한다. */
+    @Test
+    @DisplayName("시험 권한을 확인하고 고정 회차의 공개 예제와 직접 입력만 실행한다")
+    void runsExamSamplesAndPositionalInputs() throws Exception {
+        var contexts = mock(ExamRunContextClient.class);
+        var sample = new Asset("sample", "1", "a".repeat(64));
+        var hidden = new Asset("hidden", "1", "b".repeat(64));
+        prepare(List.of(new TestCase("1", 1, false, hidden), new TestCase("2", 2, true, sample)));
+        when(access.examRunRuntime(301L, 1001L, "python3"))
+            .thenReturn(new JudgeRuntime("python3", 71, "Python", "3.11", null));
+        when(assets.read(sample)).thenReturn(new TestContent(Map.of("a", "1"), "2"));
+        when(client.find("judge-token")).thenReturn(result(3, "2", null), result(3, "4", null));
+        var request = examRequest();
+        try (
+            var executor = Executors.newVirtualThreadPerTaskExecutor();
+            var heartbeat = Executors.newSingleThreadScheduledExecutor()
+        ) {
+            var service = new ExamRunService(examRuns(executor, heartbeat), contexts);
+            var response = service.run(request);
+            assertThat(response.completedAt()).isNotNull();
+            assertThat(response.results()).satisfiesExactly(sampleResult -> {
+                assertThat(sampleResult.type()).isEqualTo("SAMPLE");
+                assertThat(sampleResult.index()).isZero();
+                assertThat(sampleResult.output()).isEqualTo("2");
+                assertThat(sampleResult.error()).isNull();
+            }, customResult -> {
+                assertThat(customResult.type()).isEqualTo("CUSTOM");
+                assertThat(customResult.index()).isZero();
+                assertThat(customResult.output()).isEqualTo("4");
+                assertThat(customResult.error()).isNull();
+            });
+        }
+        var order = org.mockito.Mockito.inOrder(locks, contexts, access, data);
+        order.verify(locks).acquire(7L);
+        order.verify(contexts).check(request);
+        order.verify(access).examRunRuntime(301L, 1001L, "python3");
+        order.verify(data).find(301L, 1001L);
+        order.verify(locks).release(lease);
+        verify(assets).read(sample);
+        org.mockito.Mockito.verifyNoMoreInteractions(assets);
+    }
+
+    /** 권한 거절과 의존 장애는 시험 자료 조회 전에 종료한다. */
+    @Test
+    @DisplayName("시험 권한 확인에 실패하면 실행하지 않고 제한을 해제한다")
+    void rejectsExamContextBeforeReadingData() {
+        var contexts = mock(ExamRunContextClient.class);
+        var request = examRequest();
+        when(locks.acquire(7L)).thenReturn(lease);
+        doThrow(
+            new JudgeException(JudgeErrorCode.CONTEXT_ACCESS_DENIED),
+            new JudgeException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+        ).when(contexts).check(request);
+        try (
+            var executor = Executors.newVirtualThreadPerTaskExecutor();
+            var heartbeat = Executors.newSingleThreadScheduledExecutor()
+        ) {
+            var service = new ExamRunService(examRuns(executor, heartbeat), contexts);
+            assertThatThrownBy(() -> service.run(request))
+                .isInstanceOfSatisfying(
+                    JudgeException.class,
+                    failure -> assertThat(failure.getErrorCode()).isEqualTo(JudgeErrorCode.CONTEXT_ACCESS_DENIED)
+                );
+            assertThatThrownBy(() -> service.run(request))
+                .isInstanceOfSatisfying(
+                    JudgeException.class,
+                    failure -> assertThat(failure.getErrorCode())
+                        .isEqualTo(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE)
+                );
+        }
+        verifyNoInteractions(access, data, assets, client);
+        verify(locks, org.mockito.Mockito.times(2)).release(lease);
+    }
+
+    /** 일반 Run이 보유한 제한을 시험 Run도 그대로 사용한다. */
+    @Test
+    @DisplayName("이미 실행 중이면 시험 Run은 Contest가 읽는 429 오류를 반환한다")
+    void mapsSharedLeaseConflictForContest() {
+        var contexts = mock(ExamRunContextClient.class);
+        when(locks.acquire(7L)).thenThrow(new JudgeException(JudgeErrorCode.RUN_RATE_LIMITED));
+        try (
+            var executor = Executors.newVirtualThreadPerTaskExecutor();
+            var heartbeat = Executors.newSingleThreadScheduledExecutor()
+        ) {
+            var service = new ExamRunService(examRuns(executor, heartbeat), contexts);
+            assertThatThrownBy(() -> service.run(examRequest()))
+                .isInstanceOfSatisfying(
+                    JudgeException.class,
+                    failure -> assertThat(failure.getErrorCode()).isEqualTo(JudgeErrorCode.RUN_IN_PROGRESS)
+                );
+        }
+        verifyNoInteractions(contexts, access, data, assets, client);
+    }
+
+    /** 시험과 일반 요청이 공유하는 실행기를 구성한다. */
+    private RunService examRuns(
+        java.util.concurrent.ExecutorService executor,
+        java.util.concurrent.ScheduledExecutorService heartbeat
+    ) {
+        return new RunService(
+            locks,
+            access,
+            data,
+            assets,
+            List.of(new PythonExecutionCodeGenerator()),
+            client,
+            new JudgeResultEvaluator(new JudgeReturnComparator(), client),
+            executor,
+            heartbeat
+        );
+    }
+
+    /** 매개변수 하나를 위치로 넘기는 시험 요청이다. */
+    private ExamRunRequest examRequest() {
+        return new ExamRunRequest(
+            "EXAM",
+            "55",
+            "7",
+            "301",
+            "1001",
+            "python3",
+            "def solution(a):\n    return a + 1\n",
+            List.of(new ExamRunRequest.CustomTest(List.of(IntNode.valueOf(3))))
+        );
     }
 
     /** 고정 회차와 통과한 런타임만 반환하도록 준비한다. */

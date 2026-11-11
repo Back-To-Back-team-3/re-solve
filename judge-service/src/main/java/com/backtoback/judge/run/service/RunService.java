@@ -10,6 +10,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -84,6 +86,43 @@ public class RunService {
         var language = JudgeLanguage.fromCode(request.language());
         long problemId = SubmissionCreateRequest.parseId(request.problemId());
         long revisionId = SubmissionCreateRequest.parseId(request.problemRevisionId());
+        return runWithinDeadline(
+            memberId,
+            guard -> execute(
+                problemId,
+                revisionId,
+                language,
+                request.sourceCode(),
+                Boolean.TRUE.equals(request.useSamples()),
+                data -> request.customInputs(),
+                () -> access.runRuntime(memberId, problemId, revisionId, request.language()),
+                guard
+            )
+        );
+    }
+
+    /** 시험 권한 확인부터 결과 반환까지 일반 Run과 같은 제한 및 기한을 적용한다. */
+    RunResponse runExam(
+        long memberId,
+        long problemId,
+        long revisionId,
+        JudgeLanguage language,
+        String sourceCode,
+        Runnable checkContext,
+        Function<SubmissionJudgingDataResponse, List<RunRequest.CustomInput>> customInputs
+    ) {
+        return runWithinDeadline(
+            memberId,
+            guard -> execute(problemId, revisionId, language, sourceCode, true, customInputs, () -> {
+                checkContext.run();
+                guard.run();
+                return access.examRunRuntime(problemId, revisionId, language.getCode());
+            }, guard)
+        );
+    }
+
+    /** 실행 작업을 HTTP 요청의 전체 기한 안에서 기다린다. */
+    private RunResponse runWithinDeadline(long memberId, RunWork work) {
         long deadline = System.nanoTime() + RUN_TIMEOUT_NANOS;
         var context = MDC.getCopyOfContextMap();
         var future = executor.submit(() -> {
@@ -91,11 +130,7 @@ public class RunService {
                 MDC.setContextMap(context);
             }
             try {
-                return withLease(
-                    memberId,
-                    deadline,
-                    guard -> execute(memberId, problemId, revisionId, language, request, guard)
-                );
+                return withLease(memberId, deadline, work);
             } finally {
                 MDC.clear();
             }
@@ -167,15 +202,17 @@ public class RunService {
 
     /** 접근과 입력을 먼저 검증하고 준비한 실행만 Judge0에 전달한다. */
     private RunResponse execute(
-        long memberId,
         long problemId,
         long revisionId,
         JudgeLanguage language,
-        RunRequest request,
+        String sourceCode,
+        boolean useSamples,
+        Function<SubmissionJudgingDataResponse, List<RunRequest.CustomInput>> customInputs,
+        Supplier<JudgeRuntime> runtimeLookup,
         Runnable guard
     )
         throws InterruptedException {
-        var runtime = access.runRuntime(memberId, problemId, revisionId, request.language());
+        var runtime = runtimeLookup.get();
         guard.run();
         var data = dataClient.find(problemId, revisionId);
         var generator
@@ -184,7 +221,7 @@ public class RunService {
                 .filter(value -> value.language() == language)
                 .findFirst()
                 .orElseThrow(() -> new JudgeException(JudgeErrorCode.UNSUPPORTED_LANGUAGE));
-        var inputs = prepareInputs(request, data, generator, guard);
+        var inputs = prepareInputs(sourceCode, useSamples, customInputs.apply(data), data, generator, guard);
         List<RunResponse.Result> results = new ArrayList<>();
         String compileMessage = null;
         for (var input : inputs) {
@@ -213,16 +250,18 @@ public class RunService {
 
     /** 사용자 입력 오류는 파일 조회 전에 거절하고, 응답은 공개 예제 순번부터 반환한다. */
     private List<Input> prepareInputs(
-        RunRequest request,
+        String sourceCode,
+        boolean useSamples,
+        List<RunRequest.CustomInput> customInputs,
         SubmissionJudgingDataResponse data,
         ExecutionCodeGenerator generator,
         Runnable guard
     )
         throws InterruptedException {
         List<Input> inputs = new ArrayList<>();
-        if (request.customInputs() != null) {
+        if (customInputs != null) {
             int index = 0;
-            for (var custom : request.customInputs()) {
+            for (var custom : customInputs) {
                 try {
                     inputs
                         .add(
@@ -230,7 +269,7 @@ public class RunService {
                                 null,
                                 index++,
                                 null,
-                                generator.generate(data.functionSpec(), request.sourceCode(), custom.argumentTexts())
+                                generator.generate(data.functionSpec(), sourceCode, custom.argumentTexts())
                             )
                         );
                 } catch (IllegalArgumentException failure) {
@@ -238,15 +277,15 @@ public class RunService {
                 }
             }
         }
-        if (Boolean.TRUE.equals(request.useSamples())) {
-            inputs.addAll(0, prepareSamples(request, data, generator, guard));
+        if (useSamples) {
+            inputs.addAll(0, prepareSamples(sourceCode, data, generator, guard));
         }
         return inputs;
     }
 
     /** 공개 예제의 원문만 읽으며 원격 자료 오류를 사용자 입력 오류와 구분한다. */
     private List<Input> prepareSamples(
-        RunRequest request,
+        String sourceCode,
         SubmissionJudgingDataResponse data,
         ExecutionCodeGenerator generator,
         Runnable guard
@@ -271,7 +310,7 @@ public class RunService {
                             test.testAssetId(),
                             null,
                             content.expectedReturnText(),
-                            generator.generate(data.functionSpec(), request.sourceCode(), content.argumentTexts())
+                            generator.generate(data.functionSpec(), sourceCode, content.argumentTexts())
                         )
                     );
             } catch (IllegalArgumentException failure) {
