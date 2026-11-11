@@ -11,3 +11,5 @@ spring:
 study:
   hint-context-client:
     problem-base-url: http://localhost:8080
+  judge-client:
+    base-url: http://localhost:8080

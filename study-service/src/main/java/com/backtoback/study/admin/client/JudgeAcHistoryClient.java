@@ -4,6 +4,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.function.Supplier;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -25,6 +26,7 @@ public class JudgeAcHistoryClient {
 
     private final RestClient client;
 
+    @Autowired
     public JudgeAcHistoryClient(RestClient.Builder builder, JudgeClientProperties properties) {
         var factory
             = new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
