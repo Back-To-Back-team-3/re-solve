@@ -66,6 +66,7 @@ class SubmissionWorkerTest {
     @Mock
     private JudgeResultEvaluator evaluator;
     private SubmissionWorker worker;
+    private JudgeEngineCircuit circuit;
     private SubmissionJudgingDataResponse data;
     private final JudgeRuntime runtime = new JudgeRuntime("java", 91, "Java (OpenJDK 17.0.6)", "17.0.6", null);
     private final SubmissionLease lease
@@ -78,6 +79,7 @@ class SubmissionWorkerTest {
      */
     @BeforeEach
     void prepare() throws InterruptedException {
+        circuit = new JudgeEngineCircuit(Clock.systemUTC());
         worker
             = new SubmissionWorker(
                 store,
@@ -87,7 +89,8 @@ class SubmissionWorkerTest {
                 List.of(generator),
                 client,
                 evaluator,
-                Clock.fixed(Instant.parse("2026-10-31T00:00:00Z"), ZoneOffset.UTC)
+                Clock.fixed(Instant.parse("2026-10-31T00:00:00Z"), ZoneOffset.UTC),
+                circuit
             );
         data
             = new SubmissionJudgingDataResponse(
@@ -141,6 +144,10 @@ class SubmissionWorkerTest {
             assertThat(org.slf4j.MDC.get("correlationId")).isEqualTo(lease.correlationId());
             return new JudgeExecutionCreateResponse("token", runtime);
         });
+        given(client.find("token"))
+            .willReturn(
+                new JudgeExecutionResultResponse(State.COMPLETED, 3, "1", null, null, null, null, null, 0, null)
+            );
         given(store.saveToken(eq(lease), anyInt(), eq("token"))).willReturn(true);
         given(store.saveResult(eq(lease), anyInt(), any(), any())).willReturn(true);
         given(evaluator.evaluate(any(), any(), eq("1"), eq(1024), eq(64)))
@@ -197,6 +204,33 @@ class SubmissionWorkerTest {
         order.verify(store).validateCases(lease, data);
         order.verify(languages).requireRuntime("java", runtime);
         order.verify(client).create(any());
+    }
+
+    /** 선점 후 첫 HTTP 호출 전에 서킷이 열리면 미호출 작업을 같은 시도에 반환한다. */
+    @Test
+    @DisplayName("선점 후 자료 조회 중 서킷이 열리면 실행 생성 없이 임대를 반환한다")
+    void releasesUncalledClaimWhenCircuitOpens() {
+        given(dataClient.find(1, 1)).willAnswer(call -> {
+            try (var other = circuit.acquire().orElseThrow()) {
+                for (int index = 0; index < 5; index++) {
+                    try {
+                        other.invoke(() -> {
+                            throw new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED);
+                        });
+                    } catch (JudgeException expected) {
+                        // 다른 워커의 연속 통신 실패를 재현한다.
+                    }
+                }
+            }
+            return data;
+        });
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        assertThat(worker.runOnce()).isTrue();
+        verify(store).releaseUncalled(lease);
+        verify(store, never()).beginCreate(any(), anyInt());
+        verify(client, never()).create(any());
+        verify(store, never()).fail(any(), any());
     }
 
     /** 생성기 오류가 Judge0 장애로 기록되거나 외부 실행을 생성하지 않는지 확인한다. */

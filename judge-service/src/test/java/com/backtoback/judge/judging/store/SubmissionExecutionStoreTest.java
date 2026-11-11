@@ -440,6 +440,21 @@ class SubmissionExecutionStoreTest {
         assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("QUEUED");
     }
 
+    /** 서킷 차단 반환이 시도·기한·실행 이력을 소진하지 않는지 확인한다. */
+    @Test
+    @DisplayName("미호출 선점 반환은 같은 시도와 기한을 유지하고 이전 실행기의 저장을 차단한다")
+    void returnsUncalledClaimWithoutConsumingAttempt() {
+        var lease = store.claim().orElseThrow();
+        assertThat(store.releaseUncalled(lease)).isTrue();
+        assertThat(store.releaseUncalled(lease)).isFalse();
+        assertThat(jdbc.queryForObject("SELECT try_count FROM judge_jobs", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_job_runs", Integer.class)).isZero();
+        assertThat(store.saveToken(lease, 1, "late-token")).isFalse();
+        var next = store.claim().orElseThrow();
+        assertThat(next.deadlineAt()).isEqualTo(lease.deadlineAt());
+        assertThat(next.tryCount()).isEqualTo(lease.tryCount());
+    }
+
     @TestConfiguration
     static class Beans {
         @Bean
