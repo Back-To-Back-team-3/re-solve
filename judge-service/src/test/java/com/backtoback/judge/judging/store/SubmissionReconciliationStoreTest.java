@@ -105,7 +105,7 @@ class SubmissionReconciliationStoreTest {
     @Test
     @DisplayName("대기 작업과 다른 진행 제출은 한 번만 QUEUED로 보정한다")
     void restoresWaitingSubmissionOnce() {
-        var candidate = store.reconciliationCandidates().getFirst();
+        var candidate = store.reconciliationCandidates(0).getFirst();
         assertThat(store.reconcile(candidate, null)).isTrue();
         assertThat(store.reconcile(candidate, null)).isFalse();
         assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("QUEUED");
@@ -122,7 +122,7 @@ class SubmissionReconciliationStoreTest {
                 verdict,time_ms,memory_kb,created_at,updated_at)
             VALUES (1,1,1,false,'DONE','AC',5,128,'2026-10-31 09:00:00','2026-10-31 09:00:00')
             """);
-        var candidate = store.reconciliationCandidates().getFirst();
+        var candidate = store.reconciliationCandidates(0).getFirst();
         var data
             = new SubmissionJudgingDataResponse(
                 "1",
@@ -156,7 +156,7 @@ class SubmissionReconciliationStoreTest {
     @Test
     @DisplayName("대상 선정 뒤 정상 완료되거나 최신 회차가 바뀌면 대사 후보를 폐기한다")
     void discardsChangedSnapshot() {
-        var candidate = store.reconciliationCandidates().getFirst();
+        var candidate = store.reconciliationCandidates(0).getFirst();
         jdbc.update("""
             UPDATE submissions SET status='COMPLETED',verdict='AC',passed_count=1,total_count=1,
                 judged_at='2026-10-31 09:01:00' WHERE id=1
@@ -172,7 +172,7 @@ class SubmissionReconciliationStoreTest {
     @DisplayName("실패 대사의 Outbox 저장이 실패하면 제출 보정을 모두 롤백한다")
     void rollsBackWithOutbox() {
         jdbc.update("UPDATE judge_jobs SET status='FAILED',last_error='LEASE_EXHAUSTED' WHERE id=1");
-        var candidate = store.reconciliationCandidates().getFirst();
+        var candidate = store.reconciliationCandidates(0).getFirst();
         jdbc.execute("""
             CREATE TRIGGER reject_reconciliation_outbox BEFORE INSERT ON outbox_events
             FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='rejected'
@@ -190,7 +190,7 @@ class SubmissionReconciliationStoreTest {
     @DisplayName("최신 작업이 없으면 운영 확인 대상으로 탐지하고 상태를 보존한다")
     void detectsMissingJob() {
         jdbc.update("DELETE FROM judge_jobs");
-        var candidate = store.reconciliationCandidates().getFirst();
+        var candidate = store.reconciliationCandidates(0).getFirst();
         assertThat(candidate.jobId()).isNull();
         assertThat(store.missingReconciliationJob(candidate)).isTrue();
         assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("JUDGING");
@@ -204,7 +204,7 @@ class SubmissionReconciliationStoreTest {
     @Test
     @DisplayName("정상 완료 트랜잭션이 작업을 잠근 동안 대사는 대기하거나 상태를 덮어쓰지 않는다")
     void skipsLockedCompletion() throws Exception {
-        var candidate = store.reconciliationCandidates().getFirst();
+        var candidate = store.reconciliationCandidates(0).getFirst();
         try (var executor = Executors.newSingleThreadExecutor()) {
             new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
                 jdbc.queryForList("SELECT id FROM judge_jobs WHERE id=1 FOR UPDATE");
@@ -229,9 +229,35 @@ class SubmissionReconciliationStoreTest {
     @DisplayName("기존 RETRY_WAITING 제출은 대기 작업과 대사해 QUEUED로 보정한다")
     void normalizesLegacyRetryState() {
         jdbc.update("UPDATE submissions SET status='RETRY_WAITING' WHERE id=1");
-        var candidate = store.reconciliationCandidates().getFirst();
+        var candidate = store.reconciliationCandidates(0).getFirst();
         assertThat(store.reconcile(candidate, null)).isTrue();
         assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("QUEUED");
+    }
+
+    /** 작업 누락 후보가 배치를 채워도 이후 제출을 별도 배치에서 보정한다. */
+    @Test
+    @DisplayName("작업 누락 100건 다음의 정상 후보도 ID 커서로 조회하고 보정한다")
+    void continuesAfterMissingJobs() {
+        for (long id = 2; id <= 102; id++) {
+            jdbc.update("""
+                INSERT INTO submissions(id,member_id,problem_id,problem_revision_id,context,idempotency_key,
+                    request_hash,language,source_code,code_size_bytes,status,judge_attempt,
+                    submitted_at,created_at,updated_at)
+                SELECT ?,member_id,problem_id,problem_revision_id,context,CONCAT('key-',?),
+                    request_hash,language,source_code,code_size_bytes,status,judge_attempt,
+                    submitted_at,created_at,updated_at FROM submissions WHERE id=1
+                """, id, id);
+        }
+        jdbc.update("UPDATE judge_jobs SET submission_id=102 WHERE id=1");
+        var first = store.reconciliationCandidates(0);
+        assertThat(first).hasSize(100).allMatch(candidate -> candidate.jobId() == null);
+        var next = store.reconciliationCandidates(first.getLast().submissionId());
+        assertThat(next).extracting(candidate -> candidate.submissionId()).containsExactly(101L, 102L);
+        assertThat(store.reconcile(next.getLast(), null)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT status FROM submissions WHERE id=102", String.class))
+            .isEqualTo("QUEUED");
+        assertThat(store.reconciliationCandidates(102)).isEmpty();
+        assertThat(store.reconciliationCandidates(0)).hasSize(100);
     }
 
     @TestConfiguration

@@ -51,10 +51,11 @@ public class SubmissionExecutionStore {
     /**
      * 오래된 제출 중 최신 작업의 상태가 다른 후보를 잠금 없이 제한 조회한다. (스케줄러 §3.4)
      *
-     * @return 고정 처리량 안의 상태 대사 후보
+     * @param afterSubmissionId 마지막으로 확인한 제출 ID, 처음부터 조회하면 0
+     * @return 지정 ID 뒤의 최대 100개 상태 대사 후보
      */
     @Transactional(readOnly = true)
-    public List<SubmissionReconciliationCandidate> reconciliationCandidates() {
+    public List<SubmissionReconciliationCandidate> reconciliationCandidates(long afterSubmissionId) {
         return jdbc
             .query(
                 """
@@ -62,11 +63,11 @@ public class SubmissionExecutionStore {
                     s.problem_id,s.problem_revision_id
                         FROM submissions s LEFT JOIN judge_jobs j
                     ON j.submission_id=s.id AND j.judge_attempt=s.judge_attempt
-                        WHERE s.context IN ('PRACTICE','EXAM','DIAGNOSIS')
+                        WHERE s.id>? AND s.context IN ('PRACTICE','EXAM','DIAGNOSIS')
                         AND s.status IN ('QUEUED','JUDGING','RETRY_WAITING') AND s.updated_at<?
                         AND (j.id IS NULL OR j.status IN ('SUCCEEDED','FAILED')
                             OR (s.status IN ('JUDGING','RETRY_WAITING') AND j.status IN ('PENDING','RETRY_WAITING')))
-                        ORDER BY s.updated_at,s.id LIMIT 100
+                        ORDER BY s.id LIMIT 100
                         """,
                 (row, index) -> new SubmissionReconciliationCandidate(
                     row.getLong("id"),
@@ -77,6 +78,7 @@ public class SubmissionExecutionStore {
                     row.getLong("problem_id"),
                     row.getLong("problem_revision_id")
                 ),
+                afterSubmissionId,
                 now().minusMinutes(2)
             );
     }

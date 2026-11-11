@@ -29,6 +29,7 @@ public class JudgeReconciliationScheduler {
     private final SubmissionExecutionStore store;
     private final SubmissionJudgingDataClient dataClient;
     private final MeterRegistry meters;
+    private long lastSubmissionId;
 
     /** 원격 조회는 잠금 밖에서 수행하고 건별 장애를 격리한다. (스케줄러 §0.1·§3.4) */
     @Scheduled(
@@ -43,10 +44,17 @@ public class JudgeReconciliationScheduler {
     public void reconcile() {
         long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(2);
         try (var ignored = MDC.putCloseable("correlationId", "sched-JudgeReconciliation-" + UUID.randomUUID())) {
-            for (var candidate : store.reconciliationCandidates()) {
+            var candidates = store.reconciliationCandidates(lastSubmissionId);
+            if (candidates.isEmpty()) {
+                lastSubmissionId = 0;
+                return;
+            }
+            for (var candidate : candidates) {
                 if (deadline - System.nanoTime() < TimeUnit.SECONDS.toNanos(10)) {
                     break;
                 }
+                // 실패한 후보도 지나가고 다음 회차에 뒤의 후보를 계속 확인한다.
+                lastSubmissionId = candidate.submissionId();
                 try {
                     if (candidate.jobId() == null) {
                         if (store.missingReconciliationJob(candidate)) {
