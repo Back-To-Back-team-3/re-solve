@@ -408,7 +408,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 ### 3.3 감사 로그 (`audit_logs`) `[IMMUTABLE]`
 
-관리자 작업, 강제 종료, 재처리 등 추적이 필요한 행위를 보존한다. 감사 대상 작업과 같은 트랜잭션에서 기록하며, 각 서비스가 자기 DB에 둔다(공통-6).
+관리자 작업, 강제 종료, 재처리 등 추적이 필요한 행위를 보존한다. 감사 대상 작업과 같은 트랜잭션에서 기록하며, 각 서비스가 자기 DB에 둔다(공통-6). Judge의 시험 제출 DLQ 재전달은 외부 SQS 작업이므로 원래 큐 전송을 확인한 뒤 별도로 감사 행을 기록한다.
 
 | **컬럼** | **타입** | **NOT NULL** | **설명** |
 | --- | --- | --- | --- |
@@ -425,6 +425,14 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 - 제약 및 인덱스
     - `idx_audit_logs_target(target_type, target_id, created_at)`
     - `idx_audit_logs_actor_created_at(actor_id, created_at)`
+
+**Judge 전용 컬럼**
+
+| **컬럼** | **타입** | **NOT NULL** | **설명** |
+| --- | --- | --- | --- |
+| `exam_redrive_task_digest` | BINARY(32) GENERATED STORED | N | `action = 'DLQ_REDRIVE'`이고 `target_type = 'EXAM_SUBMISSION_REQUEST'`이면 `after_state.moveTaskHandle`의 SHA-256 해시. 다른 감사 행은 NULL |
+
+- `uk_audit_logs_exam_redrive(target_id, exam_redrive_task_digest)`는 시험 제출 DLQ 감사에서 정규화한 이벤트 UUID와 SQS 이동 작업 핸들의 조합을 유일하게 보장한다.
 
 ### 3.4 스케줄러 잠금 (`shedlock`)
 
@@ -3175,16 +3183,18 @@ judge-service/src/main/resources/db/migration/
   V13__judging_create_validation_jobs.sql
   V14__judging_create_validation_runs.sql
   V15__judging_create_validation_test_results.sql
+  V16__judging_remove_validation_run_verdict.sql
   V18__common_create_shedlock.sql
   V19__judging_track_submission_execution_recovery.sql
+  V20__common_create_audit_logs.sql
 ```
 
 기존 V1~V4는 공통 테이블 구축 계획 번호이며 실제 적용 이력과 구분한다. 기존 마이그레이션을 재사용하지 않고 Outbox·소비 기록은 V11·V12, 검증 작업·시도·테스트 결과는 V13~V15로 추가한다.
 
-§4.3.7의 대표 판정 제거는 후속 마이그레이션으로 반영한다(미구현). 이미 적용한 V14를 수정하지 않고 `judge_validation_runs.verdict` 및 해당 컬럼을 참조하는 CHECK를 제거하며, `SUCCEEDED`의 생성기 정보 필수 조건은 유지한다. 기존 시도 행과 나머지 요약은 보존한다. 파일 번호는 구현 시 실제 적용 이력과 대조해 확정한다.
-
+- V16: 검증 실행 이력에서 대표 판정 컬럼과 관련 CHECK를 제거한다. 기존 시도 행과 나머지 요약을 보존한다(§4.3.7).
 - V18: 제출 작업 임대 회수 스케줄러의 공통 잠금 테이블을 추가한다(스케줄러 §3.2).
 - V19: 생성 응답 유실 복구 횟수와 재개할 컴파일 메시지를 작업에 저장한다. 기존 작업의 복구 횟수는 0으로 채운 뒤 필수 제약을 적용한다(§4.3.2).
+- V20: 시험 제출 DLQ 감사 로그와 이벤트 ID·SQS 이동 작업 핸들의 조합을 보호하는 유일 인덱스를 생성한다(§3.3).
 
 ### 7.4 Contest (`contest-service`)
 
