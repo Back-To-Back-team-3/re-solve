@@ -26,7 +26,9 @@ public enum ProblemErrorCode implements ErrorCode {
     PROBLEM_TAG_NOT_FOUND(HttpStatus.NOT_FOUND, "태그를 찾을 수 없습니다."),
     PROBLEM_TAG_DUPLICATED(HttpStatus.CONFLICT, "같은 이름의 태그가 이미 존재합니다."),
     PROBLEM_TAG_IN_USE(HttpStatus.CONFLICT, "문제 회차에서 사용 중인 태그입니다."),
-    PROBLEM_VERSION_CONFLICT(HttpStatus.CONFLICT, "다른 요청으로 변경되었습니다. 다시 조회해 주세요.");
+    PROBLEM_VERSION_CONFLICT(HttpStatus.CONFLICT, "다른 요청으로 변경되었습니다. 다시 조회해 주세요."),
+    OUTBOX_EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "Outbox 이벤트를 찾을 수 없습니다."),
+    OUTBOX_EVENT_NOT_REPROCESSABLE(HttpStatus.CONFLICT, "FAILED 상태의 이벤트만 재처리할 수 있습니다.");
 
     private final HttpStatus status;
     private final String message;
