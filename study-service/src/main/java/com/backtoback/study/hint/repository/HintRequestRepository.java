@@ -38,6 +38,8 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
      */
     Optional<HintRequest> findByIdAndMemberId(Long id, Long memberId);
 
+    Optional<HintRequest> findByMemberIdAndProblemIdAndStatus(Long memberId, Long problemId, HintRequestStatus status);
+
     /**
      * 조건부 완료 갱신 — {@code expectedStatus}인 행만 갱신하여 경쟁 처리를 방지한다 (event-contract §S8).
      * 반환값 0이면 이미 다른 상태로 전이됐거나 존재하지 않는 행이다.
@@ -55,5 +57,20 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
         @Param("isCached") boolean isCached,
         @Param("isFallback") boolean isFallback,
         @Param("expectedStatus") HintRequestStatus expectedStatus
+    );
+
+    /**
+     * 조건부 차단 갱신 — GENERATING 행만 BLOCKED로 전이하여 경쟁 처리를 방지한다 (event-contract §C8).
+     * 반환값 0이면 이미 다른 상태로 전이됐거나 존재하지 않는 행이다.
+     */
+    @Modifying
+    @Query(
+        "UPDATE HintRequest r SET r.status = 'BLOCKED', r.blockedReason = :blockedReason,"
+            + " r.completedAt = :completedAt WHERE r.id = :id AND r.status = 'GENERATING'"
+    )
+    int blockIfGeneratingById(
+        @Param("id") Long id,
+        @Param("blockedReason") String blockedReason,
+        @Param("completedAt") LocalDateTime completedAt
     );
 }
