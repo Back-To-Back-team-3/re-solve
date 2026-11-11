@@ -153,7 +153,14 @@ class JudgeServiceApplicationTests {
         assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("20");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM setup_probe", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_logs", Integer.class)).isZero();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM shedlock", Integer.class)).isZero();
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?",
+                    Integer.class,
+                    "shedlock"
+                )
+        ).isOne();
     }
 
     /**

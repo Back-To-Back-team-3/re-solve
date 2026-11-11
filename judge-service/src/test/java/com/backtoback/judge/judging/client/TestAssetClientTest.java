@@ -78,6 +78,10 @@ class TestAssetClientTest {
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
             try {
+                if ("HEAD".equals(exchange.getRequestMethod())) {
+                    exchange.sendResponseHeaders(200, -1);
+                    return;
+                }
                 exchange.sendResponseHeaders(200, 10000);
                 exchange.getResponseBody().write('{');
                 exchange.getResponseBody().flush();
@@ -100,20 +104,24 @@ class TestAssetClientTest {
                     .forcePathStyle(true)
                     .build()
         ) {
-            var client
-                = new TestAssetClient(
-                    actual,
-                    new TestDataProperties("bucket"),
-                    JsonMapper.builder().build(),
-                    Duration.ofSeconds(1)
+            // 첫 HTTP 연결 준비를 본문 읽기 제한 측정에서 분리한다.
+            actual
+                .headObject(
+                    request -> request
+                        .bucket("bucket")
+                        .key("key")
+                        .overrideConfiguration(config -> config.apiCallTimeout(Duration.ofSeconds(5)))
                 );
+            Duration timeout = Duration.ofSeconds(2);
+            var client
+                = new TestAssetClient(actual, new TestDataProperties("bucket"), JsonMapper.builder().build(), timeout);
             long before = System.nanoTime();
             assertThatThrownBy(() -> client.read(new Asset("key", "v1", "a".repeat(64))))
                 .isInstanceOf(JudgeException.class);
             assertThat(started.getCount()).isZero();
             assertThat(Duration.ofNanos(System.nanoTime() - before))
-                .isGreaterThanOrEqualTo(Duration.ofSeconds(1))
-                .isLessThan(Duration.ofSeconds(4));
+                .isGreaterThanOrEqualTo(timeout)
+                .isLessThan(Duration.ofSeconds(5));
         } finally {
             release.countDown();
             server.stop(0);

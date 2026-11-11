@@ -4186,6 +4186,7 @@
 - **동시성/멱등 보장:** 사용자별 실행 제한을 원자적으로 획득하고, 정상 완료·예외 시 소유 토큰이 일치할 때만 해제한다. 인스턴스 중단 후 회수는 스케줄러 §3.5를 따른다. Redis에서 제한을 확인할 수 없으면 실행을 허용하지 않고 503으로 처리한다.
 - **에러:**
     - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `RUN_RATE_LIMITED`(429), `PROBLEM_NOT_AVAILABLE`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge0 장애·실행 제한 확인 실패
+    - `RUN_TIMEOUT`(504) / 전체 실행 기한 30초 초과
 
 ### 3.2 관리자 API — 진단·복구·재채점
 
