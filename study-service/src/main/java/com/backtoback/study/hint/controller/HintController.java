@@ -68,12 +68,12 @@ public class HintController {
      */
     @GetMapping
     public ResponseEntity<ApiResponse<HintHistoryResponse>> getHintHistory(
-        @RequestParam String problemId,
+        @RequestParam Long problemId,
         @AuthenticationPrincipal GatewayUser user
     ) {
         Long memberId = Long.parseLong(user.userId());
 
-        HintHistoryResponse response = hintQueryService.getHistory(memberId, Long.parseLong(problemId));
+        HintHistoryResponse response = hintQueryService.getHistory(memberId, problemId);
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -83,12 +83,12 @@ public class HintController {
      */
     @GetMapping("/{hintRequestId}")
     public ResponseEntity<ApiResponse<HintDetailResponse>> getHintDetail(
-        @PathVariable String hintRequestId,
+        @PathVariable Long hintRequestId,
         @AuthenticationPrincipal GatewayUser user
     ) {
         Long memberId = Long.parseLong(user.userId());
 
-        HintDetailResponse response = hintQueryService.getDetail(memberId, Long.parseLong(hintRequestId));
+        HintDetailResponse response = hintQueryService.getDetail(memberId, hintRequestId);
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }
