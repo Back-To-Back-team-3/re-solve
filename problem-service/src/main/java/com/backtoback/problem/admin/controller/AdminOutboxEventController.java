@@ -42,6 +42,6 @@ public class AdminOutboxEventController {
     ) {
         var id
             = service.reprocess(outboxEventId, Long.parseLong(user.userId()), body.reason(), request.getRemoteAddr());
-        return ResponseEntity.accepted().body(ApiResponse.success("재처리를 접수했습니다.", OutboxReprocessResponse.of(id)));
+        return ResponseEntity.accepted().body(ApiResponse.success("재처리를 접수했습니다.", OutboxReprocessResponse.from(id)));
     }
 }
