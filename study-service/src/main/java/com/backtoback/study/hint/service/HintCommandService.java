@@ -3,6 +3,8 @@ package com.backtoback.study.hint.service;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.study.global.error.StudyErrorCode;
+import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.hint.exception.HintInvalidStatusTransitionException;
 import com.backtoback.study.hint.repository.HintRequestRepository;
 
@@ -23,6 +25,9 @@ public class HintCommandService {
      */
     @Transactional
     public void transitionToGenerating(Long hintRequestId) {
+        if (!hintRequestRepository.existsById(hintRequestId)) {
+            throw new StudyException(StudyErrorCode.HINT_REQUEST_NOT_FOUND);
+        }
         int updated = hintRequestRepository.updateStatusToGenerating(hintRequestId);
         if (updated == 0) {
             throw new HintInvalidStatusTransitionException();
