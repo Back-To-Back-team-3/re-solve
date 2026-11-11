@@ -24,7 +24,6 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * HintReady 이벤트를 소비하여 hint_requests 상태를 갱신하고 Outbox를 재발행한다
  * (event-contract.md §S8).
- * content 필드는 §8.2 미결 항목 6번 처리 전까지 NULL로 유지한다.
  */
 @Slf4j
 @Service
@@ -70,7 +69,7 @@ public class HintReadyConsumerService {
                 .completeIfGenerating(
                     hintRequestId,
                     newStatus,
-                    null,
+                    null, // event-contract.md §8.2 미결 항목 6 확정 전 NULL
                     completedAt,
                     payload.isCached(),
                     isFallback,
