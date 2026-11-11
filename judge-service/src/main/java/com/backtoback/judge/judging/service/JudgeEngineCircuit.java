@@ -50,7 +50,7 @@ public class JudgeEngineCircuit implements MeterBinder {
     /**
      * 관측용 서킷 상태를 제공한다.
      *
-     * @return CLOSED는 0, OPEN은 1, HALF_OPEN은 2
+     * @return {@code CLOSED}는 0, {@code OPEN}은 1, {@code HALF_OPEN}은 2
      */
     public synchronized int state() {
         return retryAt == null ? 0 : probe == null ? 1 : 2;
@@ -60,7 +60,7 @@ public class JudgeEngineCircuit implements MeterBinder {
      * 이미 실행 중인 호출은 유지하고 미호출 선점은 현재 서킷을 재확인한다.
      *
      * @param permit 작업 선점 허가
-     * @return 호출을 시작하는 세대, 차단됐으면 null
+     * @return 호출을 시작하는 세대, 차단됐으면 {@code null}
      */
     private synchronized Long enter(Permit permit) {
         if (permit.called || permit == probe || (retryAt == null && permit.generation == generation)) {
