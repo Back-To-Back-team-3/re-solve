@@ -42,6 +42,7 @@ import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
 import com.backtoback.judge.judging.service.execution.JudgeResultEvaluator;
 import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionCreateResponse;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
 import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.backtoback.judge.judging.service.execution.dto.JudgeTestResult;
@@ -152,22 +153,27 @@ class SubmissionWorkerTest {
         verify(store).complete(lease, data);
     }
 
-    /** 임대 회수 후 기존 Judge0 실행을 조회하며 생성 요청을 반복하지 않는지 확인한다. */
+    /** 임대 회수 후 결과 조회가 타임아웃되어도 같은 토큰으로 재조회해 채점을 마치는지 확인한다. */
     @Test
-    @DisplayName("회수한 테스트는 저장한 Judge0 토큰으로만 결과를 조회한다")
-    void pollsResumedTokensWithoutCreating() {
+    @DisplayName("회수한 테스트의 결과 조회가 타임아웃되면 같은 Judge0 토큰으로 재조회해 완료한다")
+    void retriesTimedOutPollWithResumedToken() {
         given(store.completedOrders(lease)).willReturn(java.util.Set.of(1));
         given(store.resumableTokens(lease)).willReturn(Map.of(2, "second"));
         given(generator.generate(any(), eq("code"), any()))
             .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
-        given(store.saveResult(eq(lease), anyInt(), any(), any())).willReturn(true);
-        given(evaluator.evaluate(any(), any(), eq("1"), eq(1024), eq(64)))
-            .willReturn(new JudgeTestResult(State.COMPLETED, JudgeVerdict.AC, 1, null, "1", null, null));
+        var response = new JudgeExecutionResultResponse(State.COMPLETED, 3, "1", null, null, null, null, null, 0, null);
+        var result = new JudgeTestResult(State.COMPLETED, JudgeVerdict.AC, 1, null, "1", null, null);
+        given(client.find("second"))
+            .willThrow(new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED))
+            .willReturn(response);
+        given(evaluator.evaluate(eq(response), any(), eq("1"), eq(1024), eq(64))).willReturn(result);
+        given(store.saveResult(lease, 2, "second", result)).willReturn(true);
 
         assertThat(worker.runOnce()).isTrue();
         verify(client, never()).find("first");
-        verify(client).find("second");
+        verify(client, times(2)).find("second");
         verify(client, never()).create(any());
+        verify(store).saveResult(lease, 2, "second", result);
         verify(store).complete(lease, data);
     }
 
