@@ -3761,7 +3761,7 @@
 
 #### 2.8.1 실패 Outbox 재처리
 
-> 서비스별 경로와 재요청 처리는 확정했다. 기존 Problem 구현의 경로 전환·동시성 보완은 아직 적용하지 않았다. 아래 동시성 처리 상세는 구현 보완안이며, Judge 계약은 §3.2.6을 따른다.
+> 서비스별 경로와 재요청 처리는 확정했다. 아래 동시성 처리 상세는 검토안이며, Judge 계약은 §3.2.6을 따른다.
 
 - **Method / URI:** `POST /api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses`
 - **인증:** `ADMIN`
@@ -3785,19 +3785,21 @@
     - `OUTBOX_EVENT_NOT_REPROCESSABLE`(409): `FAILED` 외 상태
 - **서비스별 경로 구분 — 확정:** 각 서비스의 `outbox_events.id`는 자기 DB 안에서만 유일하다. 서비스는 경로로 구분하고, 바디로 임의의 서비스나 스키마를 지정하지 않는다.
 
-    | 대상 | 현재 구현 경로 | 확정 경로 | Gateway 반영 |
-    | --- | --- | --- | --- |
-    | Problem | `/api/v1/admin/outbox-events/{outboxEventId}/reprocesses` | `/api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses` | 기존 `/api/v1/admin/problems/**` 분류 활용. Controller 경로 전환 필요 |
-    | Judge | 없음 | `/api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses` | `/api/v1/admin/judge/outbox-events/**`를 Judge 목적지에 추가 필요 |
+    | 대상 | 확정 경로 |
+    | --- | --- |
+    | Problem | `/api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses` |
+    | Judge | `/api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses` |
 
-    - 기존 Problem 경로의 Gateway 라우트는 현재 없다. 경로 전환 시 운영 호출 도구·Controller·Gateway의 일치를 확인한다. 기존 경로를 두 서비스에 중복 라우팅하거나 다른 서비스 DB를 대신 조회하지 않는다.
-    - Gateway 라우트 반영은 담당 A와 협의할 구현 항목이며 이 문서 보완만으로 적용된 것으로 간주하지 않는다.
+    - Gateway는 각 경로를 해당 서비스로 전달한다. 서비스는 자기 DB의 Outbox만 조회·변경한다.
 - **동시성/멱등 보장 — 구현 보완안:**
     - 자기 서비스의 Outbox 대상 행을 `SELECT ... FOR UPDATE`로 잠그고, 잠금 획득 후 공통 `Clock` 기준 서울 시각을 정한다. 대상 없음·발생 7일 초과는 404, `FAILED` 외 상태는 409다. 발생 시각이 정확히 `now - 7일`이면 허용한다.
     - 상태를 다시 확인한 뒤 `WHERE id = :id AND status = 'FAILED' AND occurred_at >= :cutoff` 조건부 UPDATE로 `status=PENDING`, `retry_count=0`, `published_at=NULL`, `updated_at=now`를 반영한다.
-    - 영향 행이 정확히 1건일 때만 감사와 202 응답을 확정한다. 0건이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)로 롤백하며 성공 응답·감사를 남기지 않는다. 현재 Problem 구현의 `resetFailedToPending()` 반환값 무시를 보완한다.
-    - 상태 변경과 `audit_logs` INSERT는 같은 트랜잭션이다. `actor_id`는 인증한 관리자, `action=OUTBOX_REPROCESS`, `target_type=OUTBOX_EVENT`, `target_id`는 Outbox 행 ID, `reason`은 요청 사유, `client_ip`는 신뢰할 수 있는 요청 주소로 기록한다. 감사 저장 실패 시 상태 변경도 롤백한다.
-    - `reason`은 공백만 허용하지 않는 1~500자다(ERD §3.3의 저장 길이). Problem의 기존 `NotBlank` 검증에 최대 길이 검증을 추가하는 보완안이다.
+    - 영향 행이 정확히 1건일 때만 감사와 202 응답을 확정한다. 0건이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)로 롤백하며 성공 응답·감사를 남기지 않는다.
+    - 상태 변경과 `audit_logs` INSERT는 같은 트랜잭션이다. 감사 저장 실패 시 상태 변경도 롤백한다.
+        - `actor_id`는 인증한 관리자, `action=OUTBOX_REPROCESS`, `target_type=OUTBOX_EVENT`, `target_id`는 Outbox 행 ID, `reason`은 요청 사유, `client_ip`는 신뢰할 수 있는 요청 주소로 기록한다.
+        - `before_state`에는 행 잠금으로 확인한 기존 `status`·`retryCount`·`publishedAt`을 기록한다. `after_state`에는 `status=PENDING`, `retryCount=0`, `publishedAt=null`을 기록한다. 이벤트 본문·코드·인증 정보는 감사 JSON에 복사하지 않는다.
+        - `created_at`에는 잠금 획득 후 정한 기준 시각을 서울 시간대·마이크로초 정밀도로 기록한다. 변경 전후 값·감사 시각은 ERD §3.3과 정책 §9.4를 따른다.
+    - `reason`은 공백만 허용하지 않는 1~500자다(ERD §3.3의 저장 길이).
     - `event_id`·`payload`·`occurred_at`·`correlation_id`는 보존하고 기존 공통 Relay가 재발행한다. Relay도 같은 Outbox 행을 잠그므로 행 단위로 직렬화된다.
 - **비고:** 동시 운영 요청의 성공·409 분기, 실제 전환 1건당 감사 1건, 감사 실패 전체 롤백, Relay 경합, 정확히 7일인 경계값을 구현 회귀 테스트로 확인한다. 이 보완안에서는 테이블·컬럼·환경변수를 추가하지 않는다.
 
@@ -3810,7 +3812,7 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 외부 경로 | `/api/v1/submissions/**`, `/api/v1/me/submissions`, `/api/v1/runs`, `/api/v1/judge/languages`, `/api/v1/admin/judge-jobs/**`, `/api/v1/admin/submissions/**` |
+| 외부 경로 | `/api/v1/submissions/**`, `/api/v1/me/submissions`, `/api/v1/runs`, `/api/v1/judge/languages`, `/api/v1/admin/judge-jobs/**`, `/api/v1/admin/submissions/**`, `/api/v1/admin/judge/outbox-events/**` |
 | 내부 경로 | `/internal/v1/submissions/**` |
 | 소유 테이블 | 스키마 `judge` (`submissions`, `judge_jobs`, `judge_job_runs`, `judge_test_results`) |
 | 문맥 | `PRACTICE`(외부 API), `EXAM`·`CONTEST`·`DIAGNOSIS`(SQS `exam-submission-queue`). 시험·대회는 contest, 진단은 member가 접수한다. |
@@ -4370,7 +4372,7 @@
 
 #### 3.2.6 실패 Outbox 재처리
 
-> Problem §2.8.1을 기준으로 서비스별 경로와 재요청 처리를 확정했다. 현재 Judge에는 구현되지 않았으며 Controller·Gateway 반영이 필요하다. 나머지 상세 사항은 구현 전 검토안이다. 기존 채점 작업 복구(§3.2.5)와 별개의 작업이다.
+> Problem §2.8.1을 기준으로 서비스별 경로와 재요청 처리를 확정했다. 나머지 상세 사항은 검토안이다. 기존 채점 작업 복구(§3.2.5)와 별개의 작업이다.
 
 - **Method / URI:** `POST /api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses`
 - **인증:** `ADMIN`
