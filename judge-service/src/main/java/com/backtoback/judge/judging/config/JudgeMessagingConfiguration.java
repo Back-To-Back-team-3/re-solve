@@ -67,6 +67,7 @@ public class JudgeMessagingConfiguration {
                 "SubmissionJudged",
                 "ExamSubmissionJudged",
                 "ContestSubmissionJudged",
+                "DiagnosisSubmissionJudged",
                 "SubmissionFailed"
             );
 
