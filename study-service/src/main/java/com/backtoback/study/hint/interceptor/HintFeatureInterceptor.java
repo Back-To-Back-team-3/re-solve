@@ -4,21 +4,23 @@ import java.io.IOException;
 import java.util.List;
 
 import org.springframework.http.MediaType;
+import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import com.backtoback.common.api.ApiErrorResponse;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.hint.config.HintFeatureProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 힌트 기능 토글 인터셉터.
  * {@code study.hint.feature.enabled=false}이면 모든 힌트 API에 {@code HINT_FEATURE_DISABLED(503)}을 반환한다.
  */
+@Component
 @RequiredArgsConstructor
 public class HintFeatureInterceptor implements HandlerInterceptor {
 

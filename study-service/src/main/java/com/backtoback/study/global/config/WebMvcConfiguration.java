@@ -4,9 +4,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-import com.backtoback.study.hint.config.HintFeatureProperties;
 import com.backtoback.study.hint.interceptor.HintFeatureInterceptor;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 
@@ -17,13 +15,10 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class WebMvcConfiguration implements WebMvcConfigurer {
 
-    private final HintFeatureProperties hintFeatureProperties;
-    private final ObjectMapper objectMapper;
+    private final HintFeatureInterceptor hintFeatureInterceptor;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry
-            .addInterceptor(new HintFeatureInterceptor(hintFeatureProperties, objectMapper))
-            .addPathPatterns("/api/v1/hint-requests/**");
+        registry.addInterceptor(hintFeatureInterceptor).addPathPatterns("/api/v1/hint-requests/**");
     }
 }
