@@ -5,7 +5,9 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,6 +31,7 @@ import lombok.RequiredArgsConstructor;
 @Repository
 @RequiredArgsConstructor
 public class SubmissionExecutionStore {
+    private static final String TOKEN_RECOVERY = "TOKEN_RECOVERY";
     private final JdbcTemplate jdbc;
     private final Clock clock;
     private final SubmissionRepository submissions;
@@ -56,7 +59,7 @@ public class SubmissionExecutionStore {
     }
 
     /**
-     * 접수 시 고정한 테스트 ID·순서·공개 여부와 실행 자료를 대조한다.
+     * 저장된 테스트 ID·순서·공개 여부와 실행 자료를 대조한다.
      *
      * @param lease 현재 작업의 회차·실행 시도·임대 소유권
      * @param data 고정 회차에서 조회한 채점 자료
@@ -74,7 +77,7 @@ public class SubmissionExecutionStore {
                 .sorted(java.util.Comparator.comparingInt(SubmissionJudgingDataResponse.TestCase::testOrder))
                 .map(test -> List.of(test.testAssetId(), test.testOrder(), test.isSample()))
                 .toList();
-        Assert.isTrue(fixed.equals(received), "접수 시 고정한 테스트 구성이 일치하지 않습니다.");
+        Assert.isTrue(fixed.equals(received), "저장된 테스트 구성이 일치하지 않습니다.");
     }
 
     /**
@@ -115,41 +118,77 @@ public class SubmissionExecutionStore {
             return Optional.empty();
         }
         jdbc.update("""
-            UPDATE judge_jobs SET status='RUNNING',lease_token=?,lease_until=?,started_at=?,updated_at=?
+            UPDATE judge_jobs SET status='RUNNING',lease_token=?,lease_until=?,
+                started_at=CASE WHEN last_error=? THEN started_at ELSE ? END,updated_at=?
             WHERE id=?
-            """, lease.token(), instant.plusSeconds(120), instant, instant, lease.jobId());
-        jdbc
-            .update(
-                "UPDATE submissions SET status='JUDGING',verdict=NULL,compile_message=NULL,updated_at=? WHERE id=?",
-                instant,
-                lease.submissionId()
-            );
+            """, lease.token(), instant.plusSeconds(120), TOKEN_RECOVERY, instant, instant, lease.jobId());
+        jdbc.update("""
+            UPDATE submissions SET status='JUDGING',verdict=NULL,compile_message=NULL,updated_at=? WHERE id=?
+            """, instant, lease.submissionId());
         return Optional.of(lease);
     }
 
     /**
-     * 현재 시도 결과를 초기화하며 생성 여부가 불명확한 기존 실행은 보존한다.
+     * 현재 시도 결과를 초기화하고 회수한 작업의 확인된 토큰은 재사용한다.
      *
      * @param lease 현재 작업의 회차·실행 시도·임대 소유권
-     * @return 소유권이 유효하고 미확정 실행 없이 초기화했는지 여부
+     * @return 현재 임대로 새 실행 또는 토큰 재조회를 준비했는지 여부
      */
     @Transactional
     public boolean prepare(SubmissionLease lease) {
         if (!owns(lease)) {
             return false;
         }
-        Integer unresolved = jdbc.queryForObject("""
-            SELECT COUNT(*) FROM judge_test_results WHERE judge_job_id=?
-            AND token_status IN ('UNKNOWN','CREATED')
-            """, Integer.class, lease.jobId());
-        if (unresolved != null && unresolved > 0) {
-            return false;
+        String lastError
+            = jdbc.queryForObject("SELECT last_error FROM judge_jobs WHERE id=?", String.class, lease.jobId());
+        if ("LEASE_EXPIRED".equals(lastError)) {
+            // 임대 회수에서 정한 유예를 지난 UNKNOWN만 새 시도로 넘긴다.
+            jdbc.update("""
+                UPDATE judge_test_results SET token_status='NOT_CREATED',created_try_count=NULL,updated_at=?
+                WHERE judge_job_id=? AND token_status='UNKNOWN'
+                """, now(), lease.jobId());
         }
+        // 시스템 실패 결과만 다시 실행한다. 발급된 토큰과 확정 판정은 그대로 둔다.
         jdbc.update("""
             UPDATE judge_test_results SET token_status='NOT_CREATED',judge0_token=NULL,created_try_count=NULL,
-            verdict=NULL,time_ms=NULL,memory_kb=NULL,actual_output=NULL,updated_at=? WHERE judge_job_id=?
+            verdict=NULL,time_ms=NULL,memory_kb=NULL,actual_output=NULL,updated_at=?
+            WHERE judge_job_id=? AND verdict='SYSTEM_ERROR'
             """, now(), lease.jobId());
         return true;
+    }
+
+    /**
+     * 회수한 작업에서 이미 생성된 Judge0 토큰을 조회한다.
+     *
+     * @param lease 새 임대와 현재 실행 시도
+     * @return 테스트 순서별로 다시 조회할 기존 토큰
+     */
+    @Transactional(readOnly = true)
+    public Map<Integer, String> resumableTokens(SubmissionLease lease) {
+        return jdbc.query("""
+            SELECT test_order,judge0_token FROM judge_test_results
+            WHERE judge_job_id=? AND token_status='CREATED'
+            """, rows -> {
+            var tokens = new LinkedHashMap<Integer, String>();
+            while (rows.next()) {
+                tokens.put(rows.getInt("test_order"), rows.getString("judge0_token"));
+            }
+            return tokens;
+        }, lease.jobId());
+    }
+
+    /**
+     * 현재 채점 회차에서 코드 판정이 이미 확정된 테스트를 조회한다.
+     *
+     * @param lease 조회할 채점 작업의 임대
+     * @return 재실행하지 않을 테스트 순서
+     */
+    @Transactional(readOnly = true)
+    public Set<Integer> completedOrders(SubmissionLease lease) {
+        return Set.copyOf(jdbc.queryForList("""
+            SELECT test_order FROM judge_test_results
+            WHERE judge_job_id=? AND token_status='DONE' AND verdict<>'SYSTEM_ERROR'
+            """, Integer.class, lease.jobId()));
     }
 
     /**
@@ -241,33 +280,42 @@ public class SubmissionExecutionStore {
      *
      * @param lease 현재 작업의 회차·실행 시도·임대 소유권
      * @param order 완료한 테스트 순서
+     * @param token 조회에 사용한 Judge0 실행 토큰
      * @param result 평가가 완료된 테스트 결과
      * @return 현재 생성 요청의 결과를 저장했는지 여부
      * @throws IllegalArgumentException 완료 판정이 없는 경우
      * @throws ArithmeticException 메모리 사용량이 정수 저장 범위를 초과하는 경우
      */
     @Transactional
-    public boolean saveResult(SubmissionLease lease, int order, JudgeTestResult result) {
+    public boolean saveResult(SubmissionLease lease, int order, String token, JudgeTestResult result) {
         Assert.notNull(result.verdict(), "완료 판정이 필요합니다.");
         Integer memory
             = result.memoryKiB() == null ? null
                 : result.memoryKiB().setScale(0, java.math.RoundingMode.CEILING).intValueExact();
-        return owns(lease) && jdbc
-            .update(
-                """
-                    UPDATE judge_test_results SET token_status='DONE',verdict=?,time_ms=?,memory_kb=?,
-                    actual_output=CASE WHEN is_sample THEN ? ELSE NULL END,updated_at=?
-                    WHERE judge_job_id=? AND test_order=? AND created_try_count=? AND token_status='CREATED'
-                    """,
-                result.verdict().name(),
-                result.timeMs(),
-                memory,
-                result.actualReturnText(),
-                now(),
-                lease.jobId(),
-                order,
-                lease.tryCount()
-            ) == 1;
+        boolean saved
+            = owns(lease) && jdbc
+                .update(
+                    """
+                        UPDATE judge_test_results SET token_status='DONE',verdict=?,time_ms=?,memory_kb=?,
+                        actual_output=CASE WHEN is_sample THEN ? ELSE NULL END,updated_at=?
+                        WHERE judge_job_id=? AND test_order=?
+                        AND BINARY judge0_token=BINARY ? AND token_status='CREATED'
+                        """,
+                    result.verdict().name(),
+                    result.timeMs(),
+                    memory,
+                    result.actualReturnText(),
+                    now(),
+                    lease.jobId(),
+                    order,
+                    token
+                ) == 1;
+        if (saved && result.verdict() == JudgeVerdict.CE && result.compileMessage() != null) {
+            jdbc.update("""
+                UPDATE judge_jobs SET pending_compile_message=COALESCE(pending_compile_message,?) WHERE id=?
+                """, result.compileMessage(), lease.jobId());
+        }
+        return saved;
     }
 
     /**
@@ -275,19 +323,18 @@ public class SubmissionExecutionStore {
      *
      * @param lease 현재 작업의 회차·실행 시도·임대 소유권
      * @param data 결과 이벤트에 포함할 고정 문제 메타데이터
-     * @param compileMessage 첫 컴파일 오류 메시지, 없으면 null
      * @return 현재 소유권으로 전체 결과를 확정했는지 여부
      * @throws IllegalArgumentException 미완료 또는 시스템 오류 테스트가 남아 있는 경우
      */
     @Transactional
-    public boolean complete(SubmissionLease lease, SubmissionJudgingDataResponse data, String compileMessage) {
+    public boolean complete(SubmissionLease lease, SubmissionJudgingDataResponse data) {
         if (!owns(lease)) {
             return false;
         }
         var verdicts = jdbc.queryForList("""
-            SELECT CASE WHEN token_status='DONE' AND created_try_count=? THEN verdict ELSE NULL END
+            SELECT CASE WHEN token_status='DONE' THEN verdict ELSE NULL END
             FROM judge_test_results WHERE judge_job_id=? ORDER BY test_order
-            """, String.class, lease.tryCount(), lease.jobId());
+            """, String.class, lease.jobId());
         var verdict
             = SubmissionVerdict
                 .summarize(verdicts.stream().map(value -> value == null ? null : JudgeVerdict.valueOf(value)).toList());
@@ -305,14 +352,18 @@ public class SubmissionExecutionStore {
             .update(
                 """
                     UPDATE submissions SET status='COMPLETED',verdict=?,passed_count=?,total_count=?,max_time_ms=?,
-                    max_memory_kb=?,compile_message=?,judged_at=?,updated_at=? WHERE id=?
+                    max_memory_kb=?,compile_message=CASE WHEN ? THEN (
+                        SELECT pending_compile_message FROM judge_jobs WHERE id=?
+                    ) ELSE NULL END,
+                    judged_at=?,updated_at=? WHERE id=?
                     """,
                 verdict.name(),
                 metrics.get("passed"),
                 verdicts.size(),
                 time,
                 memory,
-                verdict == JudgeVerdict.CE ? compileMessage : null,
+                verdict == JudgeVerdict.CE,
+                lease.jobId(),
                 instant,
                 instant,
                 lease.submissionId()
@@ -320,7 +371,7 @@ public class SubmissionExecutionStore {
         recordRun(lease, "SUCCEEDED", null, instant);
         jdbc.update("""
             UPDATE judge_jobs SET status='SUCCEEDED',finished_at=?,lease_token=NULL,lease_until=NULL,
-            last_error=NULL,updated_at=? WHERE id=?
+            last_error=NULL,pending_compile_message=NULL,updated_at=? WHERE id=?
             """, instant, instant, lease.jobId());
         var payload = payload(lease);
         payload.put("verdict", verdict.name());
@@ -367,7 +418,7 @@ public class SubmissionExecutionStore {
         recordRun(lease, "SYSTEM_ERROR", errorCode, instant);
         if (lease.tryCount() < 3) {
             jdbc.update("""
-                UPDATE judge_jobs SET status='RETRY_WAITING',try_count=try_count+1,next_run_at=?,
+                UPDATE judge_jobs SET status='RETRY_WAITING',try_count=try_count+1,unknown_retry_count=0,next_run_at=?,
                 lease_token=NULL,lease_until=NULL,last_error=?,updated_at=? WHERE id=?
                 """, instant.plusSeconds(lease.tryCount() == 1 ? 10 : 30), errorCode, instant, lease.jobId());
             jdbc
@@ -383,19 +434,92 @@ public class SubmissionExecutionStore {
     }
 
     /**
-     * 처리 기한이 지난 작업 한 건을 종결하며 실행 전 작업에는 실행 이력을 만들지 않는다.
+     * 30초 이상 응답이 불명확한 요청을 회수한다. 실행 중에는 현재 시도의 요청만 회수한다. (스케줄러 §3.3)
      *
-     * @return 기한 초과 작업을 종결했는지 여부
+     * @return 처리할 UNKNOWN 요청이 있었는지 여부
      */
     @Transactional
-    public boolean expireOne() {
+    public boolean recoverUnknownOne() {
+        var observedAt = now();
+        var leases
+            = jdbc
+                .query(
+                    """
+                        SELECT j.id,j.submission_id,j.judge_attempt,j.try_count,j.lease_token,j.deadline_at
+                        FROM judge_jobs j STRAIGHT_JOIN submissions s ON s.id=j.submission_id
+                        WHERE s.context='PRACTICE'
+                        AND ((s.judge_attempt=j.judge_attempt AND j.status='RUNNING'
+                            AND j.lease_until>? AND j.deadline_at>?)
+                            OR j.status IN ('RETRY_WAITING','FAILED','SUCCEEDED'))
+                        AND EXISTS (
+                            SELECT 1 FROM judge_test_results t WHERE t.judge_job_id=j.id
+                            AND t.token_status='UNKNOWN' AND t.updated_at<=?
+                            AND (j.status<>'RUNNING' OR t.created_try_count=j.try_count)
+                        )
+                        ORDER BY j.id LIMIT 1 FOR UPDATE SKIP LOCKED
+                        """,
+                    (row, index) -> new SubmissionLease(
+                        row.getLong("id"),
+                        row.getLong("submission_id"),
+                        row.getInt("judge_attempt"),
+                        row.getInt("try_count"),
+                        row.getString("lease_token"),
+                        row.getObject("deadline_at", LocalDateTime.class)
+                    ),
+                    observedAt,
+                    observedAt,
+                    observedAt.minusSeconds(30)
+                );
+        if (leases.isEmpty()) {
+            return false;
+        }
+        var lease = leases.getFirst();
+        String status = jdbc.queryForObject("SELECT status FROM judge_jobs WHERE id=?", String.class, lease.jobId());
+        boolean running = "RUNNING".equals(status);
+        if (running && !owns(lease)) {
+            return false;
+        }
+        var instant = now();
+        int reset = jdbc.update("""
+            UPDATE judge_test_results SET token_status='NOT_CREATED',created_try_count=NULL,updated_at=?
+            WHERE judge_job_id=? AND token_status='UNKNOWN' AND updated_at<=?
+            AND (?<>'RUNNING' OR created_try_count=?)
+            """, instant, lease.jobId(), instant.minusSeconds(30), status, lease.tryCount());
+        if (reset == 0 || !running) {
+            return reset > 0;
+        }
+        int retries = jdbc.queryForObject("""
+            SELECT unknown_retry_count FROM judge_jobs WHERE id=?
+            """, Integer.class, lease.jobId());
+        if (retries == 2) {
+            return fail(lease, "JUDGE0_TIMEOUT");
+        }
+        // 대기 중에는 쓰기 권한이 없다. 재선점 전 기한이 끝날 경우를 위해 이전 임대 토큰만 보존한다.
+        jdbc.update("""
+            UPDATE judge_jobs SET status='RETRY_WAITING',next_run_at=?,lease_until=NULL,
+            unknown_retry_count=unknown_retry_count+1,
+            last_error=?,updated_at=? WHERE id=?
+            """, instant, TOKEN_RECOVERY, instant, lease.jobId());
+        jdbc.update("UPDATE submissions SET status='QUEUED',updated_at=? WHERE id=?", instant, lease.submissionId());
+        return true;
+    }
+
+    /**
+     * 기한이 지났거나 임대가 만료된 제출 작업 한 건을 회수한다. (스케줄러 §3.2)
+     *
+     * @return 기한 초과 종결 또는 임대 회수를 반영했는지 여부
+     */
+    @Transactional
+    public boolean recoverOne() {
+        var observedAt = now();
         var rows
             = jdbc
                 .query(
                     """
                         SELECT j.* FROM judge_jobs j STRAIGHT_JOIN submissions s ON s.id=j.submission_id
-                        WHERE j.status IN ('PENDING','RUNNING','RETRY_WAITING') AND j.deadline_at<=?
-                        AND s.context='PRACTICE' AND s.judge_attempt=j.judge_attempt
+                        WHERE s.context='PRACTICE' AND s.judge_attempt=j.judge_attempt
+                        AND j.status IN ('PENDING','RUNNING','RETRY_WAITING')
+                        AND (j.deadline_at<=? OR (j.status='RUNNING' AND (j.lease_until<=? OR j.started_at<=?)))
                         ORDER BY j.deadline_at,j.id LIMIT 1 FOR UPDATE SKIP LOCKED
                         """,
                     (row, index) -> new SubmissionLease(
@@ -404,19 +528,50 @@ public class SubmissionExecutionStore {
                         row.getInt("judge_attempt"),
                         row.getInt("try_count"),
                         row.getString("lease_token"),
-                        row.getTimestamp("deadline_at").toLocalDateTime()
+                        row.getObject("deadline_at", LocalDateTime.class)
                     ),
-                    now()
+                    observedAt,
+                    observedAt,
+                    observedAt.minusMinutes(10)
                 );
         if (rows.isEmpty()) {
             return false;
         }
         var lease = rows.getFirst();
-        if (lease.token() != null) {
-            recordRun(lease, "SYSTEM_ERROR", "DEADLINE_EXCEEDED", now());
+        var instant = now();
+        if (!instant.isBefore(lease.deadlineAt())) {
+            // 진행 중이거나 같은 시도의 UNKNOWN 복구를 기다리는 경우만 실행 이력을 마무리한다.
+            if (lease.token() != null) {
+                recordRun(lease, "SYSTEM_ERROR", "DEADLINE_EXCEEDED", instant);
+            }
+            terminalFailure(lease, "DEADLINE_EXCEEDED", instant);
+        } else {
+            recoverExpiredLease(lease, instant);
         }
-        terminalFailure(lease, "DEADLINE_EXCEEDED", now());
         return true;
+    }
+
+    /**
+     * 잠근 임대를 닫고 시도 상한 안에서만 다음 시도를 예약한다.
+     *
+     * @param lease 회수할 작업의 관측한 임대
+     * @param instant 잠금 획득 후 시각
+     */
+    private void recoverExpiredLease(SubmissionLease lease, LocalDateTime instant) {
+        recordRun(lease, "LEASE_EXPIRED", "LEASE_EXPIRED", instant);
+        if (lease.tryCount() >= 3) {
+            terminalFailure(lease, "LEASE_EXHAUSTED", instant);
+            return;
+        }
+        // 생성 여부를 모르는 요청은 스케줄러 §3.3의 30초 대기 후에만 다시 생성한다.
+        jdbc.update("""
+            UPDATE judge_jobs SET status='RETRY_WAITING',try_count=try_count+1,unknown_retry_count=0,
+            next_run_at=GREATEST(?,COALESCE(
+                (SELECT MAX(updated_at) + INTERVAL 30 SECOND FROM judge_test_results
+                 WHERE judge_job_id=? AND token_status='UNKNOWN'),?)),
+            lease_token=NULL,lease_until=NULL,last_error='LEASE_EXPIRED',updated_at=? WHERE id=?
+            """, instant, lease.jobId(), instant, instant, lease.jobId());
+        jdbc.update("UPDATE submissions SET status='QUEUED',updated_at=? WHERE id=?", instant, lease.submissionId());
     }
 
     /**
@@ -445,7 +600,7 @@ public class SubmissionExecutionStore {
     private void terminalFailure(SubmissionLease lease, String error, LocalDateTime instant) {
         jdbc.update("""
             UPDATE judge_jobs SET status='FAILED',finished_at=?,last_error=?,lease_token=NULL,lease_until=NULL,
-            updated_at=? WHERE id=?
+            pending_compile_message=NULL,updated_at=? WHERE id=?
             """, instant, error, instant, lease.jobId());
         jdbc
             .update(

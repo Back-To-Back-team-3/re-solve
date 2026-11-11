@@ -29,6 +29,7 @@ import com.backtoback.judge.judging.domain.JudgeTestResult;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
 import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse;
 import com.backtoback.judge.submission.domain.Submission;
+import com.backtoback.judge.submission.dto.SubmissionTestResultsResponse;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -44,20 +45,21 @@ class SubmissionTestResultServiceTest {
     @ParameterizedTest
     @CsvSource(
         {
-            "AC,true",
-            "WA,false",
-            "SYSTEM_ERROR,null"
+            "AC,true,RUNNING,1",
+            "WA,false,RUNNING,1",
+            "SYSTEM_ERROR,null,RUNNING,1",
+            "AC,true,SUCCEEDED,2"
         }
     )
     @DisplayName("숨김 테스트는 번호와 통과 여부 두 필드만 직렬화한다")
-    void hidesDetails(JudgeVerdict verdict, String expected) {
+    void hidesDetails(JudgeVerdict verdict, String expected, JudgeJob.Status status, int tryCount) {
         var test = mock(JudgeTestResult.class);
         given(test.getTestOrder()).willReturn(1);
         given(test.getCreatedTryCount()).willReturn(1);
         given(test.getTokenStatus()).willReturn(JudgeTestResult.TokenStatus.DONE);
         given(test.getVerdict()).willReturn(verdict);
-        var job = job();
-        given(job.getTryCount()).willReturn(1);
+        var job = job(status);
+        given(job.getTryCount()).willReturn(tryCount);
         given(history.read(7, 1))
             .willReturn(
                 new SubmissionHistory(
@@ -74,12 +76,16 @@ class SubmissionTestResultServiceTest {
     }
 
     @Test
-    @DisplayName("이전 실행 시도의 숨김 판정을 현재 통과 여부로 노출하지 않는다")
+    @DisplayName("이전 시도의 숨김 AC는 재시도 중 가리고 회차가 정상 완료되면 반환한다")
     void masksOldTry() {
         var test = mock(JudgeTestResult.class);
         given(test.getTestOrder()).willReturn(1);
         given(test.getCreatedTryCount()).willReturn(1);
-        var job = job();
+        given(test.getTokenStatus()).willReturn(JudgeTestResult.TokenStatus.DONE);
+        given(test.getVerdict()).willReturn(JudgeVerdict.AC);
+        var job = mock(JudgeJob.class);
+        given(job.getJudgeAttempt()).willReturn(1);
+        given(job.getStatus()).willReturn(JudgeJob.Status.RUNNING, JudgeJob.Status.SUCCEEDED);
         given(job.getTryCount()).willReturn(2);
         given(history.read(7, 1))
             .willReturn(
@@ -88,9 +94,11 @@ class SubmissionTestResultServiceTest {
                     List.of(new SubmissionHistory.Attempt(job, List.of(test)))
                 )
             );
-        var response = new SubmissionTestResultService(history, dataClient, assets).read(7, 1, 1);
-        assertThat(JsonMapper.builder().build().valueToTree(response).get("content").get(0).get("passed").isNull())
-            .isTrue();
+        var service = new SubmissionTestResultService(history, dataClient, assets);
+        var running = (SubmissionTestResultsResponse.HiddenTest)service.read(7, 1, 1).content().getFirst();
+        var succeeded = (SubmissionTestResultsResponse.HiddenTest)service.read(7, 1, 1).content().getFirst();
+        assertThat(running.passed()).isNull();
+        assertThat(succeeded.passed()).isTrue();
     }
 
     /**
@@ -106,7 +114,7 @@ class SubmissionTestResultServiceTest {
             true
         }
     )
-    @DisplayName("공개 원문을 연결하고 조회 중단 시 인터럽트를 보존한 실패를 반환한다")
+    @DisplayName("정상 완료 회차는 이전 시도의 공개 결과를 반환하고 원문 조회 중단 시 인터럽트를 보존한다")
     void loadsPublicSource(boolean interrupted) throws InterruptedException {
         var submission = mock(Submission.class);
         given(submission.getProblemId()).willReturn(10L);
@@ -121,8 +129,8 @@ class SubmissionTestResultServiceTest {
         if (!interrupted) {
             given(test.getActualOutput()).willReturn("3");
         }
-        var job = job();
-        given(job.getTryCount()).willReturn(1);
+        var job = job(JudgeJob.Status.SUCCEEDED);
+        given(job.getTryCount()).willReturn(2);
         given(history.read(7, 1))
             .willReturn(new SubmissionHistory(submission, List.of(new SubmissionHistory.Attempt(job, List.of(test)))));
         var asset = new SubmissionJudgingDataResponse.Asset("key", "version", "a".repeat(64));
@@ -175,10 +183,16 @@ class SubmissionTestResultServiceTest {
         verifyNoInteractions(dataClient, assets);
     }
 
-    private JudgeJob job() {
+    /**
+     * 요청한 회차의 작업 상태를 설정한다.
+     *
+     * @param status 테스트가 조회할 작업 상태
+     * @return 첫 채점 회차의 작업 대역
+     */
+    private JudgeJob job(JudgeJob.Status status) {
         var job = mock(JudgeJob.class);
         given(job.getJudgeAttempt()).willReturn(1);
-        given(job.getStatus()).willReturn(JudgeJob.Status.RUNNING);
+        given(job.getStatus()).willReturn(status);
         return job;
     }
 }

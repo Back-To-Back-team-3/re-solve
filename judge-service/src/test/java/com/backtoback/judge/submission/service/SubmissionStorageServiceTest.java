@@ -133,7 +133,7 @@ class SubmissionStorageServiceTest {
         var saved = storage.register(request("request-1", JAVA));
         var submission = submissions.findById(saved.submissionId()).orElseThrow();
         var job = jobs.findBySubmissionIdAndJudgeAttempt(saved.submissionId(), saved.judgeAttempt()).orElseThrow();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("16");
+        assertThat(flyway.info().applied()).anyMatch(migration -> "19".equals(migration.getVersion().getVersion()));
         assertThat(submission.getStatus()).isEqualTo(Submission.Status.QUEUED);
         assertThat(submission.getVerdict()).isNull();
         assertThat(submission.getJudgeAttempt()).isEqualTo(1);
@@ -147,6 +147,7 @@ class SubmissionStorageServiceTest {
         assertThat(job.getStatus()).isEqualTo(JudgeJob.Status.PENDING);
         assertThat(job.getJudgeAttempt()).isEqualTo(1);
         assertThat(job.getTryCount()).isEqualTo(1);
+        assertThat(job.getUnknownRetryCount()).isZero();
         assertThat(job.getNextRunAt()).isEqualTo(NOW);
         assertThat(job.getDeadlineAt()).isEqualTo(NOW.plusMinutes(10));
         assertThat(job.getLeaseToken()).isNull();

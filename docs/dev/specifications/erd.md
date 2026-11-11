@@ -1495,7 +1495,9 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `judge_attempt` | INT | Y | 이 작업이 처리하는 채점 회차 |
 | `status` | VARCHAR(30) | Y | `PENDING` / `RUNNING` / `RETRY_WAITING` / `SUCCEEDED` / `FAILED` |
 | `try_count` | INT | Y | 회차 안 실행 시도 수 (상한 3) |
-| `lease_token` | VARCHAR(64) | N | NULL 허용: 선점 전. 선점마다 새로 발급 |
+| `unknown_retry_count` | INT | Y | 동일 실행 시도의 생성 응답 유실 재생성 횟수(0~2). 작업 생성 시 애플리케이션에서 0으로 초기화 |
+| `pending_compile_message` | MEDIUMTEXT | N | 이미 판정한 테스트의 첫 컴파일 메시지. 작업이 CE로 완료되면 제출에 반영 |
+| `lease_token` | VARCHAR(64) | N | 선점마다 새로 발급. 같은 시도의 생성 응답 유실 복구 대기 중에는 종료 이력용으로 이전 토큰을 보존한다. 선점 전·시도 종료 후에는 NULL |
 | `lease_until` | DATETIME(6) | N | NULL 허용: 선점 전. `now + 120초`, 30초마다 연장 |
 | `next_run_at` | DATETIME(6) | Y | 선점 가능 시각 (백오프 10→30초 반영) |
 | `deadline_at` | DATETIME(6) | Y | 전체 처리 기한. 일반 제출은 정책 및 상태 §2에 따라 접수 저장 시 확정하며 같은 작업의 재요청·재시도에서 변경하지 않음 |
@@ -3173,11 +3175,16 @@ judge-service/src/main/resources/db/migration/
   V13__judging_create_validation_jobs.sql
   V14__judging_create_validation_runs.sql
   V15__judging_create_validation_test_results.sql
+  V18__common_create_shedlock.sql
+  V19__judging_track_submission_execution_recovery.sql
 ```
 
 기존 V1~V4는 공통 테이블 구축 계획 번호이며 실제 적용 이력과 구분한다. 기존 마이그레이션을 재사용하지 않고 Outbox·소비 기록은 V11·V12, 검증 작업·시도·테스트 결과는 V13~V15로 추가한다.
 
 §4.3.7의 대표 판정 제거는 후속 마이그레이션으로 반영한다(미구현). 이미 적용한 V14를 수정하지 않고 `judge_validation_runs.verdict` 및 해당 컬럼을 참조하는 CHECK를 제거하며, `SUCCEEDED`의 생성기 정보 필수 조건은 유지한다. 기존 시도 행과 나머지 요약은 보존한다. 파일 번호는 구현 시 실제 적용 이력과 대조해 확정한다.
+
+- V18: 제출 작업 임대 회수 스케줄러의 공통 잠금 테이블을 추가한다(스케줄러 §3.2).
+- V19: 생성 응답 유실 복구 횟수와 재개할 컴파일 메시지를 작업에 저장한다. 기존 작업의 복구 횟수는 0으로 채운 뒤 필수 제약을 적용한다(§4.3.2).
 
 ### 7.4 Contest (`contest-service`)
 

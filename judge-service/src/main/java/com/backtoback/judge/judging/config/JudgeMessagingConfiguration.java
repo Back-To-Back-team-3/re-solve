@@ -10,6 +10,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
@@ -17,7 +19,8 @@ import com.backtoback.common.event.client.EventDestinationResolver;
 import com.backtoback.common.event.config.OutboxRelayConfiguration;
 import com.backtoback.common.event.dto.EventDestination;
 import com.backtoback.common.event.service.EventConsumer;
-import com.backtoback.judge.judging.service.JudgeWorkScheduler;
+import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
+import com.backtoback.judge.judging.service.SubmissionScheduler;
 import com.backtoback.judge.judging.service.SubmissionWorker;
 import com.backtoback.judge.judging.service.ValidationMessageListener;
 import com.backtoback.judge.judging.service.ValidationScheduler;
@@ -36,7 +39,12 @@ import software.amazon.awssdk.services.sqs.SqsAsyncClient;
     havingValue = "true"
 )
 @EnableConfigurationProperties(JudgeMessagingProperties.class)
-@Import(OutboxRelayConfiguration.class)
+@Import(
+    {
+        OutboxRelayConfiguration.class,
+        SchedulerLockConfiguration.class
+    }
+)
 public class JudgeMessagingConfiguration {
     private static final Set<String> RESULT_EVENTS
         = Set
@@ -112,15 +120,30 @@ public class JudgeMessagingConfiguration {
     }
 
     /**
-     * 작업 실행과 분리한 스레드에서 선점 요청과 기한 초과 종결 주기를 관리한다.
+     * 회수 작업과 분리해 채점 선점과 공통 예약 작업의 주기를 관리한다.
      *
-     * @return 검증 주기 제어용 스케줄러
+     * @return 채점 선점과 공통 예약 작업에 사용할 기본 스케줄러
      */
     @Bean
+    @Primary
     public ThreadPoolTaskScheduler judgeValidationScheduler() {
         var scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(2);
         scheduler.setThreadNamePrefix("judge-validation-schedule-");
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
+    /**
+     * 기한 초과·임대 만료·토큰 회수 작업을 채점 선점과 다른 스레드에서 실행한다.
+     *
+     * @return 회수 전용 스케줄러
+     */
+    @Bean
+    public ThreadPoolTaskScheduler judgeRecoveryScheduler() {
+        var scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(2);
+        scheduler.setThreadNamePrefix("judge-recovery-schedule-");
         scheduler.setRemoveOnCancelPolicy(true);
         return scheduler;
     }
@@ -132,6 +155,7 @@ public class JudgeMessagingConfiguration {
      * @param store 검증 저장소
      * @param executor 두 작업의 실행 전용 스레드
      * @param clock 공통 시각
+     * @param transactionManager 기한 초과 처리 트랜잭션 관리자
      * @return 검증 예약 작업
      */
     @Bean
@@ -139,9 +163,10 @@ public class JudgeMessagingConfiguration {
         ValidationWorker worker,
         ValidationExecutionStore store,
         @Qualifier("judgeValidationExecutor") ThreadPoolTaskExecutor executor,
-        Clock clock
+        Clock clock,
+        JpaTransactionManager transactionManager
     ) {
-        return new ValidationScheduler(worker, store, executor, clock);
+        return new ValidationScheduler(worker, store, executor, clock, transactionManager);
     }
 
     /**
@@ -160,22 +185,24 @@ public class JudgeMessagingConfiguration {
     }
 
     /**
-     * 메시징이 활성화된 환경에서 일반 제출 선점과 기한 초과 정리를 예약한다.
+     * 메시징이 활성화된 환경에서 제출 선점과 기한·임대 만료 처리를 예약한다.
      *
      * @param worker 일반 제출 실행기
-     * @param store 일반 제출 실행 저장소
-     * @param executor 일반 제출 전용 실행 스레드 풀
+     * @param store 제출 실행 저장소
+     * @param executor 제출 전용 실행 스레드 풀
      * @param clock 공통 시각
-     * @return 일반 제출 예약 작업
+     * @param transactionManager 회수 한 건마다 트랜잭션을 시작할 관리자
+     * @return 제출 실행 및 회수 예약 작업
      */
     @Bean
-    public JudgeWorkScheduler submissionScheduler(
+    public SubmissionScheduler submissionScheduler(
         SubmissionWorker worker,
         SubmissionExecutionStore store,
         @Qualifier("judgeSubmissionExecutor") ThreadPoolTaskExecutor executor,
-        Clock clock
+        Clock clock,
+        JpaTransactionManager transactionManager
     ) {
-        return new JudgeWorkScheduler(worker::runOnce, store::expireOne, executor, clock);
+        return new SubmissionScheduler(worker, store, executor, clock, transactionManager);
     }
 
 }

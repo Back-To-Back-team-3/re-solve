@@ -63,13 +63,14 @@ public class SubmissionTestResultService {
                     );
         }
         var content = new ArrayList<SubmissionTestResultsResponse.TestResult>();
+        var status = attempt.job().getStatus();
         for (var test : attempt.tests()) {
-            boolean current
-                = attempt.job().getStatus() != JudgeJob.Status.PENDING
-                    && attempt.job().getStatus() != JudgeJob.Status.RETRY_WAITING && test.getCreatedTryCount() != null
-                    && test.getCreatedTryCount() == attempt.job().getTryCount()
-                    && test.getTokenStatus() == JudgeTestResult.TokenStatus.DONE;
-            var verdict = current && test.getVerdict() != JudgeVerdict.SYSTEM_ERROR ? test.getVerdict() : null;
+            boolean visible
+                = status != JudgeJob.Status.PENDING && status != JudgeJob.Status.RETRY_WAITING
+                    && test.getTokenStatus() == JudgeTestResult.TokenStatus.DONE && test.getCreatedTryCount() != null
+                    && (test.getCreatedTryCount() == attempt.job().getTryCount()
+                        || status == JudgeJob.Status.SUCCEEDED);
+            var verdict = visible && test.getVerdict() != JudgeVerdict.SYSTEM_ERROR ? test.getVerdict() : null;
             if (!test.isSample()) {
                 content.add(SubmissionTestResultsResponse.HiddenTest.from(test.getTestOrder(), verdict));
                 continue;
