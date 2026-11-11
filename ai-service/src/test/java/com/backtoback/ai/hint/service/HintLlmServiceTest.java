@@ -53,8 +53,6 @@ class HintLlmServiceTest {
     HintReadyEventPublisher hintReadyEventPublisher;
     @Mock
     HintPromptTemplate hintPromptTemplate;
-    @Mock
-    HintFallbackTextProvider hintFallbackTextProvider;
 
     HintLlmService sut;
 
@@ -67,13 +65,12 @@ class HintLlmServiceTest {
                 redisTemplate,
                 hintReadyEventPublisher,
                 hintPromptTemplate,
-                hintFallbackTextProvider,
                 FIXED_CLOCK
             );
     }
 
     @Test
-    @DisplayName("Redis 캐시 적중 시 LLM 미호출, isCached=true로 HintReady 발행")
+    @DisplayName("Redis 캐시 적중 시 LLM 미호출, isCached=true·result=READY로 HintReady 발행")
     void process_cacheHit_publishesHintReadyWithIsCachedTrue() {
         HintRequestedPayload event = makeEvent();
         given(redisTemplate.opsForValue()).willReturn(valueOps);
@@ -84,13 +81,13 @@ class HintLlmServiceTest {
         ArgumentCaptor<HintReadyPublishPayload> captor = ArgumentCaptor.forClass(HintReadyPublishPayload.class);
         then(hintReadyEventPublisher).should().publish(captor.capture());
         assertThat(captor.getValue().isCached()).isTrue();
-        assertThat(captor.getValue().result()).isEqualTo("캐시된 힌트");
+        assertThat(captor.getValue().result()).isEqualTo("READY");
         then(valueOps).should().get(anyString());
         then(valueOps).shouldHaveNoMoreInteractions();
     }
 
     @Test
-    @DisplayName("캐시 미적중 후 LLM 정상 완료 시 isCached=false로 HintReady 발행 및 Redis 저장")
+    @DisplayName("캐시 미적중 후 LLM 정상 완료 시 isCached=false·result=READY로 HintReady 발행 및 Redis 저장")
     void process_cacheMiss_llmSuccess_storesInRedisAndPublishesHintReady() {
         HintRequestedPayload event = makeEvent();
         given(redisTemplate.opsForValue()).willReturn(valueOps);
@@ -105,11 +102,11 @@ class HintLlmServiceTest {
         ArgumentCaptor<HintReadyPublishPayload> captor = ArgumentCaptor.forClass(HintReadyPublishPayload.class);
         then(hintReadyEventPublisher).should().publish(captor.capture());
         assertThat(captor.getValue().isCached()).isFalse();
-        assertThat(captor.getValue().result()).isEqualTo("LLM 힌트");
+        assertThat(captor.getValue().result()).isEqualTo("READY");
     }
 
     @Test
-    @DisplayName("캐시 미적중 후 LLM 예외(타임아웃 포함) 시 폴백 텍스트로 HintReady 발행, Redis 미저장")
+    @DisplayName("캐시 미적중 후 LLM 예외(타임아웃 포함) 시 result=FALLBACK으로 HintReady 발행, Redis 미저장")
     void process_cacheMiss_llmException_publishesFallbackHintReady() {
         HintRequestedPayload event = makeEvent();
         given(redisTemplate.opsForValue()).willReturn(valueOps);
@@ -118,7 +115,6 @@ class HintLlmServiceTest {
         given(hintPromptTemplate.userPrompt(anyInt(), any(), any(), any())).willReturn("user");
         given(chatClient.prompt().system(anyString()).user(anyString()).call().content())
             .willThrow(new RuntimeException("LLM 오류"));
-        given(hintFallbackTextProvider.get(1)).willReturn("폴백 텍스트");
 
         sut.process(event);
 
@@ -127,7 +123,7 @@ class HintLlmServiceTest {
         ArgumentCaptor<HintReadyPublishPayload> captor = ArgumentCaptor.forClass(HintReadyPublishPayload.class);
         then(hintReadyEventPublisher).should().publish(captor.capture());
         assertThat(captor.getValue().isCached()).isFalse();
-        assertThat(captor.getValue().result()).isEqualTo("폴백 텍스트");
+        assertThat(captor.getValue().result()).isEqualTo("FALLBACK");
     }
 
     @Test

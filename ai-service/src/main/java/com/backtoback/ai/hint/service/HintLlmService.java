@@ -2,7 +2,9 @@ package com.backtoback.ai.hint.service;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -28,16 +30,18 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class HintLlmService {
 
-    private static final String SCHEMA_VERSION = "1";
+    private static final String SCHEMA_VERSION = "v1";
     private static final String EVENT_TYPE = "HintReady";
-    private static final Duration HINT_CACHE_TTL = Duration.ofDays(7);
+    private static final Duration HINT_CACHE_TTL = Duration.ofDays(30);
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter OCCURRED_AT_FMT
+        = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX");
 
     private final StudyInternalClient studyInternalClient;
     private final Optional<ChatClient> chatClient;
     private final RedisTemplate<String, String> redisTemplate;
     private final HintReadyEventPublisher hintReadyEventPublisher;
     private final HintPromptTemplate hintPromptTemplate;
-    private final HintFallbackTextProvider hintFallbackTextProvider;
     private final Clock clock;
 
     public void process(HintRequestedPayload event) {
@@ -48,31 +52,31 @@ public class HintLlmService {
             return;
         }
 
-        String cacheKey = cacheKey(event.problemId(), event.problemRevisionId(), event.level());
+        String cacheKey = cacheKey(event.problemRevisionId(), event.level());
         String cached = redisTemplate.opsForValue().get(cacheKey);
         if (cached != null) {
             log.info("힌트 캐시 적중 hintRequestId={}", event.hintRequestId());
-            publishHintReady(event, cached, true);
+            publishHintReady(event, "READY", true);
             return;
         }
 
         if (chatClient.isEmpty()) {
-            log.warn("ChatClient 미초기화, 폴백 텍스트 사용 hintRequestId={}", event.hintRequestId());
-            publishHintReady(event, hintFallbackTextProvider.get(event.level()), false);
+            log.warn("ChatClient 미초기화, 폴백 발행 hintRequestId={}", event.hintRequestId());
+            publishHintReady(event, "FALLBACK", false);
             return;
         }
 
-        String result;
+        String hintText;
         try {
-            result = callLlmWithTimeout(event);
+            hintText = callLlmWithTimeout(event);
         } catch (Exception e) {
-            log.warn("LLM 호출 실패 또는 타임아웃, 폴백 텍스트 사용 hintRequestId={} error={}", event.hintRequestId(), e.getMessage());
-            publishHintReady(event, hintFallbackTextProvider.get(event.level()), false);
+            log.warn("LLM 호출 실패 또는 타임아웃, 폴백 발행 hintRequestId={} error={}", event.hintRequestId(), e.getMessage());
+            publishHintReady(event, "FALLBACK", false);
             return;
         }
 
-        redisTemplate.opsForValue().set(cacheKey, result, HINT_CACHE_TTL);
-        publishHintReady(event, result, false);
+        redisTemplate.opsForValue().set(cacheKey, hintText, HINT_CACHE_TTL);
+        publishHintReady(event, "READY", false);
     }
 
     private String callLlmWithTimeout(HintRequestedPayload event) {
@@ -110,7 +114,7 @@ public class HintLlmService {
     }
 
     private void publishHintReady(HintRequestedPayload event, String result, boolean isCached) {
-        String now = Instant.now(clock).toString();
+        String now = ZonedDateTime.now(clock).withZoneSameInstant(KST).format(OCCURRED_AT_FMT);
         hintReadyEventPublisher
             .publish(
                 new HintReadyPublishPayload(
@@ -132,7 +136,7 @@ public class HintLlmService {
             );
     }
 
-    private String cacheKey(String problemId, String problemRevisionId, int level) {
-        return "hint:" + problemId + ":" + problemRevisionId + ":" + level;
+    private String cacheKey(String problemRevisionId, int level) {
+        return "hint:cache:" + problemRevisionId + ":" + level;
     }
 }
