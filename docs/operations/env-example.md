@@ -105,6 +105,8 @@ AWS_SECRET_ACCESS_KEY=
 # 호스트 로컬 IDE에서 직접 실행 시: http://localhost:2358
 # 언어 ID와 런타임은 실행 중인 Judge0 서버에서 확인한다.
 JUDGE0_IMAGE=judge0/judge0:1.13.1-extra
+JUDGE0_SERVER_IMAGE=
+JUDGE0_WORKER_IMAGE=
 JUDGE0_SERVER_PORT=2358
 JUDGE0_BASE_URL=http://judge0-server:2358
 JUDGE0_AUTH_HEADER=X-Auth-Token
@@ -209,7 +211,9 @@ Spring 설정 키는 각각 `contest.ranking-cache.ttl-seconds`, `contest.rankin
 
 | 환경변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `JUDGE0_IMAGE` | `judge0/judge0:1.13.1-extra` | Judge0 서버와 worker가 사용하는 이미지 |
+| `JUDGE0_IMAGE` | `judge0/judge0:1.13.1-extra` | 서버·워커 전용 이미지가 비어 있을 때 사용하는 공통 이미지 |
+| `JUDGE0_SERVER_IMAGE` | 빈 값 | 레지스트리에 게시한 Judge0 API 서버 이미지 주소와 버전 태그 |
+| `JUDGE0_WORKER_IMAGE` | 빈 값 | 레지스트리에 게시한 Judge0 워커 이미지 주소와 버전 태그 |
 | `JUDGE0_SERVER_PORT` | `2358` | 호스트의 로컬 인터페이스에 공개할 Judge0 API 포트 |
 | `JUDGE0_BASE_URL` | 실행 환경별 | Judge0 서버 주소. 같은 Docker 네트워크의 서버는 해당 서비스명으로 연결하고, 호스트에서 실행하는 judge-service는 호스트에 공개된 주소로 연결한다. |
 | `JUDGE0_AUTH_HEADER` | `X-Auth-Token` | Judge0 서버가 요구하는 인증 헤더 이름 |
@@ -283,6 +287,15 @@ docker compose logs redis
 Judge0는 Compose 프로필(`judge0`)로 분리되어 있다. 일반 `docker compose up`에는 포함되지 않는다.
 
 ### 5.1 가동과 언어 목록 확인
+
+게시된 cgroup v2 이미지를 사용할 때는 `.env`에 `JUDGE0_SERVER_IMAGE`와 `JUDGE0_WORKER_IMAGE`를 지정한다. cgroup v2를 지원하는 호스트에서 워커 전용 cgroup 네임스페이스 설정을 함께 적용한다.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.judge0-cgroup-v2.yml --profile judge0 pull judge0-server judge0-worker judge0-db judge0-redis
+docker compose -f docker-compose.yml -f docker-compose.judge0-cgroup-v2.yml --profile judge0 up -d --no-build judge0-server judge0-worker
+```
+
+공통 이미지를 사용하는 기본 구성은 아래 명령으로 실행한다.
 
 ```bash
 # Judge0 서비스 스택 시작과 상태 확인
