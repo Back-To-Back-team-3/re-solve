@@ -4329,8 +4329,8 @@
 
 - **Method / URI:** `POST /api/v1/admin/judge-jobs/{judgeJobId}/recoveries`
 - **인증:** `ADMIN`
-- **Idempotency:** 있음
-- **대응 테이블:** `judge_jobs`, `judge_job_runs`, `audit_logs`
+- **Idempotency:** `Idempotency-Key` 필수(ASCII 1~100자). 관리자·작업·키와 양끝 공백을 제거한 사유의 해시를 저장한다. 같은 요청은 최초 202 응답을 반환하고 다른 사유는 `IDEMPOTENCY_KEY_CONFLICT`(422)다.
+- **대응 테이블:** `judge_jobs`, `judge_job_runs`, `submissions`, `audit_logs`, `judge_recovery_requests`
 - **설명:** 종결되지 않은 작업을 같은 회차 안에서 재개한다(임대 해제 → `RETRY_WAITING`). 새 회차를 만들지 않고, 종결 상태를 되살리거나 시도 상한·처리 기한을 우회하지 않는다.
 - **요청 바디:**
     
@@ -4346,6 +4346,8 @@
     
 - **에러:**
     - `SUBMISSION_NOT_FOUND`(404), `SUBMISSION_REJUDGE_NOT_ALLOWED`(409) / 이미 종결된 작업
+
+- **동시성/멱등 보장:** 복구 요청 → 채점 작업 → 제출 순서로 잠근다. `RUNNING` 복구는 현재 시도를 `SYSTEM_ERROR`로 종결하고 다음 시도로 전환하므로 상한 3회에서는 거절한다. 대기 작업은 시도 수를 유지하며, `UNKNOWN`은 기존 30초 유예를 보존한다. 기한·최신 회차·종결 여부를 잠금 후 재검증하고 작업·제출·감사를 함께 커밋한다.
 
 ### 3.3 내부 API
 
