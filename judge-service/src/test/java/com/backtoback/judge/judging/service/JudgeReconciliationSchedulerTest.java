@@ -45,7 +45,7 @@ class JudgeReconciliationSchedulerTest {
         given(store.reconciliationCandidates(0)).willReturn(List.of(missing, failed));
         given(store.reconciliationCandidates(2)).willReturn(List.of(waiting));
         given(store.reconciliationCandidates(3)).willReturn(List.of());
-        given(dataClient.find(1, 1)).willThrow(new IllegalStateException("metadata unavailable"));
+        given(dataClient.findForReconciliation(1, 1)).willThrow(new IllegalStateException("metadata unavailable"));
         var scheduler = new JudgeReconciliationScheduler(store, dataClient, meters);
 
         scheduler.reconcile();

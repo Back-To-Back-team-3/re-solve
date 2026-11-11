@@ -90,7 +90,7 @@ public class JudgeReconciliationScheduler {
                     }
                     var data
                         = "SUCCEEDED".equals(candidate.jobStatus())
-                            ? dataClient.find(candidate.problemId(), candidate.revisionId()) : null;
+                            ? dataClient.findForReconciliation(candidate.problemId(), candidate.revisionId()) : null;
                     recordItem(store.reconcile(candidate, data) ? "corrected" : "skipped");
                 } catch (RuntimeException failure) {
                     recordItem("failed");

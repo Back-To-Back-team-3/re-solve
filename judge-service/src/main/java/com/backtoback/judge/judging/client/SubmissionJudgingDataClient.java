@@ -1,6 +1,7 @@
 package com.backtoback.judge.judging.client;
 
 import java.net.http.HttpClient;
+import java.time.Duration;
 
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -16,6 +17,7 @@ import com.backtoback.judge.submission.config.SubmissionClientProperties;
 @Component
 public class SubmissionJudgingDataClient {
     private final RestClient client;
+    private final RestClient reconciliationClient;
 
     /**
      * 기존 내부 주소·타임아웃·상관관계 전파 설정을 재사용한다.
@@ -24,15 +26,29 @@ public class SubmissionJudgingDataClient {
      * @param properties 기존 내부 HTTP 설정
      */
     public SubmissionJudgingDataClient(RestClient.Builder builder, SubmissionClientProperties properties) {
-        var http
-            = HttpClient
-                .newBuilder()
-                .connectTimeout(properties.timeout())
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build();
+        client = createClient(builder, properties, properties.timeout());
+        Duration timeout
+            = properties.timeout().compareTo(Duration.ofSeconds(2)) > 0 ? Duration.ofSeconds(2) : properties.timeout();
+        reconciliationClient = createClient(builder, properties, timeout);
+    }
+
+    /**
+     * 연결과 응답 읽기를 같은 상한으로 제한하고 공통 추적 설정을 유지한다.
+     *
+     * @param builder 공통 추적 설정을 적용한 빌더
+     * @param properties 내부 HTTP 주소 설정
+     * @param timeout 연결·응답 읽기 각각의 제한시간
+     * @return 제한시간을 적용한 클라이언트
+     */
+    private static RestClient createClient(
+        RestClient.Builder builder,
+        SubmissionClientProperties properties,
+        Duration timeout
+    ) {
+        var http = HttpClient.newBuilder().connectTimeout(timeout).followRedirects(HttpClient.Redirect.NEVER).build();
         var factory = new JdkClientHttpRequestFactory(http);
-        factory.setReadTimeout(properties.timeout());
-        client = builder.clone().baseUrl(properties.problemBaseUrl().toString()).requestFactory(factory).build();
+        factory.setReadTimeout(timeout);
+        return builder.clone().baseUrl(properties.problemBaseUrl().toString()).requestFactory(factory).build();
     }
 
     /**
@@ -41,9 +57,34 @@ public class SubmissionJudgingDataClient {
      * @param problemId 문제 식별자
      * @param revisionId 접수 시 고정한 문제 회차 식별자
      * @return 검증한 고정 회차 채점 자료
-     * @throws JudgeException 조회 또는 응답 검증에 실패한 경우 COMMON_DEPENDENCY_UNAVAILABLE
+     * @throws JudgeException 조회 또는 응답 검증에 실패한 경우 {@code COMMON_DEPENDENCY_UNAVAILABLE}
      */
     public SubmissionJudgingDataResponse find(long problemId, long revisionId) {
+        return find(client, problemId, revisionId);
+    }
+
+    /**
+     * 대사 회차의 15초 잔여 예산 안에서 연결·응답 읽기를 각각 최대 2초로 제한한다. (스케줄러 §3.4)
+     *
+     * @param problemId 문제 식별자
+     * @param revisionId 접수 시 고정한 문제 회차 식별자
+     * @return 검증한 고정 회차 채점 자료
+     * @throws JudgeException 조회 또는 응답 검증에 실패한 경우 {@code COMMON_DEPENDENCY_UNAVAILABLE}
+     */
+    public SubmissionJudgingDataResponse findForReconciliation(long problemId, long revisionId) {
+        return find(reconciliationClient, problemId, revisionId);
+    }
+
+    /**
+     * 지정 클라이언트의 응답을 동일한 고정 회차 계약으로 검증한다.
+     *
+     * @param client 제한시간을 적용한 클라이언트
+     * @param problemId 문제 식별자
+     * @param revisionId 고정한 문제 회차 식별자
+     * @return 검증한 채점 자료
+     * @throws JudgeException 조회 또는 응답 검증에 실패한 경우 {@code COMMON_DEPENDENCY_UNAVAILABLE}
+     */
+    private SubmissionJudgingDataResponse find(RestClient client, long problemId, long revisionId) {
         try {
             var response
                 = client
