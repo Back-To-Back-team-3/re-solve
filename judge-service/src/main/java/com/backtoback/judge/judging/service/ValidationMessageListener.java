@@ -1,6 +1,10 @@
 package com.backtoback.judge.judging.service;
 
+import java.util.List;
+
 import com.backtoback.common.event.service.EventConsumer;
+import com.backtoback.common.event.service.EventHandler;
+import com.backtoback.common.event.service.EventMessageDecoder;
 
 import io.awspring.cloud.sqs.annotation.SqsListener;
 import io.awspring.cloud.sqs.listener.acknowledgement.Acknowledgement;
@@ -10,6 +14,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ValidationMessageListener {
     private final EventConsumer consumer;
+    private final EventMessageDecoder decoder;
+    private final List<EventHandler> handlers;
 
     /**
      * 검증 메시지의 소비와 커밋 후 삭제를 공통 소비기에 위임한다.
@@ -17,14 +23,22 @@ public class ValidationMessageListener {
      *
      * @param message SQS 원문 또는 SNS 봉투
      * @param acknowledgement 동기 수동 삭제 동작
+     * @throws IllegalArgumentException 검증 큐에서 지원하지 않는 이벤트 종류·버전인 경우
      * @throws RuntimeException 처리·커밋·메시지 삭제가 실패한 경우
      */
     @SqsListener(
         value = "${judge.messaging.validation-queue-url}",
-        factory = "judgeValidationListenerFactory",
+        factory = "judgeManualAckListenerFactory",
         acknowledgementMode = "MANUAL"
     )
     public void receive(String message, Acknowledgement acknowledgement) {
+        var metadata = decoder.decode(message).metadata();
+        String type = metadata.eventType();
+        if ("ProblemValidationRequested".equals(type) ? !"v1".equals(metadata.schemaVersion())
+            : SubmissionMessageListener.isSubmissionRequest(type)
+                || handlers.stream().anyMatch(handler -> handler.eventType().equals(type))) {
+            throw new IllegalArgumentException("검증 큐에서 지원하지 않는 이벤트입니다.");
+        }
         consumer.consume(message, acknowledgement::acknowledge);
     }
 }

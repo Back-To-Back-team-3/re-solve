@@ -66,3 +66,4 @@ judge:
     enabled: ${JUDGE_MESSAGING_ENABLED:false}
     topic-arn: ${JUDGE_EVENTS_TOPIC_ARN:}
     validation-queue-url: ${PROBLEM_VALIDATION_QUEUE_URL:}
+    submission-queue-url: ${JUDGE_SUBMISSION_QUEUE_URL:}
