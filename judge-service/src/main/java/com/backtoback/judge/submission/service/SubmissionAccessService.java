@@ -77,6 +77,19 @@ public class SubmissionAccessService {
         );
     }
 
+    /** 시험 문맥의 권한을 확인한 뒤 고정 회차의 실행 환경을 조회한다. */
+    public JudgeRuntime examRunRuntime(long problemId, long revisionId, String language) {
+        var validation = dependencies.validation(problemId, revisionId);
+        require(
+            validation != null && Long.toString(problemId).equals(validation.problemId())
+                && Long.toString(revisionId).equals(validation.problemRevisionId())
+        );
+        return runtime(
+            language,
+            profiles(validation.supportedLanguages(), validation.executionProfiles()).get(language)
+        );
+    }
+
     /**
      * 문제·회차 소속과 일반 공개 조건 및 테스트 식별자를 확인한다.
      *

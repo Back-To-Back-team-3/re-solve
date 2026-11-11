@@ -30,6 +30,11 @@ public record RunRequest(
                 || customInputs.stream().anyMatch(value -> value == null || value.argumentTexts() == null))) {
             throw new JudgeException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
+        validateSourceSize(sourceCode);
+    }
+
+    /** 일반·시험 Run에 같은 UTF-8 코드 크기 제한을 적용한다. */
+    public static void validateSourceSize(String sourceCode) {
         if (sourceCode.getBytes(StandardCharsets.UTF_8).length > 64 * 1024) {
             throw new JudgeException(JudgeErrorCode.CODE_TOO_LARGE);
         }
