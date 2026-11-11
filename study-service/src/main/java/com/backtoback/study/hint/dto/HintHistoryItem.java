@@ -1,7 +1,9 @@
 package com.backtoback.study.hint.dto;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.hint.domain.HintRequest;
 import com.backtoback.study.hint.domain.HintRequestStatus;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -15,8 +17,8 @@ public record HintHistoryItem(
     HintRequestStatus status,
     @JsonProperty("isFallback") boolean fallback,
     String content,
-    LocalDateTime requestedAt,
-    LocalDateTime completedAt
+    OffsetDateTime requestedAt,
+    OffsetDateTime completedAt
 ) {
 
     public static HintHistoryItem from(HintRequest request) {
@@ -26,8 +28,12 @@ public record HintHistoryItem(
             request.getStatus(),
             request.isFallback(),
             request.getContent(),
-            request.getCreatedAt(),
-            request.getCompletedAt()
+            toSeoulOffset(request.getCreatedAt()),
+            toSeoulOffset(request.getCompletedAt())
         );
+    }
+
+    private static OffsetDateTime toSeoulOffset(LocalDateTime ldt) {
+        return ldt == null ? null : ldt.atZone(ClockConfiguration.SERVICE_ZONE).toOffsetDateTime();
     }
 }

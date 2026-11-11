@@ -1,7 +1,9 @@
 package com.backtoback.study.hint.dto;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
+import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.hint.domain.HintRequest;
 import com.backtoback.study.hint.domain.HintRequestStatus;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -18,13 +20,14 @@ public record HintDetailResponse(
     @JsonProperty("isFallback") boolean fallback,
     String blockedReason,
     String content,
-    LocalDateTime completedAt
+    OffsetDateTime completedAt
 ) {
 
     public static HintDetailResponse from(HintRequest request) {
         HintRequestStatus status = request.getStatus();
         // BLOCKED 상태이면 content를 노출하지 않는다 (api-spec §6.1.3).
         String content = status == HintRequestStatus.BLOCKED ? null : request.getContent();
+        LocalDateTime completedAt = request.getCompletedAt();
 
         return new HintDetailResponse(
             String.valueOf(request.getId()),
@@ -34,7 +37,7 @@ public record HintDetailResponse(
             request.isFallback(),
             request.getBlockedReason(),
             content,
-            request.getCompletedAt()
+            completedAt == null ? null : completedAt.atZone(ClockConfiguration.SERVICE_ZONE).toOffsetDateTime()
         );
     }
 }
