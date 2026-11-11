@@ -97,6 +97,7 @@ flowchart LR
         C[contest]
         S[study]
         I[integration]
+        A[ai]
     end
     subgraph TOPIC["SNS 토픽"]
         TM[member-events]
@@ -105,6 +106,7 @@ flowchart LR
         TC[contest-events]
         TS[study-events]
         TI[integration-events]
+        TA[ai-events]
     end
     subgraph QUEUE["SQS 소비 큐 (+DLQ)"]
         QM[member-queue]
@@ -123,6 +125,8 @@ flowchart LR
     C --> TC
     S --> TS
     I --> TI
+    A --> TA
+    TA --> QS
     C -->|"Exam/ContestSubmissionRequested"| QX
     M -->|"DiagnosisSubmissionRequested"| QX
     QX --> JS[judge consumer]
@@ -146,6 +150,7 @@ flowchart LR
 | `contest-events` | contest | 동일 | 참가·상태·확정 |
 | `study-events` | study | 동일 | 스터디·문제집·힌트 |
 | `integration-events` | integration | 동일 | `GitHubSyncFailed` |
+| `ai-events` | ai | `eventType`, `schemaVersion` | LLM 힌트 생성 결과 |
 - 구독은 Raw Message Delivery를 켜서 SQS 본문이 이벤트 JSON 그대로가 되게 한다.
 - 로컬·CI는 LocalStack으로 같은 토픽·큐·구독을 Terraform(또는 init 스크립트)으로 생성한다(기획서 T1-02).
 
@@ -219,6 +224,7 @@ flowchart LR
 | S7 | `AssignmentIncompleteRepeated` v1 | study | notification | SNS | 연속 2회 `INCOMPLETE` 발견 | — | 확정 |
 | S8 | `HintReady` v1 | study (AI 모듈) | notification, member(확정 필요) | SNS | 힌트 종결 (`READY`·`FALLBACK`·`BLOCKED`) | — | 확정 |
 | S9 | `HintRequested` v1 | study | ai | SNS | `hint_requests` REQUESTED INSERT와 같은 트랜잭션에서 Outbox 기록. aggregate = `hintRequestId` | — | 확정 |
+| A1 | `HintReady` v1 | ai | study | SNS `ai-events` → `study-queue` | LLM 힌트 생성 완료 (캐시 미적중 경로). aggregate = `hintRequestId` | — | 확정 |
 | I1 | `GitHubSyncFailed` v1 | integration | notification | SNS | Sync Job 최종 `FAILED` | — | 확정 |
 - API B.2와 다른 행: `StudyMemberJoined` 구독에서 notification 제외(대응 알림 유형 없음, API 7.0), `ContestParticipantRegistered`·`Canceled` 구독에서 notification 제외(대회는 `ContestStarted`로 알림). `MemberUpdated`·`MemberSuspended`의 "전 서비스"는 `member_replicas` 보유 서비스(problem·contest·study, ERD §3)로 한정했다. 근거는 §8.1.
 
@@ -952,6 +958,28 @@ flowchart LR
 | 필드 | `syncJobId`, `memberId`, `submissionId`, `problemId`, `problemTitle`(추가 제안), `errorCode`(`RATE_LIMIT_EXHAUSTED` / `GITHUB_5XX` / `AUTH_EXPIRED` / `REPOSITORY_NOT_FOUND` / `CODE_UNAVAILABLE`), `failedAt` |
 | 소비자 | notification: `GITHUB_SYNC_FAILED`, `AUTH_EXPIRED`면 재인가 안내 링크 |
 
+### 4.7 ai (담당 D)
+
+#### A1 `HintReady` v1
+
+- **발행:** LLM 힌트 생성 완료 시. study-service가 `REQUESTED → GENERATING` 전이 허용 후 LLM 처리. 결과가 `READY` / `FALLBACK`이면 발행하고, ai-service는 Outbox를 사용하지 않는다. aggregate = `hintRequestId`.
+- **경로:** SNS `ai-events` 팬아웃 → SQS `study-queue`.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `hintRequestId` | string | Y | `hint_requests.id` |
+| `memberId` | string | Y |  |
+| `problemId` | string | Y |  |
+| `problemRevisionId` | string | Y | Redis 캐시 키 `hint:cache:{problemRevisionId}:{level}` |
+| `level` | integer (1~3) | Y |  |
+| `result` | string | Y | `READY` / `FALLBACK` |
+| `isCached` | boolean | Y | true = Redis 캐시 적중 (ai-queue로 재수신된 경우 없음; 항상 false) |
+| `completedAt` | string (date-time) | Y | LLM 처리 완료 시각 |
+
+| 소비자 | 처리 |
+| --- | --- |
+| study | `REQUESTED·GENERATING → READY·FALLBACK` 전이 (WHERE status = GENERATING) → S8 `HintReady` Outbox 발행 |
+
 ## 5. 서비스별 구독 매트릭스
 
 이 표가 SNS 구독 필터 정책의 원본이다. ● = 구독, ○ = 구독(확정 필요), 빈칸 = 구독 안 함.
@@ -996,10 +1024,11 @@ flowchart LR
 | `AssignmentPublished` |  |  |  |  |  | ● |  |  |
 | `AssignmentDeadlineApproaching` |  |  |  |  |  | ● |  |  |
 | `AssignmentIncompleteRepeated` |  |  |  |  |  | ● |  |  |
-| `HintReady` |  | ○ |  |  |  | ● |  |  |
+| `HintReady` (S8, study-events) |  | ○ |  |  |  | ● |  |  |
+| `HintReady` (A1, ai-events) |  |  |  |  | ● |  |  |  |
 | `HintRequested` |  |  |  |  |  |  |  | ● |
 | `GitHubSyncFailed` |  |  |  |  |  | ● |  |  |
-| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 18 | 19 | 2 | 1 |
+| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 19 | 19 | 2 | 1 |
 
 ### 5.1 소비자 구현 체크리스트
 
