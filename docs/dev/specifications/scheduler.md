@@ -364,7 +364,7 @@
 | --- | --- |
 | 실행 방식 | `fixedDelay = 5분`, `initialDelay = 5분` |
 | 잠금 | ShedLock `JudgeReconciliationScheduler`, `lockAtMostFor = 4분` |
-| 대상 조회 | `submissions.status IN ('QUEUED','JUDGING') AND updated_at < now() - 2분`과 최신 회차 작업 조인 / `idx_submissions_status_updated_at` |
+| 대상 조회 | `submissions.status IN ('QUEUED','JUDGING','RETRY_WAITING') AND updated_at < now() - 2분`과 최신 회차 작업 조인 / `idx_submissions_status_updated_at` |
 
 | 불일치 | 원인 추정 | 조치 |
 | --- | --- | --- |
@@ -374,6 +374,9 @@
 | 제출 `QUEUED`/`JUDGING`, 작업 `FAILED` | 동일 | 제출 `FAILED` + `SubmissionFailed` |
 | 작업 `RUNNING` 임대 만료 | 회수 지연 | 3.2에 위임 |
 - 모든 보정은 제출 행 `WHERE status = :observed AND judge_attempt = :attempt` 조건부 UPDATE. 정상 경로가 먼저 끝났으면 0행.
+- 회차당 최대 100건·2분 안에서 처리하며 상태 대사는 선점·임대 회수와 분리된 유지보수 스케줄러를 사용한다. 성공 이벤트의 고정 회차 메타데이터는 행 잠금 밖에서 조회하고, 건별 트랜잭션에서 작업·제출 순서로 잠근 뒤 회차·관측 상태를 재검증한다.
+- 기존 제출에 남아 있는 `RETRY_WAITING`도 대사 대상으로 포함하고, 최신 작업이 대기 중이면 정책 §3.2의 제출 상태인 `QUEUED`로 정규화한다.
+- 성공 보정은 기존 테스트 결과로 집계하고 작업의 종결 시각과 실행 시도 이력을 보존하되 제출의 갱신 시각은 보정 시각으로 기록한다. 작업 누락은 WARN 로그와 `judge.reconciliation.missing.jobs` 지표로 운영에 알리며 임의 작업을 생성하지 않는다.
 
 ### 3.5 `RunLockReconciliationScheduler` — Run 락 정리
 
