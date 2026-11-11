@@ -120,7 +120,7 @@ Put new files in the existing structure below. If a new top-level directory is n
 1. Tailwind utility classes.
 2. If a new design token is needed, add it to `@theme inline` in `src/styles/tokens.css`, then use it via Tailwind.
 3. Responsive: use Tailwind breakpoints (`sm:`, `md:`, `lg:`). Do not write media queries directly.
-4. Do not reference CSS variables directly in `className` (`var(--)` belongs in `tokens.css`), write `style={{}}`, or use CSS Modules.
+4. Do not: reference CSS variables directly in `className` (`var(--)` belongs in `tokens.css`), use `style={{}}`, or use CSS Modules.
 
 ## 15. page.tsx role
 
