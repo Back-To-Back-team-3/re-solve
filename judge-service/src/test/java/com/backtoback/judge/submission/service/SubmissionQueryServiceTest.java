@@ -3,6 +3,8 @@ package com.backtoback.judge.submission.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.List;
+
 import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +28,9 @@ import com.backtoback.judge.global.config.PersistenceConfiguration;
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
+import com.backtoback.judge.submission.domain.Submission.Context;
+import com.backtoback.judge.submission.dto.SubmissionListRequest;
+import com.backtoback.judge.submission.dto.SubmissionListResponse;
 
 import jakarta.persistence.EntityManagerFactory;
 
@@ -76,44 +81,84 @@ class SubmissionQueryServiceTest {
         }
     }
 
-    /** 본인 시험 제출을 제외하고 엔티티를 적재하지 않는 요약 페이지와 필터를 검증한다. */
+    /** 본인 제출만 안정적으로 페이지에 담고 시험·진단의 판정과 실행 지표를 가린다. */
     @Test
-    @DisplayName("일반 제출 요약만 조회하고 시험 제출 제외·판정 필터·안정적인 정렬을 적용한다")
+    @DisplayName("내 제출 목록은 본인 시험·진단을 포함하고 상세 연결 ID만 공개한다")
     void listsOwnedPage() {
-        jdbc.update("""
-            INSERT INTO submissions(id,member_id,problem_id,problem_revision_id,context,context_id,
-            source_submission_id,language,source_code,code_size_bytes,status,verdict,judge_attempt,submitted_at,
-            created_at,updated_at)
-            VALUES (4,1,1,1,'EXAM',1,1,'java','exam',4,'COMPLETED','AC',1,
-            '2026-10-31 09:00:00','2026-10-31 09:00:00','2026-10-31 09:00:00')
-            """);
+        insertExternal(4, 1, Context.EXAM, 41);
+        insertExternal(5, 1, Context.DIAGNOSIS, 51);
+        insertExternal(6, 1, Context.CONTEST, 61);
+        insertExternal(7, 2, Context.DIAGNOSIS, 71);
+        jdbc.update("UPDATE submissions SET max_time_ms=12,max_memory_kb=8192 WHERE id=1");
+
         var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         statistics.clear();
-        var page
-            = queries
-                .list(1, new com.backtoback.judge.submission.dto.SubmissionListRequest("1", null, null, 0, 1, null));
-        assertThat(page.totalElements()).isEqualTo(2);
-        assertThat(page.content().getFirst().submissionId()).isEqualTo("2");
-        assertThat(page.hasNext()).isTrue();
-        var filtered
-            = queries
-                .list(
-                    1,
-                    new com.backtoback.judge.submission.dto.SubmissionListRequest(
-                        "1",
-                        null,
-                        JudgeVerdict.AC,
-                        0,
-                        20,
-                        null
-                    )
-                );
-        assertThat(filtered.content()).hasSize(1);
-        assertThat(filtered.content().getFirst().submissionId()).isEqualTo("1");
+        var first = queries.list(1, new SubmissionListRequest("1", null, null, 0, 2, null));
+        assertThat(first.totalElements()).isEqualTo(4);
+        assertThat(first.hasNext()).isTrue();
+        assertThat(first.content()).extracting(SubmissionListResponse::submissionId).containsExactly("5", "4");
+        assertThat(first.content()).extracting(SubmissionListResponse::contextId).containsExactly("51", "41");
+        assertThat(first.content()).extracting(SubmissionListResponse::context).containsExactly("DIAGNOSIS", "EXAM");
+        assertThat(first.content())
+            .extracting(SubmissionListResponse::submittedAt)
+            .containsExactly("2026-10-31T09:00:00+09:00", "2026-10-31T09:00:00.000000+09:00");
+        assertThat(first.content()).allSatisfy(item -> {
+            assertThat(item.status()).isEqualTo("COMPLETED");
+            assertThat(item.verdict()).isNull();
+            assertThat(item.maxTimeMs()).isNull();
+            assertThat(item.maxMemoryKb()).isNull();
+        });
+
+        var second = queries.list(1, new SubmissionListRequest("1", null, null, 1, 2, null));
+        assertThat(second.hasNext()).isFalse();
+        assertThat(second.content()).extracting(SubmissionListResponse::submissionId).containsExactly("2", "1");
+        var practice = second.content().getLast();
+        assertThat(practice.submittedAt()).isEqualTo("2026-10-31T09:00:00+09:00");
+        assertThat(practice.contextId()).isNull();
+        assertThat(practice.verdict()).isEqualTo(JudgeVerdict.AC);
+        assertThat(practice.maxTimeMs()).isEqualTo(12);
+        assertThat(practice.maxMemoryKb()).isEqualTo(8192);
         assertThat(statistics.getEntityLoadCount()).isZero();
-        assertThat(page.content()).extracting(value -> value.submissionId()).doesNotContain("4");
-        assertThat(filtered.content().getFirst().language()).isEqualTo("java");
-        assertThat(filtered.content().getFirst().status()).isEqualTo("COMPLETED");
+    }
+
+    /** 문맥과 판정 필터를 조합해도 가린 판정이 목록이나 페이지 건수에 반영되지 않는다. */
+    @Test
+    @DisplayName("시험·진단 AC는 판정 필터의 조회 결과와 페이지 건수에서 제외된다")
+    void excludesMaskedVerdictsFromFiltering() {
+        insertExternal(4, 1, Context.EXAM, 41);
+        insertExternal(5, 1, Context.DIAGNOSIS, 51);
+
+        for (var context : List.of(Context.EXAM, Context.DIAGNOSIS)) {
+            var unfiltered = queries.list(1, new SubmissionListRequest(null, context, null, 0, 20, null));
+            assertThat(unfiltered.content()).hasSize(1);
+
+            var filtered = queries.list(1, new SubmissionListRequest(null, context, JudgeVerdict.AC, 0, 20, null));
+            assertThat(filtered.content()).isEmpty();
+            assertThat(filtered.totalElements()).isZero();
+        }
+
+        var filtered = queries.list(1, new SubmissionListRequest(null, null, JudgeVerdict.AC, 0, 1, null));
+        assertThat(filtered.content()).extracting(SubmissionListResponse::submissionId).containsExactly("1");
+        assertThat(filtered.totalElements()).isEqualTo(1);
+        assertThat(filtered.hasNext()).isFalse();
+    }
+
+    /**
+     * 판정·지표를 가진 외부 제출을 저장한다.
+     *
+     * @param id Judge 제출 ID
+     * @param memberId 제출 소유자 ID
+     * @param context 제출 문맥
+     * @param contextId 시험·대회·진단 식별자
+     */
+    private void insertExternal(long id, long memberId, Context context, long contextId) {
+        jdbc.update("""
+            INSERT INTO submissions(id,member_id,problem_id,problem_revision_id,context,context_id,
+                source_submission_id,language,source_code,code_size_bytes,status,verdict,judge_attempt,max_time_ms,
+                max_memory_kb,submitted_at,created_at,updated_at)
+            VALUES (?,?,1,1,?,?,?,'java','x',1,'COMPLETED','AC',1,12,8192,
+                '2026-10-31 09:00:00','2026-10-31 09:00:00','2026-10-31 09:00:00')
+            """, id, memberId, context.name(), contextId, id + 100);
     }
 
     /** 타인·미존재·시험 제출을 동일한 오류 코드로 숨기는지 확인한다. */
