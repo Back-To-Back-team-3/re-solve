@@ -30,7 +30,7 @@ public record SubmissionTestResultsResponse(List<TestResult> content) {
         int testOrder();
     }
 
-    /** 공개 테스트 원문과 현재 실행 시도의 확정 결과. */
+    /** 공개 테스트 원문과 채점 회차에서 공개할 확정 결과. */
     public record PublicTest(
         int testOrder,
         boolean isSample,
@@ -45,7 +45,7 @@ public record SubmissionTestResultsResponse(List<TestResult> content) {
          * 공개 원문과 결과를 조합하며 미확정 시도의 측정값·출력은 숨긴다.
          *
          * @param test 저장된 공개 테스트 결과
-         * @param verdict 현재 시도의 공개 가능한 판정, 미확정이면 null
+         * @param verdict 채점 회차에서 공개 가능한 판정, 미확정이면 null
          * @param source 버전·체크섬 검증을 마친 공개 원문
          * @return 공개 테스트 결과 응답
          */
@@ -70,7 +70,7 @@ public record SubmissionTestResultsResponse(List<TestResult> content) {
          * 숨김 테스트 판정을 통과 여부로만 변환한다.
          *
          * @param testOrder 고정 테스트 순서
-         * @param verdict 현재 시도의 공개 가능한 판정, 미확정이면 null
+         * @param verdict 채점 회차에서 공개 가능한 판정, 미확정이면 null
          * @return 번호와 통과 여부, 미확정이면 통과 여부는 null
          */
         public static HiddenTest from(int testOrder, JudgeVerdict verdict) {
