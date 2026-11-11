@@ -1,6 +1,10 @@
-package com.backtoback.judge.judging.store;
+package com.backtoback.judge.judging.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -10,7 +14,10 @@ import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -20,7 +27,6 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
-import com.backtoback.common.event.config.OutboxStorageConfiguration;
 import com.backtoback.judge.global.config.PersistenceConfiguration;
 
 /** 실제 Judge DB 상태로 대기열 지표의 관측 전용 계약을 확인한다. */
@@ -30,22 +36,20 @@ import com.backtoback.judge.global.config.PersistenceConfiguration;
 @Import(
     {
         PersistenceConfiguration.class,
-        OutboxStorageConfiguration.class,
-        SubmissionExecutionStore.class,
-        com.backtoback.judge.judging.service.JudgeQueueMetrics.class,
-        SubmissionReconciliationStoreTest.Beans.class
+        JudgeQueueMetrics.class,
+        JudgeQueueMetricsTest.Beans.class
     }
 )
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Testcontainers(disabledWithoutDocker = true)
-class JudgeQueueMetricsStoreTest {
+class JudgeQueueMetricsTest {
     @Container
     static final MySQLContainer MYSQL
         = new MySQLContainer("mysql:8.4").withCommand("--log-bin-trust-function-creators=1");
     @Autowired
     private JdbcTemplate jdbc;
     @Autowired
-    private com.backtoback.judge.judging.service.JudgeQueueMetrics metrics;
+    private JudgeQueueMetrics metrics;
 
     /**
      * 독립 MySQL 스키마를 제공한다.
@@ -101,6 +105,20 @@ class JudgeQueueMetricsStoreTest {
             assertThat(registry.get("scheduler.backlog.oldest.seconds").gauge().value()).isZero();
         } finally {
             registry.close();
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class Beans {
+        /**
+         * 대기 시간 관측에 사용하는 시각을 고정한다.
+         *
+         * @return 준비한 작업보다 3분 뒤인 시계
+         */
+        @Bean
+        @Primary
+        Clock testClock() {
+            return Clock.fixed(Instant.parse("2026-10-31T00:03:00Z"), ZoneOffset.UTC);
         }
     }
 }

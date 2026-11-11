@@ -64,7 +64,7 @@ public class JudgeQueueMetrics implements MeterBinder {
     }
 
     /**
-     * 가장 오래된 PENDING 작업의 대기 시간을 조회한다.
+     * 가장 오래된 {@code PENDING} 작업의 대기 시간을 조회한다.
      *
      * @return 대기 작업이 없으면 0, 있으면 음수가 아닌 대기 초
      */
