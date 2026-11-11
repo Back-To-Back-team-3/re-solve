@@ -10,6 +10,7 @@ import com.backtoback.common.api.PageResponse;
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.submission.domain.Submission;
+import com.backtoback.judge.submission.domain.Submission.Context;
 import com.backtoback.judge.submission.dto.SubmissionListRequest;
 import com.backtoback.judge.submission.dto.SubmissionListResponse;
 import com.backtoback.judge.submission.dto.SubmissionSourceResponse;
@@ -17,14 +18,14 @@ import com.backtoback.judge.submission.repository.SubmissionRepository;
 
 import lombok.RequiredArgsConstructor;
 
-/** 인증 회원의 일반 풀이만 조회하며 타인 제출과 미존재를 같은 404로 처리한다. */
+/** 인증 회원의 제출 목록과 본인 일반 풀이의 원본 코드를 조회한다. */
 @Service
 @RequiredArgsConstructor
 public class SubmissionQueryService {
     private final SubmissionRepository submissions;
 
     /**
-     * 본인 일반 제출의 요약 필드만 조회하고 안정적인 정렬로 페이지를 반환한다.
+     * 본인 일반·시험·진단 제출을 안정적으로 정렬한다. 판정 검색은 일반 제출로 제한한다.
      *
      * @param memberId 인증 회원 ID
      * @param request 검증된 목록 필터와 페이지 조건
@@ -33,14 +34,14 @@ public class SubmissionQueryService {
     @Transactional(readOnly = true)
     public PageResponse<SubmissionListResponse> list(long memberId, SubmissionListRequest request) {
         Specification<Submission> filter = (root, query, builder) -> {
-            var predicate
-                = builder
-                    .and(
-                        builder.equal(root.get("memberId"), memberId),
-                        builder.equal(root.get("context"), Submission.Context.PRACTICE)
-                    );
+            var context = root.<Context>get("context");
+            // 판정을 가린 제출은 판정별 조회 결과와 페이지 건수에서도 드러나지 않도록 제외한다.
+            var visibleContexts
+                = request.verdict() == null ? context.in(Context.PRACTICE, Context.EXAM, Context.DIAGNOSIS)
+                    : builder.equal(context, Context.PRACTICE);
+            var predicate = builder.and(builder.equal(root.get("memberId"), memberId), visibleContexts);
             if (request.context() != null) {
-                predicate = builder.and(predicate, builder.equal(root.get("context"), request.context()));
+                predicate = builder.and(predicate, builder.equal(context, request.context()));
             }
             if (request.problemId() != null) {
                 predicate

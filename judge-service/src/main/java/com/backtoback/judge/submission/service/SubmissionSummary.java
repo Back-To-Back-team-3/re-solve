@@ -12,6 +12,7 @@ import com.backtoback.judge.submission.domain.Submission;
  * @param problemId 문제 ID
  * @param language 제출 언어
  * @param context 제출 문맥
+ * @param contextId 시험 또는 진단 ID; 일반 풀이는 {@code null}
  * @param status 현재 제출 상태
  * @param verdict 대표 판정
  * @param maxTimeMs 최대 실행 시간
@@ -23,6 +24,7 @@ public record SubmissionSummary(
     long problemId,
     String language,
     Submission.Context context,
+    Long contextId,
     Submission.Status status,
     JudgeVerdict verdict,
     Integer maxTimeMs,

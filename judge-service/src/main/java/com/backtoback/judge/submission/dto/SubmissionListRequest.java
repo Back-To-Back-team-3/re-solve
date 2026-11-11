@@ -7,7 +7,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 
-/** 일반 풀이 목록 필터. 문맥별 결과 공개 연동 전에는 PRACTICE만 조회한다. */
+/** 내 일반·시험·진단 제출 목록의 조회 조건. */
 public record SubmissionListRequest(
     @Pattern(
         regexp = "[1-9][0-9]{0,18}",
