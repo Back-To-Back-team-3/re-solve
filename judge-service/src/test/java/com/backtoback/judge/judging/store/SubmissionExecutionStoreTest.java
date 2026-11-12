@@ -430,6 +430,16 @@ class SubmissionExecutionStoreTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
     }
 
+    /** 재시도 작업과 제출의 상태 대응표를 지키는지 확인한다. */
+    @Test
+    @DisplayName("시스템 오류 재시도는 작업 RETRY_WAITING과 제출 QUEUED를 함께 저장한다")
+    void queuesSubmissionOnSystemRetry() {
+        var lease = store.claim().orElseThrow();
+        assertThat(store.fail(lease, "JUDGE0_UNAVAILABLE")).isTrue();
+        assertThat(jdbc.queryForObject("SELECT status FROM judge_jobs", String.class)).isEqualTo("RETRY_WAITING");
+        assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("QUEUED");
+    }
+
     @TestConfiguration
     static class Beans {
         @Bean
