@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api } from "@/services/mock-api";
-import { authApi, memberApi } from "@/services/api";
+import { apiFetch, authApi, memberApi, problemTagApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import { useWorkspace } from "@/stores/workspace";
 import { Pet } from "@/components/pet";
@@ -17,7 +16,6 @@ import {
   Tabs,
   useAction,
 } from "@/components/ui";
-import { SubmissionList } from "./problem-list";
 export function CallbackPage() {
   const router = useRouter();
   const params = useSearchParams();
@@ -66,11 +64,8 @@ export function safeReturn(value: string | null) {
     ? value
     : "/dashboard";
 }
-export function AuthPage({ signup = false }: { signup?: boolean }) {
-  const router = useRouter(),
-    params = useSearchParams(),
-    action = useAction(),
-    [busy, setBusy] = useState(false);
+export function AuthPage() {
+  const params = useSearchParams();
   return (
     <div className="auth-layout">
       <div className="auth-art">
@@ -83,102 +78,37 @@ export function AuthPage({ signup = false }: { signup?: boolean }) {
         </h2>
         <p>오늘의 한 문제가 내일의 자신감으로.</p>
       </div>
-      <form
-        className="card stack"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          const form = e.currentTarget,
-            f = new FormData(form);
-          await action(
-            async () => {
-              const email = String(f.get("email"));
-              if (signup) await api.signup(email, String(f.get("name")));
-              else await api.login(email);
-              form.reset();
-              router.push(safeReturn(params.get("returnTo")));
-            },
-            signup ? "데모 계정을 만들었습니다." : "데모 로그인했습니다.",
-            false,
-          );
-          setBusy(false);
-        }}
-      >
+      <div className="card stack">
         <Heading
-          title={signup ? "회원가입" : "다시 만나서 반가워요"}
-          description="실제 인증 없이 체험하는 데모 계정입니다."
+          title="다시 만나서 반가워요"
+          description="GitHub 계정으로 로그인합니다."
         />
-        {signup && (
-          <label className="field">
-            닉네임
-            <input
-              name="name"
-              className="input"
-              required
-              minLength={2}
-              maxLength={20}
-              autoComplete="nickname"
-            />
-          </label>
-        )}
-        <label className="field">
-          이메일
-          <input
-            name="email"
-            type="email"
-            className="input"
-            required
-            autoComplete="email"
-            placeholder="player@resolve.demo"
-          />
-        </label>
-        <label className="field">
-          비밀번호
-          <input
-            type="password"
-            className="input"
-            required
-            minLength={4}
-            autoComplete={signup ? "new-password" : "current-password"}
-          />
-        </label>
-        <p className="notice">
-          입력한 비밀번호는 저장하거나 전송하지 않습니다. 데모 로그인은 이메일로
-          사용자를 구분합니다.
-        </p>
-        <Button className="primary" disabled={busy}>
-          {signup ? "데모 회원가입" : "데모 로그인"}
-        </Button>
-        <Go
-          href={`${signup ? "/login" : "/signup"}?returnTo=${encodeURIComponent(safeReturn(params.get("returnTo")))}`}
+        <Button
+          className="primary"
+          onClick={() => {
+            const returnTo = params.get("returnTo");
+            // OAuth 외부 리다이렉트 — router.push는 CSR 내부 라우팅이므로 사용 불가
+            window.location.href = returnTo
+              ? `/api/v1/auth/github?redirectPath=${encodeURIComponent(safeReturn(returnTo))}`
+              : "/api/v1/auth/github";
+          }}
         >
-          {signup ? "이미 계정이 있어요" : "처음이라면, 회원가입"}
-        </Go>
-      </form>
+          GitHub으로 로그인
+        </Button>
+      </div>
     </div>
   );
 }
 export function MyPage() {
-  const r = useResource(api.snapshot),
+  const member = useWorkspace((s) => s.member),
+    clearMember = useWorkspace((s) => s.clearMember),
     action = useAction(),
+    router = useRouter(),
     [tab, setTab] = useState("profile"),
     fontSize = useWorkspace((s) => s.fontSize),
     setFontSize = useWorkspace((s) => s.setFontSize);
-  if (r.loading)
-    return (
-      <div className="container">
-        <Loading />
-      </div>
-    );
-  if (r.error)
-    return (
-      <div className="container">
-        <ErrorState message={r.error.message} retry={r.retry} />
-      </div>
-    );
-  const db = r.data!,
-    u = db.users.find((x) => x.id === db.currentUserId);
-  if (!u)
+
+  if (!member)
     return (
       <div className="container">
         <Empty
@@ -187,19 +117,20 @@ export function MyPage() {
         />
       </div>
     );
+
   return (
     <div className="container stack">
       <Heading
-        title={`${u.name}님의 마이페이지`}
+        title={`${member.nickname}님의 마이페이지`}
         eyebrow="MY PROFILE"
         description="학습 기록과 설정을 한곳에서 관리하세요."
       />
       <div className="card row">
         <Pet size={90} />
         <div>
-          <h2>{u.name}</h2>
-          <p>{u.email}</p>
-          <p className="muted">{u.goal}</p>
+          <h2>{member.nickname}</h2>
+          {member.email && <p>{member.email}</p>}
+          <p className="muted">@{member.githubLogin}</p>
         </div>
       </div>
       <Tabs
@@ -207,8 +138,8 @@ export function MyPage() {
         onChange={setTab}
         items={[
           { id: "profile", label: "프로필" },
+          { id: "skill", label: "스킬" },
           { id: "submissions", label: "제출 기록" },
-          { id: "activity", label: "참여 활동" },
           { id: "settings", label: "설정" },
         ]}
       />
@@ -220,9 +151,8 @@ export function MyPage() {
             const f = new FormData(e.currentTarget);
             action(
               () =>
-                api.profile({
-                  name: String(f.get("name")).trim(),
-                  goal: String(f.get("goal")),
+                memberApi.updateMe({
+                  nickname: String(f.get("nickname")).trim(),
                 }),
               "프로필을 저장했습니다.",
             );
@@ -231,61 +161,37 @@ export function MyPage() {
           <label className="field">
             닉네임
             <input
-              name="name"
+              name="nickname"
               className="input"
-              defaultValue={u.name}
+              defaultValue={member.nickname}
               minLength={2}
-              maxLength={20}
+              maxLength={50}
               required
             />
           </label>
-          <label className="field">
-            나의 목표
-            <input
-              name="goal"
-              className="input"
-              defaultValue={u.goal}
-              maxLength={100}
-            />
-          </label>
           <Button className="primary">프로필 저장</Button>
+          <Button
+            type="button"
+            onClick={() =>
+              action(
+                async () => {
+                  await authApi.logout();
+                  clearMember();
+                  router.push("/login");
+                },
+                "로그아웃했습니다.",
+              )
+            }
+          >
+            로그아웃
+          </Button>
         </form>
       )}
+      {tab === "skill" && <SkillPage />}
       {tab === "submissions" && (
         <Section title="최근 제출">
-          <SubmissionList
-            items={db.submissions
-              .filter((s) => s.userId === u.id && s.kind === "submit")
-              .slice()
-              .sort((a, b) => b.createdAt - a.createdAt)}
-          />
+          <Empty title="제출 기록을 불러오는 중입니다." />
         </Section>
-      )}
-      {tab === "activity" && (
-        <div className="grid-2">
-          <Section title="참여 스터디">
-            {db.studies
-              .filter(
-                (s) => s.members.includes(u.id) || s.applicants.includes(u.id),
-              )
-              .map((s) => (
-                <Go key={s.id} href={`/studies/${s.id}`}>
-                  {s.title}
-                </Go>
-              ))}
-          </Section>
-          <Section title="참여 시험">
-            <div className="stack-sm">
-              {db.exams
-                .filter((e) => e.participants.includes(u.id))
-                .map((e) => (
-                  <Go key={e.id} href={`/exams/${e.id}`}>
-                    {e.title}
-                  </Go>
-                ))}
-            </div>
-          </Section>
-        </div>
       )}
       {tab === "settings" && (
         <Section title="화면과 에디터 설정">
@@ -294,11 +200,15 @@ export function MyPage() {
               테마
               <select
                 className="input"
-                defaultValue={document.documentElement.dataset.theme || "light"}
+                defaultValue={
+                  typeof document !== "undefined"
+                    ? (document.documentElement.dataset.theme ?? "light")
+                    : "light"
+                }
                 onChange={(e) => {
                   document.documentElement.dataset.theme = e.target.value;
                   try {
-                    localStorage.setItem("resolve:theme", e.target.value);
+                    localStorage.setItem("re-solve:theme", e.target.value);
                   } catch {}
                 }}
               >
@@ -316,10 +226,10 @@ export function MyPage() {
                   setFontSize(size);
                   try {
                     const prev = JSON.parse(
-                      localStorage.getItem("resolve:editor") || "{}",
+                      localStorage.getItem("re-solve:editor") ?? "{}",
                     );
                     localStorage.setItem(
-                      "resolve:editor",
+                      "re-solve:editor",
                       JSON.stringify({ ...prev, fontSize: size }),
                     );
                   } catch {}
@@ -336,5 +246,83 @@ export function MyPage() {
         </Section>
       )}
     </div>
+  );
+}
+
+function cooldownDaysFrom(cooldownEndsAt: string | null): number {
+  if (!cooldownEndsAt) return 0;
+  return Math.ceil((new Date(cooldownEndsAt).getTime() - new Date().getTime()) / 86400000);
+}
+
+function SkillPage() {
+  const tagLevelsR = useResource(memberApi.getTagLevels, "tag-levels");
+  const tagsR = useResource(problemTagApi.getTags, "problem-tags");
+
+  if (tagLevelsR.loading || tagsR.loading) return <Loading />;
+  if (tagLevelsR.error)
+    return <ErrorState message={tagLevelsR.error.message} retry={tagLevelsR.retry} />;
+  if (tagsR.error)
+    return <ErrorState message={tagsR.error.message} retry={tagsR.retry} />;
+
+  const levels = tagLevelsR.data?.content ?? [];
+  const allTags = tagsR.data?.content ?? [];
+
+  return (
+    <Section title="태그별 진단 레벨">
+      <div className="stack">
+        {allTags.map((tag) => {
+          const tl = levels.find((l) => l.tagId === tag.tagId);
+          const inProgress = tl?.diagnosis.inProgressDiagnosisId != null;
+          const cooldown = tl?.diagnosis.cooldownEndsAt;
+          const cooldownDays = cooldownDaysFrom(cooldown ?? null);
+          return (
+            <div key={tag.tagId} className="card row">
+              <span>{tag.name}</span>
+              {!tl && (
+                <Button
+                  onClick={() =>
+                    apiFetch<unknown>("/api/v1/members/me/diagnoses", {
+                      method: "POST",
+                      body: JSON.stringify({ tagId: tag.tagId }),
+                    }).catch(() => null)
+                  }
+                >
+                  진단 시작
+                </Button>
+              )}
+              {tl && inProgress && (
+                <Button disabled title="준비 중">
+                  이어서 풀기
+                </Button>
+              )}
+              {tl && !inProgress && (
+                <div className="row">
+                  <span className="badge">{tl.level}</span>
+                  {tl.achievements[0] && (
+                    <span className="muted">
+                      {tl.achievements[0].achievementRate.toFixed(0)}%
+                    </span>
+                  )}
+                  <Button
+                    disabled={!!cooldown && cooldownDays > 0}
+                    title={
+                      cooldown && cooldownDays > 0 ? `D-${cooldownDays}` : undefined
+                    }
+                    onClick={() =>
+                      apiFetch<unknown>("/api/v1/members/me/diagnoses", {
+                        method: "POST",
+                        body: JSON.stringify({ tagId: tag.tagId }),
+                      }).catch(() => null)
+                    }
+                  >
+                    {cooldown && cooldownDays > 0 ? `D-${cooldownDays}` : "재응시"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Section>
   );
 }
