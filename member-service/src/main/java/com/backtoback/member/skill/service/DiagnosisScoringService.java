@@ -27,6 +27,7 @@ import com.backtoback.member.skill.repository.DiagnosisProblemRepository;
 import com.backtoback.member.skill.repository.MemberLevelHistoryRepository;
 import com.backtoback.member.skill.repository.MemberTagLevelRepository;
 import com.backtoback.member.skill.store.DiagnosisSubmissionStore;
+import com.backtoback.member.skill.store.DiagnosisSubmissionStore.CooldownRelease;
 import com.backtoback.member.skill.store.DiagnosisSubmissionStore.ResultTarget;
 
 import lombok.RequiredArgsConstructor;
@@ -41,6 +42,7 @@ public class DiagnosisScoringService {
 
     public static final String JUDGED = "JUDGED";
     public static final String FAILED = "FAILED";
+    static final String COOLDOWN_RELEASED = "COOLDOWN_RELEASED";
 
     private final DiagnosisAttemptRepository attemptRepository;
     private final DiagnosisProblemRepository problemRepository;
@@ -172,6 +174,33 @@ public class DiagnosisScoringService {
                 )
             );
         learningProfileService.tagLevelsChanged(attempt.getMemberId());
+        return true;
+    }
+
+    /**
+     * 쿨타임 해제 알림 (스케줄러 1.3). 표시와 {@code TagLevelChanged}({@code COOLDOWN_RELEASED}, 현재 레벨 그대로)를 한 트랜잭션에
+     * 기록한다. 응시 가능 여부는 API가 시각으로 판단하므로 알림이 늦어도 응시는 막히지 않는다.
+     *
+     * @return 이번에 알렸으면 {@code true}
+     */
+    @Transactional
+    public boolean notifyCooldownReleased(CooldownRelease release) {
+        if (!submissionStore.markCooldownNotified(release.attemptId(), now())) {
+            return false;
+        }
+        memberEventPublisher
+            .tagLevelChanged(
+                new TagLevelChangedPayload(
+                    String.valueOf(release.memberId()),
+                    String.valueOf(release.tagId()),
+                    release.tagName(),
+                    release.level(),
+                    release.level(),
+                    COOLDOWN_RELEASED,
+                    String.valueOf(release.attemptId()),
+                    null
+                )
+            );
         return true;
     }
 

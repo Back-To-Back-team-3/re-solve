@@ -209,7 +209,54 @@ public class DiagnosisSubmissionStore {
             );
     }
 
+    /**
+     * 쿨타임 해제 알림 대상 (스케줄러 1.3): 태그별 마지막 응시가 {@code SCORED}·쿨타임 대상이고 {@code closed_at <= closedBefore},
+     * 현재 레벨 {@code LV1}·{@code LV2}, 알림 미발송. 해제 전에 같은 태그의 새 응시가 시작되면 빠진다.
+     */
+    public List<CooldownRelease> findCooldownReleases(LocalDateTime closedBefore, int limit) {
+        return jdbcTemplate
+            .query(
+                "select a.id, a.member_id, a.tag_id, a.tag_name, l.level from diagnosis_attempts a "
+                    + "join member_tag_levels l on l.member_id = a.member_id and l.tag_id = a.tag_id "
+                    + "where a.status = 'SCORED' and a.is_cooldown_exempt = false and a.cooldown_notified_at is null "
+                    + "and a.closed_at <= ? and l.level in ('LV1', 'LV2') and not exists ("
+                    + "select 1 from diagnosis_attempts b where b.member_id = a.member_id and b.tag_id = a.tag_id "
+                    + "and b.id > a.id) order by a.closed_at, a.id limit ?",
+                (row, index) -> new CooldownRelease(
+                    row.getLong("id"),
+                    row.getLong("member_id"),
+                    row.getLong("tag_id"),
+                    row.getString("tag_name"),
+                    row.getString("level")
+                ),
+                closedBefore,
+                limit
+            );
+    }
+
+    /**
+     * 쿨타임 해제 알림을 한 번만 보내도록 표시한다.
+     *
+     * @return 이번에 표시했으면 {@code true} (다른 인스턴스·재실행이 먼저 표시했으면 {@code false})
+     */
+    public boolean markCooldownNotified(long attemptId, LocalDateTime now) {
+        return jdbcTemplate
+            .update(
+                "update diagnosis_attempts set cooldown_notified_at = ?, updated_at = ? "
+                    + "where id = ? and cooldown_notified_at is null",
+                now,
+                now,
+                attemptId
+            ) == 1;
+    }
+
     public record Submission(long id, String status, LocalDateTime receivedAt) {
+    }
+
+    /**
+     * @param level 현재 태그 레벨 (알림의 {@code toLevel})
+     */
+    public record CooldownRelease(long attemptId, long memberId, long tagId, String tagName, String level) {
     }
 
     /**

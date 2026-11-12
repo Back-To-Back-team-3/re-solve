@@ -165,12 +165,12 @@
 | 실행 방식 | `fixedDelay = 10분` |
 | 잠금 | ShedLock `DiagnosisCooldownReleaseScheduler`, `lockAtMostFor = 8분` |
 | 대상 조회 | 태그별 마지막 응시가 `SCORED`·쿨타임 대상이고 `closed_at + 3일 <= now()`, 레벨 `LV1`·`LV2`, 해제 알림 미발송 |
-| 상태 변경 | `diagnosis_attempts.cooldown_notified_at = now()` (ERD 추가 컬럼 제안) 조건부 UPDATE |
+| 상태 변경 | `diagnosis_attempts.cooldown_notified_at = now()` 조건부 UPDATE (ERD 4.1.6, V17) |
 | 발행 이벤트 | `TagLevelChanged`(`reasonType = COOLDOWN_RELEASED`) |
 - 응시 가능 여부 판정은 API가 시각으로 직접 하므로 이 스케줄러가 늦어도 응시는 막히지 않는다. 알림만 늦는다.
 - 해제 전 같은 태그에 새 응시가 시작되면 대상에서 빠진다(마지막 응시 기준).
 
-**명세서와의 관계:** 정책 §8.3 레벨 알림(쿨타임 해제) / ERD 4.1.6 (`cooldown_notified_at` 추가 필요)
+**명세서와의 관계:** 정책 §8.3 레벨 알림(쿨타임 해제) / ERD 4.1.6 `cooldown_notified_at`
 
 ---
 
