@@ -19,6 +19,15 @@
 | `AUTH_OAUTH_FAILED` | 502 | GitHub OAuth 응답 실패 |
 | `AUTH_ACCESS_DENIED` | 403 | 해당 리소스에 접근 권한 없음 |
 
+#### **Outbox 운영 (problem · judge)**
+
+Problem의 기존 오류 코드를 Judge 수동 재처리에도 사용하는 보완안이다. API 명세서 §2.8.1·§3.2.6을 따른다.
+
+| 오류 코드 | HTTP | 설명 |
+| --- | --- | --- |
+| `OUTBOX_EVENT_NOT_FOUND` | 404 | 요청을 받은 서비스 DB에 대상 Outbox 이벤트가 없거나 발생 7일 초과 |
+| `OUTBOX_EVENT_NOT_REPROCESSABLE` | 409 | 대상이 `FAILED`가 아니거나, 재처리 조건부 갱신에 실패함 |
+
 #### **Member · Level · Diagnosis**
 
 | 오류 코드 | HTTP | 설명 |
@@ -58,8 +67,6 @@
 | `PROBLEM_TAG_NOT_FOUND` | 404 | 태그를 찾을 수 없음 |
 | `PROBLEM_TAG_DUPLICATED` | 409 | 같은 이름의 태그 존재 |
 | `PROBLEM_TAG_IN_USE` | 409 | 회차에서 사용 중인 태그 삭제 |
-| `OUTBOX_EVENT_NOT_FOUND` | 404 | 대상 Outbox 이벤트가 없거나 발생 7일 초과 |
-| `OUTBOX_EVENT_NOT_REPROCESSABLE` | 409 | `FAILED` 상태가 아닌 Outbox 이벤트 재처리 요청 |
 | `SOLUTION_SHARE_NOT_FOUND` | 404 | 공유 풀이를 찾을 수 없거나 열람 권한 없음 |
 | `SOLUTION_SHARE_NOT_ALLOWED` | 409 | 본인 `PRACTICE` AC 제출이 아님 |
 | `SOLUTION_ALREADY_SHARED` | 409 | 같은 스터디에 같은 제출 공유 중 |
