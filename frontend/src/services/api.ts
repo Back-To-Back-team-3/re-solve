@@ -1,6 +1,7 @@
 import type {
   AdminMember,
   AuthTokenResponse,
+  JudgeResult,
   Language,
   Member,
   ProblemDetail,
@@ -8,6 +9,7 @@ import type {
   ProblemListItem,
   RunResponse,
   ServerPage,
+  SubmissionReceipt,
   TagLevel,
   UserRole,
   UserStatus,
@@ -165,6 +167,18 @@ export const judgeApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  submit: (body: {
+    problemRevisionId: string;
+    language: Language;
+    sourceCode: string;
+  }) =>
+    apiFetch<SubmissionReceipt>("/api/v1/submissions", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(body),
+    }),
+  getStatus: (submissionId: string) =>
+    apiFetch<JudgeResult>(`/api/v1/submissions/${submissionId}`),
 };
 
 // 관리자 API (§1.6)

@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { loader } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { RotateCcw, Save, Play, Send } from "lucide-react";
@@ -9,18 +9,17 @@ import {
   Badge,
   Modal,
   Empty,
-  useAction,
-  useToast,
 } from "@/components/ui";
-import { api, labels } from "@/services/mock-api";
+import { labels } from "@/services/mock-api";
 import { judgeApi } from "@/services/api";
+import { usePollUntil } from "@/services/hooks";
 import {
   draftKey,
   readDraft,
   saveDraft,
   useWorkspace,
 } from "@/stores/workspace";
-import type { Language, Problem, RunResponse, Submission } from "@/services/types";
+import type { JudgeResult, Language, Problem, RunResponse } from "@/services/types";
 const Monaco = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => <div className="skeleton pixel">LOADING EDITOR...</div>,
@@ -104,6 +103,65 @@ export function CodeEditor({
     </div>
   );
 }
+function JudgePoll({
+  submissionId,
+  onDone,
+}: {
+  submissionId: string;
+  onDone: (result: JudgeResult | null, error: string | null) => void;
+}) {
+  const onDoneRef = useRef(onDone);
+  useLayoutEffect(() => {
+    onDoneRef.current = onDone;
+  });
+  const { data, loading, error, polling } = usePollUntil(
+    () => judgeApi.getStatus(submissionId),
+    (d) => d.status === "COMPLETED" || d.status === "FAILED",
+    { intervalMs: 2000, timeoutMs: 60000 },
+  );
+  useEffect(() => {
+    if (loading || polling) return;
+    if (error) { onDoneRef.current(null, error.message); return; }
+    if (data) onDoneRef.current(data, null);
+  }, [loading, polling, data, error]);
+  return null;
+}
+const VERDICT_LABELS: Record<string, string> = {
+  AC: "정답", WA: "오답", TLE: "시간 초과",
+  MLE: "메모리 초과", RE: "런타임 에러", CE: "컴파일 에러",
+};
+function verdictTone(verdict: string | null): string {
+  if (!verdict) return "pending";
+  if (verdict === "AC") return "success";
+  if (verdict === "WA" || verdict === "RE") return "error";
+  return "warning";
+}
+function JudgeResultView({ result }: { result: JudgeResult }) {
+  const v = result.effectiveResult?.verdict ?? null;
+  const r = result.effectiveResult;
+  return (
+    <div className="stack-sm">
+      <div className="row">
+        <Badge tone={verdictTone(v)}>
+          {v
+            ? `${v} ${VERDICT_LABELS[v] ?? v}`
+            : labels[result.status]}
+        </Badge>
+        {r && (
+          <span>
+            {r.passedCount} / {r.totalCount} 통과
+            {r.maxTimeMs != null && ` · ${r.maxTimeMs}ms`}
+            {r.maxMemoryKb != null &&
+              ` · ${Math.round(r.maxMemoryKb / 1024)}MB`}
+          </span>
+        )}
+      </div>
+      {result.compileMessage && (
+        <pre className="error-text">{result.compileMessage}</pre>
+      )}
+    </div>
+  );
+}
 function RunResult({ result }: { result: RunResponse }) {
   if (result.compileMessage) {
     return <pre className="error-text">{result.compileMessage}</pre>;
@@ -170,13 +228,13 @@ function Buffer({
     [ready, setReady] = useState(false),
     [saved, setSaved] = useState("복원 중…"),
     [reset, setReset] = useState(false),
-    [submission, setSubmission] = useState<Submission | null>(null),
     [busy, setBusy] = useState(false),
     [runResult, setRunResult] = useState<RunResponse | null>(null),
     [runError, setRunError] = useState<string | null>(null),
-    [busyRun, setBusyRun] = useState(false);
-  const action = useAction(),
-    toast = useToast();
+    [busyRun, setBusyRun] = useState(false),
+    [judgeSubmissionId, setJudgeSubmissionId] = useState<string | null>(null),
+    [judgeResult, setJudgeResult] = useState<JudgeResult | null>(null),
+    [judgeError, setJudgeError] = useState<string | null>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   useEffect(() => {
     let initial = memory;
@@ -243,33 +301,13 @@ function Buffer({
     clearTimeout(timer.current);
     timer.current = setTimeout(persist, 500);
   }
-  useEffect(() => {
-    if (!submission || ["COMPLETED", "FAILED"].includes(submission.state))
-      return;
-    const interval = setInterval(
-      () =>
-        api
-          .settle(submission.id)
-          .then(setSubmission)
-          .catch(() => {
-            clearInterval(interval);
-            setBusy(false);
-            toast("채점 상태를 저장하지 못했습니다.");
-          }),
-      300,
-    );
-    return () => clearInterval(interval);
-  }, [submission, toast]);
-  useEffect(() => {
-    if (submission && ["COMPLETED", "FAILED"].includes(submission.state))
-      setBusy(false);
-  }, [submission]);
   async function handleRun() {
     persist();
     setBusyRun(true);
     setRunResult(null);
     setRunError(null);
-    setSubmission(null);
+    setJudgeResult(null);
+    setJudgeError(null);
     try {
       setRunResult(
         await judgeApi.run({
@@ -288,23 +326,25 @@ function Buffer({
       setBusyRun(false);
     }
   }
-  async function judge(kind: "submit") {
+  async function handleSubmit() {
     setRunResult(null);
     setRunError(null);
+    setJudgeResult(null);
+    setJudgeError(null);
     persist();
     setBusy(true);
-    const ok = await action(async () =>
-      setSubmission(
-        await api.submit({
-          problemId: problem.id,
-          language,
-          sourceCode: codeRef.current,
-          kind,
-          examId,
-        }),
-      ),
-    );
-    if (!ok) setBusy(false);
+    try {
+      const receipt = await judgeApi.submit({
+        problemRevisionId: problem.problemRevisionId,
+        language,
+        sourceCode: codeRef.current,
+      });
+      setJudgeSubmissionId(receipt.submissionId);
+    } catch (e) {
+      const err = e as { message?: string };
+      setJudgeError(err.message ?? "제출에 실패했습니다.");
+      setBusy(false);
+    }
   }
   function theme(monaco: typeof import("monaco-editor")) {
     const s = getComputedStyle(document.documentElement),
@@ -324,6 +364,17 @@ function Buffer({
   }
   return (
     <>
+      {judgeSubmissionId && (
+        <JudgePoll
+          submissionId={judgeSubmissionId}
+          onDone={(result, err) => {
+            setJudgeSubmissionId(null);
+            setBusy(false);
+            if (err) setJudgeError(err);
+            else setJudgeResult(result);
+          }}
+        />
+      )}
       <div className="editor-frame">
         {ready && (
           <Monaco
@@ -377,7 +428,7 @@ function Buffer({
           </Button>
           <Button
             className="small"
-            disabled={busyRun || busy || !ready}
+            disabled={busyRun || !ready}
             onClick={handleRun}
           >
             <Play size={14} />
@@ -386,64 +437,34 @@ function Buffer({
           <Button
             className="small primary"
             disabled={busy || !ready}
-            onClick={() => judge("submit")}
+            onClick={handleSubmit}
           >
             <Send size={14} />
-            제출
+            {busy ? "채점 중…" : "제출"}
           </Button>
         </div>
       </div>
       <section className="results stack-sm">
         <h3>실행 결과</h3>
-        {busyRun ? (
+        {busy ? (
+          <div className="row">
+            <Badge tone="pending">채점 중…</Badge>
+          </div>
+        ) : judgeError ? (
+          <p className="error-text">{judgeError}</p>
+        ) : judgeResult ? (
+          <JudgeResultView result={judgeResult} />
+        ) : busyRun ? (
           <p className="muted">실행 중…</p>
         ) : runError ? (
           <p className="error-text">{runError}</p>
         ) : runResult ? (
           <RunResult result={runResult} />
-        ) : !submission ? (
+        ) : (
           <Empty
             title="코드를 실행해 보세요"
             description="공개 예제 실행 또는 전체 제출을 선택할 수 있어요."
           />
-        ) : (
-          <>
-            <div className="row">
-              <Badge
-                tone={
-                  submission.verdict === "AC"
-                    ? "success"
-                    : submission.verdict || submission.state === "FAILED"
-                      ? "error"
-                      : "pending"
-                }
-              >
-                {labels[submission.verdict || submission.state]}
-              </Badge>
-              <span>
-                모의 제출 · {submission.passedCount} / {submission.totalCount}
-              </span>
-            </div>
-            {submission.state === "COMPLETED" &&
-              Array.from({ length: submission.totalCount }, (_, i) => (
-                <div className="result-case" key={i}>
-                  <b>숨김 테스트 {i + 1}</b>
-                  <Badge
-                    tone={i < submission.passedCount ? "success" : "error"}
-                  >
-                    {i < submission.passedCount
-                      ? "통과"
-                      : labels[submission.verdict || "WA"]}
-                  </Badge>
-                </div>
-              ))}
-            {submission.state === "FAILED" && (
-              <p className="error-text">
-                모의 채점 시스템 오류입니다. 시나리오를 변경한 후 다시 제출해
-                주세요.
-              </p>
-            )}
-          </>
         )}
       </section>
       <Modal

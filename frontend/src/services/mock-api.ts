@@ -192,50 +192,6 @@ export const api = {
       .map((s) => resolveSubmission(s))
       .sort((a, b) => b.createdAt - a.createdAt);
   },
-  async submit(input: {
-    problemId: string;
-    language: Language;
-    sourceCode: string;
-    kind: "run" | "submit";
-    examId?: string;
-  }) {
-    return change((db) => {
-      const u = user(db),
-        p = problems.find((p) => p.id === input.problemId);
-      if (!p) throw new Error("문제를 찾을 수 없습니다.");
-      if (input.examId) {
-        const session = db.sessions.find(
-          (s) => s.examId === input.examId && s.userId === u.id,
-        );
-        if (!session || session.finishedAt || session.endsAt <= Date.now())
-          throw new Error("종료된 시험에는 제출할 수 없습니다.");
-      }
-      const s: Submission & { scenario?: Verdict | "FAILED" } = {
-        ...input,
-        id: crypto.randomUUID(),
-        userId: u.id,
-        problemRevisionId: p.problemRevisionId,
-        scenario: db.scenario,
-        state: "QUEUED" as JudgeState,
-        verdict: null,
-        createdAt: Date.now(),
-        passedCount: 0,
-        totalCount: input.kind === "run" ? p.samples.length : 5,
-        cpuTimeMs: 24,
-        memoryKiB: 32768,
-      };
-      db.submissions.push(s);
-      return s;
-    });
-  },
-  async settle(id: string) {
-    return change((db) => {
-      const i = db.submissions.findIndex((s) => s.id === id);
-      if (i < 0) throw new Error("제출을 찾을 수 없습니다.");
-      db.submissions[i] = resolveSubmission(db.submissions[i]);
-      return db.submissions[i];
-    });
-  },
   async studies() {
     return (await read()).studies;
   },
