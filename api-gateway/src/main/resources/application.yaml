@@ -36,13 +36,13 @@ spring:
         - id: problem-service
           uri: ${PROBLEM_SERVICE_URL:http://problem-service:8080}
           predicates:
-            - Path=/api/v1/problems/**, /api/v1/solution-shares/**, /api/v1/admin/problems/**
+            - Path=/api/v1/problems, /api/v1/problems/**, /api/v1/solution-shares, /api/v1/solution-shares/**, /api/v1/admin/problems/**
 
         # judge-service
         - id: judge-service
           uri: ${JUDGE_SERVICE_URL:http://judge-service:8080}
           predicates:
-            - Path=/api/v1/judge/**, /api/v1/submissions/**, /api/v1/runs/**, /api/v1/me/submissions/**, /api/v1/admin/judge-jobs/**, /api/v1/admin/submissions/**
+            - Path=/api/v1/judge/**, /api/v1/submissions, /api/v1/submissions/**, /api/v1/runs, /api/v1/runs/**, /api/v1/me/submissions, /api/v1/me/submissions/**, /api/v1/admin/judge-jobs/**, /api/v1/admin/submissions/**
 
         # contest-service
         - id: contest-service
