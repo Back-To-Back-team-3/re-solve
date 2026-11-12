@@ -1,31 +1,10 @@
 "use client";
-import { useState, useEffect, useRef, useLayoutEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { contestApi } from "@/services/api";
 import type { ApiError } from "@/services/api";
 import type { RankingItem, RankingResponse, ResultStatus } from "@/services/types";
 import { Badge, Button, ErrorState, Loading } from "@/components/ui";
-
-function useExamRankingSSE(
-  examId: string,
-  enabled: boolean,
-  onUpdate: () => void,
-) {
-  const onUpdateRef = useRef(onUpdate);
-  useLayoutEffect(() => {
-    onUpdateRef.current = onUpdate;
-  });
-
-  useEffect(() => {
-    if (!enabled) return;
-    const es = new EventSource(`/api/v1/exams/${examId}/events`, {
-      withCredentials: true,
-    });
-    es.addEventListener("exam-result-updated", () => {
-      onUpdateRef.current();
-    });
-    return () => es.close();
-  }, [examId, enabled]);
-}
+import { useExamRankingSSE } from "@/services/hooks";
 
 export function ExamRanking({ id }: { id: string }) {
   const [items, setItems] = useState<RankingItem[]>([]);
