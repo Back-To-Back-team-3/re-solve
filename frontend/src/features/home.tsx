@@ -243,7 +243,19 @@ export function HomePage() {
       </section>
       <div className="home-bottom">
         <Section title="오늘의 도전" href="/problems">
-          <ProblemTable items={problems.slice(0, 4)} db={r.data} />
+          <ProblemTable
+            items={problems.slice(0, 4).map((p) => ({
+              problemId: p.id,
+              problemRevisionId: p.problemRevisionId,
+              revisionNumber: 0,
+              title: p.title,
+              difficulty: p.difficulty,
+              tags: p.tags,
+              publishedAt: "",
+              solvedStatus: "UNSOLVED" as const,
+              supportedLanguages: [],
+            }))}
+          />
         </Section>
         <Section title="성장 일기">
           {[

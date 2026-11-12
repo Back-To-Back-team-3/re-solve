@@ -194,11 +194,36 @@ export interface Database {
   scenario: Verdict | "FAILED";
   simulateReadError: boolean;
 }
+// --- api-spec §2.1 problem-service B 도메인 실서버 타입 ---
+
+// GET /api/v1/problems §2.1.1 목록 항목
+export interface ProblemListItem {
+  problemId: string;
+  problemRevisionId: string;
+  revisionNumber: number;
+  title: string;
+  difficulty: number;
+  tags: { tagId: string; name: string }[];
+  publishedAt: string;
+  solvedStatus: SolvedStatus;
+  supportedLanguages: Language[];
+}
+
+// 공통 서버 페이지 래퍼 (api-spec §0.1)
+export interface ServerPage<T> {
+  content: T[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  hasNext: boolean;
+}
+
 export interface ProblemFilter {
   keyword?: string;
-  tag?: string;
+  tagIds?: string;
   difficulty?: string;
-  status?: string;
+  solvedStatus?: string;
   sort?: string;
   page?: number;
   size?: number;

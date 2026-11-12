@@ -5,8 +5,6 @@ import type {
   ExamSession,
   JudgeState,
   Language,
-  Problem,
-  ProblemFilter,
   Study,
   Submission,
   User,
@@ -89,40 +87,6 @@ export function solvedStatus(
   );
   return rows.some((s) => s.verdict === "AC") ? "SOLVED" : "UNSOLVED";
 }
-export function filterProblems(
-  list: Problem[],
-  filter: ProblemFilter,
-  submissions: Submission[],
-  userId: string | null,
-) {
-  const matches = list.filter(
-    (p) =>
-      (!filter.keyword ||
-        `${p.id} ${p.title}`.includes(filter.keyword.trim())) &&
-      (!filter.tag || p.tags.some((t) => t.tagId === filter.tag)) &&
-      (!filter.difficulty || p.difficulty === Number(filter.difficulty)) &&
-      (!filter.status ||
-        solvedStatus(p.id, submissions, userId) === filter.status),
-  );
-  matches.sort((a, b) =>
-    filter.sort === "difficulty"
-      ? a.difficulty - b.difficulty
-      : Number(b.id) - Number(a.id),
-  );
-  const size = Math.max(1, Math.min(100, filter.size || 5)),
-    totalPages = Math.ceil(matches.length / size),
-    page = Math.min(
-      Math.max(0, Number.isFinite(filter.page) ? Math.floor(filter.page!) : 0),
-      Math.max(0, totalPages - 1),
-    );
-  return {
-    items: matches.slice(page * size, (page + 1) * size),
-    page,
-    size,
-    totalElements: matches.length,
-    totalPages,
-  };
-}
 type SubmissionWithScenario = Submission & { scenario?: Verdict | "FAILED" };
 export function resolveSubmission(
   s: SubmissionWithScenario,
@@ -155,10 +119,6 @@ export const api = {
   async catalog() {
     await read();
     return structuredClone({ problems, tags });
-  },
-  async problems(filter: ProblemFilter = {}) {
-    const db = await read();
-    return filterProblems(problems, filter, db.submissions, db.currentUserId);
   },
   async problem(id: string) {
     await read();

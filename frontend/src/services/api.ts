@@ -2,6 +2,9 @@ import type {
   AdminMember,
   AuthTokenResponse,
   Member,
+  ProblemFilter,
+  ProblemListItem,
+  ServerPage,
   TagLevel,
   UserRole,
   UserStatus,
@@ -123,6 +126,24 @@ export const problemTagApi = {
     apiFetch<{
       content: { tagId: string; name: string; displayOrder: number }[];
     }>("/api/v1/problems/tags"),
+};
+
+// 문제 API (§2.1)
+export const problemApi = {
+  getList: (filter: ProblemFilter = {}) => {
+    const q = new URLSearchParams();
+    if (filter.keyword) q.set("keyword", filter.keyword);
+    if (filter.tagIds) q.set("tagIds", filter.tagIds);
+    if (filter.difficulty) q.set("difficulty", filter.difficulty);
+    if (filter.solvedStatus) q.set("solvedStatus", filter.solvedStatus);
+    if (filter.sort) q.set("sort", filter.sort);
+    if (filter.page != null) q.set("page", String(filter.page));
+    if (filter.size != null) q.set("size", String(filter.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<ProblemListItem>>(
+      `/api/v1/problems${qs ? `?${qs}` : ""}`,
+    );
+  },
 };
 
 // 관리자 API (§1.6)

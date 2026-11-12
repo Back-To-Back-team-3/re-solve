@@ -271,8 +271,19 @@ export function StudyPage({ id }: { id: string }) {
           )}
           {tab === "problems" && (
             <ProblemTable
-              items={problems.filter((p) => s.problemIds.includes(p.id))}
-              db={db}
+              items={problems
+                .filter((p) => s.problemIds.includes(p.id))
+                .map((p) => ({
+                  problemId: p.id,
+                  problemRevisionId: p.problemRevisionId,
+                  revisionNumber: 0,
+                  title: p.title,
+                  difficulty: p.difficulty,
+                  tags: p.tags,
+                  publishedAt: "",
+                  solvedStatus: "UNSOLVED" as const,
+                  supportedLanguages: [],
+                }))}
             />
           )}{" "}
           {tab === "board" && <Board scope={`study:${id}`} />}

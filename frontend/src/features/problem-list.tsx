@@ -3,9 +3,10 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Search } from "lucide-react";
-import { api, labels, solvedStatus } from "@/services/mock-api";
+import { labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
-import type { Problem, Database, Submission } from "@/services/types";
+import { problemApi } from "@/services/api";
+import type { ProblemListItem, Submission } from "@/services/types";
 import { useCatalog } from "@/services/catalog";
 import {
   Badge,
@@ -16,13 +17,7 @@ import {
   Loading,
   date,
 } from "@/components/ui";
-export function ProblemTable({
-  items,
-  db,
-}: {
-  items: Problem[];
-  db?: Database;
-}) {
+export function ProblemTable({ items }: { items: ProblemListItem[] }) {
   return (
     <div className="table-wrap">
       <table>
@@ -36,28 +31,23 @@ export function ProblemTable({
           </tr>
         </thead>
         <tbody>
-          {items.map((p) => {
-            const status = db
-              ? solvedStatus(p.id, db.submissions, db.currentUserId)
-              : "UNSOLVED";
-            return (
-              <tr key={p.id}>
-                <td>
-                  <Badge tone={status === "SOLVED" ? "success" : ""}>
-                    {labels[status]}
-                  </Badge>
-                </td>
-                <td className="mono">{p.id}</td>
-                <td>
-                  <Link href={`/problems/${p.id}`}>{p.title}</Link>
-                </td>
-                <td>
-                  <Badge>Lv. {p.difficulty}</Badge>
-                </td>
-                <td>{p.tags.map((t) => t.name).join(", ")}</td>
-              </tr>
-            );
-          })}
+          {items.map((p) => (
+            <tr key={p.problemId}>
+              <td>
+                <Badge tone={p.solvedStatus === "SOLVED" ? "success" : ""}>
+                  {labels[p.solvedStatus]}
+                </Badge>
+              </td>
+              <td className="mono">{p.problemId}</td>
+              <td>
+                <Link href={`/problems/${p.problemId}`}>{p.title}</Link>
+              </td>
+              <td>
+                <Badge>Lv. {p.difficulty}</Badge>
+              </td>
+              <td>{p.tags.map((t) => t.name).join(", ")}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -164,17 +154,14 @@ export function ProblemsPage() {
   useEffect(() => setKeyword(appliedKeyword), [appliedKeyword]);
   const filter = {
     keyword: params.get("keyword") || "",
-    tag: params.get("tag") || "",
+    tagIds: params.get("tagIds") || "",
     difficulty: params.get("difficulty") || "",
-    status: params.get("status") || "",
+    solvedStatus: params.get("solvedStatus") || "",
     sort: params.get("sort") || "",
     page: Number(params.get("page") || 0),
   };
   const resource = useResource(
-    async () => ({
-      page: await api.problems(filter),
-      db: await api.snapshot(),
-    }),
+    () => problemApi.getList(filter),
     params.toString(),
   );
   return (
@@ -205,7 +192,7 @@ export function ProblemsPage() {
         </label>
         {[
           {
-            key: "tag",
+            key: "tagIds",
             label: "모든 알고리즘",
             options: tags.map((t) => [t.id, t.name]),
           },
@@ -215,14 +202,14 @@ export function ProblemsPage() {
             options: [1, 2, 3, 4, 5].map((n) => [String(n), `Lv. ${n}`]),
           },
           {
-            key: "status",
+            key: "solvedStatus",
             label: "모든 상태",
             options: ["UNSOLVED", "SOLVED"].map((s) => [s, labels[s]]),
           },
           {
             key: "sort",
             label: "최신순",
-            options: [["difficulty", "쉬운 문제순"]],
+            options: [["difficulty,asc", "쉬운 문제순"]],
           },
         ].map((f) => (
           <select
@@ -250,15 +237,11 @@ export function ProblemsPage() {
           <>
             <div className="row between">
               <p>
-                총 <b>{resource.data.page.totalElements}</b>문제
+                총 <b>{resource.data.totalElements}</b>문제
               </p>
-              <span className="muted">목업 문제 · 함수형 풀이</span>
             </div>
-            {resource.data.page.items.length ? (
-              <ProblemTable
-                items={resource.data.page.items}
-                db={resource.data.db}
-              />
+            {resource.data.content.length ? (
+              <ProblemTable items={resource.data.content} />
             ) : (
               <Empty
                 title="검색 결과가 없어요"
@@ -269,9 +252,9 @@ export function ProblemsPage() {
                       setKeyword("");
                       change({
                         keyword: "",
-                        tag: "",
+                        tagIds: "",
                         difficulty: "",
-                        status: "",
+                        solvedStatus: "",
                         page: "0",
                       });
                     }}
@@ -281,36 +264,11 @@ export function ProblemsPage() {
                 }
               />
             )}
-            <div className="row" style={{ justifyContent: "center" }}>
-              <Button
-                disabled={resource.data.page.page === 0}
-                onClick={() =>
-                  change({ page: String(resource.data!.page.page - 1) })
-                }
-              >
-                이전
-              </Button>
-              {Array.from({ length: resource.data.page.totalPages }, (_, i) => (
-                <Button
-                  className={i === resource.data?.page.page ? "primary" : ""}
-                  key={i}
-                  aria-label={`${i + 1} 페이지`}
-                  onClick={() => change({ page: String(i) })}
-                >
-                  {i + 1}
-                </Button>
-              ))}
-              <Button
-                disabled={
-                  resource.data.page.page >= resource.data.page.totalPages - 1
-                }
-                onClick={() =>
-                  change({ page: String(resource.data!.page.page + 1) })
-                }
-              >
-                다음
-              </Button>
-            </div>
+            <Pager
+              page={resource.data.page}
+              totalPages={resource.data.totalPages}
+              onChange={(p) => change({ page: String(p) })}
+            />
           </>
         )
       )}
