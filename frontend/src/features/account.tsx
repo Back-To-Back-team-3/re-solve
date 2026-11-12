@@ -207,7 +207,7 @@ export function MyPage() {
                 onChange={(e) => {
                   document.documentElement.dataset.theme = e.target.value;
                   try {
-                    localStorage.setItem("re-solve:theme", e.target.value);
+                    localStorage.setItem("re-solve:settings:theme", e.target.value);
                   } catch {}
                 }}
               >
@@ -225,10 +225,10 @@ export function MyPage() {
                   setFontSize(size);
                   try {
                     const prev = JSON.parse(
-                      localStorage.getItem("re-solve:editor") ?? "{}",
+                      localStorage.getItem("re-solve:settings:editor") ?? "{}",
                     );
                     localStorage.setItem(
-                      "re-solve:editor",
+                      "re-solve:settings:editor",
                       JSON.stringify({ ...prev, fontSize: size }),
                     );
                   } catch {}
