@@ -22,7 +22,13 @@ export async function apiFetch<T>(
     } satisfies ApiError;
   }
 
-  const json: ApiResponse<T> = await res.json();
+  let json: ApiResponse<T>;
+  try {
+    json = await res.json();
+  } catch {
+    // 게이트웨이 오류(502/504) 등 JSON이 아닌 응답 본문 처리
+    throw { code: "UNKNOWN", message: `HTTP ${res.status}` } satisfies ApiError;
+  }
   if (!json.success) throw json.error;
   return json.data;
 }
