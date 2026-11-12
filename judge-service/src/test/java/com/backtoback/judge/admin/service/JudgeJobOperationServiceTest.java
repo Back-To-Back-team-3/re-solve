@@ -75,6 +75,7 @@ class JudgeJobOperationServiceTest {
     @BeforeEach
     void prepare() {
         jdbc.execute("DROP TRIGGER IF EXISTS reject_recovery_audit");
+        jdbc.update("DELETE FROM outbox_events");
         jdbc.update("DELETE FROM judge_recovery_requests");
         jdbc.update("DELETE FROM audit_logs");
         jdbc.update("DELETE FROM judge_test_results");
@@ -175,6 +176,52 @@ class JudgeJobOperationServiceTest {
         jdbc.update("UPDATE judge_jobs SET status='SUCCEEDED' WHERE id=1");
         assertThatThrownBy(() -> operations.recover(1, 9, "key", "복구", "192.0.2.10"))
             .isInstanceOf(JudgeException.class);
+    }
+
+    /**
+     * 관리자 복구와 완료가 경합해도 한쪽만 기존 임대를 종결한다.
+     *
+     * @throws Exception 동시 작업을 제한시간 안에 완료하지 못한 경우
+     */
+    @Test
+    @DisplayName("관리자 복구와 정상 완료가 경합하면 한 경로만 기존 임대를 종결한다")
+    void serializesRecoveryAndCompletion() throws Exception {
+        jdbc.update("""
+            INSERT INTO judge_test_results(judge_job_id,test_asset_id,test_order,is_sample,token_status,
+                judge0_token,verdict,created_try_count,created_at,updated_at)
+            VALUES (1,1,1,false,'DONE','token','AC',1,'2026-10-31 09:00:00','2026-10-31 09:00:00')
+            """);
+        var lease = new SubmissionLease(1, 1, 1, 1, "old", LocalDateTime.of(2026, 10, 31, 9, 10));
+        var start = new CyclicBarrier(2);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var completed = executor.submit(() -> {
+                start.await();
+                return executions.complete(lease, null);
+            });
+            var recovered = executor.submit(() -> {
+                start.await();
+                try {
+                    operations.recover(1, 9, "race", "복구", "192.0.2.10");
+                    return true;
+                } catch (JudgeException exception) {
+                    return false;
+                }
+            });
+            boolean completionWon = completed.get(10, TimeUnit.SECONDS);
+            boolean recoveryWon = recovered.get(10, TimeUnit.SECONDS);
+            assertThat(completionWon).isNotEqualTo(recoveryWon);
+            if (recoveryWon) {
+                assertThat(executions.complete(lease, null)).isFalse();
+                var next = executions.claim().orElseThrow();
+                assertThat(executions.prepare(next)).isTrue();
+                assertThat(executions.complete(next, null)).isTrue();
+            }
+        }
+        assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("SELECT verdict FROM submissions", String.class)).isEqualTo("AC");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT event_type FROM outbox_events", String.class))
+            .isEqualTo("ExamSubmissionJudged");
     }
 
     /** 필터 목록과 상세 오류 정보를 안전하게 조회한다. */

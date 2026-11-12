@@ -303,6 +303,16 @@ class SubmissionExecutionStoreTest {
             SELECT created_try_count FROM judge_test_results ORDER BY test_order
             """, Integer.class)).containsExactly(1, 1);
         assertThat(store.complete(second, null)).isTrue();
+        assertThat(store.saveResult(first, 2, "existing-token", result)).isFalse();
+        assertThat(store.complete(first, null)).isFalse();
+        assertThat(store.complete(second, null)).isFalse();
+        assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("SELECT verdict FROM submissions", String.class)).isEqualTo("CE");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT event_type FROM outbox_events", String.class))
+            .isEqualTo("ExamSubmissionJudged");
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+            .isEqualTo(second.correlationId());
         assertThat(jdbc.queryForObject("SELECT compile_message FROM submissions", String.class)).isEqualTo(diagnostic);
     }
 

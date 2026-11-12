@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -183,6 +184,61 @@ class SubmissionWorkerTest {
         verify(client, times(2)).find("second");
         verify(client, never()).create(any());
         verify(store).saveResult(lease, 2, "second", result);
+        verify(store).complete(lease, data);
+    }
+
+    /** 차단 중 선점을 멈추고 기존 토큰의 복구 확인이 성공하면 선점을 다시 시도한다. */
+    @Test
+    @DisplayName("서킷 복구 확인이 성공하면 기존 토큰 결과를 저장하고 대기 작업 선점을 재개한다")
+    void resumesWorkAfterCircuitProbe() {
+        var circuitClock = mock(Clock.class);
+        var start = Instant.parse("2026-10-31T00:00:00Z");
+        given(circuitClock.instant()).willReturn(start);
+        var controlledCircuit = new JudgeEngineCircuit(circuitClock);
+        try (var permit = controlledCircuit.acquire().orElseThrow()) {
+            for (int index = 0; index < 5; index++) {
+                try {
+                    permit.invoke(() -> {
+                        throw new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED);
+                    });
+                } catch (JudgeException expected) {
+                    // Judge0 통신 실패를 서킷에 반영한다.
+                }
+            }
+        }
+        worker
+            = new SubmissionWorker(
+                store,
+                dataClient,
+                assets,
+                languages,
+                List.of(generator),
+                client,
+                evaluator,
+                Clock.fixed(start, ZoneOffset.UTC),
+                controlledCircuit
+            );
+        assertThat(worker.runOnce()).isFalse();
+        verify(store, never()).claim();
+
+        given(circuitClock.instant()).willReturn(start.plusSeconds(30));
+        given(store.claim()).willReturn(Optional.of(lease), Optional.empty());
+        given(store.completedOrders(lease)).willReturn(java.util.Set.of(1));
+        given(store.resumableTokens(lease)).willReturn(Map.of(2, "second"));
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        var response = new JudgeExecutionResultResponse(State.COMPLETED, 3, "1", null, null, null, null, null, 0, null);
+        var result = new JudgeTestResult(State.COMPLETED, JudgeVerdict.AC, 1, null, "1", null, null);
+        given(client.find("second")).willReturn(response);
+        given(evaluator.evaluate(eq(response), any(), eq("1"), eq(1024), eq(64))).willReturn(result);
+        given(store.saveResult(lease, 2, "second", result)).willReturn(true);
+
+        assertThat(worker.runOnce()).isTrue();
+        assertThat(controlledCircuit.state()).isZero();
+        assertThat(worker.runOnce()).isFalse();
+        verify(store, times(2)).claim();
+        verify(client).find("second");
+        verify(client, never()).create(any());
         verify(store).complete(lease, data);
     }
 
