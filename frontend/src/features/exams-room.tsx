@@ -2,8 +2,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Timer } from "lucide-react";
-import { api, remainingSeconds } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
+import { contestApi } from "@/services/api";
+import type { ExamProblem, Language, Problem } from "@/services/types";
 import {
   Button,
   Empty,
@@ -11,82 +12,70 @@ import {
   Go,
   Loading,
   Modal,
-  NotFound,
   Badge,
-  useAction,
 } from "@/components/ui";
-import {
-  useWorkspace,
-  useWorkspaceApi,
-  examDrafts,
-  readDraft,
-  type Draft,
-} from "@/stores/workspace";
+import { useWorkspace } from "@/stores/workspace";
 import { ProblemDescription } from "./problem";
 import { CodeEditor } from "./editor";
-import { useCatalog } from "@/services/catalog";
+
+function toUIProblem(ep: ExamProblem): Problem {
+  return {
+    id: ep.problemId,
+    problemRevisionId: ep.problemId,
+    title: ep.title,
+    difficulty: 0,
+    tags: [],
+    description: ep.body,
+    constraints: "",
+    examples: "",
+    functionSpec: { name: "solution", parameters: [], returnType: "" },
+    starterCodes: { java: "", python3: "", cpp: "" } as Record<Language, string>,
+    samples: [],
+  };
+}
+
 
 export function ExamRoom({ id }: { id: string }) {
-  const { problems } = useCatalog();
-  const r = useResource(
-      async () => ({
-        exam: await api.exam(id),
-        session: await api.session(id),
-        user: await api.currentUser(),
-      }),
-      id,
-    ),
-    router = useRouter(),
-    action = useAction(),
-    [now, setNow] = useState(Date.now),
-    [confirm, setConfirm] = useState(false),
-    [finishing, setFinishing] = useState(false),
-    expired = useRef(false);
-  const store = useWorkspaceApi();
-  const [endError, setEndError] = useState("");
-  function collected() {
-    const all: Record<string, Draft> = {};
-    try {
-      for (const key of Object.keys(localStorage)) {
-        if (key.startsWith("resolve:draft:")) {
-          const d = readDraft(key.slice("resolve:draft:".length));
-          if (d) all[key.slice("resolve:draft:".length)] = d;
-        }
-      }
-    } catch {}
-    Object.assign(all, store.getState().drafts);
-    return examDrafts(all, r.data?.user?.id || "", id);
-  }
-  const collectRef = useRef(collected);
+  const r = useResource(() => contestApi.getExamProblems(id), id);
+  const router = useRouter();
+  const member = useWorkspace((s) => s.member);
+  const active = useWorkspace((s) => s.activeProblems[id]);
+  const setActive = useWorkspace((s) => s.setActive);
+
+  const [now, setNow] = useState(() => Date.now());
+  const [offset, setOffset] = useState(0);
+  const [confirm, setConfirm] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const expired = useRef(false);
+
   useEffect(() => {
-    collectRef.current = collected;
-  });
-  const active = useWorkspace((s) => s.activeProblems[id]),
-    setActive = useWorkspace((s) => s.setActive);
+    if (!r.data) return;
+    setOffset(new Date(r.data.serverNow).getTime() - Date.now());
+  }, [r.data]);
+
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(timer);
   }, []);
-  const session = r.data?.session;
+
+  const personalEndsAt = r.data?.personalEndsAt ?? "";
+  const remaining = personalEndsAt
+    ? Math.max(
+        0,
+        Math.floor(
+          (new Date(personalEndsAt).getTime() - (now + offset)) / 1000,
+        ),
+      )
+    : 0;
+
   useEffect(() => {
-    if (session?.finishedAt) router.replace(`/exams/${id}/result`);
-    else if (
-      session &&
-      remainingSeconds(session.endsAt, now) === 0 &&
-      !expired.current
-    ) {
+    if (!personalEndsAt || !r.data) return;
+    if (remaining === 0 && !expired.current) {
       expired.current = true;
-      window.dispatchEvent(new Event("resolve:flush"));
-      api
-        .finishExam(id, collectRef.current())
-        .then(() => router.replace(`/exams/${id}/result`))
-        .catch(() => {
-          setEndError(
-            "응시 종료를 저장하지 못했습니다. 저장소 공간을 확보한 뒤 다시 시도해 주세요.",
-          );
-        });
+      router.replace(`/exams/${id}/result`);
     }
-  }, [session, now, id, router]);
+  }, [remaining, personalEndsAt, r.data, id, router]);
+
   if (r.loading)
     return (
       <div className="container">
@@ -99,9 +88,7 @@ export function ExamRoom({ id }: { id: string }) {
         <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
-  const e = r.data?.exam;
-  if (!e) return <NotFound what="시험" />;
-  if (!session || !r.data?.user)
+  if (!r.data || r.data.problems.length === 0)
     return (
       <div className="container">
         <Empty
@@ -111,59 +98,33 @@ export function ExamRoom({ id }: { id: string }) {
         />
       </div>
     );
-  if (endError)
-    return (
-      <div className="container">
-        <ErrorState
-          message={endError}
-          retry={() => {
-            setEndError("");
-            expired.current = false;
-          }}
-        />
-      </div>
-    );
-  if (session.finishedAt || remainingSeconds(session.endsAt, now) === 0)
-    return (
-      <div className="container">
-        <Loading />
-      </div>
-    );
-  const problem = problems.find(
-      (p) =>
-        p.id === (e.problemIds.includes(active) ? active : e.problemIds[0]),
-    )!,
-    seconds = remainingSeconds(session.endsAt, now);
+
+  const uiProblems = r.data.problems.map(toUIProblem);
+  const activeProblemId = uiProblems.some((p) => p.id === active)
+    ? active
+    : uiProblems[0].id;
+  const problem = uiProblems.find((p) => p.id === activeProblemId)!;
+  const userId = member?.memberId ?? "";
+
   async function finish() {
     setFinishing(true);
-    window.dispatchEvent(new Event("resolve:flush"));
-    await action(async () => {
-      await api.finishExam(id, collected());
-      router.push(`/exams/${id}/result`);
-    });
+    router.push(`/exams/${id}/result`);
     setFinishing(false);
   }
+
   return (
     <>
       <div className="exam-bar">
         <div className="row">
           <Badge tone="accent">실전 모의</Badge>
-          <h3>{e.title}</h3>
+          <h3>모의 코딩테스트</h3>
         </div>
         <div className="row wrap">
           <span className="timer" aria-label="남은 시간">
             <Timer size={18} />{" "}
-            {String(Math.floor(seconds / 60)).padStart(2, "0")}:
-            {String(seconds % 60).padStart(2, "0")}
+            {String(Math.floor(remaining / 60)).padStart(2, "0")}:
+            {String(remaining % 60).padStart(2, "0")}
           </span>
-          <Button
-            className="small"
-            onClick={() =>
-              action(() => api.expireExam(id), "타이머 만료를 재현합니다.")
-            }
-          >
-            데모: 시간 만료
-          </Button>
           <Button className="primary" onClick={() => setConfirm(true)}>
             응시 종료
           </Button>
@@ -172,18 +133,18 @@ export function ExamRoom({ id }: { id: string }) {
       <div className="exam-workspace">
         <aside className="exam-sidebar stack-sm">
           <h3>시험 문제</h3>
-          <small>{e.problemIds.length}문제 · 자동 저장</small>
-          {e.problemIds.map((pid, i) => (
+          <small>{r.data.problems.length}문제 · 자동 저장</small>
+          {r.data.problems.map((p, i) => (
             <button
-              className={problem.id === pid ? "active" : ""}
-              key={pid}
+              className={activeProblemId === p.problemId ? "active" : ""}
+              key={p.problemId}
               onClick={() => {
                 window.dispatchEvent(new Event("resolve:flush"));
-                setActive(id, pid);
+                setActive(id, p.problemId);
               }}
             >
               <b>문제 {i + 1}</b>
-              <p>{problems.find((p) => p.id === pid)?.title}</p>
+              <p>{p.title}</p>
             </button>
           ))}
           <Go className="small" href={`/exams/${id}`}>
@@ -192,14 +153,14 @@ export function ExamRoom({ id }: { id: string }) {
         </aside>
         <div className="workspace">
           <ProblemDescription key={problem.id} problem={problem} exam />
-          <CodeEditor problem={problem} userId={r.data.user.id} examId={id} />
+          <CodeEditor problem={problem} userId={userId} examId={id} />
         </div>
       </div>
       <Modal
         open={confirm}
         onOpenChange={setConfirm}
         title="응시를 종료할까요?"
-        description="종료하면 더 이상 코드를 편집할 수 없습니다. 문제별 가장 최근에 저장한 언어의 코드를 최종 제출하고 모의 결과를 기록합니다."
+        description="종료하면 더 이상 코드를 편집할 수 없습니다. 각 문제의 마지막 저장 코드를 최종 제출합니다."
       >
         <div className="row">
           <Button onClick={() => setConfirm(false)}>계속 풀기</Button>
