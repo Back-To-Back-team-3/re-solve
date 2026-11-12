@@ -353,7 +353,7 @@ export function StudyCreate() {
               condition: String(f.get("condition")),
               tagIds: selected,
               problemIds: problems
-                .filter((p) => selected.includes(p.tagId))
+                .filter((p) => p.tags.some((t) => selected.includes(t.tagId)))
                 .map((p) => p.id),
             });
             router.push(`/studies/${s.id}`);

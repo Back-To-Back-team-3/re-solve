@@ -5,7 +5,6 @@ import remarkGfm from "remark-gfm";
 import { api } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
 import type { Problem } from "@/services/types";
-import { useCatalog } from "@/services/catalog";
 import {
   Badge,
   ErrorState,
@@ -24,7 +23,6 @@ export function ProblemDescription({
   problem: Problem;
   exam?: boolean;
 }) {
-  const { tags } = useCatalog();
   const [tab, setTab] = useState("description"),
     r = useResource(() => api.submissions(problem.id), problem.id);
   return (
@@ -32,7 +30,7 @@ export function ProblemDescription({
       <div className="row wrap">
         <Badge>Lv. {problem.difficulty}</Badge>
         <Badge tone="accent">
-          {tags.find((t) => t.id === problem.tagId)?.name}
+          {problem.tags[0]?.name}
         </Badge>
         <small>#{problem.id}</small>
       </div>

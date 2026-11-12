@@ -313,7 +313,7 @@ export function HomePage() {
   );
 }
 export function DashboardPage() {
-  const { tags, problems } = useCatalog();
+  const { problems } = useCatalog();
   const r = useResource(api.snapshot);
   if (r.loading)
     return (
@@ -368,7 +368,7 @@ export function DashboardPage() {
                   <div className="grow">
                     <b>{p.title}</b>
                     <p className="muted">
-                      {tags.find((t) => t.id === p.tagId)?.name}
+                      {p.tags[0]?.name}
                     </p>
                   </div>
                   <Badge>Lv.{p.difficulty}</Badge>

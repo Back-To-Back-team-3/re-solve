@@ -73,10 +73,14 @@ export type AdminMember = {
 
 export type Language = "java" | "python3" | "cpp";
 export type Verdict = "AC" | "WA" | "CE" | "TLE" | "MLE" | "RE";
+// api-spec §0.1 enumeration table
 export type JudgeState =
-  "ACCEPTED" | "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
-export type Scenario = Verdict | "FAILED";
-export type SolvedStatus = "UNSOLVED" | "SOLVED" | "WRONG" | "REVIEW";
+  | "QUEUED"
+  | "JUDGING"
+  | "RETRY_WAITING"
+  | "COMPLETED"
+  | "FAILED";
+export type SolvedStatus = "SOLVED" | "UNSOLVED";
 export interface Tag {
   id: string;
   name: string;
@@ -90,8 +94,7 @@ export interface Problem {
   problemRevisionId: string;
   title: string;
   difficulty: number;
-  tagId: string;
-  rate: number;
+  tags: { tagId: string; name: string }[];
   description: string;
   constraints: string;
   examples: string;
@@ -114,7 +117,6 @@ export interface Submission {
   kind: "run" | "submit";
   state: JudgeState;
   verdict: Verdict | null;
-  scenario: Scenario;
   createdAt: number;
   finishedAt?: number;
   passedCount: number;
@@ -189,7 +191,7 @@ export interface Database {
   submissions: Submission[];
   messages: Message[];
   notes: Record<string, string>;
-  scenario: Scenario;
+  scenario: Verdict | "FAILED";
   simulateReadError: boolean;
 }
 export interface ProblemFilter {
@@ -208,3 +210,47 @@ export interface Page<T> {
   totalElements: number;
   totalPages: number;
 }
+
+// --- api-spec §3.1 judge-service B 도메인 실서버 타입 ---
+
+// POST /api/v1/runs §3.1.8 테스트 항목
+export type RunTestResult = {
+  source: "SAMPLE" | "CUSTOM";
+  testAssetId?: string;
+  index?: number;
+  verdict: Verdict | null;
+  actualReturnText: string | null;
+  expectedReturnText?: string;
+  timeMs: number | null;
+  memoryKb: number | null;
+  stdout: string;
+};
+
+// POST /api/v1/runs §3.1.8 응답
+export type RunResponse = {
+  results: RunTestResult[];
+  compileMessage: string | null;
+};
+
+// GET /api/v1/submissions/{submissionId} §3.1.3 응답
+export type JudgeResult = {
+  submissionId: string;
+  status: JudgeState;
+  effectiveResult: {
+    verdict: Verdict | null;
+    passedCount: number;
+    totalCount: number;
+    maxTimeMs: number | null;
+    maxMemoryKb: number | null;
+  } | null;
+  compileMessage: string | null;
+};
+
+// POST /api/v1/submissions §3.1.2 접수 응답 (202)
+export type SubmissionReceipt = {
+  submissionId: string;
+  judgeAttempt: number;
+  status: JudgeState;
+  submittedAt: string;
+  statusUrl: string;
+};

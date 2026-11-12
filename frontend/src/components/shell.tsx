@@ -7,7 +7,7 @@ import { CatalogProvider } from "@/services/catalog";
 import { WorkspaceProvider } from "@/stores/workspace";
 import { api, labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
-import type { Scenario } from "@/services/types";
+import type { Verdict } from "@/services/types";
 import { Button, Modal, ToastProvider, useAction, useToast } from "./ui";
 const nav = [
   ["/", "연습하기"],
@@ -24,7 +24,7 @@ function Frame({ children }: { children: ReactNode }) {
     toast = useToast();
   const [theme, setTheme] = useState("light"),
     [demo, setDemo] = useState(false),
-    [scenario, setScenario] = useState<Scenario>("AC");
+    [scenario, setScenario] = useState<Verdict | "FAILED">("AC");
   useEffect(() => {
     const sync = () =>
       setTheme(document.documentElement.dataset.theme || "light");
@@ -123,7 +123,7 @@ function Frame({ children }: { children: ReactNode }) {
             <select
               className="input"
               value={scenario}
-              onChange={(e) => setScenario(e.target.value as Scenario)}
+              onChange={(e) => setScenario(e.target.value as Verdict | "FAILED")}
             >
               {["AC", "WA", "TLE", "CE", "MLE", "RE", "FAILED"].map((s) => (
                 <option key={s} value={s}>

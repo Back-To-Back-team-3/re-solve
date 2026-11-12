@@ -23,7 +23,6 @@ export function ProblemTable({
   items: Problem[];
   db?: Database;
 }) {
-  const { tags } = useCatalog();
   return (
     <div className="table-wrap">
       <table>
@@ -34,7 +33,6 @@ export function ProblemTable({
             <th>문제 제목</th>
             <th>난이도</th>
             <th>알고리즘</th>
-            <th>정답률</th>
           </tr>
         </thead>
         <tbody>
@@ -45,15 +43,7 @@ export function ProblemTable({
             return (
               <tr key={p.id}>
                 <td>
-                  <Badge
-                    tone={
-                      status === "SOLVED"
-                        ? "success"
-                        : status === "WRONG"
-                          ? "error"
-                          : ""
-                    }
-                  >
+                  <Badge tone={status === "SOLVED" ? "success" : ""}>
                     {labels[status]}
                   </Badge>
                 </td>
@@ -64,8 +54,7 @@ export function ProblemTable({
                 <td>
                   <Badge>Lv. {p.difficulty}</Badge>
                 </td>
-                <td>{tags.find((t) => t.id === p.tagId)?.name}</td>
-                <td className="mono">{p.rate}%</td>
+                <td>{p.tags.map((t) => t.name).join(", ")}</td>
               </tr>
             );
           })}
@@ -228,15 +217,12 @@ export function ProblemsPage() {
           {
             key: "status",
             label: "모든 상태",
-            options: ["UNSOLVED", "SOLVED", "WRONG"].map((s) => [s, labels[s]]),
+            options: ["UNSOLVED", "SOLVED"].map((s) => [s, labels[s]]),
           },
           {
             key: "sort",
             label: "최신순",
-            options: [
-              ["difficulty", "쉬운 문제순"],
-              ["rate", "정답률순"],
-            ],
+            options: [["difficulty", "쉬운 문제순"]],
           },
         ].map((f) => (
           <select

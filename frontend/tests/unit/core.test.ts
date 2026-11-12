@@ -84,13 +84,13 @@ describe("mock judgement and timer", () => {
     const s = {
       ...seed(1000).submissions[0],
       createdAt: 1000,
-      state: "ACCEPTED" as const,
+      state: "QUEUED" as const,
       verdict: null,
       scenario: "WA" as const,
     };
-    expect(resolveSubmission(s, 1000).state).toBe("ACCEPTED");
-    expect(resolveSubmission(s, 1400).state).toBe("QUEUED");
-    expect(resolveSubmission(s, 1800).state).toBe("RUNNING");
+    expect(resolveSubmission(s, 1000).state).toBe("QUEUED");
+    expect(resolveSubmission(s, 1400).state).toBe("JUDGING");
+    expect(resolveSubmission(s, 1800).state).toBe("JUDGING");
     expect(resolveSubmission(s, 2400)).toMatchObject({
       state: "COMPLETED",
       verdict: "WA",
