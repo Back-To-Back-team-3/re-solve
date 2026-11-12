@@ -1,11 +1,20 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Users, Clock, ArrowRight, Plus } from "lucide-react";
+import { Users, ArrowRight, Plus } from "lucide-react";
 import { api } from "@/services/mock-api";
 import { studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
-import type { Study, GoalType, SkillLevel, ActiveTimeSlot, JoinType, Language } from "@/services/types";
+import type {
+  GoalType,
+  SkillLevel,
+  ActiveTimeSlot,
+  JoinType,
+  Language,
+  MembershipStatus,
+  StudySummary,
+  StudyRecommendation,
+} from "@/services/types";
 import { useCatalog } from "@/services/catalog";
 import {
   Badge,
@@ -23,80 +32,142 @@ import {
 } from "@/components/ui";
 import { Pet } from "@/components/pet";
 import { Board } from "./board";
-import { ProblemTable, useQuery, pageSlice, Pager } from "./problem-list";
-function StudyCard({ study, userId }: { study: Study; userId: string | null }) {
-  const { tags } = useCatalog();
-  const member = study.members.includes(userId || ""),
-    applicant = study.applicants.includes(userId || "");
+import { ProblemTable, useQuery, Pager } from "./problem-list";
+const goalLabel: Record<GoalType, string> = {
+  EMPLOYMENT: "취업 준비",
+  CONTEST: "대회 준비",
+  STUDY: "순수 학습",
+};
+const skillLabel: Record<SkillLevel, string> = {
+  LV0: "LV0",
+  LV1: "LV1",
+  LV2: "LV2",
+  LV3: "LV3",
+  MASTER: "MASTER",
+};
+const timeLabel: Record<ActiveTimeSlot, string> = {
+  MORNING: "오전",
+  AFTERNOON: "오후",
+  EVENING: "저녁",
+  NIGHT: "심야",
+};
+const langLabel: Record<Language, string> = {
+  java: "Java",
+  python3: "Python",
+  cpp: "C++",
+};
+
+function StudyCard({
+  study,
+  membershipStatus,
+}: {
+  study: StudySummary;
+  membershipStatus: MembershipStatus | null;
+}) {
+  const isApproved = membershipStatus === "APPROVED";
+  const isPending = membershipStatus === "PENDING";
   return (
     <article className="card study-card">
       <div className="row between">
-        <Badge tone={member ? "success" : applicant ? "pending" : "accent"}>
-          {member ? "참여 중" : applicant ? "가입 신청 중" : "모집 중"}
-        </Badge>
+        <div className="row">
+          {isApproved && <Badge tone="success">참여 중</Badge>}
+          {isPending && <Badge tone="pending">신청 중</Badge>}
+          <Badge tone={study.joinType === "INSTANT" ? "accent" : undefined}>
+            {study.joinType === "INSTANT" ? "즉시 가입" : "승인 필요"}
+          </Badge>
+        </div>
         <Pet size={36} level={2} />
       </div>
-      <h3>{study.title}</h3>
-      <p className="muted">{study.description}</p>
-      <div className="row wrap">
-        {study.tagIds.map((t) => (
-          <Badge key={t}>{tags.find((x) => x.id === t)?.name}</Badge>
-        ))}
-      </div>
+      <h3>{study.name}</h3>
+      <p className="muted">
+        {goalLabel[study.goal]} · {skillLabel[study.skillLevel]} ·{" "}
+        {langLabel[study.preferredLanguage]}
+      </p>
+      <p className="muted">{timeLabel[study.activeTimeSlot]}</p>
       <p className="row">
         <Users size={16} />
-        {study.members.length} / {study.capacity}명{" "}
-        <span className="muted">{study.level}</span>
+        {study.memberCount} / {study.capacity}명
       </p>
+      {study.status === "RECRUITING" && (
+        <Go className="actions primary" href={`/studies/${study.studyId}`}>
+          {isApproved ? "스터디 입장" : "자세히 보기"}
+          <ArrowRight size={16} />
+        </Go>
+      )}
+      {study.status === "ACTIVE" && (
+        <Go className="actions" href={`/studies/${study.studyId}`}>
+          정원 마감 — 자세히 보기
+          <ArrowRight size={16} />
+        </Go>
+      )}
+    </article>
+  );
+}
+
+function RecCard({
+  study,
+  membershipStatus,
+}: {
+  study: StudyRecommendation;
+  membershipStatus: MembershipStatus | null;
+}) {
+  return (
+    <article className="card study-card">
+      <div className="row between">
+        <div className="row">
+          {membershipStatus === "APPROVED" && <Badge tone="success">참여 중</Badge>}
+          {membershipStatus === "PENDING" && <Badge tone="pending">신청 중</Badge>}
+        </div>
+        <Pet size={36} level={2} />
+      </div>
+      <h3>{study.name}</h3>
       <p className="row">
-        <Clock size={16} />
-        {study.time}
+        <Users size={16} />
+        {study.memberCount} / {study.capacity}명
       </p>
-      <div className="notice">{study.reason}</div>
-      <Go className="actions primary" href={`/studies/${study.id}`}>
-        {member ? "스터디 입장" : "자세히 보기"}
+      {study.reasons[0] && <p className="muted">{study.reasons[0]}</p>}
+      <Go className="actions primary" href={`/studies/${study.studyId}`}>
+        자세히 보기
         <ArrowRight size={16} />
       </Go>
     </article>
   );
 }
 export function StudiesPage() {
-  const { tags } = useCatalog();
-  const { params, change } = useQuery(),
-    r = useResource(api.snapshot);
+  const { params, change } = useQuery();
   const [search, setSearch] = useState(params.get("keyword") || "");
   const appliedKeyword = params.get("keyword") || "";
   useEffect(() => setSearch(appliedKeyword), [appliedKeyword]);
-  if (r.loading)
-    return (
-      <div className="container">
-        <Loading />
-      </div>
-    );
-  if (r.error)
-    return (
-      <div className="container">
-        <ErrorState message={r.error.message} retry={r.retry} />
-      </div>
-    );
-  const db = r.data!,
-    matches = db.studies.filter(
-      (s) =>
-        (!params.get("keyword") || s.title.includes(params.get("keyword")!)) &&
-        (!params.get("tag") || s.tagIds.includes(params.get("tag")!)),
-    ),
-    mine = matches.filter((s) => s.members.includes(db.currentUserId || "")),
-    recommended = matches.filter(
-      (s) => !s.members.includes(db.currentUserId || ""),
-    );
-  const order = (a: Study, b: Study) =>
-    params.get("sort") === "members"
-      ? b.members.length - a.members.length
-      : params.get("sort") === "title"
-        ? a.title.localeCompare(b.title)
-        : b.deadline - a.deadline;
-  const recPage = pageSlice(recommended.sort(order), params.get("page"), 3),
-    myPage = pageSlice(mine.sort(order), params.get("minePage"), 3);
+
+  const listKey = [
+    params.get("keyword") || "",
+    params.get("goal") || "",
+    params.get("activeTimeSlot") || "",
+    params.get("sort") || "",
+    params.get("page") || "0",
+  ].join("|");
+
+  const list = useResource(
+    () =>
+      studyApi.getList({
+        keyword: params.get("keyword") || undefined,
+        goal: (params.get("goal") as GoalType) || undefined,
+        activeTimeSlot: (params.get("activeTimeSlot") as ActiveTimeSlot) || undefined,
+        sort: params.get("sort") || undefined,
+        page: Number(params.get("page") || 0),
+        size: 20,
+      }),
+    listKey,
+  );
+  const rec = useResource(() => studyApi.getRecommendations({ size: 5 }));
+  const myList = useResource(() => studyApi.getMyStudies({ size: 100 }));
+
+  const membershipMap = useMemo(() => {
+    const map = new Map<string, MembershipStatus>();
+    myList.data?.content.forEach((m) => map.set(m.studyId, m.membershipStatus));
+    return map;
+  }, [myList.data]);
+
   return (
     <div className="container stack">
       <Heading
@@ -114,81 +185,105 @@ export function StudiesPage() {
         className="filters"
         onSubmit={(e) => {
           e.preventDefault();
-          change({ keyword: search, page: "0", minePage: "0" });
+          change({ keyword: search, page: "0" });
         }}
       >
         <input
           aria-label="스터디 검색"
           className="input search"
-          placeholder="찾고 싶은 스터디를 검색하세요"
+          placeholder="스터디 이름을 검색하세요"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <select
           className="input"
-          aria-label="스터디 알고리즘"
-          value={params.get("tag") || ""}
-          onChange={(e) =>
-            change({ tag: e.target.value, page: "0", minePage: "0" })
-          }
+          aria-label="학습 목표"
+          value={params.get("goal") || ""}
+          onChange={(e) => change({ goal: e.target.value, page: "0" })}
         >
-          <option value="">모든 알고리즘</option>
-          {tags.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
+          <option value="">모든 목표</option>
+          <option value="EMPLOYMENT">취업 준비</option>
+          <option value="CONTEST">대회 준비</option>
+          <option value="STUDY">순수 학습</option>
         </select>
         <select
           className="input"
-          aria-label="스터디 정렬"
+          aria-label="활동 시간대"
+          value={params.get("activeTimeSlot") || ""}
+          onChange={(e) => change({ activeTimeSlot: e.target.value, page: "0" })}
+        >
+          <option value="">모든 시간대</option>
+          <option value="MORNING">오전</option>
+          <option value="AFTERNOON">오후</option>
+          <option value="EVENING">저녁</option>
+          <option value="NIGHT">심야</option>
+        </select>
+        <select
+          className="input"
+          aria-label="정렬"
           value={params.get("sort") || ""}
-          onChange={(e) =>
-            change({ sort: e.target.value, page: "0", minePage: "0" })
-          }
+          onChange={(e) => change({ sort: e.target.value, page: "0" })}
         >
           <option value="">최신순</option>
-          <option value="members">참여 인원순</option>
-          <option value="title">이름순</option>
+          <option value="lastActivityAt,desc">최근 활동순</option>
+          <option value="memberCount,desc">멤버순</option>
         </select>
         <Button>검색</Button>
       </form>
-      <section className="stack">
-        <h2>나에게 맞는 추천 스터디</h2>
-        {recommended.length ? (
+
+      {!rec.error && rec.data && rec.data.content.length > 0 && (
+        <section className="stack">
+          <h2>
+            {rec.data.mode === "PERSONALIZED" ? "나를 위한 추천 스터디" : "인기 스터디"}
+          </h2>
+          {rec.data.isProfileRequired && (
+            <p className="muted">
+              더 정확한 추천을 받으려면 학습 프로필을 입력하세요.
+            </p>
+          )}
           <div className="grid-3">
-            {recPage.items.map((s) => (
-              <StudyCard key={s.id} study={s} userId={db.currentUserId} />
+            {rec.data.content.map((s) => (
+              <RecCard
+                key={s.studyId}
+                study={s}
+                membershipStatus={membershipMap.get(s.studyId) ?? null}
+              />
             ))}
           </div>
-        ) : (
-          <Empty
-            title="조건에 맞는 스터디가 없어요"
-            description="직접 스터디를 만들거나 다른 검색 조건을 선택해 보세요."
-          />
-        )}
-        <Pager
-          {...recPage}
-          onChange={(page) => change({ page: String(page) })}
-        />
-      </section>
+        </section>
+      )}
+
       <section className="stack">
-        <h2>
-          참여 중인 스터디 <Badge>{mine.length}</Badge>
-        </h2>
-        {mine.length ? (
-          <div className="grid-3">
-            {myPage.items.map((s) => (
-              <StudyCard key={s.id} study={s} userId={db.currentUserId} />
-            ))}
-          </div>
+        <h2>스터디 탐색</h2>
+        {list.loading ? (
+          <Loading />
+        ) : list.error ? (
+          <ErrorState message={list.error.message} retry={list.retry} />
         ) : (
-          <Empty title="함께할 동료를 찾아보세요" />
+          <>
+            {list.data!.content.length ? (
+              <div className="grid-3">
+                {list.data!.content.map((s) => (
+                  <StudyCard
+                    key={s.studyId}
+                    study={s}
+                    membershipStatus={membershipMap.get(s.studyId) ?? null}
+                  />
+                ))}
+              </div>
+            ) : (
+              <Empty
+                title="조건에 맞는 스터디가 없어요"
+                description="필터를 바꿔보거나 직접 스터디를 만들어 보세요."
+              />
+            )}
+            <Pager
+              page={list.data!.page}
+              totalPages={list.data!.totalPages}
+              onChange={(page) => change({ page: String(page) })}
+            />
+          </>
         )}
-        <Pager
-          {...myPage}
-          onChange={(page) => change({ minePage: String(page) })}
-        />
       </section>
     </div>
   );

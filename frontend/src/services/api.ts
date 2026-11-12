@@ -339,8 +339,14 @@ export const studyApi = {
   },
   getDetail: (studyId: string) =>
     apiFetch<StudyDetail>(`/api/v1/studies/${studyId}`),
-  getMyStudies: () =>
-    apiFetch<ServerPage<StudyMeItem>>("/api/v1/studies/me"),
+  getMyStudies: (params: { status?: MembershipStatus; page?: number; size?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.page != null) q.set("page", String(params.page));
+    if (params.size != null) q.set("size", String(params.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<StudyMeItem>>(`/api/v1/studies/me${qs ? `?${qs}` : ""}`);
+  },
   getRecommendations: (params: { page?: number; size?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.page != null) q.set("page", String(params.page));
