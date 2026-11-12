@@ -12,6 +12,7 @@ import type {
 } from "@/services/types";
 import { Badge, Button, ErrorState, Loading, useAction } from "@/components/ui";
 import { Pet } from "@/components/pet";
+import { DelegateModal, RemoveModal } from "./study-member-modals";
 
 const goalLabel: Record<GoalType, string> = {
   EMPLOYMENT: "취업 준비",
@@ -57,7 +58,6 @@ export function MembersTab({
     membershipId: string;
     nickname: string;
   } | null>(null);
-  const [removeReason, setRemoveReason] = useState("");
   const [openMenu, setOpenMenu] = useState<string | null>(null);
 
   const approved = useResource(
@@ -141,43 +141,6 @@ export function MembersTab({
         }
       },
       "역할이 변경됐습니다.",
-      false,
-    );
-  }
-
-  async function doDelegate() {
-    if (!delegateTarget) return;
-    await action(
-      async () => {
-        try {
-          await studyApi.delegateLeader(studyId, delegateTarget.membershipId);
-          setDelegateTarget(null);
-          onRefresh();
-          router.refresh();
-        } catch (err) {
-          throw new Error(((err as { message?: string }).message ?? "오류가 발생했습니다."));
-        }
-      },
-      "스터디장을 위임했습니다.",
-      false,
-    );
-  }
-
-  async function doRemove() {
-    if (!removeTarget) return;
-    await action(
-      async () => {
-        try {
-          await studyApi.removeMember(studyId, removeTarget.membershipId, removeReason);
-          setRemoveTarget(null);
-          setRemoveReason("");
-          onRefresh();
-          router.refresh();
-        } catch (err) {
-          throw new Error(((err as { message?: string }).message ?? "오류가 발생했습니다."));
-        }
-      },
-      "강제 탈퇴 처리했습니다.",
       false,
     );
   }
@@ -321,67 +284,21 @@ export function MembersTab({
       </section>
 
       {delegateTarget && (
-        <>
-          <div className="modal-overlay" onClick={() => setDelegateTarget(null)} />
-          <div className="modal stack">
-            <h2 className="modal-title">스터디장 위임</h2>
-            <p className="modal-description">
-              {delegateTarget.nickname}님에게 스터디장을 위임합니다.
-              <br />
-              위임 후에는 되돌릴 수 없습니다.
-            </p>
-            <div className="row">
-              <Button onClick={() => setDelegateTarget(null)}>취소</Button>
-              <Button className="primary" onClick={doDelegate}>
-                위임하기
-              </Button>
-            </div>
-          </div>
-        </>
+        <DelegateModal
+          studyId={studyId}
+          target={delegateTarget}
+          onClose={() => setDelegateTarget(null)}
+          onRefresh={onRefresh}
+        />
       )}
 
       {removeTarget && (
-        <>
-          <div
-            className="modal-overlay"
-            onClick={() => {
-              setRemoveTarget(null);
-              setRemoveReason("");
-            }}
-          />
-          <div className="modal stack">
-            <h2 className="modal-title">강제 탈퇴</h2>
-            <p className="modal-description">
-              {removeTarget.nickname}님을 강제 탈퇴합니다.
-            </p>
-            <label className="field">
-              사유 (필수, 최대 500자)
-              <textarea
-                className="input"
-                maxLength={500}
-                value={removeReason}
-                onChange={(e) => setRemoveReason(e.target.value)}
-              />
-            </label>
-            <div className="row">
-              <Button
-                onClick={() => {
-                  setRemoveTarget(null);
-                  setRemoveReason("");
-                }}
-              >
-                취소
-              </Button>
-              <Button
-                className="primary"
-                disabled={!removeReason.trim()}
-                onClick={doRemove}
-              >
-                탈퇴 처리
-              </Button>
-            </div>
-          </div>
-        </>
+        <RemoveModal
+          studyId={studyId}
+          target={removeTarget}
+          onClose={() => setRemoveTarget(null)}
+          onRefresh={onRefresh}
+        />
       )}
     </div>
   );
