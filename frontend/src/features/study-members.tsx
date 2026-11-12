@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import type {
@@ -41,6 +42,7 @@ export function MembersTab({
   version: number;
   onRefresh: () => void;
 }) {
+  const router = useRouter();
   const action = useAction();
   const myId = myMembership?.membershipId ?? "";
   const isLeader = myMembership?.role === "LEADER";
@@ -86,6 +88,7 @@ export function MembersTab({
         try {
           await studyApi.approveMember(studyId, membershipId);
           onRefresh();
+          router.refresh();
         } catch (err) {
           const code = (err as { code?: string }).code;
           throw new Error(
@@ -108,6 +111,7 @@ export function MembersTab({
         try {
           await studyApi.rejectMember(studyId, membershipId);
           onRefresh();
+          router.refresh();
         } catch (err) {
           throw new Error(((err as { message?: string }).message ?? "오류가 발생했습니다."));
         }
@@ -124,6 +128,7 @@ export function MembersTab({
         try {
           await studyApi.changeRole(studyId, membershipId, role);
           onRefresh();
+          router.refresh();
         } catch (err) {
           const code = (err as { code?: string }).code;
           throw new Error(
@@ -148,6 +153,7 @@ export function MembersTab({
           await studyApi.delegateLeader(studyId, delegateTarget.membershipId);
           setDelegateTarget(null);
           onRefresh();
+          router.refresh();
         } catch (err) {
           throw new Error(((err as { message?: string }).message ?? "오류가 발생했습니다."));
         }
@@ -166,6 +172,7 @@ export function MembersTab({
           setRemoveTarget(null);
           setRemoveReason("");
           onRefresh();
+          router.refresh();
         } catch (err) {
           throw new Error(((err as { message?: string }).message ?? "오류가 발생했습니다."));
         }

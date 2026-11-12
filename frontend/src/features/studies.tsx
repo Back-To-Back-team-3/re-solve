@@ -288,9 +288,10 @@ export function StudiesPage() {
 export function StudyPage({ id }: { id: string }) {
   const [tab, setTab] = useState("intro");
   const [version, setVersion] = useState(0);
+  const router = useRouter();
   const action = useAction();
   const r = useResource(() => studyApi.getDetail(id), `${id}:${version}`);
-  const refresh = () => setVersion((v) => v + 1);
+  const refresh = () => { setVersion((v) => v + 1); router.refresh(); };
 
   if (r.loading)
     return (
