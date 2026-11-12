@@ -1,8 +1,12 @@
 package com.backtoback.judge.judging.store;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -36,8 +40,28 @@ import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.event.config.OutboxStorageConfiguration;
 import com.backtoback.judge.global.config.PersistenceConfiguration;
+import com.backtoback.judge.global.error.JudgeErrorCode;
+import com.backtoback.judge.global.error.JudgeException;
+import com.backtoback.judge.judging.client.SubmissionJudgingDataClient;
+import com.backtoback.judge.judging.client.TestAssetClient;
+import com.backtoback.judge.judging.domain.JudgeLanguage;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
+import com.backtoback.judge.judging.dto.FunctionSpec;
+import com.backtoback.judge.judging.dto.ProblemValidationDataResponse;
+import com.backtoback.judge.judging.dto.SubmissionJudgingDataResponse;
+import com.backtoback.judge.judging.dto.TypeSpec;
+import com.backtoback.judge.judging.service.JudgeClient;
+import com.backtoback.judge.judging.service.JudgeEngineCircuit;
+import com.backtoback.judge.judging.service.JudgeLanguageService;
+import com.backtoback.judge.judging.service.JudgeQueueMetrics;
+import com.backtoback.judge.judging.service.SubmissionWorker;
+import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
+import com.backtoback.judge.judging.service.execution.JudgeResultEvaluator;
+import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionCreateResponse;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.backtoback.judge.judging.service.execution.dto.JudgeTestResult;
 
 import tools.jackson.databind.ObjectMapper;
@@ -51,6 +75,7 @@ import tools.jackson.databind.json.JsonMapper;
     {
         PersistenceConfiguration.class,
         OutboxStorageConfiguration.class,
+        JudgeQueueMetrics.class,
         SubmissionExecutionStore.class,
         SubmissionExecutionStoreTest.Beans.class
     }
@@ -67,6 +92,8 @@ class SubmissionExecutionStoreTest {
     private SubmissionExecutionStore store;
     @Autowired
     private Clock clock;
+    @Autowired
+    private JudgeQueueMetrics metrics;
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
@@ -208,6 +235,10 @@ class SubmissionExecutionStoreTest {
     @Test
     @DisplayName("대기 상태의 기한 초과는 실행 시도를 만들지 않고 실패 이벤트와 함께 종결한다")
     void expiresWithoutRun() {
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        metrics.bindTo(registry);
+        assertThat(registry.get("judge.jobs.pending.count").gauge().value()).isEqualTo(1);
+        assertThat(registry.get("judge.jobs.failed").functionCounter().count()).isZero();
         given(clock.instant()).willReturn(START.plusSeconds(600));
         assertThat(store.claim()).isEmpty();
         assertThat(store.recoverOne()).isTrue();
@@ -217,6 +248,17 @@ class SubmissionExecutionStoreTest {
         assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
             .matches("sched-JudgeJobExpiry-[0-9a-f-]{36}");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+        assertThat(registry.get("judge.jobs.pending.count").gauge().value()).isZero();
+        assertThat(registry.get("judge.jobs.failed").functionCounter().count()).isEqualTo(1);
+        assertThat(registry.get("judge.jobs.failed").functionCounter().count()).isEqualTo(1);
+        var payload
+            = JsonMapper
+                .builder()
+                .build()
+                .readTree(jdbc.queryForObject("SELECT payload FROM outbox_events", String.class));
+        assertThat(payload.get("correlationId").asString())
+            .isEqualTo(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class));
+        registry.close();
     }
 
     @Test
@@ -303,6 +345,16 @@ class SubmissionExecutionStoreTest {
             SELECT created_try_count FROM judge_test_results ORDER BY test_order
             """, Integer.class)).containsExactly(1, 1);
         assertThat(store.complete(second, null)).isTrue();
+        assertThat(store.saveResult(first, 2, "existing-token", result)).isFalse();
+        assertThat(store.complete(first, null)).isFalse();
+        assertThat(store.complete(second, null)).isFalse();
+        assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("SELECT verdict FROM submissions", String.class)).isEqualTo("CE");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT event_type FROM outbox_events", String.class))
+            .isEqualTo("ExamSubmissionJudged");
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+            .isEqualTo(second.correlationId());
         assertThat(jdbc.queryForObject("SELECT compile_message FROM submissions", String.class)).isEqualTo(diagnostic);
     }
 
@@ -400,6 +452,139 @@ class SubmissionExecutionStoreTest {
         var nextAttempt = store.claim().orElseThrow();
         assertThat(store.prepare(nextAttempt)).isTrue();
         assertThat(jdbc.queryForObject("SELECT unknown_retry_count FROM judge_jobs", Integer.class)).isZero();
+    }
+
+    /** 생성 응답 유실 뒤 새 임대에서 확정한 결과만 시험 결과 이벤트로 발행한다. */
+    @Test
+    @DisplayName("생성 응답 유실 복구 후 늦은 토큰을 거절하고 새 결과와 이벤트를 한 번 저장한다")
+    void completesAfterUnknownRecovery() {
+        // given: 생성 요청 이후 응답을 받지 못해 토큰은 UNKNOWN으로 남는다.
+        jdbc.update("""
+            UPDATE submissions SET context='EXAM',context_id=55,source_submission_id=71,
+                idempotency_key=NULL,request_hash=NULL WHERE id=1
+            """);
+        var first = store.claim().orElseThrow();
+        assertThat(store.beginCreate(first, 1)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT token_status FROM judge_test_results", String.class))
+            .isEqualTo("UNKNOWN");
+
+        // when: 유예가 지나 회수된 임대에서 새 실행을 생성한다.
+        given(clock.instant()).willReturn(START.plusSeconds(30));
+        assertThat(store.recoverUnknownOne()).isTrue();
+        var next = store.claim().orElseThrow();
+        assertThat(store.prepare(next)).isTrue();
+        assertThat(store.beginCreate(next, 1)).isTrue();
+        assertThat(store.saveToken(first, 1, "lost-token")).isFalse();
+        assertThat(store.saveToken(next, 1, "new-token")).isTrue();
+        var result = new JudgeTestResult(State.COMPLETED, JudgeVerdict.AC, 1, BigDecimal.ONE, null, null, null);
+        assertThat(store.saveResult(next, 1, "new-token", result)).isTrue();
+        assertThat(store.complete(next, null)).isTrue();
+
+        // then: 이전 실행과 완료 재호출은 확정 결과를 덮어쓰거나 이벤트를 추가하지 못한다.
+        assertThat(store.saveResult(first, 1, "lost-token", result)).isFalse();
+        assertThat(store.complete(first, null)).isFalse();
+        assertThat(store.complete(next, null)).isFalse();
+        assertThat(jdbc.queryForObject("SELECT verdict FROM submissions", String.class)).isEqualTo("AC");
+        assertThat(jdbc.queryForObject("SELECT judge0_token FROM judge_test_results", String.class))
+            .isEqualTo("new-token");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT event_type FROM outbox_events", String.class))
+            .isEqualTo("ExamSubmissionJudged");
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+            .isEqualTo(next.correlationId());
+    }
+
+    /**
+     * 실제 작업 저장소와 실행기를 연결해 생성 응답 유실 후 복구된 결과를 확인한다.
+     *
+     * @throws InterruptedException 테스트 자료 대역을 설정하는 중 인터럽트된 경우
+     */
+    @Test
+    @DisplayName("실행 생성 응답 유실 뒤 복구된 실행기가 새 토큰의 결과와 이벤트를 한 번 저장한다")
+    void workerCompletesAfterLostCreateResponse() throws InterruptedException {
+        // given: Judge0와 자료 조회만 대역으로 두고 작업·결과·Outbox는 실제 DB를 사용한다.
+        jdbc.update("""
+            INSERT INTO execution_runtimes(snapshot_hash,language,judge0_language_id,
+                runtime_name,runtime_version,created_at)
+            VALUES (REPEAT('e',64),'java',91,'Java','17','2026-10-31 09:00:00')
+            ON DUPLICATE KEY UPDATE id=id
+            """);
+        jdbc.update("""
+            UPDATE submissions SET context='EXAM',context_id=55,source_submission_id=71,
+                idempotency_key=NULL,request_hash=NULL,
+                runtime_id=(SELECT id FROM execution_runtimes WHERE snapshot_hash=REPEAT('e',64)) WHERE id=1
+            """);
+        var data
+            = new SubmissionJudgingDataResponse(
+                "1",
+                "1",
+                "제목",
+                1,
+                List.of(),
+                List.of(),
+                new FunctionSpec("solution", List.of(), new TypeSpec(TypeSpec.Kind.INT32, null, null, null, null)),
+                new ProblemValidationDataResponse.Limits(1000, 6000, 1024, 64),
+                List
+                    .of(
+                        new SubmissionJudgingDataResponse.TestCase(
+                            "1",
+                            1,
+                            false,
+                            new SubmissionJudgingDataResponse.Asset("test", "v1", "a".repeat(64))
+                        )
+                    ),
+                List.of()
+            );
+        var dataClient = mock(SubmissionJudgingDataClient.class);
+        var assets = mock(TestAssetClient.class);
+        var languages = mock(JudgeLanguageService.class);
+        var generator = mock(ExecutionCodeGenerator.class);
+        var client = mock(JudgeClient.class);
+        var evaluator = mock(JudgeResultEvaluator.class);
+        var runtime = new JudgeRuntime("java", 91, "Java", "17", null);
+        var response = new JudgeExecutionResultResponse(State.COMPLETED, 3, "1", null, null, null, null, null, 0, null);
+        var result = new JudgeTestResult(State.COMPLETED, JudgeVerdict.AC, 1, null, "1", null, null);
+        given(dataClient.find(1, 1)).willReturn(data);
+        given(assets.read(any())).willReturn(new SubmissionJudgingDataResponse.TestContent(Map.of(), "1"));
+        given(generator.language()).willReturn(JudgeLanguage.JAVA);
+        given(generator.generate(any(), eq("x"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        given(client.create(any()))
+            .willThrow(new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED))
+            .willReturn(new JudgeExecutionCreateResponse("recovered-token", runtime));
+        given(client.find("recovered-token")).willReturn(response);
+        given(evaluator.evaluate(eq(response), any(), eq("1"), eq(1024), eq(64))).willReturn(result);
+        var worker
+            = new SubmissionWorker(
+                store,
+                dataClient,
+                assets,
+                languages,
+                List.of(generator),
+                client,
+                evaluator,
+                clock,
+                new JudgeEngineCircuit(clock)
+            );
+
+        // when: 첫 호출의 응답 유실을 기록하고 30초 후 UNKNOWN을 회수한다.
+        assertThat(worker.runOnce()).isTrue();
+        assertThat(jdbc.queryForObject("SELECT token_status FROM judge_test_results", String.class))
+            .isEqualTo("UNKNOWN");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isZero();
+        given(clock.instant()).willReturn(START.plusSeconds(30));
+        assertThat(store.recoverUnknownOne()).isTrue();
+        assertThat(worker.runOnce()).isTrue();
+
+        // then: 두 번째 실행에서만 받은 토큰의 결과와 시험 결과 이벤트를 확정한다.
+        verify(client, times(2)).create(any());
+        verify(client).find("recovered-token");
+        assertThat(jdbc.queryForObject("SELECT verdict FROM submissions", String.class)).isEqualTo("AC");
+        assertThat(jdbc.queryForObject("SELECT judge0_token FROM judge_test_results", String.class))
+            .isEqualTo("recovered-token");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT event_type FROM outbox_events", String.class))
+            .isEqualTo("ExamSubmissionJudged");
     }
 
     /** 재선점 없이 기한이 끝나도 이미 시작한 동일 시도의 이력이 한 건 남는지 확인한다. */

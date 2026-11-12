@@ -4,10 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,6 +22,9 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import javax.sql.DataSource;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,6 +42,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
@@ -115,6 +125,8 @@ class SubmissionMessageListenerTest {
     private ExternalSubmissionAcceptanceStore acceptance;
     @Autowired
     private InternalSubmissionQueryService internalQueries;
+    @MockitoSpyBean
+    private DataSource dataSource;
 
     /**
      * 리스너 시작 전에 Standard 큐·토픽·결과 구독을 준비한다.
@@ -396,6 +408,74 @@ class SubmissionMessageListenerTest {
         submissions.receive(event, acknowledgement);
         verify(acknowledgement).acknowledge();
         assertThat(count("judge_jobs")).isEqualTo(1);
+    }
+
+    /**
+     * 서비스가 구성한 소비 트랜잭션에서 JDBC 커밋 호출 실패와 재전달을 확인한다.
+     *
+     * @throws SQLException 테스트용 JDBC 연결 동작을 설정할 수 없는 경우
+     */
+    @Test
+    @DisplayName("접수 커밋 호출이 실패하면 ACK하지 않고 재전달 시 한 번만 저장한다")
+    void retriesAfterJdbcCommitFailure() throws SQLException {
+        // given: 서비스의 트랜잭션 구성을 유지하고 테스트 스레드의 첫 커밋에만 예외를 주입한다.
+        var failCommit = new AtomicBoolean(true);
+        var testThread = Thread.currentThread();
+        doAnswer(invocation -> {
+            var connection = (Connection)invocation.callRealMethod();
+            if (Thread.currentThread() != testThread || !failCommit.get()) {
+                return connection;
+            }
+            return connectionWithCommitFailure(connection, failCommit);
+        }).when(dataSource).getConnection();
+        var acknowledgement = mock(Acknowledgement.class);
+        var event = examMessage(UUID.randomUUID(), "ExamSubmissionRequested");
+
+        // when & then: 커밋 호출 실패는 ACK 없이 제출·작업·소비 기록을 롤백한다.
+        assertThatThrownBy(() -> submissions.receive(event, acknowledgement))
+            .isInstanceOf(RuntimeException.class)
+            .hasRootCauseInstanceOf(SQLException.class)
+            .hasRootCauseMessage("simulated commit failure");
+        assertThat(failCommit).isFalse();
+        verifyNoInteractions(acknowledgement);
+        assertThat(count("processed_events")).isZero();
+        assertThat(count("submissions")).isZero();
+        assertThat(count("judge_jobs")).isZero();
+
+        // when & then: 같은 이벤트를 다시 받으면 한 번만 저장하고 ACK한다.
+        submissions.receive(event, acknowledgement);
+        submissions.receive(event, acknowledgement);
+        verify(acknowledgement, times(2)).acknowledge();
+        assertThat(count("processed_events")).isEqualTo(1);
+        assertThat(count("submissions")).isEqualTo(1);
+        assertThat(count("judge_jobs")).isEqualTo(1);
+    }
+
+    /**
+     * 첫 커밋 호출이 실제 DB에 전달되기 전에 실패하도록 연결을 감싼다.
+     *
+     * @param connection 실제 MySQL 연결
+     * @param failCommit 같은 테스트의 연결에서 공유하는 커밋 실패 여부
+     * @return 커밋 실패 한 건을 제외한 호출을 실제 연결에 위임하는 연결
+     */
+    private Connection connectionWithCommitFailure(Connection connection, AtomicBoolean failCommit) {
+        return (Connection)Proxy
+            .newProxyInstance(
+                Connection.class.getClassLoader(),
+                new Class<?>[] {
+                    Connection.class
+                },
+                (proxy, method, args) -> {
+                    if ("commit".equals(method.getName()) && failCommit.compareAndSet(true, false)) {
+                        throw new SQLException("simulated commit failure");
+                    }
+                    try {
+                        return method.invoke(connection, args);
+                    } catch (InvocationTargetException failure) {
+                        throw failure.getCause();
+                    }
+                }
+            );
     }
 
     /** DLQ 이동 후 실제 SQS 재전달과 운영자 감사 저장을 검증한다. */
