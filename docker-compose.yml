@@ -149,6 +149,7 @@ services:
       MEMBER_EVENTS_CONSUMER_ENABLED: ${MEMBER_EVENTS_CONSUMER_ENABLED:-false}
       MEMBER_QUEUE_URL: ${MEMBER_QUEUE_URL:-}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
     depends_on:
       mysql:
         condition: service_healthy
