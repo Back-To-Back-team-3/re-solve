@@ -187,14 +187,17 @@ class SubmissionWorkerTest {
         verify(store).complete(lease, data);
     }
 
-    /** 차단 중 선점을 멈추고 기존 토큰의 복구 확인이 성공하면 선점을 다시 시도한다. */
+    /** 기존 토큰의 복구 확인 이후 별도 대기 작업까지 처리하고 서킷 지표를 확인한다. */
     @Test
     @DisplayName("서킷 복구 확인이 성공하면 기존 토큰 결과를 저장하고 대기 작업 선점을 재개한다")
     void resumesWorkAfterCircuitProbe() {
+        // given
         var circuitClock = mock(Clock.class);
         var start = Instant.parse("2026-10-31T00:00:00Z");
         given(circuitClock.instant()).willReturn(start);
         var controlledCircuit = new JudgeEngineCircuit(circuitClock);
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        controlledCircuit.bindTo(registry);
         try (var permit = controlledCircuit.acquire().orElseThrow()) {
             for (int index = 0; index < 5; index++) {
                 try {
@@ -220,26 +223,47 @@ class SubmissionWorkerTest {
             );
         assertThat(worker.runOnce()).isFalse();
         verify(store, never()).claim();
+        assertThat(registry.get("judge.engine.circuit.state").gauge().value()).isEqualTo(1);
 
+        // when: 기존 토큰 조회가 복구 확인에 성공한 뒤 다른 임대를 선점한다.
         given(circuitClock.instant()).willReturn(start.plusSeconds(30));
-        given(store.claim()).willReturn(Optional.of(lease), Optional.empty());
+        var waiting = new SubmissionLease(2, 2, 1, 1, "waiting", LocalDateTime.of(2026, 10, 31, 9, 10));
+        given(store.claim()).willReturn(Optional.of(lease), Optional.of(waiting));
+        given(store.active(waiting)).willReturn(true);
+        given(store.input(waiting)).willReturn(new SubmissionExecutionInput(1, 1, "java", "code", runtime));
+        given(store.prepare(waiting)).willReturn(true);
         given(store.completedOrders(lease)).willReturn(java.util.Set.of(1));
         given(store.resumableTokens(lease)).willReturn(Map.of(2, "second"));
+        given(store.completedOrders(waiting)).willReturn(java.util.Set.of(1));
+        given(store.resumableTokens(waiting)).willReturn(Map.of(2, "waiting-token"));
         given(generator.generate(any(), eq("code"), any()))
             .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
         var response = new JudgeExecutionResultResponse(State.COMPLETED, 3, "1", null, null, null, null, null, 0, null);
         var result = new JudgeTestResult(State.COMPLETED, JudgeVerdict.AC, 1, null, "1", null, null);
-        given(client.find("second")).willReturn(response);
+        given(client.find("second")).willAnswer(call -> {
+            assertThat(org.slf4j.MDC.get("correlationId")).isEqualTo(lease.correlationId());
+            return response;
+        });
+        given(client.find("waiting-token")).willAnswer(call -> {
+            assertThat(org.slf4j.MDC.get("correlationId")).isEqualTo(waiting.correlationId());
+            return response;
+        });
         given(evaluator.evaluate(eq(response), any(), eq("1"), eq(1024), eq(64))).willReturn(result);
         given(store.saveResult(lease, 2, "second", result)).willReturn(true);
+        given(store.saveResult(waiting, 2, "waiting-token", result)).willReturn(true);
 
+        // then
         assertThat(worker.runOnce()).isTrue();
         assertThat(controlledCircuit.state()).isZero();
-        assertThat(worker.runOnce()).isFalse();
+        assertThat(registry.get("judge.engine.circuit.state").gauge().value()).isZero();
+        assertThat(worker.runOnce()).isTrue();
         verify(store, times(2)).claim();
         verify(client).find("second");
+        verify(client).find("waiting-token");
         verify(client, never()).create(any());
         verify(store).complete(lease, data);
+        verify(store).complete(waiting, data);
+        registry.close();
     }
 
     /** 미확정 외부 제출은 고정 환경을 저장한 뒤 그 환경으로 Judge0를 호출한다. */

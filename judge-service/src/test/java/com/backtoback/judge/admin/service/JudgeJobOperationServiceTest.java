@@ -29,7 +29,9 @@ import org.testcontainers.mysql.MySQLContainer;
 import com.backtoback.common.event.config.OutboxStorageConfiguration;
 import com.backtoback.judge.admin.dto.JudgeJobListRequest;
 import com.backtoback.judge.global.config.PersistenceConfiguration;
+import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
+import com.backtoback.judge.judging.service.JudgeQueueMetrics;
 import com.backtoback.judge.judging.service.dto.SubmissionLease;
 import com.backtoback.judge.judging.store.SubmissionExecutionStore;
 
@@ -42,6 +44,7 @@ import com.backtoback.judge.judging.store.SubmissionExecutionStore;
         PersistenceConfiguration.class,
         OutboxStorageConfiguration.class,
         SubmissionExecutionStore.class,
+        JudgeQueueMetrics.class,
         JudgeJobOperationService.class,
         JudgeJobOperationServiceTest.Beans.class
     }
@@ -58,6 +61,8 @@ class JudgeJobOperationServiceTest {
     private JudgeJobOperationService operations;
     @Autowired
     private SubmissionExecutionStore executions;
+    @Autowired
+    private JudgeQueueMetrics metrics;
 
     /**
      * 독립 MySQL 스키마를 제공한다.
@@ -181,11 +186,12 @@ class JudgeJobOperationServiceTest {
     /**
      * 관리자 복구와 완료가 경합해도 한쪽만 기존 임대를 종결한다.
      *
-     * @throws Exception 동시 작업을 제한시간 안에 완료하지 못한 경우
+     * @throws Exception 동시 작업의 시작·실행 또는 결과 조회에 실패한 경우
      */
     @Test
     @DisplayName("관리자 복구와 정상 완료가 경합하면 한 경로만 기존 임대를 종결한다")
     void serializesRecoveryAndCompletion() throws Exception {
+        // given
         jdbc.update("""
             INSERT INTO judge_test_results(judge_job_id,test_asset_id,test_order,is_sample,token_status,
                 judge0_token,verdict,created_try_count,created_at,updated_at)
@@ -193,6 +199,11 @@ class JudgeJobOperationServiceTest {
             """);
         var lease = new SubmissionLease(1, 1, 1, 1, "old", LocalDateTime.of(2026, 10, 31, 9, 10));
         var start = new CyclicBarrier(2);
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        metrics.bindTo(registry);
+        assertThat(registry.get("judge.jobs.count").tag("status", "RUNNING").gauge().value()).isEqualTo(1);
+        String correlationId = lease.correlationId();
+        // when & then: 작업 행 잠금을 먼저 잡은 경로만 기존 임대를 종결할 수 있다.
         try (var executor = Executors.newFixedThreadPool(2)) {
             var completed = executor.submit(() -> {
                 start.await();
@@ -204,6 +215,7 @@ class JudgeJobOperationServiceTest {
                     operations.recover(1, 9, "race", "복구", "192.0.2.10");
                     return true;
                 } catch (JudgeException exception) {
+                    assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.SUBMISSION_REJUDGE_NOT_ALLOWED);
                     return false;
                 }
             });
@@ -212,16 +224,25 @@ class JudgeJobOperationServiceTest {
             assertThat(completionWon).isNotEqualTo(recoveryWon);
             if (recoveryWon) {
                 assertThat(executions.complete(lease, null)).isFalse();
+                assertThat(registry.get("judge.jobs.count").tag("status", "RETRY_WAITING").gauge().value())
+                    .isEqualTo(1);
                 var next = executions.claim().orElseThrow();
+                correlationId = next.correlationId();
                 assertThat(executions.prepare(next)).isTrue();
                 assertThat(executions.complete(next, null)).isTrue();
             }
         }
+        // then
         assertThat(jdbc.queryForObject("SELECT status FROM submissions", String.class)).isEqualTo("COMPLETED");
         assertThat(jdbc.queryForObject("SELECT verdict FROM submissions", String.class)).isEqualTo("AC");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT event_type FROM outbox_events", String.class))
             .isEqualTo("ExamSubmissionJudged");
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+            .isEqualTo(correlationId);
+        assertThat(registry.get("judge.jobs.count").tag("status", "SUCCEEDED").gauge().value()).isEqualTo(1);
+        assertThat(registry.get("judge.jobs.failed").functionCounter().count()).isZero();
+        registry.close();
     }
 
     /** 필터 목록과 상세 오류 정보를 안전하게 조회한다. */
