@@ -925,6 +925,7 @@ flowchart LR
 
 - **발행:** `hint_requests` REQUESTED INSERT와 같은 트랜잭션에서 Outbox 기록. aggregate = `hintRequestId`.
 - **경로:** SNS `study-events` 팬아웃 → SQS `ai-queue`.
+- **입력 크기:** 제목·본문·태그는 정책 §8.1의 임시 힌트 입력 크기 기준을 따른다. 전체 메시지에는 §1.7의 직렬화 후 크기 검사를 계속 적용한다.
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |

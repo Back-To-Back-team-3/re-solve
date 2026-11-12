@@ -3462,21 +3462,45 @@
 #### 2.6.6 힌트 문맥 조회
 
 - **Method / URI:** `GET /internal/v1/problems/{problemId}/hint-context`
-- **인증:** 내부 호출 (study AI 모듈)
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tags`
-- **설명:** 힌트 입력(제목·본문·태그)과 현재 공개 회차, 힌트 가능 여부를 반환한다. 대회 전용 문제는 대회 종료 전 `isHintAvailable: false`.
-- **응답 (200):**
+- **인증:** 내부 호출 (study). 공통 내부 네트워크 신뢰 규칙을 따른다.
+- **Idempotency:** 없음 (조회, 상태 변경 없음)
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_validations`, `problem_body_assets`, `problem_revision_tags`, `tags`
+- **설명:** 힌트 입력(제목·Markdown 본문·태그)과 현재 사용 회차, 힌트 가능 여부를 반환한다. 정책 §8.1에 따라 `GENERAL`·`PUBLIC`이고 통과 사용 회차와 통과 언어가 있는 문제만 허용한다. `EXAM_ONLY`는 대회 종료 후 공개된 상태여도 힌트 대상에서 제외한다. 회원별 시험·진단 차단과 일일 횟수 검증은 Study가 담당한다.
+- **요청 헤더:** 없음 (공통 Correlation ID 전달 규칙 적용)
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 양수 BIGINT 문제 ID |
+
+- **요청 바디:** 없음
+- **응답 (200):** 공통 래퍼 없이 데이터 객체를 반환한다.
 
     ```json
     {
       "problemId": "101",
       "problemRevisionId": "201",
-      "title": "최단 경로",
-      "description": "...",
-      "tags": ["그래프"],
+      "problemTitle": "최단 경로",
+      "problemBody": "두 정점 사이의 최단 경로를 구하시오.\n\n## 제한 사항\n\n정점 수는 100 이하이다.\n\n## 예시\n\n입력과 출력 예시",
+      "problemTags": ["그래프"],
       "isHintAvailable": true
     }
     ```
+
+    - `problemRevisionId`는 최신 작성 회차가 아니라 검증을 통과한 현재 사용 회차 ID다.
+    - `problemBody`는 해당 회차의 설명·제한 사항·예시를 위 순서의 Markdown으로 조합한다. 숨김 테스트·정답 코드·사용자 코드는 포함하지 않는다.
+    - `problemTags`는 해당 회차의 태그 이름이며 태그 ID 순으로 반환한다. 태그가 없으면 빈 배열이다.
+    - 문제가 존재하지만 공개 상태·회차 등 힌트 대상 조건을 충족하지 않으면 `isHintAvailable=false`, `problemRevisionId`·`problemTitle`·`problemBody`는 `null`, `problemTags`는 빈 배열이다. 이 경우 저장소 원문을 조회하지 않는다.
+    - 원문 조합 후 정책 §8.1의 임시 힌트 입력 크기 기준을 초과해도 같은 비가용 응답을 반환한다. 이 검사는 원문 조회 후 수행하며, 본문을 잘라서 제공하지 않는다. Study의 404 응답·일일 횟수·기존 캐시 처리도 해당 정책을 따른다.
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 문제 ID가 양수 BIGINT가 아님
+    - `PROBLEM_NOT_FOUND`(404) / 존재하지 않는 문제
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 사용 회차의 본문 메타 정보·저장소 조회·체크섬·크기·JSON 해석 실패
+- **동시성/멱등 보장:** 문제 상태·통과 사용 회차·태그·불변 본문 참조를 같은 읽기 트랜잭션에서 고정한다. 본문 저장소는 트랜잭션 밖에서 고정된 객체 버전으로 조회하고 체크섬·크기를 검증한다.
+- **발행:** 없음
+- **외부 의존:** 기존 S3 본문 저장소 — 읽기 실패 시 503으로 거절한다. Judge·Contest·Member API를 호출하지 않는다.
+- **비고:** 응답 필드명은 Study 수신 형식과 `HintRequested`의 제목·본문·태그 필드에 맞춘다. 기존 내부 API의 `enabled=true`·`implementation=real` 선택을 따르며 `internal-stub` 프로필에서는 실제 경로를 등록하지 않는다.
 
 #### 2.6.7 진단 출제 후보 조회
 
