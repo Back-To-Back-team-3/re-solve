@@ -610,6 +610,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `member_id` | BIGINT | Y | FK → `members.id` |
 | `tag_id` | BIGINT | Y | 태그 ID (외부 참조) |
+| `tag_name` | VARCHAR(200) | N | NULL 허용: V16 이전 응시. 시작 시점 태그 이름 (`TagLevelChanged` 알림 문구용 스냅샷) |
 | `status` | VARCHAR(30) | Y | `IN_PROGRESS` / `CLOSED` / `SCORED` |
 | `active_tag_id` | BIGINT `[GENERATED]` | N | `IF(status = 'IN_PROGRESS', tag_id, NULL)`. NULL 허용: 종료된 응시 |
 | `started_at` | DATETIME(6) | Y | 시작 시각 |
@@ -618,6 +619,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `close_reason` | VARCHAR(30) | N | NULL 허용: 진행 중. `SUBMITTED` / `EXPIRED` |
 | `score` | DECIMAL(6,2) | N | NULL 허용: 채점 전. 획득 점수 (총 6점) |
 | `result_level` | VARCHAR(30) | N | NULL 허용: 채점 전. 진단 결과 레벨 (`LV1`~`LV3`) |
+| `applied_level` | VARCHAR(30) | N | NULL 허용: 채점 전. 반영 후 레벨 `max(이전 레벨, result_level)` (API 1.5.2 `appliedLevel`) |
 | `is_cooldown_exempt` | BOOLEAN | Y | 채점 장애(`FAILED`) 발생으로 쿨타임 미적용 |
 | `scored_at` | DATETIME(6) | N | NULL 허용: 채점 전 |
 | `created_at` | DATETIME(6) | Y |  |
@@ -3138,11 +3140,12 @@ member-service/src/main/resources/db/migration/
   V13__diagnosis_create_diagnosis_problems.sql
   V14__diagnosis_create_diagnosis_drafts.sql
   V15__diagnosis_create_diagnosis_submissions.sql
-  V16__replica_create_hint_usage_replicas.sql
+  V16__diagnosis_alter_diagnosis_attempts.sql
+  V17__replica_create_hint_usage_replicas.sql
 ```
 
-- V1~V15는 적용된 파일이다. V1은 이 규칙을 정하기 전에 만들어 DB에 적용됐으므로 이름을 바꾸지 않는다(Flyway 적용 기록과 어긋남).
-- V16 이후는 아직 만들지 않은 계획 순서다. 실제 생성 순서에 따라 번호를 다시 매긴다.
+- V1~V16은 적용된 파일이다. V1은 이 규칙을 정하기 전에 만들어 DB에 적용됐으므로 이름을 바꾸지 않는다(Flyway 적용 기록과 어긋남).
+- V17 이후는 아직 만들지 않은 계획 순서다. 실제 생성 순서에 따라 번호를 다시 매긴다.
 
 ### 7.2 Problem (`problem-service`)
 

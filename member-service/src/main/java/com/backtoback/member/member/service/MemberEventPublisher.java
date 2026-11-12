@@ -28,6 +28,7 @@ public class MemberEventPublisher {
     static final String MEMBER_WITHDRAWN = "MemberWithdrawn";
     public static final String DIAGNOSIS_SUBMISSION_REQUESTED = "DiagnosisSubmissionRequested";
     static final String DIAGNOSIS_SUBMISSION_AGGREGATE = "DIAGNOSIS_SUBMISSION";
+    static final String TAG_LEVEL_CHANGED = "TagLevelChanged";
     static final String SCHEMA_VERSION = "v1";
     // 이벤트 계약 공통 규칙: +09:00, 마이크로초 6자리 (occurredAt과 같은 형식)
     private static final DateTimeFormatter EVENT_TIME_FORMAT
@@ -135,6 +136,14 @@ public class MemberEventPublisher {
                     EVENT_TIME_FORMAT.format(receivedAt.atZone(ClockConfiguration.SERVICE_ZONE))
                 )
             );
+    }
+
+    /**
+     * 태그 레벨 알림 (M5). 진단 확정은 레벨이 그대로여도 결과 알림으로 보낸다.
+     */
+    public void tagLevelChanged(TagLevelChangedPayload payload) {
+        outboxEventWriter
+            .append(AGGREGATE_TYPE, TAG_LEVEL_CHANGED, SCHEMA_VERSION, payload.memberId(), correlationId(), payload);
     }
 
     // HTTP 요청은 CorrelationIdFilter가 MDC에 넣은 값을, 그 밖의 흐름은 새 ID를 쓴다.

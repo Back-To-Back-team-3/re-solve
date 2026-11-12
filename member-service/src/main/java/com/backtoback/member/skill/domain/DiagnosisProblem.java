@@ -48,6 +48,19 @@ public class DiagnosisProblem extends BaseTimeEntity {
     @Column(length = 30)
     private String finalVerdict;
 
+    /**
+     * 채점 결과를 반영한다. 제한 시간 안에 한 번이라도 AC면 정답으로 보고(레벨 판정), 문항의 마지막 제출이면 최종 판정으로 남긴다.
+     */
+    public void applyResult(Long submissionId, String verdict, boolean latest) {
+        if ("AC".equals(verdict)) {
+            this.accepted = true;
+        }
+        if (latest) {
+            this.finalSubmissionId = submissionId;
+            this.finalVerdict = verdict;
+        }
+    }
+
     public DiagnosisProblem(Long diagnosisAttemptId, Long problemId, Long problemRevisionId, int difficulty) {
         this.diagnosisAttemptId = diagnosisAttemptId;
         this.problemId = problemId;
