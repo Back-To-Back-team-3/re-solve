@@ -53,7 +53,13 @@ public class HintLlmService {
         }
 
         String cacheKey = cacheKey(event.problemRevisionId(), event.level());
-        String cached = redisTemplate.opsForValue().get(cacheKey);
+        String cached;
+        try {
+            cached = redisTemplate.opsForValue().get(cacheKey);
+        } catch (RuntimeException e) {
+            log.warn("힌트 캐시 조회 실패, 캐시 미스로 처리 hintRequestId={} error={}", event.hintRequestId(), e.getMessage());
+            cached = null;
+        }
         if (cached != null) {
             log.info("힌트 캐시 적중 hintRequestId={}", event.hintRequestId());
             publishHintReady(event, "READY", true);
@@ -75,7 +81,11 @@ public class HintLlmService {
             return;
         }
 
-        redisTemplate.opsForValue().set(cacheKey, hintText, HINT_CACHE_TTL);
+        try {
+            redisTemplate.opsForValue().set(cacheKey, hintText, HINT_CACHE_TTL);
+        } catch (RuntimeException e) {
+            log.warn("힌트 캐시 저장 실패, READY 발행은 계속 진행 hintRequestId={} error={}", event.hintRequestId(), e.getMessage());
+        }
         publishHintReady(event, "READY", false);
     }
 
