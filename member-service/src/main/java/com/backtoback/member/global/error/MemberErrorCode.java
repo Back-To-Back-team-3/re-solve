@@ -37,7 +37,9 @@ public enum MemberErrorCode implements ErrorCode {
     DIAGNOSIS_ALREADY_IN_PROGRESS(HttpStatus.CONFLICT, "이 태그의 진단이 이미 진행 중입니다."),
     DIAGNOSIS_PROBLEMS_UNAVAILABLE(HttpStatus.CONFLICT, "이 태그는 진단 문제가 부족합니다. Lv.1로 시작해 주세요."),
     DIAGNOSIS_CLOSED(HttpStatus.CONFLICT, "종료된 진단입니다."),
-    CODE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "코드는 64KB 이하로 작성해 주세요.");
+    CODE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "코드는 64KB 이하로 작성해 주세요."),
+    UNSUPPORTED_LANGUAGE(HttpStatus.BAD_REQUEST, "지원하지 않는 언어입니다."),
+    SUBMISSION_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "같은 문항은 5초 뒤에 다시 제출할 수 있습니다.");
 
     private final HttpStatus status;
     private final String message;

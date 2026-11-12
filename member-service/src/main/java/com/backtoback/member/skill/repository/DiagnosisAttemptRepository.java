@@ -1,5 +1,6 @@
 package com.backtoback.member.skill.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,6 +25,18 @@ public interface DiagnosisAttemptRepository extends JpaRepository<DiagnosisAttem
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from DiagnosisAttempt a where a.id = :id and a.memberId = :memberId")
     Optional<DiagnosisAttempt> findForUpdateByIdAndMemberId(Long id, Long memberId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from DiagnosisAttempt a where a.id = :id")
+    Optional<DiagnosisAttempt> findForUpdateById(Long id);
+
+    /**
+     * 제한 시각이 지난 진행 중 응시 (스케줄러 1.1, {@code idx_diagnosis_attempts_status_ends_at}).
+     */
+    @Query(
+        "select a.id from DiagnosisAttempt a where a.status = :status and a.endsAt <= :before order by a.endsAt, a.id"
+    )
+    List<Long> findExpiredIds(DiagnosisStatus status, LocalDateTime before, Pageable pageable);
 
     boolean existsByMemberIdAndTagIdAndStatus(Long memberId, Long tagId, DiagnosisStatus status);
 

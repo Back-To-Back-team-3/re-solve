@@ -19,6 +19,8 @@ resolve:
   messaging:
     enabled: ${MEMBER_MESSAGING_ENABLED:false}
     topic-arn: ${MEMBER_EVENTS_TOPIC_ARN:}
+    # 진단 채점 요청(M6)을 보낼 judge 큐
+    exam-submission-queue-url: ${EXAM_SUBMISSION_QUEUE_URL:}
     consumer-enabled: ${MEMBER_EVENTS_CONSUMER_ENABLED:false}
     queue-url: ${MEMBER_QUEUE_URL:}
   auth:

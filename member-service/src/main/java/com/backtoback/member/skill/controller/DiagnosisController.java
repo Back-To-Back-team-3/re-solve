@@ -25,9 +25,12 @@ import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.member.skill.dto.DiagnosisDetailResponse;
 import com.backtoback.member.skill.dto.DiagnosisDraftRequest;
 import com.backtoback.member.skill.dto.DiagnosisDraftResponse;
+import com.backtoback.member.skill.dto.DiagnosisFinishResponse;
 import com.backtoback.member.skill.dto.DiagnosisHistoryItem;
 import com.backtoback.member.skill.dto.DiagnosisStartRequest;
 import com.backtoback.member.skill.dto.DiagnosisStartResponse;
+import com.backtoback.member.skill.dto.DiagnosisSubmitRequest;
+import com.backtoback.member.skill.dto.DiagnosisSubmitResponse;
 import com.backtoback.member.skill.service.DiagnosisCooldownException;
 import com.backtoback.member.skill.service.DiagnosisService;
 
@@ -133,6 +136,45 @@ public class DiagnosisController {
                         )
                 );
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    /**
+     * 1.5.5 진단 문항 제출 — 접수만 하고 판정은 진단 종료 후 공개한다.
+     */
+    @PostMapping("/{diagnosisId}/problems/{problemId}/submissions")
+    public ResponseEntity<ApiResponse<DiagnosisSubmitResponse>> submit(
+        @AuthenticationPrincipal GatewayUser user,
+        @PathVariable Long diagnosisId,
+        @PathVariable Long problemId,
+        @Valid @RequestBody DiagnosisSubmitRequest request
+    ) {
+        DiagnosisSubmitResponse response
+            = DiagnosisSubmitResponse
+                .from(
+                    diagnosisService
+                        .submit(
+                            memberId(user),
+                            diagnosisId,
+                            problemId,
+                            request.language(),
+                            request.sourceCode(),
+                            Long.parseLong(request.seq())
+                        )
+                );
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.success("제출이 접수되었습니다.", response));
+    }
+
+    /**
+     * 1.5.6 진단 최종 제출 (종료)
+     */
+    @PostMapping("/{diagnosisId}/finish")
+    public ResponseEntity<ApiResponse<DiagnosisFinishResponse>> finish(
+        @AuthenticationPrincipal GatewayUser user,
+        @PathVariable Long diagnosisId
+    ) {
+        DiagnosisFinishResponse response
+            = DiagnosisFinishResponse.from(diagnosisService.finish(memberId(user), diagnosisId));
+        return ResponseEntity.ok(ApiResponse.success("진단이 종료되었습니다. 채점이 끝나면 결과를 알려드립니다.", response));
     }
 
     /**
