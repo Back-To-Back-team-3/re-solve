@@ -79,13 +79,15 @@ function Frame({ children }: { children: ReactNode }) {
             >
               {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
             </Button>
-            <Button
-              className="icon-btn"
-              aria-label="데모 설정"
-              onClick={() => setDemo(true)}
-            >
-              <Settings size={18} />
-            </Button>
+            {process.env.NEXT_PUBLIC_DEMO === "true" && (
+              <Button
+                className="icon-btn"
+                aria-label="데모 설정"
+                onClick={() => setDemo(true)}
+              >
+                <Settings size={18} />
+              </Button>
+            )}
             <Link className="btn" href={user ? "/mypage" : "/login"}>
               <UserRound size={16} />
               <span className="profile-label">{user?.name || "로그인"}</span>
@@ -109,7 +111,7 @@ function Frame({ children }: { children: ReactNode }) {
         <span className="pixel">Re:Solve · GROW WITH CODE</span>
         <span>하루 한 문제, 함께 자라는 실력.</span>
       </footer>
-      <Modal
+      {process.env.NEXT_PUBLIC_DEMO === "true" && <Modal
         open={demo}
         onOpenChange={setDemo}
         title="데모 설정"
@@ -191,7 +193,7 @@ function Frame({ children }: { children: ReactNode }) {
             </Button>
           </details>
         </div>
-      </Modal>
+      </Modal>}
     </>
   );
 }

@@ -50,7 +50,7 @@ export function Board({
       {r.loading ? (
         <Loading />
       ) : r.error ? (
-        <ErrorState message={r.error} retry={r.retry} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       ) : !r.data?.length ? (
         <Empty title="첫 이야기를 남겨 주세요" />
       ) : (

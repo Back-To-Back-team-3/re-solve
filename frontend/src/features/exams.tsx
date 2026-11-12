@@ -106,7 +106,7 @@ export function ExamsPage({ contest = false }: { contest?: boolean }) {
       {r.loading ? (
         <Loading />
       ) : r.error ? (
-        <ErrorState message={r.error} retry={r.retry} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       ) : items.length ? (
         <div className="grid-3">
           {items.map((e) => (
@@ -185,7 +185,7 @@ export function ExamDetail({
   if (r.error)
     return (
       <div className="container">
-        <ErrorState message={r.error} retry={r.retry} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
   const e = r.data?.exam;
@@ -481,7 +481,7 @@ export function ExamRoom({ id }: { id: string }) {
   if (r.error)
     return (
       <div className="container">
-        <ErrorState message={r.error} retry={r.retry} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
   const e = r.data?.exam;
@@ -615,7 +615,7 @@ export function ExamResult({ id }: { id: string }) {
   if (r.error)
     return (
       <div className="container">
-        <ErrorState message={r.error} retry={r.retry} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
   const e = r.data?.exam;
