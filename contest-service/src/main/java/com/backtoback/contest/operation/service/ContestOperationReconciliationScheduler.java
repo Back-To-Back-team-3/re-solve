@@ -242,9 +242,7 @@ public class ContestOperationReconciliationScheduler {
         String query
             = "SELECT id,resource_type,resource_id,operation_id,expected_source_version,version," + reconciliationTime
                 + " AS reconciliation_time "
-                + "FROM contest_resource_guards WHERE ((resource_type='MEMBER' AND operation_type='WITHDRAWAL') "
-                + "OR (resource_type='STUDY' AND operation_type='STUDY_CLOSE') "
-                + "OR (resource_type='PROBLEM' AND operation_type='PROBLEM_HIDE')) "
+                + "FROM contest_resource_guards WHERE resource_type='PROBLEM' AND operation_type='PROBLEM_HIDE' "
                 + "AND state='PREPARED' AND operation_result='PENDING' AND " + reconciliationTime + "<=? ";
         org.springframework.jdbc.core.RowMapper<GuardCandidate> mapper
             = (rs, row) -> new GuardCandidate(

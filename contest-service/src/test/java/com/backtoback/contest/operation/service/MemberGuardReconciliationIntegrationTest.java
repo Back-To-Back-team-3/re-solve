@@ -3,13 +3,8 @@ package com.backtoback.contest.operation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
 import java.time.Clock;
@@ -180,141 +175,77 @@ class MemberGuardReconciliationIntegrationTest extends ExamIntegrationTestSuppor
         assertThat(result()).isEqualTo("PENDING");
     }
 
-    /** 조회 실패 항목을 같은 회차에 반복하지 않고, 이후 유입한 작업보다 먼저 다시 조회한다. */
+    /** Member·Study는 조회하지 않고 Problem 가드는 기존 대사 경로로 전달한다. */
     @Test
-    @DisplayName("신규 가드가 유입되어도 이전에 미확인한 가드를 다시 조회한다")
-    void retriesUnknownGuardBeforeNewerCandidates() {
+    @DisplayName("회원과 스터디 준비 작업은 유지하고 문제 작업만 자동 대사한다")
+    void schedulerReconcilesOnlyProblemGuards() {
         // given
         var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).withNano(0).plusMinutes(3);
-        var firstId
-            = jdbc
-                .queryForObject(
-                    "SELECT id FROM contest_resource_guards WHERE resource_type='MEMBER' AND resource_id=?",
-                    Long.class,
-                    MEMBER_ID
-                );
-        given(memberOperations.find(MEMBER_ID, "member-op"))
-            .willThrow(new ResourceAccessException("timeout"))
-            .willReturn(new MemberOperationClient.Result("member-op", "ABORTED", "4", "ACTIVE"));
-        long newerMember = MEMBER_ID + 1;
-        given(memberOperations.find(newerMember, "newer-op"))
-            .willReturn(new MemberOperationClient.Result("newer-op", "PENDING", "4", "ACTIVE"));
-        var snapshotUpdatedAt = now.minusSeconds(10);
-        jdbc.update("UPDATE contest_resource_guards SET updated_at=? WHERE id=?", snapshotUpdatedAt, firstId);
-
-        // when
-        runScheduler(now);
-        var attemptedAt
-            = jdbc
-                .queryForObject(
-                    "SELECT last_reconciliation_attempt_at FROM contest_resource_guards WHERE id=?",
-                    LocalDateTime.class,
-                    firstId
-                );
-        assertThat(attemptedAt).isEqualTo(now);
-        assertThat(
+        long resourceId = 77772;
+        for (var type : new String[] {
+            "STUDY",
+            "PROBLEM"
+        }) {
+            String operationType = "STUDY".equals(type) ? "STUDY_CLOSE" : "PROBLEM_HIDE";
             jdbc
-                .queryForObject(
-                    "SELECT updated_at FROM contest_resource_guards WHERE id=?",
-                    LocalDateTime.class,
-                    firstId
-                )
-        ).isEqualTo(snapshotUpdatedAt);
-        assertThat(state()).isEqualTo("PREPARED");
-        try {
+                .update(
+                    "DELETE FROM contest_resource_guards WHERE resource_type=? AND resource_id=?",
+                    type,
+                    resourceId
+                );
             jdbc
                 .update(
                     "INSERT INTO contest_resource_guards (resource_type,resource_id,operation_id,operation_type,"
                         + "expected_source_version,request_hash,state,prepared_from_state,operation_result,"
                         + "source_version,prepared_at,version,created_at,updated_at) "
-                        + "SELECT resource_type,?,'newer-op',operation_type,expected_source_version,request_hash,state,"
-                        + "prepared_from_state,operation_result,source_version,?,0,?,? "
-                        + "FROM contest_resource_guards WHERE id=?",
-                    newerMember,
-                    now.plusSeconds(1),
-                    now.plusSeconds(1),
-                    now.plusSeconds(1),
-                    firstId
-                );
-            runScheduler(now.plusMinutes(5));
-
-            // then
-            var calls = inOrder(memberOperations);
-            calls.verify(memberOperations, org.mockito.Mockito.times(2)).find(MEMBER_ID, "member-op");
-            calls.verify(memberOperations).find(newerMember, "newer-op");
-            assertThat(result()).isEqualTo("ABORTED");
-            assertThat(state()).isEqualTo("OPEN");
-        } finally {
-            jdbc
-                .update(
-                    "DELETE FROM contest_resource_guards WHERE resource_type='MEMBER' AND resource_id=?",
-                    newerMember
+                        + "VALUES (?,?,?,?,4,?,'PREPARED','OPEN','PENDING',4,?,0,?,?)",
+                    type,
+                    resourceId,
+                    type + "-op",
+                    operationType,
+                    "a".repeat(64),
+                    now.minusMinutes(2),
+                    now.minusMinutes(2),
+                    now.minusMinutes(2)
                 );
         }
-    }
-
-    /** 시도 시각을 저장하지 못한 가드는 이번 회차에서 건너뛰고 다음 회차에 다시 조회한다. */
-    @Test
-    @DisplayName("가드 시도 시각 저장이 실패해도 다음 후보를 확인한다")
-    void skipsGuardAfterAttemptWriteFailure() {
-        var now = LocalDateTime.now(ClockConfiguration.SERVICE_ZONE).withNano(0).plusMinutes(3);
-        long firstId
-            = jdbc
-                .queryForObject(
-                    "SELECT id FROM contest_resource_guards WHERE resource_type='MEMBER' AND resource_id=?",
-                    Long.class,
-                    MEMBER_ID
-                );
-        long nextMember = MEMBER_ID + 1;
-        var schedulerJdbc = spy(jdbc);
-        doThrow(new IllegalStateException("시도 시각 저장 실패"))
-            .when(schedulerJdbc)
-            .update(
-                startsWith("UPDATE contest_resource_guards SET last_reconciliation_attempt_at"),
-                eq(now),
-                eq(firstId),
-                eq("member-op"),
-                eq(0L),
-                any(LocalDateTime.class)
-            );
-        given(memberOperations.find(nextMember, "next-op"))
-            .willReturn(new MemberOperationClient.Result("next-op", "PENDING", "4", "ACTIVE"));
-        given(memberOperations.find(MEMBER_ID, "member-op"))
-            .willReturn(new MemberOperationClient.Result("member-op", "ABORTED", "4", "ACTIVE"));
-
-        jdbc
-            .update(
-                "INSERT INTO contest_resource_guards (resource_type,resource_id,operation_id,operation_type,"
-                    + "expected_source_version,request_hash,state,prepared_from_state,operation_result,"
-                    + "source_version,prepared_at,version,created_at,updated_at) "
-                    + "SELECT resource_type,?,'next-op',operation_type,expected_source_version,request_hash,state,"
-                    + "prepared_from_state,operation_result,source_version,DATE_ADD(prepared_at,INTERVAL 1 SECOND),"
-                    + "0,created_at,updated_at FROM contest_resource_guards WHERE id=?",
-                nextMember,
-                firstId
+        var resourceGuards = mock(ResourceGuardReconciliation.class);
+        var locks = mock(ExtensibleLockProvider.class);
+        given(locks.lock(any())).willReturn(Optional.of(mock(SimpleLock.class)));
+        var scheduler
+            = new ContestOperationReconciliationScheduler(
+                jdbc,
+                mock(ExamRetryStore.class),
+                mock(ExamRetryService.class),
+                reconciliation,
+                resourceGuards,
+                Clock.fixed(now.atZone(ClockConfiguration.SERVICE_ZONE).toInstant(), ClockConfiguration.SERVICE_ZONE),
+                new SimpleMeterRegistry(),
+                locks
             );
         try {
-            runScheduler(now, mock(ExamRetryStore.class), mock(ExamRetryService.class), schedulerJdbc);
-            verify(schedulerJdbc)
-                .update(
-                    startsWith("UPDATE contest_resource_guards SET last_reconciliation_attempt_at"),
-                    eq(now),
-                    eq(firstId),
-                    eq("member-op"),
-                    eq(0L),
-                    any(LocalDateTime.class)
-                );
-            verify(memberOperations).find(nextMember, "next-op");
-            assertThat(state()).isEqualTo("PREPARED");
+            // when
+            scheduler.run();
 
-            runScheduler(now.plusMinutes(5));
-            verify(memberOperations).find(MEMBER_ID, "member-op");
-            assertThat(state()).isEqualTo("OPEN");
+            // then
+            org.mockito.Mockito.verifyNoInteractions(memberOperations);
+            verify(resourceGuards).reconcile("PROBLEM", resourceId, "PROBLEM-op", 4);
+            org.mockito.Mockito.verifyNoMoreInteractions(resourceGuards);
+            assertThat(state()).isEqualTo("PREPARED");
+            assertThat(
+                jdbc
+                    .queryForObject(
+                        "SELECT state FROM contest_resource_guards WHERE resource_type='STUDY' AND resource_id=?",
+                        String.class,
+                        resourceId
+                    )
+            ).isEqualTo("PREPARED");
         } finally {
+            scheduler.stopRenewals();
             jdbc
                 .update(
-                    "DELETE FROM contest_resource_guards WHERE resource_type='MEMBER' AND resource_id=?",
-                    nextMember
+                    "DELETE FROM contest_resource_guards WHERE resource_id=? AND resource_type IN ('STUDY','PROBLEM')",
+                    resourceId
                 );
         }
     }
