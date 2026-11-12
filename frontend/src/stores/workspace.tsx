@@ -114,7 +114,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     router.push(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   });
 
-  const { authReady } = store.getState();
+  const authReady = useStore(store, (s) => s.authReady);
   if (!authReady && !isPublicPath) {
     return <Loading />;
   }
