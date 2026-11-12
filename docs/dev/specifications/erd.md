@@ -1715,6 +1715,29 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 - 테스트 ID·순서는 초기 자료와 일치해야 하며 재시도에서 변경하지 않는다. 테스트별 최신 실행 상태만 유지하고 이전 시도의 요약은 §4.3.7에 보존한다.
 - 사용자 공개용 결과 테이블이 아니므로 `is_sample`·`actual_output`은 복제하지 않는다. Problem의 테스트 원본은 기존 자료 API로 읽는다.
 
+
+#### 4.3.9 관리자 채점 복구 요청 (`judge_recovery_requests`)
+
+관리자 복구 API의 최초 성공 응답을 작업·감사 기록과 같은 트랜잭션에서 보존한다.
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `actor_id` | BIGINT | Y | Gateway에서 인증한 관리자 ID, 외부 참조 |
+| `judge_job_id` | BIGINT | Y | FK → `judge_jobs.id` |
+| `idempotency_key` | VARCHAR(100) `_bin` | Y | 원래 Idempotency-Key, ASCII 1~100자 |
+| `request_hash` | CHAR(64) | Y | 양끝 공백을 제거한 사유의 SHA-256 |
+| `reason` | VARCHAR(500) | Y | 관리자 복구 사유 |
+| `response_status` | VARCHAR(30) | Y | 최초 성공 응답의 `RETRY_WAITING`. 트랜잭션 내부의 `PENDING`은 외부에 커밋하지 않음 |
+| `created_at` | DATETIME(6) | Y | 최초 성공한 요청의 저장 시각 |
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `fk_judge_recovery_requests_job` | `judge_job_id` → `judge_jobs.id` | 서비스 내부 FK |
+| `uk_judge_recovery_requests_actor_job_key` | `(actor_id, judge_job_id, idempotency_key)` | 같은 관리자·작업·키의 중복 실행 방지 |
+
+- 같은 키·같은 정규화 사유는 최초 응답을 반환한다. 같은 키·다른 사유는 `IDEMPOTENCY_KEY_CONFLICT`(422)다. 거절되거나 롤백된 요청은 성공 이력으로 남기지 않는다. 요청 기록과 감사 이력은 자동 삭제하지 않는다.
+
 ### 4.4 contest
 
 > 작성: 담당 C
@@ -3187,6 +3210,7 @@ judge-service/src/main/resources/db/migration/
   V18__common_create_shedlock.sql
   V19__judging_track_submission_execution_recovery.sql
   V20__common_create_audit_logs.sql
+  V21__judging_create_recovery_requests.sql
 ```
 
 기존 V1~V4는 공통 테이블 구축 계획 번호이며 실제 적용 이력과 구분한다. 기존 마이그레이션을 재사용하지 않고 Outbox·소비 기록은 V11·V12, 검증 작업·시도·테스트 결과는 V13~V15로 추가한다.
