@@ -1,3 +1,76 @@
+// --- api-spec §1 인증·회원 타입 ---
+
+export type UserRole = "USER" | "ADMIN";
+export type UserStatus = "ACTIVE" | "SUSPENDED" | "WITHDRAWN";
+
+// GET /api/v1/members/me §1.2.1
+export type Member = {
+  memberId: string;
+  githubLogin: string;
+  nickname: string;
+  profileImageUrl: string | null;
+  email: string | null;
+  role: UserRole;
+  status: UserStatus;
+  hasLearningProfile: boolean;
+  createdAt: string;
+};
+
+// POST /api/v1/auth/token §1.1.3 응답
+export type AuthTokenResponse = {
+  accessToken: string;
+  expiresIn: number;
+  member: {
+    memberId: string;
+    nickname: string;
+    role: UserRole;
+    status: UserStatus;
+    isNewMember: boolean;
+  };
+};
+
+// GET /api/v1/members/me/tag-levels §1.4.1
+export type TagLevelBand = "GOOD" | "NORMAL" | "WEAK";
+
+export type TagLevelAchievement = {
+  difficulty: number;
+  solvedCount: number;
+  achievementRate: number;
+  band: TagLevelBand;
+};
+
+export type TagLevelDiagnosis = {
+  isEligible: boolean;
+  cooldownEndsAt: string | null;
+  inProgressDiagnosisId: string | null;
+};
+
+export type TagLevel = {
+  tagId: string;
+  level: string; // "LV1", "LV2", …
+  accessibleMaxDifficulty: number;
+  achievements: TagLevelAchievement[];
+  diagnosis: TagLevelDiagnosis;
+  nextPromotion: {
+    targetLevel: string;
+    requiredSolvedCount: number;
+    requiredAchievementRate: number;
+  } | null;
+};
+
+// GET /api/v1/admin/members §1.6.1 행 단위
+export type AdminMember = {
+  memberId: string;
+  nickname: string;
+  githubLogin: string;
+  role: UserRole;
+  status: UserStatus;
+  createdAt: string;
+};
+
+// --- 기존 mock 타입 (다른 도메인 화면에서 사용 중) ---
+// 주의: 아래 User는 mock-api 전용이다. 실서버 회원 타입은 위의 Member를 사용한다.
+
 export type Language = "java" | "python3" | "cpp";
 export type Verdict = "AC" | "WA" | "CE" | "TLE" | "MLE" | "RE";
 export type JudgeState =
