@@ -485,10 +485,11 @@ export const contestApi = {
 
 // 알림 API (§7)
 export const notificationApi = {
-  getList: (params: { page?: number; size?: number } = {}) => {
+  getList: (params: { page?: number; size?: number; unreadOnly?: boolean } = {}) => {
     const q = new URLSearchParams();
     if (params.page != null) q.set("page", String(params.page));
     if (params.size != null) q.set("size", String(params.size));
+    if (params.unreadOnly != null) q.set("unreadOnly", String(params.unreadOnly));
     const qs = q.toString();
     return apiFetch<NotificationListResponse>(
       `/api/v1/notifications${qs ? `?${qs}` : ""}`,
