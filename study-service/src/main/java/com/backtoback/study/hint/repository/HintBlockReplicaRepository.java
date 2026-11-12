@@ -74,4 +74,6 @@ public interface HintBlockReplicaRepository extends JpaRepository<HintBlockRepli
     @Modifying
     @Query("DELETE FROM HintBlockReplica r WHERE r.memberId = :memberId")
     void deleteByMemberId(@Param("memberId") Long memberId);
+
+    List<HintBlockReplica> findByContextTypeAndContextId(HintBlockContextType contextType, Long contextId);
 }
