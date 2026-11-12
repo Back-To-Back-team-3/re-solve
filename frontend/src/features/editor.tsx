@@ -29,10 +29,12 @@ export function CodeEditor({
   problem,
   userId,
   examId,
+  availableLanguages,
 }: {
   problem: Problem;
   userId: string;
   examId?: string;
+  availableLanguages?: Language[];
 }) {
   const language = useWorkspace((s) => s.language),
     setLanguage = useWorkspace((s) => s.setLanguage),
@@ -50,6 +52,9 @@ export function CodeEditor({
       }
     } catch {}
   }, [setLanguage, setFontSize]);
+  const languages = availableLanguages ?? (["python3", "java", "cpp"] as const)
+    .filter((value) => typeof problem.starterCodes[value] === "string");
+  const selectedLanguage = languages.includes(language) ? language : languages[0];
   function settings(lang: Language, size: number) {
     window.dispatchEvent(new Event("resolve:flush"));
     setLanguage(lang);
@@ -69,10 +74,11 @@ export function CodeEditor({
           <select
             aria-label="코드 언어"
             className="input"
-            value={language}
+            value={selectedLanguage ?? ""}
+            disabled={!selectedLanguage}
             onChange={(e) => settings(e.target.value as Language, fontSize)}
           >
-            {(["python3", "java", "cpp"] as const).map((l) => (
+            {languages.map((l) => (
               <option key={l} value={l}>
                 {labels[l]}
               </option>
@@ -83,7 +89,7 @@ export function CodeEditor({
           aria-label="글자 크기"
           className="input"
           value={fontSize}
-          onChange={(e) => settings(language, Number(e.target.value))}
+          onChange={(e) => settings(selectedLanguage ?? language, Number(e.target.value))}
         >
           {[12, 14, 16, 18, 20, 22].map((n) => (
             <option key={n} value={n}>
@@ -92,14 +98,14 @@ export function CodeEditor({
           ))}
         </select>
       </div>
-      <Buffer
-        key={draftKey(userId, problem.id, language, examId)}
+      {selectedLanguage ? <Buffer
+        key={JSON.stringify([draftKey(userId, problem.id, selectedLanguage, examId), problem.problemRevisionId])}
         problem={problem}
         userId={userId}
         examId={examId}
-        language={language}
+        language={selectedLanguage}
         fontSize={fontSize}
-      />
+      /> : <Empty title="실행 가능한 언어가 없어요" description="지원 실행 환경을 확인한 뒤 다시 시도해 주세요." />}
     </div>
   );
 }
@@ -267,9 +273,9 @@ function Buffer({
       codeRef.current =
         initial?.revisionId === problem.problemRevisionId
           ? initial.code
-          : problem.starterCodes[language];
+          : (problem.starterCodes[language] ?? "");
       setCode(codeRef.current);
-      setSaved(initial ? "저장된 코드 복원 완료" : "초기 코드");
+      setSaved(initial?.revisionId === problem.problemRevisionId ? "저장된 코드 복원 완료" : "초기 코드");
     }
     readyRef.current = true;
     setReady(true);
@@ -533,7 +539,7 @@ function Buffer({
         <Button
           className="danger"
           onClick={() => {
-            edit(problem.starterCodes[language]);
+            edit(problem.starterCodes[language] ?? "");
             setReset(false);
           }}
         >

@@ -4,7 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useResource } from "@/services/hooks";
 import { judgeApi, problemApi } from "@/services/api";
-import type { Language, Problem, ProblemDetail } from "@/services/types";
+import type { Problem } from "@/services/types";
 import {
   Badge,
   ErrorState,
@@ -17,6 +17,7 @@ import { CodeEditor } from "./editor";
 import { ProblemSubmissionList } from "./problem-list";
 import { Board, Note } from "./board";
 import { useWorkspace } from "@/stores/workspace";
+import { availableProblemLanguages, toEditorProblem } from "@/services/problem-editor";
 export function ProblemDescription({
   problem,
   exam = false,
@@ -69,37 +70,10 @@ export function ProblemDescription({
     </section>
   );
 }
-function toProblem(d: ProblemDetail): Problem {
-  return {
-    id: d.problemId,
-    problemRevisionId: d.problemRevisionId,
-    title: d.title,
-    difficulty: d.difficulty,
-    tags: d.tags,
-    description: d.description,
-    constraints: d.constraints,
-    examples: d.examples,
-    functionSpec: {
-      name: "solution",
-      parameters: d.functionSpec.parameters.map((p) => ({
-        name: p.name,
-        type: p.type.kind,
-      })),
-      returnType: d.functionSpec.returnType.kind,
-    },
-    starterCodes: Object.fromEntries(
-      d.starterCodes.map((s) => [s.language, s.sourceCode]),
-    ) as Record<Language, string>,
-    samples: d.samples.map((s) => ({
-      input: Object.values(s.argumentTexts).join(", "),
-      expected: s.expectedReturnText,
-    })),
-  };
-}
-
 export function ProblemPage({ id }: { id: string }) {
   const member = useWorkspace((s) => s.member);
   const r = useResource(() => problemApi.getDetail(id), id);
+  const runtimes = useResource(judgeApi.getLanguages, "judge-languages");
   if (r.loading)
     return (
       <div className="container">
@@ -113,7 +87,8 @@ export function ProblemPage({ id }: { id: string }) {
       </div>
     );
   if (!r.data) return <NotFound what="문제" />;
-  const problem = toProblem(r.data);
+  if (r.data.problemId !== id) return <Loading />;
+  const problem = toEditorProblem(r.data);
   return (
     <>
       <div className="exam-bar">
@@ -123,10 +98,15 @@ export function ProblemPage({ id }: { id: string }) {
       </div>
       <div className="workspace">
         <ProblemDescription key={id} problem={problem} />
-        <CodeEditor
-          problem={problem}
-          userId={member?.memberId || "guest"}
-        />
+        {runtimes.loading ? <Loading /> : runtimes.error ? (
+          <ErrorState message={runtimes.error.message} retry={runtimes.retry} />
+        ) : (
+          <CodeEditor
+            problem={problem}
+            userId={member?.memberId || "guest"}
+            availableLanguages={availableProblemLanguages(r.data, runtimes.data?.content ?? [])}
+          />
+        )}
       </div>
     </>
   );

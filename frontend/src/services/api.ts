@@ -28,6 +28,7 @@ import type {
   GoalType,
   JoinType,
   JudgeResult,
+  JudgeLanguage,
   Language,
   MarkAllReadResponse,
   MarkReadResponse,
@@ -240,6 +241,8 @@ export const problemApi = {
 
 // 채점 API (§3.1)
 export const judgeApi = {
+  getLanguages: () =>
+    apiFetch<{ content: JudgeLanguage[] }>("/api/v1/judge/languages"),
   run: (body: {
     problemId: string;
     problemRevisionId: string;
