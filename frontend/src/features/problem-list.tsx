@@ -258,7 +258,7 @@ export function ProblemsPage() {
       {resource.loading ? (
         <Loading />
       ) : resource.error ? (
-        <ErrorState message={resource.error} retry={resource.retry} />
+        <ErrorState message={resource.error.message} retry={resource.retry} />
       ) : (
         resource.data && (
           <>

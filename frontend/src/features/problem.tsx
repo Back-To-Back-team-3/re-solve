@@ -59,7 +59,7 @@ export function ProblemDescription({
       )}
       {tab === "submissions" &&
         (r.error ? (
-          <ErrorState message={r.error} retry={r.retry} />
+          <ErrorState message={r.error.message} retry={r.retry} />
         ) : (
           <SubmissionList items={r.data || []} />
         ))}
@@ -87,7 +87,7 @@ export function ProblemPage({ id }: { id: string }) {
   if (r.error)
     return (
       <div className="container">
-        <ErrorState message={r.error} retry={r.retry} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
   if (!r.data?.problem) return <NotFound what="문제" />;

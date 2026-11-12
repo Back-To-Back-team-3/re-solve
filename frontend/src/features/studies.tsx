@@ -75,7 +75,7 @@ export function StudiesPage() {
   if (r.error)
     return (
       <div className="container">
-        <ErrorState message={r.error} retry={r.retry} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
   const db = r.data!,
@@ -206,7 +206,7 @@ export function StudyPage({ id }: { id: string }) {
   if (r.error)
     return (
       <div className="container">
-        <ErrorState message={r.error} retry={r.retry} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
   const db = r.data!,
