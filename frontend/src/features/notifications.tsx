@@ -7,7 +7,7 @@ import { notificationApi } from "@/services/api";
 import { useNotificationSSE } from "@/services/hooks";
 import type { NotificationItem } from "@/services/types";
 
-function formatRelativeTime(isoString: string): string {
+export function formatRelativeTime(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
   const rtf = new Intl.RelativeTimeFormat("ko", { numeric: "auto" });
   if (diff < 60_000) return rtf.format(-Math.floor(diff / 1000), "second");
