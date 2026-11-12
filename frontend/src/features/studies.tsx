@@ -2,7 +2,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Users, ArrowRight, Plus } from "lucide-react";
-import { api } from "@/services/mock-api";
 import { studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import type {
@@ -15,7 +14,6 @@ import type {
   StudySummary,
   StudyRecommendation,
 } from "@/services/types";
-import { useCatalog } from "@/services/catalog";
 import {
   Badge,
   Button,
@@ -24,15 +22,12 @@ import {
   Go,
   Heading,
   Loading,
-  NotFound,
   Section,
   Tabs,
   useAction,
-  date,
 } from "@/components/ui";
 import { Pet } from "@/components/pet";
-import { Board } from "./board";
-import { ProblemTable, useQuery, Pager } from "./problem-list";
+import { useQuery, Pager } from "./problem-list";
 const goalLabel: Record<GoalType, string> = {
   EMPLOYMENT: "취업 준비",
   CONTEST: "대회 준비",
@@ -289,10 +284,12 @@ export function StudiesPage() {
   );
 }
 export function StudyPage({ id }: { id: string }) {
-  const { tags, problems } = useCatalog();
-  const r = useResource(api.snapshot, id),
-    [tab, setTab] = useState("intro"),
-    action = useAction();
+  const [tab, setTab] = useState("intro");
+  const [version, setVersion] = useState(0);
+  const action = useAction();
+  const r = useResource(() => studyApi.getDetail(id), `${id}:${version}`);
+  const refresh = () => setVersion((v) => v + 1);
+
   if (r.loading)
     return (
       <div className="container">
@@ -305,25 +302,79 @@ export function StudyPage({ id }: { id: string }) {
         <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
-  const db = r.data!,
-    s = db.studies.find((s) => s.id === id);
-  if (!s) return <NotFound what="스터디" />;
-  const joined = s.members.includes(db.currentUserId || ""),
-    applied = s.applicants.includes(db.currentUserId || "");
+
+  const study = r.data!;
+  const myM = study.myMembership;
+  const isApproved = myM?.status === "APPROVED";
+  const isPending = myM?.status === "PENDING";
+  const isLeader = myM?.role === "LEADER";
+
+  const statusLabel = { RECRUITING: "모집 중", ACTIVE: "진행 중", CLOSED: "종료됨" }[study.status];
+  const statusTone =
+    study.status === "RECRUITING" ? "success" : study.status === "ACTIVE" ? "accent" : undefined;
+
+  const memberGuard = !isApproved ? (
+    <p className="muted">
+      {isPending ? "승인 후 이용할 수 있습니다." : "구성원만 이용할 수 있습니다."}
+    </p>
+  ) : null;
+
+  async function handleJoin() {
+    await action(
+      async () => {
+        try {
+          await studyApi.join(id);
+          refresh();
+        } catch (err) {
+          const code = (err as { code?: string }).code;
+          throw new Error(
+            code === "STUDY_FULL"
+              ? "정원이 가득 찼습니다."
+              : code === "STUDY_JOIN_LIMIT_EXCEEDED"
+                ? "최대 5개 스터디에 참여할 수 있습니다."
+                : code === "STUDY_ALREADY_APPLIED"
+                  ? "이미 신청하셨습니다."
+                  : code === "STUDY_NOT_RECRUITING"
+                    ? "현재 모집 중이 아닙니다."
+                    : ((err as { message?: string }).message ?? "오류가 발생했습니다."),
+          );
+        }
+      },
+      study.joinType === "INSTANT"
+        ? "가입이 완료됐습니다."
+        : "신청이 완료됐습니다. 7일 내 승인되지 않으면 자동으로 취소됩니다.",
+      false,
+    );
+  }
+
+  async function handleLeave() {
+    if (!myM) return;
+    if (isLeader) {
+      window.alert("스터디장은 다른 멤버에게 위임한 뒤 탈퇴할 수 있습니다.");
+      return;
+    }
+    if (!window.confirm(isPending ? "신청을 취소하시겠습니까?" : "스터디에서 탈퇴하시겠습니까?"))
+      return;
+    await action(
+      async () => {
+        await studyApi.leave(id, myM.membershipId);
+        refresh();
+      },
+      isPending ? "신청을 취소했습니다." : "탈퇴했습니다.",
+      false,
+    );
+  }
+
   return (
     <div className="container stack">
       <Go className="small" href="/studies">
         ← 스터디 목록
       </Go>
       <Heading
-        title={s.title}
+        title={study.name}
         eyebrow="STUDY ROOM"
-        description={s.description}
-        action={
-          <Badge tone="accent">
-            {joined ? "참여 중" : applied ? "신청 중" : "모집 중"}
-          </Badge>
-        }
+        description={study.description}
+        action={<Badge tone={statusTone}>{statusLabel}</Badge>}
       />
       <div className="detail-grid">
         <section className="card stack">
@@ -334,55 +385,52 @@ export function StudyPage({ id }: { id: string }) {
               { id: "intro", label: "소개" },
               { id: "members", label: "구성원" },
               { id: "problems", label: "주간 문제집" },
-              { id: "board", label: "게시판" },
             ]}
           />
           {tab === "intro" && (
             <div className="stack">
               <Pet size={100} />
-              <h2>함께 만드는 꾸준함</h2>
-              <p>{s.description}</p>
               <div className="inset stack-sm">
-                <h3>우리의 목표</h3>
-                <p>{s.goal}</p>
-                <p>참가 조건: {s.condition || "누구나 환영해요."}</p>
-                <p>진행 시간: {s.time}</p>
+                <p>
+                  <b>학습 목표</b> {goalLabel[study.goal]}
+                </p>
+                <p>
+                  <b>실력 수준</b> {skillLabel[study.skillLevel]}
+                </p>
+                <p>
+                  <b>선호 언어</b> {langLabel[study.preferredLanguage]}
+                </p>
+                <p>
+                  <b>활동 시간대</b> {timeLabel[study.activeTimeSlot]}
+                </p>
+                <p>
+                  <b>가입 방식</b>{" "}
+                  {study.joinType === "INSTANT" ? "즉시 가입" : "승인 후 가입"}
+                </p>
+                {study.isAutoReopen && (
+                  <p className="muted">정원이 차면 자동으로 모집을 재개합니다.</p>
+                )}
+                <p>
+                  <b>스터디장</b> {study.leader.nickname}
+                </p>
               </div>
-              <p className="muted">
-                가입 신청은 목업으로 기록됩니다. 실제 승인·알림은 제공하지
-                않습니다.
-              </p>
+              <p>{study.description}</p>
             </div>
           )}
           {tab === "members" && (
             <div className="stack">
-              {s.members.map((uid) => (
-                <div className="row inset" key={uid}>
-                  <Pet size={40} />
-                  <b>{db.users.find((u) => u.id === uid)?.name || "멤버"}</b>
-                  {uid === s.ownerId && <Badge tone="accent">스터디장</Badge>}
-                </div>
-              ))}
+              {memberGuard ?? (
+                <p className="muted">구성원 목록은 다음 커밋에서 연동합니다.</p>
+              )}
             </div>
           )}
           {tab === "problems" && (
-            <ProblemTable
-              items={problems
-                .filter((p) => s.problemIds.includes(p.id))
-                .map((p) => ({
-                  problemId: p.id,
-                  problemRevisionId: p.problemRevisionId,
-                  revisionNumber: 0,
-                  title: p.title,
-                  difficulty: p.difficulty,
-                  tags: p.tags,
-                  publishedAt: "",
-                  solvedStatus: "UNSOLVED" as const,
-                  supportedLanguages: [],
-                }))}
-            />
-          )}{" "}
-          {tab === "board" && <Board scope={`study:${id}`} />}
+            <div className="stack">
+              {memberGuard ?? (
+                <p className="muted">문제집은 다음 커밋에서 연동합니다.</p>
+              )}
+            </div>
+          )}
         </section>
         <div className="stack">
           <Section title="스터디 안내">
@@ -390,37 +438,25 @@ export function StudyPage({ id }: { id: string }) {
               <p>
                 모집 인원{" "}
                 <b>
-                  {s.members.length} / {s.capacity}명
+                  {study.memberCount} / {study.capacity}명
                 </b>
               </p>
               <p>
-                난이도 <b>{s.level}</b>
+                상태 <b>{statusLabel}</b>
               </p>
-              <p>모집 마감 {date(s.deadline)}</p>
-              <p>공개 범위 {s.visibility === "public" ? "공개" : "비공개"}</p>
-              <div className="row wrap">
-                {s.tagIds.map((t) => (
-                  <Badge key={t}>{tags.find((x) => x.id === t)?.name}</Badge>
-                ))}
-              </div>
-              <Button
-                className="primary full"
-                disabled={joined}
-                onClick={() =>
-                  action(
-                    () => api.applyStudy(id),
-                    applied
-                      ? "가입 신청을 취소했습니다."
-                      : "가입 신청을 기록했습니다.",
-                  )
-                }
-              >
-                {joined
-                  ? "참여 중인 스터디"
-                  : applied
-                    ? "가입 신청 취소"
-                    : "가입 신청"}
-              </Button>
+              <p>
+                스터디장 <b>{study.leader.nickname}</b>
+              </p>
+              {!myM && study.status === "RECRUITING" && (
+                <Button className="primary full" onClick={handleJoin}>
+                  {study.joinType === "INSTANT" ? "가입" : "신청하기"}
+                </Button>
+              )}
+              {myM && (
+                <Button className="full" onClick={handleLeave}>
+                  {isPending ? "신청 취소" : isLeader ? "탈퇴 (위임 필요)" : "탈퇴"}
+                </Button>
+              )}
             </div>
           </Section>
         </div>
