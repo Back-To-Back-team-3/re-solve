@@ -121,9 +121,9 @@ function JudgePoll({
     onDoneRef.current = onDone;
   });
   const { data, loading, error, polling } = usePollUntil(
-    () => judgeApi.getStatus(submissionId),
+    (signal) => judgeApi.getStatus(submissionId, signal),
     (d) => d.status === "COMPLETED" || d.status === "FAILED",
-    { intervalMs: 2000, timeoutMs: 60000 },
+    { intervalMs: 2000, subsequentIntervalMs: 5000, timeoutMs: 60000 },
   );
   useEffect(() => {
     if (loading || polling) return;
@@ -235,13 +235,22 @@ function Buffer({
     [ready, setReady] = useState(false),
     [saved, setSaved] = useState("복원 중…"),
     [reset, setReset] = useState(false),
-    [busy, setBusy] = useState(false),
+    [sending, setSending] = useState(false),
+    [paused, setPaused] = useState(false),
+    [pollVersion, setPollVersion] = useState(0),
     [runResult, setRunResult] = useState<RunResponse | null>(null),
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
-    [judgeSubmissionId, setJudgeSubmissionId] = useState<string | null>(null),
-    [judgeResult, setJudgeResult] = useState<JudgeResult | null>(null),
+    [showRun, setShowRun] = useState(false),
     [judgeError, setJudgeError] = useState<string | null>(null);
+  const submissionKey = JSON.stringify([key, problem.problemRevisionId]);
+  const attempt = useWorkspace((state) => state.practiceSubmissions[submissionKey]);
+  const setAttempt = useWorkspace((state) => state.setPracticeSubmission);
+  const sendingRef = useRef(false);
+  const judgeSubmissionId = attempt?.submissionId ?? null;
+  const judgeResult = attempt?.result ?? null;
+  const polling = !!judgeSubmissionId && !judgeResult && !paused;
+  const busy = sending || polling;
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   useEffect(() => {
     if (examId) {
@@ -355,10 +364,9 @@ function Buffer({
   async function handleRun() {
     persist();
     setBusyRun(true);
+    setShowRun(true);
     setRunResult(null);
     setRunError(null);
-    setJudgeResult(null);
-    setJudgeError(null);
     try {
       setRunResult(
         await judgeApi.run({
@@ -377,36 +385,61 @@ function Buffer({
       setBusyRun(false);
     }
   }
-  async function handleSubmit() {
+  async function handleSubmit(retry = false) {
+    if (sendingRef.current) return;
+    persist();
+    if (examId) {
+      sendingRef.current = true;
+      setSending(true);
+      setShowRun(false);
+      setRunResult(null);
+      setRunError(null);
+      setJudgeError(null);
+      try {
+        await contestApi.submitExam(examId, {
+          problemId: problem.id, language, sourceCode: codeRef.current, seq: seqRef.current,
+        });
+        setSaved("제출 완료");
+      } catch (failure) {
+        const error = failure as { message?: string };
+        setJudgeError(error.message ?? "제출에 실패했습니다.");
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
+      }
+      return;
+    }
+    const request = retry && attempt && !attempt.submissionId ? attempt : {
+      idempotencyKey: crypto.randomUUID(),
+      body: {
+        problemId: problem.id,
+        problemRevisionId: problem.problemRevisionId,
+        language,
+        sourceCode: codeRef.current,
+      },
+      submissionId: null,
+      result: null,
+    };
+    sendingRef.current = true;
+    setShowRun(false);
+    setAttempt(submissionKey, request);
     setRunResult(null);
     setRunError(null);
-    setJudgeResult(null);
     setJudgeError(null);
-    persist();
-    setBusy(true);
+    setPaused(true);
+    setSending(true);
     try {
-      if (examId) {
-        await contestApi.submitExam(examId, {
-          problemId: problem.id,
-          language,
-          sourceCode: codeRef.current,
-          seq: seqRef.current,
-        });
-        setJudgeError(null);
-        setSaved("제출 완료");
-        setBusy(false);
-      } else {
-        const receipt = await judgeApi.submit({
-          problemRevisionId: problem.problemRevisionId,
-          language,
-          sourceCode: codeRef.current,
-        });
-        setJudgeSubmissionId(receipt.submissionId);
-      }
-    } catch (e) {
-      const err = e as { message?: string };
-      setJudgeError(err.message ?? "제출에 실패했습니다.");
-      setBusy(false);
+      const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
+      setAttempt(submissionKey, { ...request, submissionId: receipt.submissionId });
+      setPollVersion((value) => value + 1);
+      setPaused(false);
+    } catch (failure) {
+      const message = typeof failure === "object" && failure !== null && "message" in failure
+        && typeof failure.message === "string" ? failure.message : "제출에 실패했습니다.";
+      setJudgeError(message);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   }
   function theme(monaco: typeof import("monaco-editor")) {
@@ -427,14 +460,14 @@ function Buffer({
   }
   return (
     <>
-      {judgeSubmissionId && (
+      {judgeSubmissionId && polling && (
         <JudgePoll
+          key={`${judgeSubmissionId}:${pollVersion}`}
           submissionId={judgeSubmissionId}
           onDone={(result, err) => {
-            setJudgeSubmissionId(null);
-            setBusy(false);
+            setPaused(true);
             if (err) setJudgeError(err);
-            else setJudgeResult(result);
+            else if (attempt && result) setAttempt(submissionKey, { ...attempt, result });
           }}
         />
       )}
@@ -491,7 +524,7 @@ function Buffer({
           </Button>
           <Button
             className="small"
-            disabled={busyRun || !ready}
+            disabled={busyRun || busy || !ready}
             onClick={handleRun}
           >
             <Play size={14} />
@@ -499,11 +532,11 @@ function Buffer({
           </Button>
           <Button
             className="small primary"
-            disabled={busy || !ready}
-            onClick={handleSubmit}
+            disabled={busy || busyRun || !ready}
+            onClick={() => handleSubmit()}
           >
             <Send size={14} />
-            {busy ? "채점 중…" : "제출"}
+            {busy ? "채점 중…" : attempt && !attempt.result ? "현재 코드로 새 제출" : "제출"}
           </Button>
         </div>
       </div>
@@ -513,9 +546,9 @@ function Buffer({
           <div className="row">
             <Badge tone="pending">채점 중…</Badge>
           </div>
-        ) : judgeError ? (
+        ) : !showRun && judgeError ? (
           <p className="error-text">{judgeError}</p>
-        ) : judgeResult ? (
+        ) : !showRun && judgeResult ? (
           <JudgeResultView result={judgeResult} />
         ) : busyRun ? (
           <p className="muted">실행 중…</p>
@@ -528,6 +561,26 @@ function Buffer({
             title="코드를 실행해 보세요"
             description="공개 예제 실행 또는 전체 제출을 선택할 수 있어요."
           />
+        )}
+        {attempt && !attempt.result && (paused || !attempt.submissionId) && !busy && !busyRun && (
+          <div className="stack-sm">
+            {attempt.submissionId ? (
+              <>
+                <p className="muted">제출 #{attempt.submissionId}의 결과를 다시 확인할 수 있어요.</p>
+                <Button className="small" onClick={() => {
+                  setShowRun(false);
+                  setJudgeError(null);
+                  setPollVersion((value) => value + 1);
+                  setPaused(false);
+                }}>채점 상태 다시 조회</Button>
+              </>
+            ) : (
+              <>
+                <p className="muted">재요청은 원래 제출한 코드와 요청 키를 유지합니다.</p>
+                <Button className="small" onClick={() => handleSubmit(true)}>같은 제출 재요청</Button>
+              </>
+            )}
+          </div>
         )}
       </section>
       <Modal

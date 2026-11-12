@@ -529,6 +529,14 @@ export type AdminProblemListItem = {
   supportedLanguages: Language[];
 };
 
+// POST /api/v1/submissions §3.1.2 요청
+export type SubmissionCreateRequest = {
+  problemId: string;
+  problemRevisionId: string;
+  language: Language;
+  sourceCode: string;
+};
+
 // POST /api/v1/submissions §3.1.2 접수 응답 (202)
 export type SubmissionReceipt = {
   submissionId: string;

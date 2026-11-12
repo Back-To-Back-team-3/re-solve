@@ -16,7 +16,7 @@ import {
   setMemberGetter,
   setTokenGetter,
 } from "../services/api";
-import type { Language, Member } from "../services/types";
+import type { JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
 import { Loading } from "../components/ui";
 export interface Draft {
   code: string;
@@ -44,11 +44,21 @@ export function saveDraft(key: string, draft: Draft) {
 }
 const PUBLIC_PATHS = ["/", "/login", "/auth/callback"];
 
+/** 언어·문제·회차별 접수 원본과 응답을 유지해 화면 재진입 시에도 같은 요청을 식별한다. */
+export interface PracticeSubmissionAttempt {
+  idempotencyKey: string;
+  body: SubmissionCreateRequest;
+  submissionId: string | null;
+  result: JudgeResult | null;
+}
+
 interface Workspace {
   member: Member | null;
   accessToken: string | null;
   authReady: boolean;
   drafts: Record<string, Draft>;
+  practiceSubmissions: Record<string, PracticeSubmissionAttempt | undefined>;
+  setPracticeSubmission: (key: string, attempt: PracticeSubmissionAttempt) => void;
   language: Language;
   fontSize: number;
   activeProblems: Record<string, string>;
@@ -67,11 +77,15 @@ const createWorkspace = () =>
     accessToken: null,
     authReady: false,
     drafts: {},
+    practiceSubmissions: {},
+    setPracticeSubmission: (key, attempt) => set((state) => ({
+      practiceSubmissions: { ...state.practiceSubmissions, [key]: attempt },
+    })),
     language: "python3",
     fontSize: 14,
     activeProblems: {},
     setMember: (member) => set({ member }),
-    clearMember: () => set({ member: null, accessToken: null }),
+    clearMember: () => set({ member: null, accessToken: null, practiceSubmissions: {} }),
     setAccessToken: (accessToken) => set({ accessToken }),
     setAuthReady: (authReady) => set({ authReady }),
     setDraft: (key, d) => set((s) => ({ drafts: { ...s.drafts, [key]: d } })),

@@ -1,0 +1,79 @@
+import { test, expect } from "@playwright/test";
+import { mockPracticePage } from "./practice-fixture";
+
+const receipt = {
+  submissionId: "2001", judgeAttempt: 1, status: "QUEUED",
+  submittedAt: "2026-11-13T00:00:00.000000+09:00", statusUrl: "/api/v1/submissions/2001",
+};
+const completed = {
+  submissionId: "2001", status: "COMPLETED", compileMessage: null,
+  effectiveResult: { verdict: "AC", passedCount: 2, totalCount: 2, maxTimeMs: 1, maxMemoryKb: 1024 },
+};
+
+test("응답 유실 재요청은 원래 키·본문을 유지하고 새 코드는 별도 제출한다", async ({ page }) => {
+  await mockPracticePage(page);
+  const requests: { key: string | undefined; body: unknown }[] = [];
+  await page.route("**/api/v1/submissions", async (route) => {
+    requests.push({
+      key: route.request().headers()["idempotency-key"],
+      body: JSON.parse(route.request().postData() ?? "null"),
+    });
+    if (requests.length === 1) await route.abort("failed");
+    else await route.fulfill({ status: 202, json: { success: true, data: receipt } });
+  });
+  await page.route("**/api/v1/submissions/2001", (route) =>
+    route.fulfill({ json: { success: true, data: completed } }));
+  await page.goto("/problems/1001");
+  const editor = page.getByRole("textbox", { name: "코드 편집기" });
+  await expect(editor).toBeVisible();
+  await page.getByRole("button", { name: "제출", exact: true }).click();
+  await expect(page.getByRole("button", { name: "같은 제출 재요청" })).toBeVisible();
+  expect(requests[0].body).toEqual({
+    problemId: "1001", problemRevisionId: "2001", language: "java", sourceCode: "// java starter",
+  });
+  expect(requests[0].key).toBeTruthy();
+  await editor.press("ControlOrMeta+A");
+  await editor.pressSequentially("// changed code");
+  await expect(page.locator(".view-lines")).toContainText("// changed code");
+  await page.getByRole("button", { name: "같은 제출 재요청" }).click();
+  await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
+  expect(requests[1]).toEqual(requests[0]);
+  await page.getByRole("button", { name: "제출", exact: true }).click();
+  await expect.poll(() => requests.length).toBe(3);
+  expect(requests[2].key).not.toBe(requests[0].key);
+  expect(requests[2].body).toMatchObject({ sourceCode: "// changed code", problemId: "1001" });
+});
+
+test("조회 대기 종료·조회 장애 후 같은 제출만 재조회하고 새 접수는 만들지 않는다", async ({ page }) => {
+  await mockPracticePage(page);
+  let posts = 0;
+  let reads = 0;
+  let mode: "queued" | "error" | "completed" = "queued";
+  await page.route("**/api/v1/submissions", async (route) => {
+    posts++;
+    await route.fulfill({ status: 202, json: { success: true, data: receipt } });
+  });
+  await page.route("**/api/v1/submissions/2001", async (route) => {
+    reads++;
+    if (mode === "error") {
+      await route.fulfill({ status: 503, json: { success: false, error: { code: "COMMON_DEPENDENCY_UNAVAILABLE", message: "조회 장애" } } });
+    } else await route.fulfill({ json: { success: true, data: mode === "completed" ? completed : { submissionId: "2001", status: "QUEUED", effectiveResult: null, compileMessage: null } } });
+  });
+  await page.goto("/problems/1001");
+  await expect(page.getByRole("textbox", { name: "코드 편집기" })).toBeVisible();
+  await page.clock.install();
+  await page.getByRole("button", { name: "제출", exact: true }).click();
+  await expect.poll(() => reads).toBeGreaterThan(0);
+  await page.clock.fastForward(60001);
+  await expect(page.getByText("상태 조회를 잠시 멈췄습니다. 서버 채점은 계속될 수 있습니다.")).toBeVisible();
+  const pausedReads = reads;
+  await page.clock.fastForward(20000);
+  expect(reads).toBe(pausedReads);
+  mode = "error";
+  await page.getByRole("button", { name: "채점 상태 다시 조회" }).click();
+  await expect(page.getByText("조회 장애", { exact: true })).toBeVisible();
+  mode = "completed";
+  await page.getByRole("button", { name: "채점 상태 다시 조회" }).click();
+  await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
+  expect(posts).toBe(1);
+});
