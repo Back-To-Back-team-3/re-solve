@@ -360,6 +360,36 @@ export interface MyResultResponse {
   problems: MyResultProblem[];
 }
 
+export interface CreateExamProblem {
+  problemId: string;
+  score: string;
+  displayOrder: number;
+}
+
+export interface CreateExamRequest {
+  title: string;
+  mode: "FIXED";
+  startsAt: string;
+  endsAt: string;
+  problems: CreateExamProblem[];
+}
+
+export interface ExamCreated {
+  examId: string;
+  studyId: string;
+  status: ExamStatusServer;
+  examRevision: string;
+  version: string;
+  resultRevision: string;
+  startsAt: string;
+  endsAt: string;
+  totalScore: string;
+}
+
+export interface ExamStartResponse {
+  serverNow: string;
+}
+
 export interface ProblemFilter {
   keyword?: string;
   tagIds?: string;
