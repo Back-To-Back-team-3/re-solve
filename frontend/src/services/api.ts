@@ -86,6 +86,7 @@ async function apiFetchInner<T>(
     throw { code: "UNAUTHORIZED", message: "로그인이 필요합니다" } satisfies ApiError;
   }
 
+
   let json: ApiResponse<T>;
   try {
     json = await res.json();
