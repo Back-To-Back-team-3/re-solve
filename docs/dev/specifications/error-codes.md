@@ -150,7 +150,7 @@ Problem의 기존 오류 코드를 Judge 수동 재처리에도 사용하는 보
 | `STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE` | 409 | 문제집에 넣을 문제가 `GENERAL`·`PUBLIC`이 아님 |
 | `STUDY_POST_NOT_FOUND` | 404 | 게시글을 찾을 수 없음 |
 | `STUDY_COMMENT_NOT_FOUND` | 404 | 댓글을 찾을 수 없음 |
-| `HINT_PROBLEM_NOT_AVAILABLE` | 404 | 힌트 대상이 아닌 문제 (비공개·대회 전용) |
+| `HINT_PROBLEM_NOT_AVAILABLE` | 404 | 힌트 대상이 아닌 문제 (비공개·대회 전용·정책 §8.1의 임시 힌트 입력 크기 초과) |
 | `HINT_BLOCKED_DURING_EXAM` | 403 | 참가 중인 시험·대회에 포함된 문제 |
 | `HINT_BLOCKED_DURING_DIAGNOSIS` | 403 | 진단 진행 중 힌트 요청 (판정 경로 확정 필요) |
 | `HINT_LEVEL_SKIPPED` | 409 | 앞 단계 힌트를 받기 전에 다음 단계 요청 |
