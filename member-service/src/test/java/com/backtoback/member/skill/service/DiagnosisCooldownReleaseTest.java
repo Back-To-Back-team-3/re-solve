@@ -25,6 +25,8 @@ import com.backtoback.member.member.repository.MemberRepository;
 import com.backtoback.member.skill.client.ProblemDiagnosisClient;
 import com.backtoback.member.skill.client.ProblemDiagnosisClient.Candidate;
 import com.backtoback.member.skill.client.ProblemTagClient;
+import com.backtoback.member.skill.store.DiagnosisSubmissionStore;
+import com.backtoback.member.skill.store.DiagnosisSubmissionStore.CooldownRelease;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -70,6 +72,12 @@ class DiagnosisCooldownReleaseTest {
 
     @Autowired
     private DiagnosisCooldownReleaseScheduler releaseScheduler;
+
+    @Autowired
+    private DiagnosisScoringService scoringService;
+
+    @Autowired
+    private DiagnosisSubmissionStore submissionStore;
 
     @Autowired
     private MemberRepository memberRepository;
@@ -121,6 +129,41 @@ class DiagnosisCooldownReleaseTest {
         for (long memberId : List.of(notYet, exempt, topLevel, restarted)) {
             assertThat(cooldownEvents(memberId)).isEmpty();
         }
+    }
+
+    @Test
+    @DisplayName("목록을 뽑은 뒤 새 진단을 시작했거나 레벨이 LV3가 되면 알리지 않고, 그대로인 응시는 기록 시점의 레벨로 알린다")
+    void rechecksEligibilityBeforeNotifying() {
+        long restarted = scoredMember(9306L, 46L, 4);
+        long promoted = scoredMember(9307L, 47L, 4);
+        long changedLevel = scoredMember(9308L, 48L, 4);
+        LocalDateTime closedBefore = now().minusDays(3);
+        List<CooldownRelease> picked
+            = submissionStore
+                .findCooldownReleases(closedBefore, 100)
+                .stream()
+                .filter(release -> List.of(restarted, promoted, changedLevel).contains(release.memberId()))
+                .toList();
+        assertThat(picked).hasSize(3);
+
+        jdbcTemplate
+            .update(
+                "update member_tag_levels set last_diagnosis_ended_at = ? where member_id = ?",
+                now().minusDays(4),
+                restarted
+            );
+        diagnosisService.start(restarted, 46L);
+        jdbcTemplate.update("update member_tag_levels set level = 'LV3' where member_id = ?", promoted);
+        jdbcTemplate.update("update member_tag_levels set level = 'LV2' where member_id = ?", changedLevel);
+        for (CooldownRelease release : picked) {
+            scoringService.notifyCooldownReleased(release.attemptId(), closedBefore);
+        }
+
+        assertThat(cooldownEvents(restarted)).isEmpty();
+        assertThat(cooldownEvents(promoted)).isEmpty();
+        List<JsonNode> events = cooldownEvents(changedLevel);
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).get("toLevel").asString()).isEqualTo("LV2");
     }
 
     // 제출 없이 종료하면 바로 LV1로 확정된다. 종료 시각만 daysAgo일 전으로 옮긴다.

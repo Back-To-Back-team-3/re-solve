@@ -43,7 +43,7 @@ public class DiagnosisCooldownReleaseScheduler {
         int notified = 0;
         for (CooldownRelease release : submissionStore.findCooldownReleases(closedBefore, BATCH_SIZE)) {
             try {
-                if (scoringService.notifyCooldownReleased(release)) {
+                if (scoringService.notifyCooldownReleased(release.attemptId(), closedBefore)) {
                     notified++;
                 }
             } catch (RuntimeException exception) {

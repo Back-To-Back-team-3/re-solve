@@ -1,6 +1,8 @@
 package com.backtoback.member.skill.store;
 
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,6 +25,15 @@ public class DiagnosisSubmissionStore {
     public static final String MANUAL = "MANUAL";
     public static final String AUTO = "AUTO";
     public static final String ACCEPTED = "ACCEPTED";
+
+    // 쿨타임 해제 알림 대상 조건 (스케줄러 1.3). 목록 선정과 기록 직전 재확인이 같은 조건을 쓴다.
+    private static final String COOLDOWN_RELEASE_SQL
+        = "select a.id, a.member_id, a.tag_id, a.tag_name, l.level from diagnosis_attempts a "
+            + "join member_tag_levels l on l.member_id = a.member_id and l.tag_id = a.tag_id "
+            + "where a.status = 'SCORED' and a.is_cooldown_exempt = false and a.cooldown_notified_at is null "
+            + "and a.closed_at <= ? and l.level in ('LV1', 'LV2') and not exists ("
+            + "select 1 from diagnosis_attempts b where b.member_id = a.member_id and b.tag_id = a.tag_id "
+            + "and b.id > a.id) ";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -216,22 +227,32 @@ public class DiagnosisSubmissionStore {
     public List<CooldownRelease> findCooldownReleases(LocalDateTime closedBefore, int limit) {
         return jdbcTemplate
             .query(
-                "select a.id, a.member_id, a.tag_id, a.tag_name, l.level from diagnosis_attempts a "
-                    + "join member_tag_levels l on l.member_id = a.member_id and l.tag_id = a.tag_id "
-                    + "where a.status = 'SCORED' and a.is_cooldown_exempt = false and a.cooldown_notified_at is null "
-                    + "and a.closed_at <= ? and l.level in ('LV1', 'LV2') and not exists ("
-                    + "select 1 from diagnosis_attempts b where b.member_id = a.member_id and b.tag_id = a.tag_id "
-                    + "and b.id > a.id) order by a.closed_at, a.id limit ?",
-                (row, index) -> new CooldownRelease(
-                    row.getLong("id"),
-                    row.getLong("member_id"),
-                    row.getLong("tag_id"),
-                    row.getString("tag_name"),
-                    row.getString("level")
-                ),
+                COOLDOWN_RELEASE_SQL + "order by a.closed_at, a.id limit ?",
+                this::cooldownRelease,
                 closedBefore,
                 limit
             );
+    }
+
+    /**
+     * 알림을 기록하기 직전에 한 응시가 아직 대상인지 다시 확인한다. 목록을 뽑은 뒤 새 응시가 시작되거나 레벨이 바뀌었으면
+     * 비어 있고, 대상이면 지금의 레벨을 담는다.
+     */
+    public Optional<CooldownRelease> findCooldownRelease(long attemptId, LocalDateTime closedBefore) {
+        return jdbcTemplate
+            .query(COOLDOWN_RELEASE_SQL + "and a.id = ?", this::cooldownRelease, closedBefore, attemptId)
+            .stream()
+            .findFirst();
+    }
+
+    private CooldownRelease cooldownRelease(ResultSet row, int index) throws SQLException {
+        return new CooldownRelease(
+            row.getLong("id"),
+            row.getLong("member_id"),
+            row.getLong("tag_id"),
+            row.getString("tag_name"),
+            row.getString("level")
+        );
     }
 
     /**

@@ -178,16 +178,19 @@ public class DiagnosisScoringService {
     }
 
     /**
-     * 쿨타임 해제 알림 (스케줄러 1.3). 표시와 {@code TagLevelChanged}({@code COOLDOWN_RELEASED}, 현재 레벨 그대로)를 한 트랜잭션에
-     * 기록한다. 응시 가능 여부는 API가 시각으로 판단하므로 알림이 늦어도 응시는 막히지 않는다.
+     * 쿨타임 해제 알림 (스케줄러 1.3). 기록 직전에 대상 조건을 다시 확인하고, 표시와 {@code TagLevelChanged}
+     * ({@code COOLDOWN_RELEASED}, 그 시점의 현재 레벨)를 한 트랜잭션에 기록한다. 응시 가능 여부는 API가 시각으로 판단하므로 알림이
+     * 늦어도 응시는 막히지 않는다.
      *
      * @return 이번에 알렸으면 {@code true}
      */
     @Transactional
-    public boolean notifyCooldownReleased(CooldownRelease release) {
-        if (!submissionStore.markCooldownNotified(release.attemptId(), now())) {
+    public boolean notifyCooldownReleased(long attemptId, LocalDateTime closedBefore) {
+        Optional<CooldownRelease> current = submissionStore.findCooldownRelease(attemptId, closedBefore);
+        if (current.isEmpty() || !submissionStore.markCooldownNotified(attemptId, now())) {
             return false;
         }
+        CooldownRelease release = current.get();
         memberEventPublisher
             .tagLevelChanged(
                 new TagLevelChangedPayload(
