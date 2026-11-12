@@ -83,6 +83,27 @@ public final class JudgeResultEvaluator {
         int memoryLimitKiB,
         int outputLimitKiB
     ) {
+        return evaluate(execution, returnType, expectedText, memoryLimitKiB, outputLimitKiB, true);
+    }
+
+    /** 직접 입력에는 기대값 비교를 적용하지 않고 실행 실패와 자원 측정은 동일하게 해석한다. */
+    public JudgeTestResult evaluateCustom(
+        JudgeExecutionResultResponse execution,
+        int memoryLimitKiB,
+        int outputLimitKiB
+    ) {
+        return evaluate(execution, null, null, memoryLimitKiB, outputLimitKiB, false);
+    }
+
+    /** 기대값의 유무와 관계없이 엔진 상태, 측정값, 두 출력 한도를 같은 기준으로 해석한다. */
+    private JudgeTestResult evaluate(
+        JudgeExecutionResultResponse execution,
+        TypeSpec returnType,
+        String expectedText,
+        int memoryLimitKiB,
+        int outputLimitKiB,
+        boolean compareExpected
+    ) {
         requireLimits(memoryLimitKiB, outputLimitKiB);
         if (execution == null || execution.state() != State.fromStatusId(execution.statusId())) {
             return systemFailure();
@@ -108,7 +129,15 @@ public final class JudgeResultEvaluator {
         boolean returnExceeded = exceeds(execution.stdout(), (long)outputLimitKiB * 1024);
         boolean debugExceeded = exceeds(execution.stderr(), DEBUG_LIMIT_BYTES);
         JudgeVerdict verdict
-            = verdict(execution, returnType, expectedText, memoryLimitKiB, returnExceeded, debugExceeded);
+            = verdict(
+                execution,
+                returnType,
+                expectedText,
+                memoryLimitKiB,
+                returnExceeded,
+                debugExceeded,
+                compareExpected
+            );
         return new JudgeTestResult(
             State.COMPLETED,
             verdict,
@@ -129,6 +158,7 @@ public final class JudgeResultEvaluator {
      * @param memoryLimitKiB 메모리 제한(KiB)
      * @param returnExceeded 반환값 크기 초과 여부
      * @param debugExceeded 디버그 출력 크기 초과 여부
+     * @param compareExpected 기대값이 있는 테스트인지 여부
      * @return 사용자 테스트 판정
      * @throws IllegalArgumentException 비교할 명세·기대값이 올바르지 않은 경우
      */
@@ -138,7 +168,8 @@ public final class JudgeResultEvaluator {
         String expectedText,
         int memoryLimitKiB,
         boolean returnExceeded,
-        boolean debugExceeded
+        boolean debugExceeded,
+        boolean compareExpected
     ) {
         // TLE·CE는 메모리 보정 대상이 아니며, 나머지 종료 상태는 출력 초과보다 실측 메모리를 우선한다.
         if (execution.statusId() != 5 && execution.statusId() != 6 && execution.memoryKiB() != null
@@ -157,6 +188,9 @@ public final class JudgeResultEvaluator {
         if (execution.statusId() >= 7 || execution.exitCode() != null && execution.exitCode() != 0
             || execution.exitSignal() != null && execution.exitSignal() != 0) {
             return JudgeVerdict.RE;
+        }
+        if (!compareExpected) {
+            return null;
         }
         if (execution.statusId() == 4) {
             return JudgeVerdict.WA;

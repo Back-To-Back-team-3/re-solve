@@ -63,6 +63,26 @@ REDIS_PASSWORD=
 REDIS_HOST=redis
 REDIS_PORT=6379
 
+# 🔐 인증 및 회원 이벤트 (member-service)
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_REDIRECT_URI=http://localhost:8080/api/v1/auth/github/callback
+FRONTEND_ORIGIN=http://localhost:8080
+JWT_SECRET=
+REFRESH_COOKIE_SECURE=true
+DEV_LOGIN_ENABLED=false
+MEMBER_MESSAGING_ENABLED=false
+MEMBER_EVENTS_TOPIC_ARN=
+MEMBER_EVENTS_CONSUMER_ENABLED=false
+MEMBER_QUEUE_URL=
+
+# 🏆 시험·대회 이벤트 (contest-service)
+CONTEST_EVENTS_PUBLISH_ENABLED=false
+CONTEST_EVENTS_TOPIC_ARN=
+JUDGE_SUBMISSION_QUEUE_URL=
+CONTEST_EVENTS_ENABLED=false
+CONTEST_QUEUE_URL=
+
 # 🔗 연동 (integration-service)
 # 필수 값: GitHub Access Token 암호화 키 (AES-256 GCM). Base64로 인코딩된 32바이트 키
 # 예: openssl rand -base64 32
@@ -85,6 +105,8 @@ AWS_SECRET_ACCESS_KEY=
 # 호스트 로컬 IDE에서 직접 실행 시: http://localhost:2358
 # 언어 ID와 런타임은 실행 중인 Judge0 서버에서 확인한다.
 JUDGE0_IMAGE=judge0/judge0:1.13.1-extra
+JUDGE0_SERVER_IMAGE=
+JUDGE0_WORKER_IMAGE=
 JUDGE0_SERVER_PORT=2358
 JUDGE0_BASE_URL=http://judge0-server:2358
 JUDGE0_AUTH_HEADER=X-Auth-Token
@@ -136,27 +158,62 @@ GRAFANA_ADMIN_PASSWORD=
 
 관리자 진행 조회는 기본적으로 `http://judge-service:8080`을 호출한다. 주소가 다른 환경에서만 `JUDGE_SERVICE_URL`을 지정한다.
 
-### Judge 검증 수신·실행·결과 이벤트 연결
+### Judge 요청 수신·실행·결과 이벤트 연결
 
 | 환경변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `JUDGE_MESSAGING_ENABLED` | `false` | 검증 SQS 수신·작업 실행·기한 초과 종결·결과 SNS Outbox Relay를 함께 활성화 |
+| `JUDGE_MESSAGING_ENABLED` | `false` | 검증·제출 SQS 수신과 작업 실행·기한 초과 종결·제출 임대 회수·결과 SNS Outbox Relay를 활성화 |
 | `JUDGE_EVENTS_TOPIC_ARN` | 빈 값 | 활성화 시 필수. 기존 `judge-events` Standard SNS 토픽 ARN |
 | `PROBLEM_VALIDATION_QUEUE_URL` | 빈 값 | 활성화 시 필수. 기존 `problem-validation-queue` Standard SQS 큐 URL |
+| `JUDGE_SUBMISSION_QUEUE_URL` | 빈 값 | 시험·진단 채점 요청을 받을 공용 `exam-submission-queue` Standard SQS 큐 URL. 비어 있으면 제출 큐 수신기는 시작하지 않음 |
 
-- 비활성 상태에서도 검증 저장 테이블·공통 소비기·Outbox 기록기·진행 조회 API는 유지한다. SQS 수신·자동 작업 실행·기한 초과 정리·결과 발행은 모두 중지한다. 환경변수를 바꾼 뒤 서비스를 재시작해 적용한다.
+- 비활성 상태에서도 검증 저장 테이블·공통 소비기·Outbox 기록기·진행 조회 API는 유지한다. SQS 수신·자동 작업 실행·기한 초과 정리·임대 회수·결과 발행은 모두 중지한다. 환경변수를 바꾼 뒤 서비스를 재시작해 적용한다.
 - 활성화 전에 담당 A가 제공한 큐·토픽·구독 필터·DLQ·권한을 확인한다. 리스너는 없는 큐를 자동 생성하지 않는다.
-- 검증 요청은 DB 커밋 후 수동 ACK하며 ACK 배치를 끈다. 결과는 업무 트랜잭션의 Outbox 기록 후 공통 Relay로 발행한다.
+- 검증·제출 채점 요청은 DB 커밋 후 수동 ACK하며 ACK 배치를 끈다. 결과는 업무 트랜잭션의 Outbox 기록 후 공통 Relay로 발행한다.
+- 제출 큐에는 Judge에 등록된 요청만 보내도록 구성한다. 아직 처리기가 배포되지 않은 문맥의 요청은 재수신·DLQ 경로를 따른다. 결과 이벤트 구독 필터와 재전달 권한은 담당 A와 확인한다.
+- 진단 연동은 Member의 `DiagnosisSubmissionJudged`(J5)·진단 `SubmissionFailed`(J4) 핸들러를 먼저 배포한 뒤 활성화한다. 처리기 배포 전에 구독을 열면 공통 소비기가 결과를 반영하지 않은 채 소비 기록을 저장하고 ACK할 수 있다.
+- `judge-events` → `member-queue`에서 기존 `SubmissionJudged`(J1, `context=PRACTICE`) 수신 조건을 유지하고, `context=DIAGNOSIS`의 J5·J4 조건을 OR로 추가한다. 구독과 Judge의 M6 수신기가 준비되면 Member의 `DiagnosisSubmissionRequested`(M6) 발행을 시작한다. J4의 `contextId`는 진단 ID, `receiptId`는 진단 제출 접수 ID다.
 - AWS 리전·자격 증명·엔드포인트는 기존 설정을 사용한다. 로컬은 LocalStack, 운영은 서비스 실행 환경의 자격 증명 체인을 사용한다.
-- IDE 실행 시 환경변수를 전달한다. 현재 Compose는 Judge에 `PROBLEM_VALIDATION_QUEUE_URL`을 전달한다. `JUDGE_MESSAGING_ENABLED`와 `JUDGE_EVENTS_TOPIC_ARN`은 전달하지 않으므로 `.env`만 수정해서는 Judge 메시징을 활성화할 수 없다. Compose·운영 배포의 변수 전달과 리소스 준비는 담당 A와 연결한다.
+- IDE 실행 시 환경변수를 전달한다. 현재 Compose는 Judge에 `PROBLEM_VALIDATION_QUEUE_URL`을 전달한다. `JUDGE_MESSAGING_ENABLED`·`JUDGE_EVENTS_TOPIC_ARN`·`JUDGE_SUBMISSION_QUEUE_URL`은 전달하지 않으므로 `.env`만 수정해서는 Judge 메시징을 활성화할 수 없다. Compose·운영 배포의 변수 전달과 리소스 준비는 담당 A와 연결한다.
 - 활성화하면 기존 대기 작업도 실행되므로 Problem 검증 자료 API와 Judge0 주소·사용 언어 활성화 설정을 함께 준비한다. 별도의 실행기 ON/OFF 환경변수는 사용하지 않는다.
-- 실행 동시성·대기열 조회·기한 초과 종결 기준은 정책 및 상태 §3.5를 따른다. 비활성 기간에도 작업 기한을 연장하지 않으며, 다시 활성화했을 때 기한이 지난 작업은 실행하지 않고 종결한다.
+- 제출 실행 동시성·대기열 조회·기한 초과 종결·임대 회수 기준은 스케줄러 §3.1~3.2를 따른다. 비활성 기간에도 작업 기한을 연장하지 않으며, 다시 활성화했을 때 기한이 지난 작업은 실행하지 않고 종결한다.
+
+#### 시험 제출 DLQ 재전달 감사
+
+1. 이벤트 계약 §7.3에 따라 원인을 수정하고, 파악한 이벤트 ID·시험 접수 ID를 운영 기록에 남긴다. 같은 DLQ에서 이동 작업은 한 번에 하나만 실행한다. 이번 작업에만 사용하는 비어 있는 Standard SQS 확인 큐를 목적지로 준비한다.
+2. `StartMessageMoveTask`에서 확인 큐를 목적지로 지정한다. 반환된 `TaskHandle`과 출발·목적지 ARN을 보관하고, `ListMessageMoveTasks`에서 같은 작업의 `StartedTimestamp`를 기록한다. 완료 상태에는 핸들이 없으므로 출발·목적지 ARN과 시작 시각으로 대조한다. 첫 조회 전에 끝났으면 이번 작업 전용 목적지와 시작 요청 시각 이후의 유일한 결과를 대조한다. 작업을 특정할 수 없거나 `FAILED`·`CANCELLED`라면 이미 이동한 메시지를 확인 큐에 보존하고 별도로 대사한다.
+3. 완료된 작업의 확인 큐에서 실제 메시지를 받아 시험 이벤트 ID·접수 ID를 작업 핸들과 함께 기록하고, 기존 제출·작업 상태와 대조한다. SQS의 대략적인 이동 건수만으로 이벤트 목록을 확정하지 않는다. 이미 `FAILED`로 종결된 제출은 정책 §3.4의 관리자 재처리 대상으로 확인하고, 다른 문맥의 메시지는 해당 문맥의 절차로 분리한다. 재전달할 시험 메시지는 원래 이벤트 ID를 유지한 본문과 메시지 속성으로 원래 제출 큐에 전송한다. 제출 코드와 메시지 원문은 감사 기록에 남기지 않는다.
+4. 원래 큐 전송이 확인된 시험 이벤트마다 같은 MySQL 세션에서 `@redrive_actor_id`(운영자 회원 ID), `@redrive_event_id`(원래 이벤트 UUID), `@redrive_receipt_id`(시험 접수 ID), `@redrive_task_handle`(SQS 작업 핸들), `@redrive_reason`(1~500자)을 설정하고 `judge-service/src/main/resources/operations/audit-exam-submission-redrive.sql`을 실행한다. 전송과 감사 저장을 확인한 뒤 확인 큐의 메시지를 삭제한다.
+5. 전송 또는 감사 저장 결과가 불확실하면 확인 큐에 메시지를 남기고 같은 이벤트 ID와 작업 핸들로 다시 처리한다. 재전달은 최초 제출·작업을 보존하며, 이미 저장된 감사 행은 최초 집행자와 사유를 보존한다.
+
+### Member 이벤트 발행·수신 연결
+
+- `MEMBER_MESSAGING_ENABLED=true`와 `MEMBER_EVENTS_TOPIC_ARN`(`member-events` SNS 토픽 ARN)으로 회원 이벤트 발행을 활성화한다.
+- `MEMBER_EVENTS_CONSUMER_ENABLED=true`와 `MEMBER_QUEUE_URL`(`member-queue` SQS 큐 URL)로 채점 이벤트 수신을 활성화한다. 활성화 전에 `member-queue`(+DLQ) 생성과 `judge-events` SNS 토픽 구독(필터 정책·Raw Message Delivery·큐 권한)을 먼저 준비한다.
+
+### Contest 시험 이벤트 발행
+
+- `CONTEST_EVENTS_PUBLISH_ENABLED=true`로 공통 Outbox Relay를 활성화한다.
+- `CONTEST_EVENTS_TOPIC_ARN`은 시험 설정·참가·상태·확정 이벤트를 전달할 SNS 토픽 ARN이다.
+- `JUDGE_SUBMISSION_QUEUE_URL`은 `ExamSubmissionRequested`를 전달할 Judge 제출 SQS 큐 URL이다.
+- 발행을 활성화하면 두 목적지가 모두 필요하다. 소비 활성화는 기존 `CONTEST_EVENTS_ENABLED`와 `CONTEST_QUEUE_URL`로 설정한다.
+
+### Contest 시험 순위 캐시
+
+| 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `CONTEST_RANKINGCACHE_TTLSECONDS` | `3600` | 시험 순위 데이터·현재 버전 포인터 TTL(초), 최소 1초 |
+| `CONTEST_RANKINGCACHE_FINALIZEDRETENTIONDAYS` | `7` | 시험 최초 확정 후 정기 캐시 재생성 기간(일), 최소 1일 |
+
+Spring 설정 키는 각각 `contest.ranking-cache.ttl-seconds`, `contest.ranking-cache.finalized-retention-days`다. 기간이 지난 시험도 DB 스냅샷으로 조회하며 DB 결과·스냅샷은 삭제하지 않는다.
 
 ### Judge0 연결 설정
 
 | 환경변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `JUDGE0_IMAGE` | `judge0/judge0:1.13.1-extra` | Judge0 서버와 worker가 사용하는 이미지 |
+| `JUDGE0_IMAGE` | `judge0/judge0:1.13.1-extra` | 서버·워커 전용 이미지가 비어 있을 때 사용하는 공통 이미지 |
+| `JUDGE0_SERVER_IMAGE` | 빈 값 | 레지스트리에 게시한 Judge0 API 서버 이미지 주소와 버전 태그 |
+| `JUDGE0_WORKER_IMAGE` | 빈 값 | 레지스트리에 게시한 Judge0 워커 이미지 주소와 버전 태그 |
 | `JUDGE0_SERVER_PORT` | `2358` | 호스트의 로컬 인터페이스에 공개할 Judge0 API 포트 |
 | `JUDGE0_BASE_URL` | 실행 환경별 | Judge0 서버 주소. 같은 Docker 네트워크의 서버는 해당 서비스명으로 연결하고, 호스트에서 실행하는 judge-service는 호스트에 공개된 주소로 연결한다. |
 | `JUDGE0_AUTH_HEADER` | `X-Auth-Token` | Judge0 서버가 요구하는 인증 헤더 이름 |
@@ -170,10 +227,13 @@ GRAFANA_ADMIN_PASSWORD=
 - 공통 YAML은 주소를 미설정 상태로 두고, 로컬 프로필은 `http://localhost:2358`, Compose는 `http://judge0-server:2358`을 기본으로 사용한다. `JUDGE0_BASE_URL`을 지정하면 해당 값이 우선하므로 로컬 IDE에서 실행할 때는 호스트 주소로 지정한다.
 - Judge0가 같은 Docker 네트워크에 `judge0-server`라는 서비스명으로 실행 중이면 주소는 `http://judge0-server:2358`이다. 해당 포트를 호스트의 2358로 공개한 경우 로컬 IDE에서 실행하는 judge-service는 `http://localhost:2358`로 연결한다.
 - 연결·응답 제한에는 `2s`, `1500ms`처럼 단위를 포함한 값을 사용한다. 허용 범위는 각각 1ms 이상 2,147,483,647ms 이하이며 잘못된 값은 애플리케이션 시작 시 거부한다. 이 값은 제출 코드의 CPU 실행 시간 제한과 별개다.
+- 채점 워커의 Judge0 장애 집계·차단·복구 확인은 [정책 및 상태 > 3.4 장애·재시도·재채점](../dev/planning/policy-and-state.md#34-장애재시도재채점)을 따른다. HTTP 연결·응답 제한과 서킷 차단 시간은 서로 다른 기준이며, 일반 Run의 기존 의존 서비스 오류 계약은 유지한다.
+- Run 레지스트리의 하트비트·만료·중단 회수는 [스케줄러 > 3.5 Run 락 정리](../dev/specifications/scheduler.md#35-runlockreconciliationscheduler--run-락-정리)를 따른다. Redis에서 실행 제한을 확인할 수 없으면 신규 Run을 허용하지 않는다.
 - Judge0 서버의 인증 설정에 맞춰 헤더 이름과 토큰을 지정한다. 실제 토큰은 로컬 `.env`에만 입력한다.
 - 언어 활성화 설정은 실행 환경 검증 후에만 `true`로 바꾼다. Judge0의 언어 ID와 런타임 버전은 배포 환경에서 조회·확인한다.
 - 언어 ID·버전 목록은 최초 조회에 성공하면 서비스 메모리에 캐시하며, 조회 실패는 캐시하지 않는다. 언어 활성화는 서비스 전체 설정이며 개별 문제의 언어별 검증 상태와는 별개다.
 - 설정 변경은 judge-service 재시작 후 반영한다. Compose의 `.env`를 변경했다면 컨테이너를 재생성해야 하며, 단순 `restart`로 새 환경변수가 전달되지는 않는다.
+- Judge 자체 검증에서는 다른 서비스를 기존 API·이벤트 계약에 맞는 테스트 대역으로 대체할 수 있다. 실제 서비스·Judge0·메시지 환경의 연동 검증과 구분하며, 대역 검증만으로 실제 연동 완료를 판단하지 않는다.
 
 ---
 
@@ -227,6 +287,15 @@ docker compose logs redis
 Judge0는 Compose 프로필(`judge0`)로 분리되어 있다. 일반 `docker compose up`에는 포함되지 않는다.
 
 ### 5.1 가동과 언어 목록 확인
+
+게시된 cgroup v2 이미지를 사용할 때는 `.env`에 `JUDGE0_SERVER_IMAGE`와 `JUDGE0_WORKER_IMAGE`를 지정한다. cgroup v2를 지원하는 호스트에서 워커 전용 cgroup 네임스페이스 설정을 함께 적용한다.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.judge0-cgroup-v2.yml --profile judge0 pull judge0-server judge0-worker judge0-db judge0-redis
+docker compose -f docker-compose.yml -f docker-compose.judge0-cgroup-v2.yml --profile judge0 up -d --no-build judge0-server judge0-worker
+```
+
+공통 이미지를 사용하는 기본 구성은 아래 명령으로 실행한다.
 
 ```bash
 # Judge0 서비스 스택 시작과 상태 확인
@@ -305,3 +374,7 @@ docker compose down --volumes
 ---
 
 end.
+
+### Judge 이벤트 보관 정리
+
+Judge는 메시징 활성화와 독립적으로 공통 Outbox·소비 기록 정리를 등록한다. 발행 완료는 7일, 소비 완료는 14일 보관하며 경계와 같은 시각 및 미발행·실패 Outbox는 보존한다. ShedLock은 Judge 업무 DB의 기존 테이블을 사용한다. 실패 Outbox의 수동 재발행은 별도의 운영 계약으로 다룬다.

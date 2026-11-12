@@ -14,6 +14,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -91,6 +93,29 @@ class ValidationMessageListenerTest {
     }
 
     /**
+     * 회수 스케줄러를 따로 등록하고 선점·회수 메서드가 각 스케줄러를 지정하는지 확인한다.
+     *
+     * @throws NoSuchMethodException 채점 또는 회수 예약 메서드를 찾지 못한 경우
+     */
+    @Test
+    @DisplayName("신규 선점과 세 회수 작업은 다른 스케줄러를 사용한다")
+    void separatesRecoveryFromDispatch() throws NoSuchMethodException {
+        assertThat(context.getBean(TaskScheduler.class)).isSameAs(context.getBean("judgeValidationScheduler"));
+        assertThat(context.getBean("judgeRecoveryScheduler", TaskScheduler.class))
+            .isNotSameAs(context.getBean(TaskScheduler.class));
+        assertThat(ValidationScheduler.class.getMethod("dispatch").getAnnotation(Scheduled.class).scheduler())
+            .isEqualTo("judgeValidationScheduler");
+        assertThat(SubmissionScheduler.class.getMethod("dispatch").getAnnotation(Scheduled.class).scheduler())
+            .isEqualTo("judgeValidationScheduler");
+        assertThat(ValidationScheduler.class.getMethod("expire").getAnnotation(Scheduled.class).scheduler())
+            .isEqualTo("judgeRecoveryScheduler");
+        assertThat(SubmissionScheduler.class.getMethod("expire").getAnnotation(Scheduled.class).scheduler())
+            .isEqualTo("judgeRecoveryScheduler");
+        assertThat(SubmissionScheduler.class.getMethod("recoverUnknown").getAnnotation(Scheduled.class).scheduler())
+            .isEqualTo("judgeRecoveryScheduler");
+    }
+
+    /**
      * 리스너 시작 전에 Standard 큐·토픽·결과 구독을 준비한다.
      *
      * @param registry 서비스 인프라 설정
@@ -151,7 +176,13 @@ class ValidationMessageListenerTest {
             sqs.sendMessage(request -> request.queueUrl(inputQueue).messageBody(message()));
             sqs.sendMessage(request -> request.queueUrl(inputQueue).messageBody(message()));
             await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
-                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM processed_events", Integer.class)).isEqualTo(2);
+                assertThat(
+                    jdbc
+                        .queryForObject(
+                            "SELECT COUNT(*) FROM processed_events WHERE event_type='ProblemValidationRequested'",
+                            Integer.class
+                        )
+                ).isEqualTo(2);
                 assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_validation_jobs", Integer.class))
                     .isEqualTo(1);
                 var counts
@@ -187,8 +218,13 @@ class ValidationMessageListenerTest {
             await()
                 .atMost(Duration.ofSeconds(15))
                 .untilAsserted(
-                    () -> assertThat(jdbc.queryForObject("SELECT status FROM outbox_events", String.class))
-                        .isEqualTo("PUBLISHED")
+                    () -> assertThat(
+                        jdbc
+                            .queryForObject(
+                                "SELECT status FROM outbox_events WHERE event_type='ProblemValidationCompleted'",
+                                String.class
+                            )
+                    ).isEqualTo("PUBLISHED")
                 );
             var messages = sqs.receiveMessage(request -> request.queueUrl(outputQueue).waitTimeSeconds(5)).messages();
             assertThat(messages).hasSize(1);
@@ -197,6 +233,10 @@ class ValidationMessageListenerTest {
             assertThat(result.get("eventType").asString()).isEqualTo("ProblemValidationCompleted");
             assertThat(result.get("correlationId").asString()).isEqualTo("request-sqs");
             assertThat(result.get("status").asString()).isEqualTo("ERROR");
+            sqs
+                .deleteMessage(
+                    request -> request.queueUrl(outputQueue).receiptHandle(messages.getFirst().receiptHandle())
+                );
         }
     }
 

@@ -93,7 +93,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `member.member_tag_levels` | `tag_id` | `problem.tags.id` | `SubmissionJudged` 태그 스냅샷 · 진단 출제 API | N |
 | `member.diagnosis_problems` | `problem_id`, `problem_revision_id` | `problem.problems.id`, `problem.problem_revisions.id` | 진단 출제 내부 API | N (난이도 스냅샷 포함) |
-| `member.diagnosis_submissions` | `submission_id` | `judge.submissions.id` | 진단 채점 결과 이벤트 (분리 방식 미결정) | N |
+| `member.diagnosis_submissions` | `submission_id` | `judge.submissions.id` | `DiagnosisSubmissionJudged`(J5) · `SubmissionFailed`(J4, `DIAGNOSIS`) | N |
 | `member.practice_result_replicas` | `submission_id`, `problem_id` | judge / problem | `SubmissionJudged` | **Y** |
 | `member.hint_usage_replicas` | `problem_id` | `problem.problems.id` | 힌트 사용 이벤트 (계약 확정 필요) | **Y** |
 | `problem.problems` | `author_id` | `member.members.id` | 관리자 요청의 `X-User-Id` | N |
@@ -103,7 +103,7 @@ flowchart LR
 | `problem.member_replicas` | `member_id` | `member.members.id` | 회원 정보 이벤트 | **Y** |
 | `judge.submissions` | `member_id` | `member.members.id` | `X-User-Id` · 채점 요청 이벤트 | N |
 | `judge.submissions` | `problem_id`, `problem_revision_id` | problem | 제출 요청 + 사전 검증 내부 API | N |
-| `judge.submissions` | `source_submission_id` | `contest.exam_submissions.id` / `contest.contest_submissions.id` / `member.diagnosis_submissions.id` | `ExamSubmissionRequested`·`ContestSubmissionRequested` · 진단 접수 | N |
+| `judge.submissions` | `source_submission_id` | `contest.exam_submissions.id` / `contest.contest_submissions.id` / `member.diagnosis_submissions.id` | `ExamSubmissionRequested`·`ContestSubmissionRequested`·`DiagnosisSubmissionRequested` | N |
 | `judge.judge_test_results` | `test_asset_id` | `problem.problem_test_assets.id` | 채점 정보 내부 API | N |
 | `contest.exams` | `study_id`, `creator_id` | `study.studies.id`, `member.members.id` | 시험 생성 요청 | N |
 | `contest.exam_problems` · `contest.contest_problems` | `problem_id`, `problem_revision_id` | problem | 문제 선택 API | N (제목 스냅샷 포함) |
@@ -361,7 +361,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- |
 | `outbox_events` |   • member: `LearningProfileUpdated`·`TagLevelChanged`·회원 이벤트 / <br>• problem: `ProblemStateChanged` / <br>• judge: 채점 결과 이벤트 / <br>• contest: 시험·대회 이벤트·채점 요청 / <br>• study: 스터디·문제집·힌트 이벤트 / <br>• integration: `GitHubSyncFailed` |
 | `processed_events` | 이벤트를 소비하는 모든 서비스 |
-| `audit_logs` |   • member: 회원 정지·권한 변경 / <br>• problem: 문제 공개·비공개·보관 / <br>• judge: 재채점·DLQ·실패 재처리 / <br>• contest: 재확정·0점 확정 /<br>• study: 강제 종료(9.5.1)·복제본 재동기화(9.5.2) |
+| `audit_logs` |   • member: 회원 정지·권한 변경 / <br>• problem: 문제 공개·비공개·보관·Outbox 재처리 / <br>• judge: 재채점·DLQ·실패 재처리 / <br>• contest: 재확정·0점 확정 /<br>• study: 강제 종료(9.5.1)·복제본 재동기화(9.5.2) |
 | `shedlock` | 상태 전이 스케줄러와 만료 데이터 정리 배치 (Outbox Relay는 `SKIP LOCKED`로 처리하므로 대상 아님) |
 | `member_replicas` |   • 닉네임·회원 상태 표시 (problem: 공유 풀이·댓글 작성자 / <br>• contest: 순위표 / study: 구성원·게시글) |
 
@@ -408,7 +408,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 ### 3.3 감사 로그 (`audit_logs`) `[IMMUTABLE]`
 
-관리자 작업, 강제 종료, 재처리 등 추적이 필요한 행위를 보존한다. 감사 대상 작업과 같은 트랜잭션에서 기록하며, 각 서비스가 자기 DB에 둔다(공통-6).
+관리자 작업, 강제 종료, 재처리 등 추적이 필요한 행위를 보존한다. 감사 대상 작업과 같은 트랜잭션에서 기록하며, 각 서비스가 자기 DB에 둔다(공통-6). Judge의 시험 제출 DLQ 재전달은 외부 SQS 작업이므로 원래 큐 전송을 확인한 뒤 별도로 감사 행을 기록한다.
 
 | **컬럼** | **타입** | **NOT NULL** | **설명** |
 | --- | --- | --- | --- |
@@ -425,6 +425,14 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 - 제약 및 인덱스
     - `idx_audit_logs_target(target_type, target_id, created_at)`
     - `idx_audit_logs_actor_created_at(actor_id, created_at)`
+
+**Judge 전용 컬럼**
+
+| **컬럼** | **타입** | **NOT NULL** | **설명** |
+| --- | --- | --- | --- |
+| `exam_redrive_task_digest` | BINARY(32) GENERATED STORED | N | `action = 'DLQ_REDRIVE'`이고 `target_type = 'EXAM_SUBMISSION_REQUEST'`이면 `after_state.moveTaskHandle`의 SHA-256 해시. 다른 감사 행은 NULL |
+
+- `uk_audit_logs_exam_redrive(target_id, exam_redrive_task_digest)`는 시험 제출 DLQ 감사에서 정규화한 이벤트 UUID와 SQS 이동 작업 핸들의 조합을 유일하게 보장한다.
 
 ### 3.4 스케줄러 잠금 (`shedlock`)
 
@@ -675,7 +683,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 #### 4.1.9 진단 제출 (`diagnosis_submissions`)
 
-> 진단 제출 접수 경로는 미결정. 아래는 `member-service`가 접수하고 채점을 요청하는 초안 기준.
+> `member-service`가 진단 제출을 접수하고 Outbox Relay로 `DiagnosisSubmissionRequested`(M6)를 `exam-submission-queue`에 전송한다. 식별자 매핑은 이벤트 계약 M6·J4·J5를 따른다.
 > 
 
 | 컬럼 | 타입 | NOT NULL | 설명 |
@@ -1495,7 +1503,9 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `judge_attempt` | INT | Y | 이 작업이 처리하는 채점 회차 |
 | `status` | VARCHAR(30) | Y | `PENDING` / `RUNNING` / `RETRY_WAITING` / `SUCCEEDED` / `FAILED` |
 | `try_count` | INT | Y | 회차 안 실행 시도 수 (상한 3) |
-| `lease_token` | VARCHAR(64) | N | NULL 허용: 선점 전. 선점마다 새로 발급 |
+| `unknown_retry_count` | INT | Y | 동일 실행 시도의 생성 응답 유실 재생성 횟수(0~2). 작업 생성 시 애플리케이션에서 0으로 초기화 |
+| `pending_compile_message` | MEDIUMTEXT | N | 이미 판정한 테스트의 첫 컴파일 메시지. 작업이 CE로 완료되면 제출에 반영 |
+| `lease_token` | VARCHAR(64) | N | 선점마다 새로 발급. 같은 시도의 생성 응답 유실 복구 대기 중에는 종료 이력용으로 이전 토큰을 보존한다. 선점 전·시도 종료 후에는 NULL |
 | `lease_until` | DATETIME(6) | N | NULL 허용: 선점 전. `now + 120초`, 30초마다 연장 |
 | `next_run_at` | DATETIME(6) | Y | 선점 가능 시각 (백오프 10→30초 반영) |
 | `deadline_at` | DATETIME(6) | Y | 전체 처리 기한. 일반 제출은 정책 및 상태 §2에 따라 접수 저장 시 확정하며 같은 작업의 재요청·재시도에서 변경하지 않음 |
@@ -1705,6 +1715,29 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 - 테스트 ID·순서는 초기 자료와 일치해야 하며 재시도에서 변경하지 않는다. 테스트별 최신 실행 상태만 유지하고 이전 시도의 요약은 §4.3.7에 보존한다.
 - 사용자 공개용 결과 테이블이 아니므로 `is_sample`·`actual_output`은 복제하지 않는다. Problem의 테스트 원본은 기존 자료 API로 읽는다.
 
+
+#### 4.3.9 관리자 채점 복구 요청 (`judge_recovery_requests`)
+
+관리자 복구 API의 최초 성공 응답을 작업·감사 기록과 같은 트랜잭션에서 보존한다.
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `actor_id` | BIGINT | Y | Gateway에서 인증한 관리자 ID, 외부 참조 |
+| `judge_job_id` | BIGINT | Y | FK → `judge_jobs.id` |
+| `idempotency_key` | VARCHAR(100) `_bin` | Y | 원래 Idempotency-Key, ASCII 1~100자 |
+| `request_hash` | CHAR(64) | Y | 양끝 공백을 제거한 사유의 SHA-256 |
+| `reason` | VARCHAR(500) | Y | 관리자 복구 사유 |
+| `response_status` | VARCHAR(30) | Y | 최초 성공 응답의 `RETRY_WAITING`. 트랜잭션 내부의 `PENDING`은 외부에 커밋하지 않음 |
+| `created_at` | DATETIME(6) | Y | 최초 성공한 요청의 저장 시각 |
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `fk_judge_recovery_requests_job` | `judge_job_id` → `judge_jobs.id` | 서비스 내부 FK |
+| `uk_judge_recovery_requests_actor_job_key` | `(actor_id, judge_job_id, idempotency_key)` | 같은 관리자·작업·키의 중복 실행 방지 |
+
+- 같은 키·같은 정규화 사유는 최초 응답을 반환한다. 같은 키·다른 사유는 `IDEMPOTENCY_KEY_CONFLICT`(422)다. 거절되거나 롤백된 요청은 성공 이력으로 남기지 않는다. 요청 기록과 감사 이력은 자동 삭제하지 않는다.
+
 ### 4.4 contest
 
 > 작성: 담당 C
@@ -1867,11 +1900,13 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `draft_seq` | BIGINT | Y | 제출한 Draft 순번 |
 | `language` | VARCHAR(30) | Y | JAVA / PYTHON / CPP |
 | `source_code` | MEDIUMTEXT | Y | 채점 요청 이벤트에 담을 코드 |
+| `request_snapshot` | JSON | N | 최초 채점 요청의 공통 헤더와 전체 업무 필드. 접수·Outbox와 함께 저장하고 변경하지 않는다. 기존 원본이 없는 접수는 NULL |
+| `dispatch_failure_code` | VARCHAR(100) | N | 기존 Draft의 전달 전 실패 사유. 크기 초과는 `CODE_TOO_LARGE`, 고정 회차의 지원 불가 언어는 `UNSUPPORTED_LANGUAGE`. 원문·언어 보존·FAILED 자동 접수이며 Judge 요청·Outbox를 만들지 않는다. 일반 접수는 NULL |
 | `submission_type` | VARCHAR(30) | Y | `MANUAL` / `AUTO` |
 | `received_at` | DATETIME(6) | Y | 접수 시각 (자동 제출은 `personal_ends_at`) |
 | `status` | VARCHAR(30) | Y | `ACCEPTED` / `REQUESTED` / `JUDGED` / `FAILED` |
 | `submission_id` | BIGINT | N | NULL 허용: 채점 연결 전 (외부 참조) |
-| `judge_attempt` | INT | N | NULL 허용: 종결 결과 반영 전. 마지막 반영 회차; 재처리 요청·QUEUED 응답으로 증가시키지 않음 |
+| `judge_attempt` | INT | N | NULL 허용: 종결 결과 반영 전. 전달 전 크기 초과·언어 불일치 실패는 0. 마지막 반영 회차; 재처리 요청·QUEUED 응답으로 증가시키지 않음 |
 | `verdict` | VARCHAR(30) | N | NULL 허용: 채점 전 |
 | `passed_count` | INT | N | NULL 허용: 채점 전 |
 | `total_count` | INT | N | NULL 허용: 채점 전 |
@@ -2121,13 +2156,16 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `state` | VARCHAR(30) | Y | OPEN / PREPARED / BLOCKED |
 | `prepared_from_state` | VARCHAR(30) | N | OPEN / BLOCKED. 최초 prepare 전만 NULL, 해당 작업의 복원 상태 |
 | `operation_result` | VARCHAR(30) | N | PENDING / COMMITTED / ABORTED. 최초 작업 전만 NULL, 종결 뒤 보존 |
-| `source_status` | VARCHAR(30) | N | PROBLEM의 최신 원천 visibility. 상태 스냅샷 수신 전 또는 다른 자원은 NULL |
+| `source_status` | VARCHAR(30) | N | PROBLEM의 최신 스냅샷 visibility 또는 STUDY에서 관찰한 CLOSED. 상태를 관찰하기 전에는 NULL |
 | `source_scope` | VARCHAR(30) | N | 같은 원천 버전의 PROBLEM scope. 다른 자원은 NULL |
-| `source_version` | BIGINT | Y | 기본 0. 소유 서비스 상태 이벤트의 순서 값 |
+| `source_version` | BIGINT | Y | 기본 0. 관찰한 원천 상태·완료 버전의 최댓값 |
+| `snapshot_version` | BIGINT | N | PROBLEM에서 적용한 전체 스냅샷 버전. 미수신 또는 기존 값의 근거가 불명확하면 NULL |
+| `prepared_snapshot_version` | BIGINT | N | 현재 문제 작업을 준비할 때 적용돼 있던 스냅샷 버전 |
 | `source_revision_id` | BIGINT | N | 최신 PROBLEM 사용 회차 ID. 수신 전 또는 사용 회차가 없으면 NULL |
 | `source_revision_number` | INT | N | 최신 사용 회차 번호. 사용 회차 ID가 NULL이면 NULL |
 | `source_supported_languages` | JSON | N | 최신 사용 회차의 통과 언어 배열. 미수신·다른 자원은 NULL, 사용 회차가 없으면 빈 배열 |
 | `prepared_at` | DATETIME(6) | N | 준비 시각. 준비 전 NULL |
+| `last_reconciliation_attempt_at` | DATETIME(6) | N | 현재 준비 작업의 마지막 대사 시도 시각. 신규 준비 시 NULL. 스냅샷 갱신과 별도 |
 | `version` | BIGINT | Y | 기본 0. 낙관적 락 |
 | `created_at` | DATETIME(6) | Y | 생성 시간 |
 | `updated_at` | DATETIME(6) | Y | 갱신 시간 |
@@ -2152,6 +2190,43 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 완료 버전 | complete.sourceVersion > expected_source_version·현재 operation_id 일치 확인. source_version은 max(저장값, 결과 버전)으로 보존하며 더 최신 원천 상태로 최종 차단 판단 |
 | 복구 | TTL로 자동 해제하지 않음. PENDING·404·조회 실패·결과 불명은 PREPARED 유지. COMMITTED만 complete, ABORTED만 cancel. 조회 결과 뒤 가드 잠금 안에서 현재 operationId·버전 재확인. API §4.7.3·§4.7.4 / 스케줄러 §4.7 |
 | 후속 문제 작업 | 다른 PREPARED 작업은 점유 충돌. PROBLEM_HIDE는 OPEN·BLOCKED에서 새 작업을 준비할 수 있으며 prepared_from_state를 저장한다. 확정 취소는 이전 상태로 복원하고 ABORTED를 보존한다. 더 최신 원천 상태가 있으면 PUBLIC의 GENERAL만 OPEN, PRIVATE·ARCHIVED는 BLOCKED로 유지한다. 다른 PREPARED 작업은 원천 이벤트로 취소하지 않음 |
+| 스터디 준비 결과 | 동일 `STUDY_CLOSE` 작업의 최초 취소 시험 ID 목록을 §4.4.16.1에 보존한다. 재요청 응답은 API §4.7.3을 따른다. |
+
+#### 4.4.16.1 스터디 가드 준비 결과 (`contest_study_guard_preparations`)
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT | Y | PK |
+| `study_id` | BIGINT | Y | 스터디 ID |
+| `operation_id` | VARCHAR(100) `utf8mb4_0900_bin` | Y | 원래 STUDY_CLOSE 작업 ID. 대소문자와 후행 공백을 구분 |
+| `request_hash` | CHAR(64) | Y | 최초 준비 요청의 정규화 해시 |
+| `canceled_exam_ids` | JSON | Y | 최초 준비에서 취소한 시험 ID 문자열 배열 |
+| `state` | VARCHAR(30) | Y | 해당 작업의 가드 상태. OPEN / PREPARED / BLOCKED |
+| `operation_result` | VARCHAR(30) | Y | PENDING / COMMITTED / ABORTED |
+| `prepared_at` | DATETIME(6) | Y | 최초 준비 시각 |
+| `created_at` | DATETIME(6) | Y | 최초 준비 시각 |
+
+**제약 및 인덱스**
+
+| 이름 | 컬럼 | 설명 |
+| --- | --- | --- |
+| `uk_contest_study_guard_preparations_study_operation` | `(study_id, operation_id)` | 같은 스터디 작업의 최초 준비 결과를 한 행으로 보존 |
+
+- 준비 결과는 자동 삭제하지 않는다.
+
+#### 4.4.16.2 가드 작업 종결 이력 (`contest_guard_operation_history`)
+
+| 컬럼 | 타입 | NOT NULL | 설명 |
+| --- | --- | --- | --- |
+| resource_type·resource_id·operation_id | VARCHAR(30)·BIGINT·VARCHAR(100) | Y | 작업 식별 복합 PK. ID 후행 공백을 구분해 원문 보존 |
+| request_hash·prepared_at | CHAR(64)·DATETIME(6) | N | 준비 해시와 시각 |
+| state·operation_result | VARCHAR(30) | Y | 종결 가드 상태와 COMMITTED / ABORTED 결과 |
+| source_version | BIGINT | Y | 종결 시 가드 원천 버전 |
+| resolution_path | VARCHAR(30) | N | DIRECT / RECONCILIATION / EVENT. 마이그레이션 이전 결과는 NULL |
+| reason | VARCHAR(500) | N | 직접 호출에서 수신한 사유 |
+| resolved_at | DATETIME(6) | N | 종결 시각. 마이그레이션 이전 결과는 NULL |
+
+가드 상태와 같은 트랜잭션에 저장한다. 회원·문제의 이전 작업 prepare 재요청은 해시와 결과를 이력에서 확인한다.
 
 #### 4.4.17 회원 정보 복제본 (`member_replicas`)
 
@@ -2181,7 +2256,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 컬럼 | 타입 | NOT NULL | 설명 |
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
-| `operation_id` | VARCHAR(100) `_bin` | Y | 호출자 생성 멱등 작업 ID |
+| `operation_id` | VARCHAR(100) `utf8mb4_0900_bin` | Y | 호출자 생성 멱등 작업 ID. 기존 ID의 후행 공백 보존 |
 | `operation_type` | VARCHAR(30) | Y | CONTEST_CREATE / EXAM_RETRY / EXAM_ZERO_CONFIRM / CONTEST_VOID_CONFIRM / RESULT_REFINALIZE |
 | `context` | VARCHAR(30) | Y | EXAM / CONTEST |
 | `context_id` | BIGINT | Y | 부모 시험·대회 ID (문맥별 논리 연결) |
@@ -2190,7 +2265,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `expected_judge_attempt` | INT | N | 재처리·실패 종결 대상 회차. CONTEST_CREATE·RESULT_REFINALIZE는 NULL |
 | `target_judge_attempt` | INT | N | B가 확인한 재처리 회차. EXAM_RETRY 외 또는 확인 전 NULL |
 | `expected_result_revision` | BIGINT | N | RESULT_REFINALIZE의 이전 버전. 다른 작업은 NULL |
-| `state` | VARCHAR(30) | Y | PENDING / SUCCEEDED / FAILED |
+| `state` | VARCHAR(30) | Y | PENDING / SUCCEEDED / FAILED. 원격 결과 미확인은 PENDING, 원격 실패가 확인된 경우만 FAILED |
 | `actor_member_id` | BIGINT | Y | 집행 회원 ID. 일반 관리자 작업은 ADMIN, EXAM_RETRY는 해당 시험 운영자도 허용 |
 | `reason` | VARCHAR(500) | Y | 불변 작업 사유 |
 | `response_json` | JSON | N | CONTEST_CREATE의 최초 종결 응답. 미종결 및 다른 작업은 NULL |
@@ -2209,7 +2284,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 항목 | 규칙 |
 | --- | --- |
-| 확정 차단 | PENDING/FAILED 재처리 작업의 원격 성공 여부가 불명확하면 최종 확정 보류. B 상태 조회·동일 operationId 재요청으로 SUCCEEDED 또는 확정 실패 종결 |
+| 확정 차단 | 원격 결과가 미확인인 PENDING 관리자 작업은 최종 확정을 보류한다. B 상태 조회·동일 operationId 재요청으로 SUCCEEDED 또는 확인된 FAILED로 종결하며, 확인된 FAILED 작업 자체는 확정을 차단하지 않는다. 제출이 FAILED이면 관리자 0점 종결 전까지 별도로 확정을 보류한다. |
 | 회차 저장 | judge_attempt는 마지막 반영 종결 회차. 원격 목표 회차는 target_judge_attempt에 저장 |
 | 재처리 응답 | 현재 judge_attempt < target_judge_attempt인 경우만 REQUESTED 전이. 이미 목표 이상 결과가 반영됐으면 상태·판정 유지. 늦은 성공 응답으로 결과를 되돌리지 않음 |
 | 대회 생성 | CONTEST_CREATE는 생성 operationId·요청 해시·정책 설정 관리자를 보존한다. 대회·고정 문제·PENDING 작업을 함께 저장하고 원격 연결은 커밋 후 수행한다. SUCCEEDED와 최초 응답을 함께 저장하며, SUCCEEDED 전에는 목록 노출·참가·입장·시작을 허용하지 않는다. 동일 ID 재요청은 같은 대회·고정 회차의 연결을 재개한다. 확정 실패는 대회 취소·FAILED·감사·취소 Outbox를 함께 저장하고 이미 생성된 B 연결은 이력으로 보존한다. |
@@ -2659,12 +2734,12 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | --- | --- | --- | --- |
 | `id` | BIGINT AUTO_INCREMENT | Y | PK |
 | `member_id` | BIGINT | Y | 참가자 (미입장 `ABSENT` 포함) |
-| `context_type` | VARCHAR(30) | Y | `EXAM` / `CONTEST` |
-| `context_id` | BIGINT | Y | 시험·대회 ID (외부 참조) |
+| `context_type` | VARCHAR(30) | Y | `EXAM` / `CONTEST` / `DIAGNOSIS` |
+| `context_id` | BIGINT | Y | 시험·대회·진단 ID (외부 참조). DIAGNOSIS는 `diagnosis_attempts.id` |
 | `problem_id` | BIGINT | Y | 포함 문제 |
 | `starts_at` | DATETIME(6) | Y | 차단 시작 (시험 시작 시각) |
 | `ends_at` | DATETIME(6) | Y | 차단 종료 (시험 종료 시각) |
-| `context_revision` | INT | Y | 반영한 `examRevision`·`contestRevision` (`ExamUpdated` 역전 방지) |
+| `context_revision` | INT | Y | 반영한 `examRevision`·`contestRevision` (`ExamUpdated` 역전 방지). DIAGNOSIS 행은 `1` 고정 |
 | `created_at` | DATETIME(6) | Y |  |
 | `updated_at` | DATETIME(6) | Y |  |
 
@@ -2904,7 +2979,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 마감 판정 | 상태가 아니라 서버 시각 `<= personal_ends_at` 비교 | `[시험 제출 유효성]` |
 | Draft 역전 방지 | 참가자 잠금 아래 문제별 전체 언어 최대 `seq`와 비교. 큰 순번만 해당 언어 Draft에 반영하고 DB 커밋 후 응답 (§6.4.1) | `[Draft]` |
 | 자동·수동 제출 중복 | `uk_exam_submissions_participant_problem_seq`, 위반은 "이미 제출됨" 처리 | `[시험 제출 유효성]` |
-| 제출 접수 원자성 | Draft·`exam_submissions`·Outbox를 한 트랜잭션에 저장 | — |
+| 제출 접수 원자성 | Draft·`exam_submissions`·최초 요청 보존본·Outbox를 한 트랜잭션에 저장 | — |
 | 채점 결과 역전 방지 | `exam_submissions.judge_attempt` 비교 | — |
 | 참가자 결과 동시 갱신 | `exam_problem_results`·`exam_participants`·`contest_*_results` `version` 낙관적 락 | — |
 | 결과 확정 | 종료·자동 제출 완료·미종결 제출 0건을 함께 확인. 시험 `FAILED`는 `is_zero_confirmed=true`, 대회 `FAILED`는 `is_void_confirmed=true`만 종결 인정 (§6.4.2) | `[결과 확정]` |
@@ -2920,7 +2995,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 멱등 재요청 | 같은 시험 제출 seq 또는 같은 대회 Idempotency-Key의 재요청은 기존 본문과 같으면 마감 후에도 기존 접수 결과를 반환한다. 본문이 다르면 422 IDEMPOTENCY_KEY_CONFLICT이며 새 제출을 만들지 않는다. | — |
 | Draft 순번 | 시험 Draft seq는 참가자·문제의 모든 언어에서 공통 증가한다. 참가자 잠금 아래 최대 seq와 비교하며 같거나 작으면 저장하지 않고 applied=false와 서버 최대 seq를 반환한다. 이미 접수된 같은 seq·다른 본문은 422 IDEMPOTENCY_KEY_CONFLICT다. 접수 기록이 없는 신규 직접 제출이 서버 최대 seq보다 작거나, 같은 seq인데 최신 Draft의 언어·코드와 다르면 409 DRAFT_SEQ_CONFLICT다. | — |
 | 자동 제출 대상 | 자동 제출은 참가자·문제별 최대 seq의 비어 있지 않은 Draft만 사용한다. 최신 Draft가 비어 있으면 이전 언어의 오래된 코드를 대신 제출하지 않는다. 마지막 접수 제출 seq보다 큰 경우만 생성한다. | — |
-| 자동 제출 원자성 | 자동 제출·Outbox·auto_submitted_at·FINISHED 전이는 같은 트랜잭션이다. 실패하면 전부 롤백하고 다음 실행에서 다시 처리한다. ABSENT·CANCELED 참가자는 자동 제출하지 않는다. | — |
+| 자동 제출 원자성 | 자동 제출·Outbox·auto_submitted_at·FINISHED 전이는 같은 트랜잭션이다. 크기 초과 또는 고정 회차의 지원 불가 언어인 기존 Draft는 원문·언어·실패 사유를 보존한 FAILED 자동 접수로 저장하며 해당 Outbox는 만들지 않는다. 지원 언어 조회 결과가 없거나 잠금 후 고정 회차와 일치하지 않으면 전체를 롤백한다. 저장 실패도 전부 롤백하고 다음 실행에서 다시 처리한다. ABSENT·CANCELED 참가자는 자동 제출하지 않는다. | — |
 | 수동 종료 | 수동 종료는 참가자 잠금 안에서 personal_ends_at을 확정하고 저장·신규 직접 제출을 차단한다. 기존 재요청 반환은 허용한다. | — |
 
 #### 6.4.2 채점·순위·확정
@@ -2941,6 +3016,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | ICPC 집계 | 대회는 received_at·id 순으로 최초 AC를 정한다. 그 이전 WA/TLE/MLE/RE만 오답 횟수에 포함하고 CE·SYSTEM_ERROR·AC 이후 제출은 제외한다. 분은 FLOOR((received_at - starts_at) / 60초)다. | — |
 | Redis 정렬 | Redis에는 전원 score=0인 ZSET의 고정폭 lex 정렬 키를 쓴다. solved 내림차순·penalty 오름차순·lastAcceptedAt 오름차순·memberId 순을 코드화하고 범위 초과는 Redis 갱신을 중단해 DB로 조회한다. 부동소수 합성 점수를 사용하지 않는다. | — |
 | 캐시·SSE 복구 | Redis 갱신과 SSE는 DB 커밋 이후 실행한다. 실패해도 DB를 롤백하지 않고 같거나 더 큰 resultRevision의 최신 DB 결과로 재구성한다. | — |
+| 시험 캐시 보관 | 데이터·현재 버전 포인터의 TTL은 기본 1시간(`contest.ranking-cache.ttl-seconds`, 최소 1초)이다. 최초 확정 시각부터 기본 7일(`finalized-retention-days`, 최소 1일) 동안 정기 재생성하며 이후에는 관측 버전 이하의 캐시를 삭제한다. 이후 조회도 DB 스냅샷으로 가능하며 조회 시 만든 캐시는 TTL로 만료된다. | — |
 | 확정 스냅샷 | 최초 확정·재확정은 result_revision 증가, result_snapshots 저장, ExamFinalized/ContestFinalized Outbox 기록을 같은 트랜잭션으로 수행한다. 재확정은 FINALIZED를 유지하고 기존 스냅샷을 덮어쓰지 않는다. FINALIZED 뒤 새 채점·실패 재처리는 금지하며 재확정은 기존 유효 기록 재집계만 수행한다. 스냅샷 `payload`에 참가자·문제별 유효 submissionCount, firstSubmittedAt, firstAcceptedAt, timeToFirstAcceptedMs를 포함한다. AUTO는 유효 접수로 포함하고 관리자 무효는 제외한다. 첫 AC·소요 시간은 AC 없으면 null이다. 분석(P3)의 문제 정답률은 유효 접수 참가자 중 AC 참가자의 비율이며 미제출자는 분모에서 제외한다. | — |
 
 #### 6.4.3 서비스 간 연결
@@ -2983,7 +3059,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 전달 직전 차단 시 미차감 | `GENERATING → BLOCKED` 트랜잭션에서 `used_count − 1` |
 | 타임아웃·늦은 응답 | 모든 종결 전이는 `WHERE status = 'GENERATING'` 조건부 UPDATE |
 | 시험 중 차단 | `hint_block_replicas` 시각 판정, 조회 실패 시 거절 (fail-closed) |
-| 진단 중 차단 | 판정 경로 미결정 (정책 미결정 사항) |
+| 진단 중 차단 | `hint_block_replicas` 이벤트 방식 (`DiagnosisStarted` → INSERT, `DiagnosisClosed` → DELETE) |
 
 ### 6.7 notification
 
@@ -3130,11 +3206,19 @@ judge-service/src/main/resources/db/migration/
   V13__judging_create_validation_jobs.sql
   V14__judging_create_validation_runs.sql
   V15__judging_create_validation_test_results.sql
+  V16__judging_remove_validation_run_verdict.sql
+  V18__common_create_shedlock.sql
+  V19__judging_track_submission_execution_recovery.sql
+  V20__common_create_audit_logs.sql
+  V21__judging_create_recovery_requests.sql
 ```
 
 기존 V1~V4는 공통 테이블 구축 계획 번호이며 실제 적용 이력과 구분한다. 기존 마이그레이션을 재사용하지 않고 Outbox·소비 기록은 V11·V12, 검증 작업·시도·테스트 결과는 V13~V15로 추가한다.
 
-§4.3.7의 대표 판정 제거는 후속 마이그레이션으로 반영한다(미구현). 이미 적용한 V14를 수정하지 않고 `judge_validation_runs.verdict` 및 해당 컬럼을 참조하는 CHECK를 제거하며, `SUCCEEDED`의 생성기 정보 필수 조건은 유지한다. 기존 시도 행과 나머지 요약은 보존한다. 파일 번호는 구현 시 실제 적용 이력과 대조해 확정한다.
+- V16: 검증 실행 이력에서 대표 판정 컬럼과 관련 CHECK를 제거한다. 기존 시도 행과 나머지 요약을 보존한다(§4.3.7).
+- V18: 제출 작업 임대 회수 스케줄러의 공통 잠금 테이블을 추가한다(스케줄러 §3.2).
+- V19: 생성 응답 유실 복구 횟수와 재개할 컴파일 메시지를 작업에 저장한다. 기존 작업의 복구 횟수는 0으로 채운 뒤 필수 제약을 적용한다(§4.3.2).
+- V20: 시험 제출 DLQ 감사 로그와 이벤트 ID·SQS 이동 작업 핸들의 조합을 보호하는 유일 인덱스를 생성한다(§3.3).
 
 ### 7.4 Contest (`contest-service`)
 
@@ -3157,6 +3241,12 @@ contest-service/src/main/resources/db/migration/
   V15__guard_create_contest_resource_guards.sql
   V16__operation_create_contest_admin_operations.sql
   V16_1__guard_add_problem_snapshot.sql
+  V16_2__examsubmission_preserve_request.sql
+  V16_3__examsubmission_add_dispatch_failure.sql
+  V16_4__guard_create_study_guard_preparations.sql
+  V16_5__guard_preserve_operation_history_and_snapshot_versions.sql
+  V16_6__guard_compare_study_operation_ids_exactly.sql
+  V16_7__guard_track_reconciliation_attempts.sql
   V17__contest_create_contests.sql                (P2 착수 시)
   V18__contest_create_contest_problems.sql        (P2 착수 시)
   V19__contest_create_contest_participants.sql    (P2 착수 시)
@@ -3185,10 +3275,10 @@ study-service/src/main/resources/db/migration/
   V14__replica_create_member_ac_replicas.sql
   V15__replica_create_member_learning_profile_replicas.sql
   V16__assignment_alter_assignment_problems.sql
-  V17__recommendation_create_study_recommendations.sql
-  V18__ai_create_hint_requests.sql
-  V19__ai_create_hint_daily_usages.sql
-  V20__ai_create_hint_block_replicas.sql
+  V17__ai_create_hint_requests.sql
+  V18__ai_create_hint_daily_usages.sql
+  V19__ai_create_hint_block_replicas.sql
+  V20__recommendation_create_study_recommendations.sql  (D-9-1 착수 시)
   V21__community_create_posts.sql        (P2 착수 시)
   V22__community_create_comments.sql     (P2 착수 시)
 ```

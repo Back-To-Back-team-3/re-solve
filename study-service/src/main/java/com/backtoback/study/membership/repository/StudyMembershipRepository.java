@@ -16,6 +16,7 @@ import org.springframework.data.repository.query.Param;
 import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.StudyMembership;
+import com.backtoback.study.membership.repository.projection.MembershipWithStudyStatus;
 
 import jakarta.persistence.LockModeType;
 
@@ -128,6 +129,8 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
 
     List<StudyMembership> findAllByStudyIdAndStatus(Long studyId, MembershipStatus status);
 
+    List<StudyMembership> findAllByMemberIdAndStatus(Long memberId, MembershipStatus status);
+
     /**
      * 지정 스터디의 지정 상태 가입 행을 잠금 읽기(FOR SHARE)로 조회한다(스케줄러 §5.2 동시성 설계 포인트).
      * REPEATABLE READ 스냅샷 회피를 위해 FOR SHARE를 사용한다.
@@ -192,6 +195,25 @@ public interface StudyMembershipRepository extends JpaRepository<StudyMembership
      * id·studyId·status 조건으로 가입 행을 조회한다(API 명세서 §5.3.2·§5.3.3 대상 멤버십 조회).
      */
     Optional<StudyMembership> findByIdAndStudyIdAndStatus(Long id, Long studyId, MembershipStatus status);
+
+    /**
+     * 회원의 APPROVED 가입 목록을 조회한다(API 명세서 §5.7.2).
+     * {@code excludeClosed=true}이면 CLOSED 스터디는 제외한다.
+     * {@code role}이 null이면 모든 역할을 반환한다.
+     * {@code StudyMembership}에 {@code studies}로의 연관이 없으므로 native query + projection 조합을 사용한다.
+     */
+    @Query(
+        value = "SELECT m.id AS id, m.study_id AS studyId, m.role AS role, s.status AS studyStatus "
+            + "FROM study_memberships m " + "JOIN studies s ON m.study_id = s.id " + "WHERE m.member_id = :memberId "
+            + "  AND m.status = 'APPROVED' " + "  AND (NOT :excludeClosed OR s.status <> 'CLOSED') "
+            + "  AND (:role IS NULL OR m.role = :role)",
+        nativeQuery = true
+    )
+    List<MembershipWithStudyStatus> findActiveMembershipsForMember(
+        @Param("memberId") Long memberId,
+        @Param("role") String role,
+        @Param("excludeClosed") boolean excludeClosed
+    );
 
     /**
      * 역할을 직접 갱신한다(API 명세서 §5.3.2 임명·해제).

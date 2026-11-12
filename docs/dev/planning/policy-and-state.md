@@ -164,9 +164,9 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 풀이 형태 | 사용자는 `solution` 함수를 구현해 값을 반환한다. Java는 Solution의 public 인스턴스 메서드, Python은 최상위 동기 함수, C++은 전역 solution 함수. C++의 main과 입출력 처리는 실행 코드가 제공한다. |
 | 코드 크기 | 64KB 이하. 초과 시 `CODE_TOO_LARGE`(413) |
 | 제출 문맥 | 제출은 `context`(`PRACTICE` / `EXAM` / `CONTEST` / `DIAGNOSIS`)와 문맥 ID를 가진다. |
-| 진입점 | `PRACTICE`: 클라이언트 → `judge-service` `POST /submissions`, <br>`EXAM`·`CONTEST`: 클라이언트 → `contest-service`가 접수·검증 후 `ExamSubmissionRequested`/`ContestSubmissionRequested` 이벤트로 `judge-service`에 채점 요청. `judge-service`는 이 이벤트로만 `EXAM`·`CONTEST` 제출을 생성한다., <br> `DIAGNOSIS`: 진단 세션을 소유한 `member-service`가 접수·검증 후 채점을 요청한다(세부 경로 확정 필요). |
+| 진입점 | `PRACTICE`: 클라이언트 → `judge-service` `POST /submissions`, <br>`EXAM`·`CONTEST`: 클라이언트 → `contest-service`가 접수·검증 후 `ExamSubmissionRequested`/`ContestSubmissionRequested` 이벤트로 `judge-service`에 채점 요청. `judge-service`는 이 이벤트로만 `EXAM`·`CONTEST` 제출을 생성한다., <br> `DIAGNOSIS`: 진단 세션을 소유한 `member-service`가 접수·검증 후 `DiagnosisSubmissionRequested`로 채점을 요청한다. 시험·대회·진단 모두 SQS `exam-submission-queue`를 사용한다(이벤트 계약 M6·C1·C2). |
 | 제출 대상 | `PRACTICE`는 `scope = GENERAL`·`visibility = PUBLIC` 문제 중 해당 태그의 사용자 레벨이 허용하는 난이도까지만(§8.3). `EXAM`·`CONTEST`는 시험·대회에 고정된 문제 회차만. `DIAGNOSIS`는 진단이 출제한 문제만(레벨 제한 미적용). `PRIVATE`·`ARCHIVED` 문제의 `PRACTICE` 제출은 `PROBLEM_NOT_AVAILABLE`(404) |
-| 멱등 처리 | **일반 풀이(`PRACTICE`)**는 `Idempotency-Key` 헤더가 필수다. 접수 후 24시간 동안 같은 사용자·같은 키·같은 본문 요청에는 기존 제출을 반환한다. 유효 기간 안에 같은 키로 다른 본문을 보내면 `IDEMPOTENCY_KEY_CONFLICT`(422)로 처리한다. 유효 기간이 지나 같은 키로 들어온 요청은 사전 검증을 다시 수행하여 새 제출로 접수한다. **시험·대회 제출**은 각각 `examSubmissionId`·`contestSubmissionId`를 멱등키로 사용한다. 같은 접수 ID의 요청이 다시 전달되면 기존 제출로 처리하며, 일반 풀이의 24시간 만료 규칙을 적용하지 않는다. |
+| 멱등 처리 | **일반 풀이(`PRACTICE`)**는 `Idempotency-Key` 헤더가 필수다. 접수 후 24시간 동안 같은 사용자·같은 키·같은 본문 요청에는 기존 제출을 반환한다. 유효 기간 안에 같은 키로 다른 본문을 보내면 `IDEMPOTENCY_KEY_CONFLICT`(422)로 처리한다. 유효 기간이 지나 같은 키로 들어온 요청은 사전 검증을 다시 수행하여 새 제출로 접수한다. **시험·대회·진단 제출**은 문맥과 원본 접수 ID(`examSubmissionId`·`contestSubmissionId`·`diagnosisSubmissionId`) 조합으로 중복을 확인한다. 같은 접수 요청이 다시 전달되면 기존 제출을 유지하며, 일반 풀이의 24시간 만료 규칙을 적용하지 않는다. |
 | Rate Limit | 사용자당 분당 10회, 동일 문제 5초 간격. 시험·대회 제출은 `contest-service`에서 같은 기준을 적용한다(자동 제출은 제외). 초과 시 `SUBMISSION_RATE_LIMITED`(429)와 `Retry-After` |
 | 접수 응답 | 검증 통과 시 제출(`QUEUED`)·채점 작업(`judge_jobs`, `PENDING`)·테스트별 결과 자리를 한 트랜잭션에 저장하고 `202 Accepted`와 접수 ID를 반환한다. 채점 결과는 접수 응답에 포함하지 않는다. |
 | 코드 실행(Run) | 제출과 분리된 실행 경로다. 공개 테스트케이스와 사용자 직접 입력 테스트만 실행하고, 제출 이력·결과 저장·이벤트 발행이 없다. 채점 파이프라인을 거치지 않고 Judge0를 동기 호출한다. |
@@ -218,8 +218,8 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 출력 제한 | 테스트케이스별 반환값과 디버그 출력을 합산하지 않고 각각 제한한다. 반환값은 회차의 `outputLimitKb`를 적용하며 기본값은 64KiB, 설정 가능한 범위는 1~256KiB다. 디버그 출력은 회차와 무관하게 64KiB로 제한한다. 각각 한도와 같은 크기는 허용하고, 어느 하나라도 초과하면 `RE`(출력 초과)로 처리하되, §3.3의 실측 메모리 보정 대상이면 `MLE`를 우선한다. 디버그 출력만 잘라 정상 판정으로 처리하지 않는다. |
 | 출력 크기 계산 | 1KiB는 1,024바이트다. 반환값은 직렬화된 JSON 텍스트, 디버그 출력은 사용자 표준 출력과 직접 작성한 표준 오류를 합친 스트림의 UTF-8 바이트 수로 계산한다. JSON 문자열의 따옴표·이스케이프·배열 구분자도 반환값 크기에 포함한다. Judge0 전송용 Base64나 API 응답 래퍼 크기는 포함하지 않는다. |
 | 결과 공개 범위 | 공개 테스트는 입력·기대 출력·실제 출력을 보여준다. 일반 제출의 숨김 테스트 상세 응답은 `testOrder`·`passed`만 반환한다. `passed`는 AC이면 true, 확정된 비AC 판정이면 false, 미판정·시스템 오류이면 null이다. 세부 판정·시간·메모리·입력·기대값·실제 출력은 숨김 테스트 항목에 포함하지 않는다. 숨김 입력·출력은 어떤 API로도 반환하지 않는다. 문맥별 판정 공개 시점은 §3.1 표를 따른다. |
-| Run 제한 | `run:{memberId}` 키로 원자성을 보장하는 Rate Limit을 적용한다. 쿨다운(TTL)은 두지 않는다. |
-| 이벤트 페이로드 | `SubmissionJudged`(`PRACTICE` 전용)는 공통 헤더(`eventId`·`eventType`·`schemaVersion`·`occurredAt`·`aggregateId`·`correlationId`)와 `submissionId`·`userId`·`problemId`·`problemRevisionId`·`submittedAt`(서버 접수 시각)·판정·`judgeAttempt`·통과 수/전체 수·시간·메모리·문제 난이도·태그 스냅샷을 담는다. 모든 ID 필드는 문자열이고 코드 본문은 담지 않는다. `EXAM`·`CONTEST`는 `ExamSubmissionJudged`·`ContestSubmissionJudged`로 분리 발행하며, `submittedAt`은 `contest-service`의 `received_at`을 그대로 쓴다. |
+| Run 제한 | `run:{memberId}` 키로 일반·시험 Run을 합쳐 사용자당 동시에 1개만 원자적으로 허용한다. 정상 완료·예외 시 소유 토큰이 일치할 때만 해제하고 종료 후 쿨다운(TTL)은 두지 않는다. 일반 Run은 `RUN_RATE_LIMITED`, 시험 내부 Run은 `RUN_IN_PROGRESS`로 거절한다(429). 제한 확인에 필요한 Redis 조회 실패 시 신규 실행을 허용하지 않는다. 중단 실행 회수는 스케줄러 §3.5를 따른다. |
+| 이벤트 페이로드 | `SubmissionJudged`(`PRACTICE` 전용)는 공통 헤더(`eventId`·`eventType`·`schemaVersion`·`occurredAt`·`aggregateId`·`correlationId`)와 `submissionId`·`userId`·`problemId`·`problemRevisionId`·`submittedAt`(서버 접수 시각)·판정·`judgeAttempt`·통과 수/전체 수·시간·메모리·문제 난이도·태그 스냅샷을 담는다. 모든 ID 필드는 문자열이고 코드 본문은 담지 않는다. `EXAM`·`CONTEST`는 `ExamSubmissionJudged`·`ContestSubmissionJudged`, `DIAGNOSIS`는 `DiagnosisSubmissionJudged`로 분리 발행하며, `submittedAt`은 contest·member가 확정한 원래 `receivedAt`을 그대로 쓴다(이벤트 계약 J2·J3·J5). |
 | 기록 | 케이스별 판정·CPU 시간·메모리, 회차의 통과/전체 수·최대 CPU 시간·최대 메모리. |
 
 ### 3.3 판정 매핑
@@ -270,7 +270,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 항목 | 정책 |
 | --- | --- |
 | 작업 원천 | 채점 작업은 `judge-service` 스키마의 `judge_jobs` 테이블을 원천으로 한다. SQS 메시지는 작업 생성 수단일 뿐 원천이 아니다. |
-| 작업 생성 | `PRACTICE`·`DIAGNOSIS`는 접수 트랜잭션에서 `submissions`(`QUEUED`)와 `judge_jobs`(`PENDING`)를 함께 저장한다. `EXAM`·`CONTEST`는 `exam-submission-queue` 소비 트랜잭션에서 `processed_events`·`submissions`·`judge_jobs`를 저장한 뒤 메시지를 삭제한다. |
+| 작업 생성 | `PRACTICE`는 접수 트랜잭션에서 `submissions`(`QUEUED`)와 `judge_jobs`(`PENDING`)를 함께 저장한다. `EXAM`·`CONTEST`·`DIAGNOSIS`는 `exam-submission-queue` 소비 트랜잭션에서 `processed_events`·`submissions`·`judge_jobs`를 저장한 뒤 메시지를 삭제한다. |
 | 작업 선점 | 실행기가 `deadline_at` 이전의 작업만 `SELECT … FOR UPDATE SKIP LOCKED`로 동시 처리 수만큼 선점하고 `RUNNING`·`lease_token`·`lease_until = now + 120초`로 전이한다. |
 | 임대 연장 | 실행 중 30초마다 상태·`lease_token`·기한 내 조건으로 임대를 연장한다. 구체 조건은 스케줄러 §3.1을 따른다. |
 | 재시도 대상 | 전체 처리 기한이 남은 작업의 `SYSTEM_ERROR`만 재시도한다. `AC`~`CE`는 확정 판정이므로 재시도하지 않는다. |
@@ -279,8 +279,10 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 장시간 작업 | `RUNNING` 상태로 10분이 지난 작업은 회수 대상이다. |
 | 늦은 결과 | 결과 저장은 `job.status = RUNNING AND lease_token = :token AND deadline_at > :now` 조건부 UPDATE로 한다. 회수·재채점으로 임대나 회차가 바뀌었거나 전체 처리 기한이 지난 결과는 버린다. |
 | 실행 이력 | 실행 시도마다 `judge_job_runs`에 1행을 불변 이력으로 남긴다. |
-| 서킷브레이커 | Judge0 장애로 서킷이 열리면 새 작업 선점을 멈춘다. 장애 중 반복 실패로 `try_count`가 소진되어 대량 `FAILED`가 생기는 것을 막되, 스케줄러 §3.2의 기한 초과 종결은 계속 수행한다. |
-| 중복 수신 | 시험·대회 채점 요청 메시지가 중복 수신되면 `processed_events` 유일 제약으로 반영 없이 메시지만 삭제한다. |
+| 서킷브레이커 | 채점 워커는 Judge 인스턴스별로 같은 서킷 상태를 공유한다. Judge0 통신 실패·타임아웃·HTTP 5xx가 연속 5회 발생하면 서킷을 열어 새 작업 선점을 멈춘다. 정상 응답은 연속 실패 횟수를 초기화하며 `CE`·`WA`·`RE`·`TLE` 등 사용자 코드 판정은 장애로 집계하지 않는다. |
+| 서킷 복구 | 차단 30초 후 복구 확인용 작업 1개에 한해 선점·실제 Judge0 호출을 허용한다. 정상 응답이면 서킷을 닫고 선점을 재개하며, 같은 장애이면 다시 30초 차단한다. 대상이 없으면 호출 없이 다음 폴링에서 다시 확인한다. 작업 선정·호출 허가 조건은 스케줄러 §3.1을 따르며 별도의 분산 서킷 저장소는 두지 않는다. |
+| 서킷과 작업 보존 | 선점 후 Judge0 호출 전에 차단된 작업은 임대 만료를 기다리지 않고 같은 임대·기한 조건으로 대기 상태에 반환하며 실행 시도를 소진하지 않는다. 이미 실행 중인 작업은 토큰을 보존하고 기존 임대 회수·재개 기준을 따른다. 반환 전 기한이 지났으면 대기로 되돌리지 않고 스케줄러 §3.2의 실패 종결을 적용한다. |
+| 중복 수신 | 시험·대회·진단 채점 요청 메시지가 중복 수신되면 `processed_events` 유일 제약으로 반영 없이 메시지만 삭제한다. |
 | DLQ | `exam-submission-queue` 수신 횟수가 3회를 넘은 메시지는 DLQ로 격리하고 운영 알림을 보낸다. |
 | 대사(Reconciliation) | 5분마다 제출 상태와 작업 상태가 어긋난 건(§10 대응표)을 찾아 재개하거나 기록한다. |
 | 수동 재처리 | 관리자는 DLQ 메시지·`FAILED` 제출을 재처리할 수 있다. 사유·집행자를 감사 로그에 남긴다. |
@@ -449,6 +451,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 잠정 결과 | 시험이 `CLOSED`가 되면 채점 진행률(종결 수/전체 수)과 함께 잠정 점수·순위를 시험 화면에 공개하고, 채점이 끝날 때마다 SSE로 갱신한다. 잠정 결과는 알림으로 보내지 않는다. |
 | 결과 확정 | 시험이 `CLOSED`이고 활성 참가자가 모두 `FINISHED`·`ABSENT`이며 실제 입장자의 자동 제출이 완료돼야 한다. `ACCEPTED`·`REQUESTED`와 미확인 원격 관리자 작업이 0건이고 미해결 `FAILED`가 없으면 DB 기준으로 점수·순위를 재계산해 `FINALIZED`로 전이한다(DB §6.4.2, 스케줄러 §4.3). Contest 접수의 `JUDGED`가 Judge 제출의 `COMPLETED`에 대응한다. 결과·결과 버전·불변 스냅샷·확정 이벤트 Outbox를 같은 트랜잭션에 저장하고 확정 결과를 공개한 뒤 알림을 보낸다. |
 | `FAILED` 제출 | 확정 시점에 `FAILED` 제출이 있으면 확정을 보류하고 관리자에게 알린다. 관리자가 재처리하거나 0점 확정을 사유와 함께 기록한 뒤 확정한다. |
+| 기존 초과 Draft | 전달 크기 제한을 넘는 기존 Draft는 원문·실패 사유를 보존한 `FAILED` 자동 접수로 참가 종료와 함께 저장한다. Judge 요청은 만들지 않고 자동으로 0점을 확정하지 않는다. 관리자 종결 전까지 시험 결과 확정을 보류한다(API §4.2.6·§4.6.4). |
 | 시험 순위 | 총점 내림차순 → 마지막 유효 제출 시각 오름차순. 모두 같으면 공동 순위 |
 | 분석 리포트(P3) | 문제별 정답률·제출 횟수, 개인별 제출 시점·판정 변화·최초 제출~최초 정답 경과시간(실제 풀이 시간으로 해석하지 않으며 기록이 없으면 "미산정"), 미해결·오답 문제를 다음 문제집 후보로 제공 |
 
@@ -645,7 +648,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 시간 형식 | 시간 필드는 오프셋 포함 ISO-8601, 마이크로초 자릿수로 쓴다. |
 | 전달 보장 | 최소 1회 전달. 순서는 보장하지 않는다. |
 | 멱등 소비 | 소비자는 `processed_events(event_id)` 유일 제약 기록과 반영을 같은 트랜잭션에서 수행한다. 이미 기록된 이벤트는 반영 없이 성공 처리한다. |
-| 순서 역전 | 채점 결과 이벤트(`SubmissionJudged`·`ExamSubmissionJudged`·`ContestSubmissionJudged`)를 소비할 때 같은 `submissionId`에 대해 저장된 `judgeAttempt`보다 작거나 같은 회차의 결과는 반영하지 않는다. 다른 이벤트는 순서 비교가 필요한 경우 해당 이벤트 계약에 순서 값을 정의한다. |
+| 순서 역전 | 채점 결과 이벤트(`SubmissionJudged`·`ExamSubmissionJudged`·`ContestSubmissionJudged`·`DiagnosisSubmissionJudged`)를 소비할 때 같은 `submissionId`에 대해 저장된 `judgeAttempt`보다 작거나 같은 회차의 결과는 반영하지 않는다. 다른 이벤트는 순서 비교가 필요한 경우 해당 이벤트 계약에 순서 값을 정의한다. |
 | 소비 실패 | 재시도 후에도 실패한 메시지는 큐별 DLQ로 격리하고 운영 알림을 보낸다. 재처리는 관리자 절차로만 한다. |
 | 스키마 변경 | 필드 추가는 하위 호환으로만 한다. 필드 삭제·의미 변경은 새 `eventType` 또는 `schemaVersion`으로 발행하고 소비 서비스 담당자 승인을 받는다. |
 | 데이터 소유 | 다른 서비스의 DB·스키마에 직접 접근하지 않는다. 필요한 값은 API 조회 또는 이벤트 복제본을 쓴다. |
@@ -657,11 +660,13 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 이벤트 | 발행 | 소비 | 경로 |
 | --- | --- | --- | --- |
 | `ExamSubmissionRequested` / `ContestSubmissionRequested` | contest | judge | SQS `exam-submission-queue` |
+| `DiagnosisSubmissionRequested` | member | judge | SQS `exam-submission-queue` |
 | `ProblemStateChanged` | problem | study(문제집 문제 `ACTIVE ↔ EXCLUDED`·힌트 캐시 무효화), contest | SNS 팬아웃 |
 | `SubmissionJudged` (`PRACTICE` 전용) | judge | notification, study, member, integration, problem | SNS 팬아웃 |
 | `ExamSubmissionJudged` | judge | contest | SNS 팬아웃 |
 | `ContestSubmissionJudged` | judge | contest | SNS 팬아웃 |
-| `SubmissionFailed` | judge | notification, contest | SNS 팬아웃 |
+| `DiagnosisSubmissionJudged` | judge | member | SNS 팬아웃 |
+| `SubmissionFailed` | judge | notification, contest, member(`DIAGNOSIS`) | SNS 팬아웃 |
 | `ExamParticipantRegistered` / `ExamParticipantCanceled` | contest | study(힌트 차단 복제본), notification(시험 시작 전 예약·취소) | SNS 팬아웃 |
 | `ExamStarted` / `ExamClosed` / `ExamFinalized` | contest | study(힌트 차단 복제본), notification | SNS 팬아웃 |
 | `ExamUpdated` / `ExamCanceled` | contest | study(힌트 차단 복제본), notification | SNS 팬아웃 |
@@ -677,7 +682,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | `TagLevelChanged` | member | notification | SNS 팬아웃 |
 | `MemberWithdrawn` / `MemberSuspended` | member | 전 서비스 | SNS 팬아웃 |
 | `GitHubSyncFailed` | integration | notification | SNS 팬아웃 |
-- `DIAGNOSIS` 제출의 채점 결과를 별도 이벤트로 나눌지는 B·E 협의 후 확정한다.
+- 진단 결과·실패 이벤트는 이벤트 계약 J5·J4를 따르며 일반 풀이 결과 이벤트로 발행하지 않는다.
 
 **페이로드 예시**
 
@@ -839,7 +844,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | Outbox(`outbox_events`) | `PENDING → PUBLISHED`, `PENDING → FAILED → PENDING`(재시도) |
 | 시험(`exams`) | `SCHEDULED → IN_PROGRESS → CLOSED → FINALIZED`, <br>`SCHEDULED → CANCELED`, <br>`FINALIZED → FINALIZED`(관리자 재확정, 감사 로그) |
 | 시험 참가자(`exam_participants`) | `REGISTERED → STARTED → FINISHED`(수동 종료·자동 제출 완료), <br>`REGISTERED → ABSENT`(종료 시까지 미입장), <br>`REGISTERED → CANCELED`(시작 전 참가 취소) |
-| 시험 제출(`exam_submissions`) | `ACCEPTED → REQUESTED`(Outbox 발행) `→ JUDGED`(채점 결과 연결), `REQUESTED → FAILED`(연결된 제출 `FAILED`) |
+| 시험 제출(`exam_submissions`) | `ACCEPTED → REQUESTED`(Outbox 발행) `→ JUDGED`(채점 결과 연결), `REQUESTED → FAILED`(연결된 제출 `FAILED`). 기존 초과 Draft의 자동 제출은 전달 전 `FAILED`로 직접 생성 |
 | 대회(`contests`) | `SCHEDULED → RUNNING → ENDED → FINALIZED`, `SCHEDULED → CANCELED` |
 | 스터디(`studies`) | `RECRUITING ↔ ACTIVE`, `RECRUITING / ACTIVE → CLOSED`(예정·진행 중 시험이 없을 때만) |
 | 스터디 가입(`study_memberships`) | `PENDING → APPROVED / REJECTED / CANCELED / EXPIRED`, <br>`APPROVED → LEFT / REMOVED`(`INSTANT` 가입은 `APPROVED`로 바로 생성) |

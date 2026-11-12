@@ -182,7 +182,7 @@
 | judge | 채점 관리자 | `ADMIN` | 재채점은 `EXAM` 장애 실패 건만 | B |
 | contest | 시험 생성·수정·취소 | 로그인 필요 (`SUSPENDED` 차단) | 해당 스터디 `LEADER`·`MANAGER` (study 동기 조회) | C |
 | contest | 시험 참가·응시·결과 | 로그인 필요 (`SUSPENDED` 차단) | 등록 참가자, 등록 시 스터디 `APPROVED` 구성원 | C |
-| contest | 시험 실패 재처리·작업 조회 | 로그인 필요 | `ADMIN` 또는 해당 시험 스터디 현재 `LEADER`·`MANAGER` | C |
+| contest | 시험 실패 재처리·작업 조회 | 로그인 필요 | 재처리는 `ADMIN` 또는 현재 `LEADER`·`MANAGER`. 작업 조회는 `ADMIN` 또는 해당 시험 운영자의 본인 `EXAM_RETRY` | C |
 | contest | 대회 조회·순위 | 공개 | — | C |
 | contest | 대회 참가·응시 | 로그인 필요 (`SUSPENDED` 차단) | 등록·실제 입장 참가자 | C |
 | contest | 시험·대회 관리자 | `ADMIN` | — | C |
@@ -245,8 +245,8 @@
 | 로그인 | GitHub OAuth2 단일. 인가 범위 `read:user`, `user:email` |
 | 토큰 | Access 1시간(응답 본문), Refresh 14일(`HttpOnly`·`Secure`·`SameSite=Strict` 쿠키), Redis 회전 |
 | 레벨 | 태그별 `LV0`~`MASTER`, 저장값 증감 없이 재계산 |
-| 이벤트 발행 | `MemberUpdated`, `LearningProfileUpdated`, `TagLevelChanged`, `MemberWithdrawn`, `MemberSuspended`, `DiagnosisSubmissionRequested`(확정 필요) |
-| 이벤트 구독 | `SubmissionJudged`(레벨·성취도 재계산), `SubmissionFailed`(진단), `HintReady`(힌트 사용 감점, 확정 필요) |
+| 이벤트 발행 | `MemberUpdated`, `LearningProfileUpdated`, `TagLevelChanged`, `MemberWithdrawn`, `MemberSuspended`, `DiagnosisSubmissionRequested` |
+| 이벤트 구독 | `SubmissionJudged`(레벨·성취도 재계산), `DiagnosisSubmissionJudged`(진단 결과), `SubmissionFailed`(진단 실패), `HintReady`(힌트 사용 감점, 확정 필요) |
 | 외부 서비스 | GitHub OAuth (`github.com/login/oauth`, `api.github.com/user`) |
 
 ### 1.1 외부 API — 인증
@@ -733,7 +733,7 @@
 
 ### 1.5 외부 API — 진단 테스트
 
-> `member-service`가 접수하고 `DiagnosisSubmissionRequested`(이벤트 계약 M6)로 채점을 요청한다. 결과는 `DiagnosisSubmissionJudged`(J5)로 받는다.
+> `member-service`가 진단 제출을 접수하고 `DiagnosisSubmissionRequested`(M6)를 `exam-submission-queue`로 전송한다. Judge는 정상 종결을 J5, 시스템 실패를 J4로 발행한다(이벤트 계약서 M6·J5·J4).
 > 
 
 #### 1.5.1 진단 시작
@@ -918,7 +918,7 @@
     - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409), `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `SUBMISSION_RATE_LIMITED`(429)
 - **동시성/멱등 보장:** `uk_diagnosis_submissions_attempt_problem_seq`. Draft 반영·제출·Outbox를 한 트랜잭션에 저장.
 - **발행:**
-    - `DiagnosisSubmissionRequested` — 접수 트랜잭션 (judge 채점 요청, 경로·이벤트명 확정 필요)
+    - `DiagnosisSubmissionRequested` — 접수 트랜잭션 (SQS `exam-submission-queue`, 이벤트 계약 M6)
 
 #### 1.5.6 진단 최종 제출 (종료)
 
@@ -944,7 +944,7 @@
     - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409)
 - **동시성/멱등 보장:** `WHERE status = 'IN_PROGRESS'` 조건부 UPDATE. 수동 종료와 만료 스케줄러가 경합해도 1회만 종료된다.
 - **발행:**
-    - `DiagnosisSubmissionRequested` — 자동 제출 문항마다
+    - `DiagnosisSubmissionRequested` — 자동 제출 문항마다 (SQS `exam-submission-queue`, 이벤트 계약 M6)
     - `TagLevelChanged`·`LearningProfileUpdated` — 모든 제출 채점 후 `SCORED` 전이 시
 - **프론트 계약:**
     - 결과 확정은 SSE `LEVEL_CHANGED`(진단 결과) 알림으로 받고 진단 상세·복구(1.5.2)로 결과를 조회한다.
@@ -3482,8 +3482,8 @@
 
 - **Method / URI:** `GET /internal/v1/problems/diagnosis-candidates`
 - **인증:** 내부 호출 (member)
-- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`
-- **설명:** 태그의 `GENERAL`·`PUBLIC` 문제 중 난이도 1·2·3에서 각각 1개를 무작위로 골라 현재 회차와 함께 반환한다. 난이도별 후보가 없으면 해당 항목을 `null`로 반환한다.
+- **대응 테이블:** `tags`, `problems`, `problem_revisions`, `problem_revision_tags`, `problem_validations`
+- **설명:** `GENERAL`·`PUBLIC` 문제에서 검증을 통과한 최신 회차의 태그와 난이도를 기준으로 후보를 찾는다. 난이도 1·2·3에서 각각 1개를 무작위로 골라 고정 회차 ID와 함께 반환한다. 응답 배열의 순서는 난이도 1·2·3이며, 후보가 없는 위치는 `null`이다.
 - **요청 파라미터:**
 
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
@@ -3517,6 +3517,10 @@
       ]
     }
     ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 태그 ID 누락 또는 양의 정수 범위를 벗어남
+    - `PROBLEM_TAG_NOT_FOUND`(404) / 존재하지 않는 태그
 
 ---
 
@@ -3747,6 +3751,55 @@
 - 기본 코드의 생성 책임은 Judge다. 기존 `ExecutionCodeGenerator.starterCode(FunctionSpec)`를 연결하며 응답 언어 집합은 요청과 정확히 일치해야 한다. Problem이 기본 코드를 생성하거나 이전 회차·미통과 언어 코드로 대체하지 않는다.
 - 제공 계약은 §3.3.5를 따른다. 요청 언어 집합과 응답이 정확히 일치하고 각 `sourceCode`가 문자열인지 검사한다.
 
+### 2.8 관리자 API — Outbox 운영
+
+> 작성: 담당 D (B 지원) · 서비스: `problem-service`
+>
+
+#### 2.8.1 실패 Outbox 재처리
+
+> 서비스별 경로와 재요청 처리는 확정했다. 아래 동시성 처리 상세는 검토안이며, Judge 계약은 §3.2.6을 따른다.
+
+- **Method / URI:** `POST /api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses`
+- **인증:** `ADMIN`
+- **Idempotency:** 없음. `Idempotency-Key`와 최초 응답 보존을 추가하지 않는다. 재요청 시 현재 상태가 `PENDING`·`PUBLISHED`이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)을 반환한다. 재발행이 다시 실패해 `FAILED`가 되면 상태·유효 기간을 재검증해 새 운영 조치를 허용한다.
+- **대응 테이블:** `outbox_events`, `audit_logs`
+- **설명:** `FAILED` 상태이고 발생 7일 이내인 Outbox 이벤트를 `PENDING`으로 되돌려 Outbox Relay가 재발행하도록 한다. 원래 `event_id`를 유지하므로 소비자가 `processed_events`로 중복 소비를 방지한다.
+- **요청 바디:**
+
+    ```json
+      { "reason": "DLQ 원인 수정 후 재처리" }
+    ```
+
+- **응답 (202):**
+
+    ```json
+      { "success": true, "message": "재처리를 접수했습니다.", "data": { "outboxEventId": "1001" } }
+    ```
+
+- **에러:**
+    - `OUTBOX_EVENT_NOT_FOUND`(404): 존재하지 않는 ID이거나 발생 7일 초과
+    - `OUTBOX_EVENT_NOT_REPROCESSABLE`(409): `FAILED` 외 상태
+- **서비스별 경로 구분 — 확정:** 각 서비스의 `outbox_events.id`는 자기 DB 안에서만 유일하다. 서비스는 경로로 구분하고, 바디로 임의의 서비스나 스키마를 지정하지 않는다.
+
+    | 대상 | 확정 경로 |
+    | --- | --- |
+    | Problem | `/api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses` |
+    | Judge | `/api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses` |
+
+    - Gateway는 각 경로를 해당 서비스로 전달한다. 서비스는 자기 DB의 Outbox만 조회·변경한다.
+- **동시성/멱등 보장 — 구현 보완안:**
+    - 자기 서비스의 Outbox 대상 행을 `SELECT ... FOR UPDATE`로 잠그고, 잠금 획득 후 공통 `Clock` 기준 서울 시각을 정한다. 대상 없음·발생 7일 초과는 404, `FAILED` 외 상태는 409다. 발생 시각이 정확히 `now - 7일`이면 허용한다.
+    - 상태를 다시 확인한 뒤 `WHERE id = :id AND status = 'FAILED' AND occurred_at >= :cutoff` 조건부 UPDATE로 `status=PENDING`, `retry_count=0`, `published_at=NULL`, `updated_at=now`를 반영한다.
+    - 영향 행이 정확히 1건일 때만 감사와 202 응답을 확정한다. 0건이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)로 롤백하며 성공 응답·감사를 남기지 않는다.
+    - 상태 변경과 `audit_logs` INSERT는 같은 트랜잭션이다. 감사 저장 실패 시 상태 변경도 롤백한다.
+        - `actor_id`는 인증한 관리자, `action=OUTBOX_REPROCESS`, `target_type=OUTBOX_EVENT`, `target_id`는 Outbox 행 ID, `reason`은 요청 사유, `client_ip`는 신뢰할 수 있는 요청 주소로 기록한다.
+        - `before_state`에는 행 잠금으로 확인한 기존 `status`·`retryCount`·`publishedAt`을 기록한다. `after_state`에는 `status=PENDING`, `retryCount=0`, `publishedAt=null`을 기록한다. 이벤트 본문·코드·인증 정보는 감사 JSON에 복사하지 않는다.
+        - `created_at`에는 잠금 획득 후 정한 기준 시각을 서울 시간대·마이크로초 정밀도로 기록한다. 변경 전후 값·감사 시각은 ERD §3.3과 정책 §9.4를 따른다.
+    - `reason`은 공백만 허용하지 않는 1~500자다(ERD §3.3의 저장 길이).
+    - `event_id`·`payload`·`occurred_at`·`correlation_id`는 보존하고 기존 공통 Relay가 재발행한다. Relay도 같은 Outbox 행을 잠그므로 행 단위로 직렬화된다.
+- **비고:** 동시 운영 요청의 성공·409 분기, 실제 전환 1건당 감사 1건, 감사 실패 전체 롤백, Relay 경합, 정확히 7일인 경계값을 구현 회귀 테스트로 확인한다. 이 보완안에서는 테이블·컬럼·환경변수를 추가하지 않는다.
+
 ## 3. 제출·채점 (judge)
 
 > 작성: 담당 B · 서비스: `judge-service`
@@ -3756,16 +3809,16 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 외부 경로 | `/api/v1/submissions/**`, `/api/v1/me/submissions`, `/api/v1/runs`, `/api/v1/judge/languages`, `/api/v1/admin/judge-jobs/**`, `/api/v1/admin/submissions/**` |
+| 외부 경로 | `/api/v1/submissions/**`, `/api/v1/me/submissions`, `/api/v1/runs`, `/api/v1/judge/languages`, `/api/v1/admin/judge-jobs/**`, `/api/v1/admin/submissions/**`, `/api/v1/admin/judge/outbox-events/**` |
 | 내부 경로 | `/internal/v1/submissions/**` |
 | 소유 테이블 | 스키마 `judge` (`submissions`, `judge_jobs`, `judge_job_runs`, `judge_test_results`) |
-| 문맥 | `PRACTICE`(외부 API), `EXAM`·`CONTEST`(SQS `exam-submission-queue`), `DIAGNOSIS`(member 경유, 경로 확정 필요) |
+| 문맥 | `PRACTICE`(외부 API), `EXAM`·`CONTEST`·`DIAGNOSIS`(SQS `exam-submission-queue`). 시험·대회는 contest, 진단은 member가 접수한다. |
 | 지원 언어 | `java`(Java 17), `python3`(Python 3), `cpp`(C++17). 런타임 버전과 Judge0 `language_id`는 Judge0 목록에서 조회하여 선택한다. 서비스의 언어 활성화 설정과 지원 실행 환경의 존재 여부를 함께 확인한다. |
 | 채점 | 202는 접수 완료이며 채점 완료가 아니다. 작업 원천은 `judge_jobs`, SKIP LOCKED 선점·임대, 실행 시도 상한 3회. |
 | 회차 용어 | 채점 회차 `judgeAttempt`(재채점마다 +1), 실행 시도 `tryCount`(회차 안 재시도). 기존 초안의 `attemptId`·`attemptNo`는 `judgeAttempt`로 통일 |
 | 재채점 | `PRACTICE`는 재채점하지 않는다. 채점 서버 장애로 실패한 `EXAM` 제출만 대상 (T2-11) |
 | 결과 공개 | 숨김 테스트의 입력·출력은 어떤 API로도 반환하지 않는다. 시험·대회 판정 공개 시점은 contest 정책을 따른다 |
-| 이벤트 발행 | `SubmissionJudged`(PRACTICE), `ExamSubmissionJudged`, `ContestSubmissionJudged`, `SubmissionFailed` |
+| 이벤트 발행 | `SubmissionJudged`(PRACTICE), `ExamSubmissionJudged`, `ContestSubmissionJudged`, `DiagnosisSubmissionJudged`, `SubmissionFailed` |
 
 ### 3.1 외부 API — 언어·제출·실행
 
@@ -3971,15 +4024,15 @@
 - **Method / URI:** `GET /api/v1/me/submissions`
 - **인증:** 로그인 필요
 - **대응 테이블:** `submissions`
-- **설명:** 모든 문맥의 본인 제출을 문맥과 함께 보여준다. 시험·대회 제출의 판정은 해당 문맥 공개 정책 전까지 `null`로 가린다.
+- **설명:** 일반 풀이·시험·진단의 본인 제출을 문맥과 함께 보여준다.
 - **요청 파라미터:**
     
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `problemId` | string | N | — | 문제 필터 |
-    | `context` | string | N | — | `PRACTICE` / `EXAM` / `CONTEST` / `DIAGNOSIS` |
-    | `verdict` | string | N | — | 판정 필터 |
+    | `context` | string | N | — | `PRACTICE` / `EXAM` / `DIAGNOSIS`. `CONTEST`를 지정하면 빈 목록 |
+    | `verdict` | string | N | — | 지정하면 `PRACTICE`에만 적용한다. 시험·진단 제출은 목록과 페이지 집계에서 제외한다 |
     | `page` | int | N | 0 |  |
     | `size` | int | N | 20 |  |
     
@@ -3992,18 +4045,19 @@
         "success": true,
         "message": null,
         "data": {
-          "content": [ 
-    	      { 
-    		      "submissionId": "2001", 
-    		      "problemId": "301", 
-    		      "language": "python3", 
-    		      "context": "PRACTICE", 
-    		      "status": "COMPLETED", 
-    		      "verdict": "AC", 
-    		      "maxTimeMs": 12, 
-    		      "maxMemoryKb": 8192, 
-    		      "submittedAt": "2026-09-28T10:00:00+09:00" 
-    	      } 
+          "content": [
+            {
+              "submissionId": "2001",
+              "problemId": "301",
+              "language": "python3",
+              "context": "EXAM",
+              "contextId": "401",
+              "status": "COMPLETED",
+              "verdict": null,
+              "maxTimeMs": null,
+              "maxMemoryKb": null,
+              "submittedAt": "2026-09-28T10:00:00.000000+09:00"
+            }
           ],
           "page": 0, 
           "size": 20, 
@@ -4015,7 +4069,9 @@
     ```
     
     - 문제 제목은 저장하지 않는다. 화면은 문제 서비스 조회로 채운다.
-    - 시험·대회 판정 공개 여부를 judge가 모르므로, 해당 제출의 `verdict`는 항상 `null`로 두고 contest 화면에서 확인하게 한다(**공개 정책 연동 방식 확정 필요**).
+    - 시험·진단의 `verdict`·`maxTimeMs`·`maxMemoryKb`는 목록에서 항상 `null`이다. 판정은 시험 결과 또는 진단 상세 화면에서 각 문맥의 공개 정책에 따라 확인한다.
+    - `contextId`(string 또는 null)는 상세 화면 연결용이다. 시험은 시험 ID, 진단은 진단 ID, 일반 풀이는 `null`을 반환한다.
+    - 시험 제출의 `submittedAt`은 원래 접수 시각을 마이크로초 6자리로 반환한다(§0.1).
 
 #### 3.1.5 제출 코드 조회
 
@@ -4108,6 +4164,7 @@
     - `testOrder` 오름차순으로 반환한다.
     - 공개 테스트는 예시의 상세 필드를 유지한다. 숨김 테스트 항목은 `testOrder`·`passed` 두 필드만 반환하며 `isSample`·`verdict`·`timeMs`·`memoryKb`·원문 필드를 포함하지 않는다.
     - 숨김 테스트의 `passed`는 AC이면 true, 확정된 비AC 판정이면 false다. 미판정·SYSTEM_ERROR는 null로 반환하며 시스템 실패를 코드 실패로 표시하지 않는다. 재시도 중 이전 실행 시도의 결과를 현재 시도의 확정 결과로 사용하지 않는다.
+    - 정상 완료된 채점 회차는 최종 집계에 포함한 이전 시도의 확정 결과도 반환한다.
     - 제출 전체 대표 판정은 정책 및 상태 §3.3을 따르며 테스트별 판정을 덮어쓰지 않는다.
     - token·S3 경로·체크섬·stderr는 반환하지 않는다.
 
@@ -4115,7 +4172,7 @@
 
 - **Method / URI:** `POST /api/v1/runs`
 - **인증:** 로그인 필요 (`SUSPENDED` 차단)
-- **Rate Limit:** `run:{userId}` 키 기반 원자적 제한(한도 수치 확정 필요, 쿨다운 없음)
+- **Rate Limit:** `run:{memberId}` 키로 일반·시험 Run을 합쳐 사용자당 동시에 1개만 허용한다. 초과 시 `RUN_RATE_LIMITED`(429), 종료 후 쿨다운 없이 다음 실행을 허용한다.
 - **대응 테이블:** 없음 (결과 저장·이벤트 발행 없음)
 - **설명:** 공개 테스트케이스 또는 사용자 직접 입력으로 코드를 실행한다. 제출 이력에 포함하지 않고 Judge0를 동기 호출한다(T2-14).
 - **요청 바디:**
@@ -4172,8 +4229,10 @@
     - `CUSTOM`은 기대값이 없어 `verdict`가 `null`(실행 오류면 `RE`·`TLE` 등)
     - `stdout`은 디버그 출력이며 테스트별 64KiB 제한을 적용한다. `actualReturnText`는 회차의 `outputLimitKb`로 별도 제한하며 두 출력은 합산하지 않는다. 어느 하나라도 초과하면 `RE`(출력 초과)로 처리한다. 크기 계산은 [정책 및 상태 > 3.2 채점 실행](../planning/policy-and-state.md#32-채점-실행)을 따른다.
     - `timeMs`는 Judge0 실행 시간(초)을 밀리초로 변환한 뒤 올림한 정수다. 측정값이 없으면 null을 유지한다(정책 및 상태 §3.2).
+- **동시성/멱등 보장:** 사용자별 실행 제한을 원자적으로 획득하고, 정상 완료·예외 시 소유 토큰이 일치할 때만 해제한다. 인스턴스 중단 후 회수는 스케줄러 §3.5를 따른다. Redis에서 제한을 확인할 수 없으면 실행을 허용하지 않고 503으로 처리한다.
 - **에러:**
-    - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `RUN_RATE_LIMITED`(429), `PROBLEM_NOT_AVAILABLE`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge0 장애
+    - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `RUN_RATE_LIMITED`(429), `PROBLEM_NOT_AVAILABLE`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge0 장애·실행 제한 확인 실패
+    - `RUN_TIMEOUT`(504) / 전체 실행 기한 30초 초과
 
 ### 3.2 관리자 API — 진단·복구·재채점
 
@@ -4288,8 +4347,8 @@
 
 - **Method / URI:** `POST /api/v1/admin/judge-jobs/{judgeJobId}/recoveries`
 - **인증:** `ADMIN`
-- **Idempotency:** 있음
-- **대응 테이블:** `judge_jobs`, `judge_job_runs`, `audit_logs`
+- **Idempotency:** `Idempotency-Key` 필수(ASCII 1~100자). 관리자·작업·키와 양끝 공백을 제거한 사유의 해시를 저장한다. 같은 요청은 최초 202 응답을 반환하고 다른 사유는 `IDEMPOTENCY_KEY_CONFLICT`(422)다.
+- **대응 테이블:** `judge_jobs`, `judge_job_runs`, `submissions`, `audit_logs`, `judge_recovery_requests`
 - **설명:** 종결되지 않은 작업을 같은 회차 안에서 재개한다(임대 해제 → `RETRY_WAITING`). 새 회차를 만들지 않고, 종결 상태를 되살리거나 시도 상한·처리 기한을 우회하지 않는다.
 - **요청 바디:**
     
@@ -4306,6 +4365,83 @@
 - **에러:**
     - `SUBMISSION_NOT_FOUND`(404), `SUBMISSION_REJUDGE_NOT_ALLOWED`(409) / 이미 종결된 작업
 
+- **동시성/멱등 보장:** 채점 작업 → 복구 요청 → 제출 순서로 잠근다. `RUNNING` 복구는 현재 시도를 `SYSTEM_ERROR`로 종결하고 다음 시도로 전환하므로 상한 3회에서는 거절한다. 대기 작업은 시도 수를 유지하며, `UNKNOWN`은 기존 30초 유예를 보존한다. 기한·최신 회차·종결 여부를 잠금 후 재검증하고 작업·제출·감사를 함께 커밋한다.
+
+#### 3.2.6 실패 Outbox 재처리
+
+> Problem §2.8.1을 기준으로 서비스별 경로와 재요청 처리를 확정했다. 나머지 상세 사항은 검토안이다. 기존 채점 작업 복구(§3.2.5)와 별개의 작업이다.
+
+- **Method / URI:** `POST /api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses`
+- **인증:** `ADMIN`
+- **Idempotency:** 없음. `Idempotency-Key`와 최초 응답 보존을 추가하지 않는다. 재요청 시 현재 상태가 `PENDING`·`PUBLISHED`이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)을 반환한다. 재발행이 다시 실패해 `FAILED`가 되면 상태·유효 기간을 재검증해 새 운영 조치를 허용한다. 기존 `eventId`에 의한 소비자 중복 제거는 이벤트 계약 §1.1·§1.4를 따른다.
+- **Rate Limit:** 없음
+- **대응 테이블:** `outbox_events`, `audit_logs` (Judge 자기 DB)
+- **설명:** 발생 7일 이내이고 `FAILED`인 Judge Outbox 이벤트를 `PENDING`으로 전환해 재발행을 접수한다. 원래 이벤트 식별자·본문을 보존하며 기존 공통 Relay가 저장된 메시지를 비동기로 발행한다. Outbox 변경과 관리자 조치 감사는 같은 트랜잭션에서 확정한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Content-Type` | Y | `application/json` | 요청 본문 형식 |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `outboxEventId` | Path | string | Y | — | Judge DB의 Outbox 행 ID. 양수 BIGINT 범위. 이벤트 UUID인 `eventId`와 구분 |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `reason` | string | Y | 공백만 허용하지 않는 1~500자 조치 사유 |
+
+    ```json
+    {
+      "reason": "발행 권한 복구 후 결과 이벤트 재전달"
+    }
+    ```
+
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json; charset=UTF-8` | 응답 본문 형식 |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (202):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `outboxEventId` | string | 재처리 접수가 확정된 Judge Outbox 행 ID |
+
+    ```json
+    {
+      "success": true,
+      "message": "재처리를 접수했습니다.",
+      "data": {
+        "outboxEventId": "1001"
+      }
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 양수 BIGINT 범위가 아닌 ID 또는 사유 검증 실패
+    - `AUTH_TOKEN_INVALID`(401), `AUTH_TOKEN_EXPIRED`(401) / Gateway 인증 실패
+    - `AUTH_ACCESS_DENIED`(403) / ADMIN 권한 없음
+    - `OUTBOX_EVENT_NOT_FOUND`(404) / Judge DB에 대상이 없거나 발생 7일 초과
+    - `OUTBOX_EVENT_NOT_REPROCESSABLE`(409) / `FAILED` 외 상태 또는 조건부 UPDATE 영향 행 0건
+    - `COMMON_INTERNAL_SERVER_ERROR`(500) / 상태 변경·감사 저장 등 예상하지 못한 내부 오류. 전체 롤백
+- **동시성/멱등 보장:** §2.8.1의 동시성 처리 보완안과 같은 단일 행 잠금·잠금 후 시각 확인·조건부 UPDATE·감사 원자 저장 규칙을 적용한다. 재요청 시 현재 상태가 `PENDING`·`PUBLISHED`이면 409이며 최초 202 응답을 재사용하지 않는다. 새 운영 요청이나 Relay가 상태를 변경했으면 최신 상태로 판단한다.
+- **발행:** 기존 Outbox 행을 `PENDING`으로 전환한 뒤 공통 Relay가 원래 메시지를 발행한다. 결과 이벤트의 `judgeAttempt` 등 순서 값을 변경하지 않는다.
+- **외부 의존:** 없음 (API 트랜잭션에서 SNS·SQS·다른 서비스 호출 없음)
+- **프론트 계약:** 202는 재처리 접수이며 실제 발행 완료를 의미하지 않는다.
+- **비고:**
+    - 범용 운영 인터페이스를 새 공통 모듈로 만드는 것은 이번 문서 보완 범위에 포함하지 않는다. 각 서비스는 자기 DB에서 권한·유효 기간·감사를 처리하고 기존 `common-event` Relay를 재사용한다.
+    - 기존 `OutboxEventWriter.append()`는 새 이벤트 ID를 발급하므로 이 재발행 경로에서 호출하지 않는다. 기존 행의 이벤트 ID·본문·발생 시각·상관관계 ID를 보존한다.
+    - `submissions`·`judge_jobs`·`judge_test_results`를 변경하거나 Judge0 실행을 다시 만들지 않는다. 실패 Outbox 재발행은 제출 재채점·채점 작업 복구·SQS DLQ redrive와 구분한다.
+    - 구현 시 동시 요청·Relay 경합·감사 실패 전체 롤백·7일 경계와 다른 서비스 DB를 조회하지 않는 경계를 검증한다. 테이블·컬럼·환경변수 추가는 없다.
+
 ### 3.3 내부 API
 
 > 시험·대회 채점 요청은 SQS `exam-submission-queue`로만 받는다. 
@@ -4315,27 +4451,30 @@
 #### 3.3.1 시험·대회 제출 결과 조회
 
 - **Method / URI:** `GET /internal/v1/submissions/{submissionId}/result`
-- **인증:** 내부 호출 (contest)
+- **인증:** 내부 호출 (contest, member). contest는 `EXAM`·`CONTEST`, member는 `DIAGNOSIS`를 조회한다.
 - **대응 테이블:** `submissions`, `judge_jobs`
-- **설명:** 이벤트 유실 복구·결과 확정 전 대사용. 점수·공개 판단은 contest가 한다.
+- **설명:** 시험·대회·진단의 이벤트 유실 복구·결과 확정 전 대사용. 점수·사용자 공개 판단은 문맥을 소유한 contest·member가 한다. 진단 내부 대사는 사용자 공개 전에도 허용하며 Member의 기존 공개 정책을 변경하지 않는다.
 - **요청 파라미터:**
     
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `submissionId` | string | Y | — | Path |
-    | `contextId` | string | Y | — | 시험·대회 ID (불일치 시 404) |
+    | `contextId` | string | Y | — | 시험·대회·진단 ID (불일치 시 404) |
 - **응답 (200):**
     
     ```json
       { "submissionId": "2002", "context": "EXAM", "contextId": "401", "sourceSubmissionId": "4001", "status": "COMPLETED", "judgeAttempt": 1, "verdict": "AC", "passedCount": 12, "totalCount": 12, "maxTimeMs": 12, "maxMemoryKb": 8192, "submittedAt": "2026-09-28T10:00:00+09:00" }
     ```
-    
+
+    - `DIAGNOSIS`의 `contextId`는 `diagnosisId`, `sourceSubmissionId`는 `diagnosisSubmissionId`다. 원본 접수·고정 회차를 유지하며, 숨김 테스트 원문은 반환하지 않는다.
+    - 진단 대사는 §3.3.6을 `context=DIAGNOSIS`, `receiptId=diagnosisSubmissionId`로 함께 조회한다. `found=true`일 때 두 응답의 `submissionId`가 같고, 접수 ID 조회의 `userId`·`problemId`·`problemRevisionId`·`contextId`·`receiptId`·`submittedAt`이 원래 접수와 일치하는지 확인한다.
+    - 미종결·실패 상태의 판정·통과 수·성능은 null이다. 미발견·식별자 불일치·조회 실패로 결과를 확정하지 않으며, 응답 형식은 유지한다.
 
 #### 3.3.2 제출 코드 조회 (내부)
 
 - **Method / URI:** `GET /internal/v1/submissions/{submissionId}/source`
-- **인증:** 내부 호출 (contest, problem)
+- **인증:** 내부 호출 (contest, problem, member)
 - **대응 테이블:** `submissions`
 - **설명:** 호출 목적별로 조건을 확인한 뒤 코드를 반환한다.
 - **요청 파라미터:**
@@ -4343,18 +4482,20 @@
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `purpose` | string | Y | — | `EXAM_REVIEW`(contest, 시험 결과 화면) / `SOLUTION_SHARE`(problem, 풀이 공유) |
+    | `purpose` | string | Y | — | `EXAM_REVIEW`(contest, 시험 결과 화면) / `SOLUTION_SHARE`(problem, 풀이 공유) / `DIAGNOSIS_REVIEW`(member, 진단 복기) |
     | `memberId` | string | Y | — | 호출 서비스가 인증으로 확인한 요청자 |
-    | `contextId` | string | N | — | `EXAM_REVIEW`일 때 시험 ID |
+    | `contextId` | string | N | — | `EXAM_REVIEW`·`DIAGNOSIS_REVIEW`일 때 각각 시험·진단 ID 필수 |
     - `SOLUTION_SHARE`: 제출 소유자 = `memberId`, `context = PRACTICE`, 최신 판정 `AC`일 때만 반환
     - `EXAM_REVIEW`: 제출 소유자 = `memberId`, `contextId` 일치. 공개 시점 판단은 contest 책임
+    - `DIAGNOSIS_REVIEW`: `context = DIAGNOSIS`, 제출 소유자 = `memberId`, `contextId = diagnosisId` 일치. member가 본인 진단·원래 접수·문제·고정 회차와 기존 사용자 공개 조건을 확인한다. Judge가 새로운 Member 검증 API를 호출하지 않는다.
+- **응답 헤더:** `Cache-Control: no-store`
 - **응답 (200):**
     
     ```json
       { "submissionId": "91023", "problemId": "301", "problemRevisionId": "1001", "language": "python3", "sourceCode": "…", "verdict": "AC" }
     ```
     
-- **실패 시 처리:** 조건 불일치는 404. 호출 서비스는 fail-closed
+- **실패 시 처리:** 조건 불일치는 404. 호출 서비스는 fail-closed. 숨김 테스트 원문은 반환하지 않으며 일반 제출 코드 API의 `PRACTICE` 범위는 확대하지 않는다.
 
 #### 3.3.3 GitHub 동기화용 정답 코드 조회
 
@@ -4397,6 +4538,7 @@
     ```
     
     - AC만 반환하므로 판정 필드는 두지 않는다. 회원이 없으면 빈 목록
+    - 각 페이지는 조회 시점의 완료 AC를 반환한다. 순회 중 커서보다 작은 제출 ID가 AC로 바뀌면 이후 페이지에서 조회되지 않으므로, 복제본 재동기화는 §5.6.2의 이벤트 반영·복구 절차를 함께 적용한다.
 
 #### 3.3.5 기본 코드 생성 (내부)
 
@@ -4487,16 +4629,16 @@
 #### 3.3.6 접수 ID 기준 시험·대회 채점 상태 조회
 
 - **Method / URI:** `GET /internal/v1/judge/submissions/by-receipt`
-- **인증:** 내부 호출 (contest)
+- **인증:** 내부 호출 (contest, member)
 - **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
 - **대응 테이블:** `submissions`, `judge_jobs`
-- **설명:** Judge 제출 ID를 아직 받지 못했거나 결과 이벤트가 유실된 C 접수를 원래 접수 ID로 대사한다. §3.3.1의 제출 ID 기준 조회를 대체하지 않는다.
+- **설명:** Judge 제출 ID를 아직 받지 못했거나 결과 이벤트가 유실된 시험·대회·진단 접수를 원래 접수 ID로 대사한다. §3.3.1의 제출 ID 기준 조회를 대체하지 않는다.
 - **요청 파라미터:**
 
     | 필드 | 위치 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `context` | Query | string | Y | EXAM / CONTEST |
-    | `receiptId` | Query | string | Y | C의 원래 시험·대회 접수 ID |
+    | `context` | Query | string | Y | EXAM / CONTEST / DIAGNOSIS |
+    | `receiptId` | Query | string | Y | contest의 원래 시험·대회 접수 ID 또는 member의 `diagnosisSubmissionId` |
 
 - **응답 (200):**
 
@@ -4506,13 +4648,13 @@
     | `submissionId` | string | found=true일 때 Judge 제출 ID |
     | `context / contextId / receiptId` | string | found=true일 때 원래 실행 문맥·접수 식별자 |
     | `userId / problemId / problemRevisionId` | string | found=true일 때 원래 회원·문제·고정 회차 |
-    | `submittedAt` | string (date-time) | found=true일 때 C가 확정한 원래 접수 시각 |
+    | `submittedAt` | string (date-time) | found=true일 때 contest·member가 확정한 원래 접수 시각 |
     | `status` | string | found=true일 때 Judge 제출 상태 |
     | `judgeAttempt` | integer | found=true일 때 채점 회차 |
     | `verdict` | string 또는 null | 미종결·실패는 null |
     | `passedCount / totalCount` | integer 또는 null | 미종결·실패는 null |
 
-- **실패 시 처리:** C는 원래 접수와 문맥·회원·문제·고정 회차·접수 시각을 대조하고 불일치를 격리한다. 미발견·조회 실패를 정상 채점 결과로 처리하거나 결과를 확정하지 않는다.
+- **실패 시 처리:** contest·member는 자기 서비스의 원래 접수와 문맥·회원·문제·고정 회차·접수 시각을 대조하고 불일치를 격리한다. 진단은 `contextId = diagnosisId`, `receiptId = diagnosisSubmissionId`를 사용한다. 미발견·조회 실패를 정상 채점 결과로 처리하거나 결과를 확정하지 않는다.
 
 
 #### 3.3.7 실패 시험 제출 재처리 (내부)
@@ -4547,6 +4689,7 @@
 - **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
 - **대응 테이블:** 없음. Draft·제출·점수·통계를 저장하거나 이벤트를 발행하지 않는다.
 - **설명:** §4.7.1의 RUN 검증을 거쳐 공개 예제·사용자 입력만 동기 실행한다. 숨김 테스트는 실행하지 않는다.
+- **Rate Limit:** §3.1.8과 같은 `run:{memberId}` 제한을 공유해 일반·시험 Run을 합쳐 사용자당 동시에 1개만 허용한다. 정상 완료·예외 시 소유 토큰이 일치할 때만 해제하며 종료 후 쿨다운은 없다. 중단 회수는 스케줄러 §3.5를 따른다.
 - **요청 본문:**
 
     | 필드 | 타입 | 필수 | 설명 |
@@ -4695,6 +4838,7 @@
     ```
     
     - `title` 1~200자, `mode`는 `FIXED`만 허용, `problems` 1~20개 (중복 `problemId` 불가), `displayOrder`는 1부터 문제 수까지 연속, `startsAt`은 현재 이후, `endsAt > startsAt`, 시험 시간 1~180분, `score` 0.01~9999.99 소수점 둘째 자리 문자열, 배점 합계 9999.99 이하
+    - `startsAt`·`endsAt`을 서울 시간으로 변환했을 때 연도가 1000~9999 범위를 벗어나면 `COMMON_INVALID_REQUEST`(400)를 반환한다.
 - **응답 헤더:**
     
     
@@ -4750,18 +4894,19 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `EXAM_STUDY_CLOSED`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `CONTEST_DEPENDENCY_UNAVAILABLE`(503), `COMMON_INVALID_REQUEST`(400)
+    - `AUTH_ACCESS_DENIED`(403), `EXAM_STUDY_CLOSED`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `CONTEST_DEPENDENCY_UNAVAILABLE`(503), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `COMMON_INVALID_REQUEST`(400)
 - **외부 의존:**
     - `GET /internal/v1/problems/summaries?ids=` (problem) — `GENERAL`·`PUBLIC` 및 현재 `problemRevisionId` 검증. 실패 시 503
     - `GET /internal/v1/studies/{studyId}/members` (study) — 역할·스터디 상태 검증. 실패 시 503
+    - `GET /internal/v1/members/{memberId}/status` (member) — 회원 상태 확인. 실패 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **발행:** `ExamParticipantRegistered`는 참가 등록 시 (생성 단계에서는 불필요)
 
 #### 4.1.2 스터디 시험 목록
 
 - **Method / URI:** `GET /api/v1/studies/{studyId}/exams`
-- **인증:** 로그인 필요 + `APPROVED` 구성원 또는 해당 시험에 등록한 본인
+- **인증:** 로그인 필요 + 현재 `APPROVED` 구성원 또는 해당 시험의 활성 참가자 본인
 - **대응 테이블:** `exams`, `exam_participants`
-- **설명:** 스터디 소속 시험 목록. 스터디 탈퇴 후에도 본인이 등록한 시험은 조회한다. 시작 전에는 문제 식별자·본문을 반환하지 않는다.
+- **설명:** 현재 `APPROVED` 구성원은 스터디의 모든 시험을 조회한다. 스터디 탈퇴자는 본인의 활성 참가가 있는 시험만 조회하며 취소 이력만 있으면 조회할 수 없다. 조회 권한이 없으면 403을 반환하고, 권한 범위에서 상태 필터·페이지에 맞는 시험이 없으면 200과 빈 페이지를 반환한다. 시작 전에는 문제 식별자·본문을 반환하지 않는다.
 - **요청 헤더:**
     
     
@@ -4790,7 +4935,7 @@
     | `content[].startsAt` | string (date-time) | 시작 시각 |
     | `content[].endsAt` | string (date-time) | 전체 종료 시각 |
     | `content[].problemCount` | integer | 편입된 문제 수 |
-    | `content[].myParticipantStatus` | string 또는 null | 본인 참가 상태. 미등록은 null |
+    | `content[].myParticipantStatus` | string 또는 null | 본인의 활성 참가 상태. 활성 참가가 없으면 null |
     | `page` · `size` · `totalElements` · `totalPages` · `hasNext` | — | 공통 목록 필드 |
     
     ```json
@@ -4819,14 +4964,14 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `EXAM_NOT_FOUND`(404)
+    - `AUTH_ACCESS_DENIED`(403)
 
 #### 4.1.3 시험 상세
 
 - **Method / URI:** `GET /api/v1/exams/{examId}`
-- **인증:** 로그인 필요 + 스터디 `APPROVED` 구성원 또는 활성 등록자
+- **인증:** 로그인 필요 + 현재 스터디 `APPROVED` 구성원 또는 해당 시험의 활성 참가자 본인
 - **대응 테이블:** `exams`, `exam_problems`, `exam_participants`
-- **설명:** 시작 전에는 문제 식별자·본문을 포함하지 않는다. 상세 조회만으로 입장을 기록하지 않는다.
+- **설명:** 스터디 탈퇴자도 해당 시험에 활성 참가가 있으면 조회할 수 있으며 취소 이력만 있으면 조회할 수 없다. 시작 전에는 문제 식별자·본문을 포함하지 않는다. 상세 조회만으로 입장을 기록하지 않는다.
 - **요청 헤더:**
     
     
@@ -4904,7 +5049,7 @@
 
 - **Method / URI:** `PATCH /api/v1/exams/{examId}`
 - **인증:** 로그인 필요 + 현재 `LEADER`·`MANAGER`
-- **대응 테이블:** `exams`, `exam_problems`, `contest_resource_guards`, `outbox_events`
+- **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `contest_resource_guards`, `outbox_events`
 - **설명:** `SCHEDULED` 상태이고 양쪽 `startsAt`이 모두 서버 시간보다 미래일 때만 허용. 전체 설정을 전달한다. 문제를 다시 선택하면 그 시점 현재 회차로 고정하며 참가자 `personalEndsAt`을 함께 갱신. `examRevision`·`version` +1.
 - **요청 헤더:**
     
@@ -4946,6 +5091,8 @@
     }
     ```
     
+- 입력 제한은 시험 생성(4.1.1)과 같으며 `mode`는 기존 시험의 `FIXED`를 유지한다.
+- 시험 생성·수정은 원격 회원 조회를 저장 트랜잭션 전에 끝내고, 저장 트랜잭션에서 Contest 회원 복제본을 잠가 `ACTIVE` 상태를 다시 확인한다. 활성 복제본이 없으면 `AUTH_ACCESS_DENIED`(403)를 반환한다.
 - **응답 헤더:**
     
     
@@ -4957,13 +5104,13 @@
     ```json
     {
       "success": true,
-      "message": "시험이 생성되었습니다.",
+      "message": "시험이 수정되었습니다.",
       "data": {
         "examId": "55",
         "studyId": "12",
         "status": "SCHEDULED",
-        "examRevision": "1",
-        "version": "0",
+        "examRevision": "2",
+        "version": "1",
         "resultRevision": "0",
         "startsAt": "2026-10-20T20:00:00+09:00",
         "endsAt": "2026-10-20T21:30:00+09:00",
@@ -4975,6 +5122,20 @@
             "revisionNumber": 1,
             "score": "30.00",
             "displayOrder": 1
+          },
+          {
+            "problemId": "102",
+            "problemRevisionId": "1002",
+            "revisionNumber": 1,
+            "score": "30.00",
+            "displayOrder": 2
+          },
+          {
+            "problemId": "103",
+            "problemRevisionId": "1003",
+            "revisionNumber": 1,
+            "score": "40.00",
+            "displayOrder": 3
           }
         ]
       }
@@ -4983,7 +5144,9 @@
     
     - 시험 생성(4.1.1) 응답 본문 구조와 같음
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFY_NOT_ALLOWED`(409), `EXAM_UPDATE_CONFLICT`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `COMMON_INVALID_REQUEST`(400)
+    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFICATION_CLOSED`(409), `EXAM_REVISION_CONFLICT`(409), `EXAM_STUDY_CLOSED`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `COMMON_INVALID_REQUEST`(400)
+    - 스터디·문제 조회 실패 또는 불완전한 응답은 `CONTEST_DEPENDENCY_UNAVAILABLE`(503), 회원 상태 조회 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** 시험 생성(4.1.1)과 같은 스터디 구성원·문제 선택 조회와 회원 상태 조회를 수행한다.
 - **발행:** `ExamUpdated` — 전체 문제 목록·시간·배점·활성 등록자 ID 포함
 
 #### 4.1.5 시험 취소
@@ -5051,7 +5214,9 @@
     ```
     
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFY_NOT_ALLOWED`(409), `EXAM_UPDATE_CONFLICT`(409)
+    - `COMMON_INVALID_REQUEST`(400) / 시험 식별자·버전·사유 유효성 검증 실패
+    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFICATION_CLOSED`(409), `EXAM_REVISION_CONFLICT`(409)
+    - `CONTEST_DEPENDENCY_UNAVAILABLE`(503) / 현재 스터디 관리자 권한 확인에 필요한 외부 의존 조회 실패 또는 불완전한 응답
 - **발행:** `ExamCanceled` — 취소 시각·사유·활성 등록자 ID 스냅샷 포함
 
 ### 4.2 외부 API — 시험 참가·Draft·제출·결과
@@ -5060,8 +5225,9 @@
 
 - **Method / URI:** `POST /api/v1/exams/{examId}/participants`
 - **인증:** 로그인 필요 (`SUSPENDED` 차단) + `ACTIVE` 회원이며 등록 시 `APPROVED` 구성원 복제본이 있어야 한다. 없으면 `EXAM_NOT_ELIGIBLE`(403)
-- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `study_membership_replicas`, `contest_resource_guards`, `outbox_events`
+- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `study_membership_replicas`, `member_replicas`, `contest_resource_guards`, `outbox_events`
 - **설명:** 종료 전 등록 가능. 기존 활성 참가가 있으면 `200`으로 기존 반환, 새 등록은 `201`. `CANCELED` 문맥에는 등록 불가.
+    - 시험별 활성 참가가 10,000명이면 신규 등록을 `EXAM_PARTICIPANT_LIMIT_REACHED`(409)로 거절한다. 취소된 참가는 세지 않으며 기존 활성 참가의 재요청은 기존 응답을 유지한다.
 - **요청 헤더:**
     
     
@@ -5110,9 +5276,10 @@
     ```
     
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_ELIGIBLE`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409)
-- **동시성 보장:** `MEMBER` 가드·시험·참가자 순으로 잠금, 활성 참가 1건 보장
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_ELIGIBLE`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `EXAM_PARTICIPANT_LIMIT_REACHED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `CONTEST_OPERATION_BLOCKED`(409)
+- **동시성 보장:** `MEMBER` 가드·시험·참가자 순으로 잠근다. 회원별 활성 참가 1건을 보장하고 시험 행 잠금 아래 신규 등록 한도를 확인한다.
 - **발행:** `ExamParticipantRegistered` — 새 등록 시(`201`)만
+- **외부 의존:** `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 상태 조회 실패·불완전 응답 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 자원 잠금 전에 수행한다.
 
 #### 4.2.2 시험 입장
 
@@ -5168,7 +5335,8 @@
     
 - **동시성 보장:** `MEMBER` 가드·시험·참가자 잠금
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_CLOSED`(409), `EXAM_ALREADY_FINISHED`(409), `CONTEST_OPERATION_BLOCKED`(409)
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_CLOSED`(409), `EXAM_ALREADY_FINISHED`(409), `CONTEST_OPERATION_BLOCKED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 상태 조회 실패·불완전 응답 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 자원 잠금 전에 수행한다.
 
 #### 4.2.3 시험 문제 목록·본문
 
@@ -5250,9 +5418,12 @@
 
 #### 4.2.4 시험 Draft 저장
 
+- 신규 저장은 원문 UTF-8 64KiB 이하여야 하고, 공통 직렬화기로 공통 헤더와 업무 필드를 합친 향후 채점 요청 이벤트도 최대 유효 필드 길이 기준 256KiB 이하여야 한다. 초과 시 `CODE_TOO_LARGE`(413)를 반환하고 기존 Draft는 보존한다. 클라이언트는 해당 코드를 서버 미저장 상태로 유지하고 오류를 표시한다. 이 전달 크기 조건은 Contest에 추가되는 제한이며 Judge의 원문 크기 제한과 별개다. 빈 Draft와 오래된 순번의 기존 처리 규칙은 유지한다.
+
 - **Method / URI:** `PUT /api/v1/exams/{examId}/drafts/{problemId}`
 - **인증:** 로그인 필요 + `ACTIVE`·`STARTED` 본인
 - **Rate Limit:** 참가자당 초당 1회 (초과 요청은 마지막 요청만 반영하는 서버 버퍼 처리)
+- **버퍼 응답:** 같은 버퍼에서 밀린 요청은 마지막 요청의 처리 완료 뒤 `applied=false`와 해당 문제의 실제 서버 최대 `seq`를 반환한다. 저장된 Draft가 없으면 `serverSeq`는 `"0"`, `savedAt`은 `null`이다.
 - **대응 테이블:** `exams`, `exam_participants`, `exam_drafts`, `member_replicas`
 - **설명:** 참가자 잠금 아래 문제의 전체 언어 최대 `seq`보다 큰 경우 해당 언어 Draft를 저장. 같거나 작으면 무시하고 `applied: false` 반환. 직접 제출은 이 버퍼를 우회해 최신 코드를 트랜잭션에서 저장. 저장 성공은 DB 커밋 후 응답하며 개인 마감 판정은 DB §6.4.1을 따른다.
 - **요청 헤더:**
@@ -5298,7 +5469,7 @@
     | --- | --- | --- |
     | `applied` | boolean | 신규 Draft가 실제 저장됐는지 |
     | `serverSeq` | string | 서버의 전체 언어 최대 순번 문자열 |
-    | `savedAt` | string (date-time) | 서버 Draft 저장 시각 |
+    | `savedAt` | string (date-time) 또는 null | 서버 Draft 저장 시각. 버퍼에서 밀린 요청의 문제에 저장된 Draft가 없으면 null |
     | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
     | `serverNow` | string (date-time) | C 서버 기준 시각 |
     
@@ -5317,9 +5488,11 @@
     ```
     
 - **에러:**
-    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `CODE_TOO_LARGE`(413), `COMMON_INVALID_REQUEST`(400)
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_PROBLEM_NOT_INCLUDED`(404), `MEMBER_SUSPENDED`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400), `COMMON_INVALID_REQUEST`(400), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 
 #### 4.2.5 시험 직접 제출
+
+- 신규 접수에는 §4.2.4의 원문·이벤트 크기 조건을 적용한다. 초과하면 `CODE_TOO_LARGE`(413)를 반환하고 기존 Draft·접수·Outbox를 보존한다. 이미 접수한 동일 본문 재요청은 새 크기 조건을 소급 적용하지 않고 기존 결과를 반환한다.
 
 - **Method / URI:** `POST /api/v1/exams/{examId}/submissions`
 - **인증:** 신규 접수는 `ACTIVE`·`STARTED` 등록 본인. 이미 접수한 동일 요청은 `FINISHED`·`SUSPENDED`에서도 반환
@@ -5395,6 +5568,8 @@
 
 #### 4.2.6 시험 수동 종료
 
+- 기존 Draft가 원문·채점 요청 이벤트 크기 제한을 넘거나 고정 회차가 지원하지 않는 언어이면 원문·언어·사유를 보존한 `AUTO` 접수를 `FAILED`로 기록하고 참가자를 종료한다. `dispatch_failure_code`는 각각 `CODE_TOO_LARGE`·`UNSUPPORTED_LANGUAGE`이며, `judge_attempt=0`, `is_zero_confirmed=false`로 Judge 연결·요청 스냅샷·Outbox를 만들지 않는다. 정상 Draft의 접수·Outbox, 실패 접수, 완료 표식·`FINISHED`는 같은 트랜잭션에 저장한다. 관리자 0점 종결(§4.6.4) 전까지 결과 확정을 보류하며 코드를 자르거나 이전 코드로 대체하거나 자동으로 0점을 확정하지 않는다. 지원 언어 조회 결과가 없거나 잠금 후 고정 회차와 일치하지 않으면 종료를 롤백하고 재시도로 다시 확인한다.
+
 - **Method / URI:** `POST /api/v1/exams/{examId}/finish`
 - **인증:** 로그인 필요 + 입장 본인
 - **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `exam_drafts`, `exam_submissions`, `outbox_events`
@@ -5444,7 +5619,9 @@
     
 - **에러:**
     - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403)
-- **발행:** `ExamSubmissionRequested` — 자동 제출 문제별
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Problem 지원 언어 조회에 실패하거나 응답의 지원 언어 목록이 비어 있는 등 응답이 유효하지 않은 경우.
+    - `UNSUPPORTED_LANGUAGE`(400) / 시험 잠금 후 자동 제출 대상의 지원 언어 조회 결과가 없거나 조회한 회차가 현재 고정 회차와 일치하지 않는 경우. 유효한 지원 언어 목록에 기존 Draft의 언어가 없으면 위 실패 접수로 보존한다.
+- **발행:** `ExamSubmissionRequested` — 언어·크기 검사를 통과한 자동 제출 문제별
 
 #### 4.2.7 내 시험 결과
 
@@ -5573,7 +5750,7 @@
       "data": {
         "resultStatus": "PROVISIONAL",
         "resultRevision": "3",
-        "content": [
+        "items": [
           {
             "memberId": "7",
             "nickname": "kim-dev",
@@ -5582,11 +5759,8 @@
             "pending": false
           }
         ],
-        "page": 0,
-        "size": 20,
-        "totalElements": 12,
-        "totalPages": 1,
-        "hasNext": false
+        "nextCursor": null,
+        "hasMore": false
       }
     }
     ```
@@ -5672,9 +5846,9 @@
 #### 4.2.10 시험 참가 취소
 
 - **Method / URI:** `POST /api/v1/exams/{examId}/participants/me/cancellation`
-- **인증:** 로그인 필요 (회원·문맥 권한 적용)
-- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `outbox_events`
-- **설명:** 시작 전 `REGISTERED`만 `CANCELED`로 전이. 이미 취소됐으면 기존 취소 반환. 시작 이후 `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409).
+- **인증:** 로그인 필요 (회원·문맥 권한 적용). `SUSPENDED` 회원은 새로운 참가 취소를 할 수 없다.
+- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `member_replicas`, `outbox_events`
+- **설명:** 시작 전 `REGISTERED`만 `CANCELED`로 전이. 이미 취소됐으면 회원이 정지 상태여도 기존 취소를 반환한다. 시작 이후 `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409).
 - **요청 헤더:**
     
     
@@ -5714,8 +5888,9 @@
     }
     ```
     
-- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409)
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **발행:** `ExamParticipantCanceled`
+- **외부 의존:** 신규 취소는 `GET /internal/v1/members/{memberId}/status` (member, 1.7.1)로 회원 상태를 조회한다. 조회 실패·불완전 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503)이며, 이미 취소된 참가의 재요청은 조회 없이 기존 결과를 반환한다. 원격 조회 중에는 잠금을 유지하지 않고 조회 후 참가 상태를 다시 확인한다.
 
 #### 4.2.11 시험 Draft 조회
 
@@ -5898,7 +6073,7 @@
     }
     ```
     
-- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_CLOSED`(409), `RUN_IN_PROGRESS`(429), `RUN_TIMEOUT`(504), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400)
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_PROBLEM_NOT_INCLUDED`(404), `MEMBER_SUSPENDED`(403), `EXAM_CANCELED`(409), `EXAM_CLOSED`(409), `RUN_IN_PROGRESS`(429), `RUN_TIMEOUT`(504), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400), `COMMON_INVALID_REQUEST`(400), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **외부 의존:** `POST /internal/v1/judge/runs` (judge) — 실패 시 503
 
 ### 4.3 외부 API — 시험 실시간 결과
@@ -6853,7 +7028,7 @@
 
 #### 4.6.3 실패 시험 제출 재처리
 
-- **Method / URI:** `POST /api/v1/admin/exam-submissions/{examSubmissionId}/retry`
+- **Method / URI:** `POST /api/v1/exams/{examId}/submissions/{examSubmissionId}/retry`
 - **인증:** `ADMIN` 또는 해당 시험 스터디의 현재 `LEADER`·`MANAGER`. C가 최종 검증.
 - **대응 테이블:** `exams`, `exam_submissions`, `contest_admin_operations`, `audit_logs`
 - **설명:** `EXAM`·`FAILED` 및 부모 `FINALIZED` 전만. §4.8.5의 `POST /internal/v1/judge/submissions/{submissionId}/retry`로 새 회차 요청. `contest_admin_operations`를 먼저 `PENDING` 저장 후 원격 호출. 이 작업이 남으면 결과 확정을 보류.
@@ -6868,13 +7043,14 @@
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `examSubmissionId` | string | Y | — | Path · 식별자 문자열 |
+    | `examId` | string | Y | — | Path · 시험 ID 문자열 |
+    | `examSubmissionId` | string | Y | — | Path · 해당 시험의 접수 ID 문자열 |
 - **요청 본문:**
     
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
     | `expectedJudgeAttempt` | integer | Y | 처리 대상 종결 채점 회차 |
     | `reason` | string | Y | 조치 사유. 1~500자 |
     
@@ -6923,6 +7099,8 @@
 
 #### 4.6.4 실패 제출 종결 처리
 
+- 시험의 전달 전 크기 초과·지원 불가 언어 실패(`dispatch_failure_code=CODE_TOO_LARGE`·`UNSUPPORTED_LANGUAGE`)도 종결 대상이다. Judge 제출이 없으므로 `expectedJudgeAttempt=0`으로 검증하고 Judge 재처리·대사는 호출하지 않는다. 원문·언어·실패 사유를 보존하며 나머지 잠금·재계산·감사 규칙은 동일하다. 회차 0에서는 이 두 실패 사유와 Judge 연결 없음이 모두 확인돼야 하며, 종결 후 기존 시험 확정 경로로 진행한다.
+
 - **Method / URI:** `POST /api/v1/admin/contest-submissions/{context}/{receiptId}/resolution`
 - **인증:** `ADMIN`
 - **대응 테이블:** `exams`, `exam_participants`, `exam_submissions`, `exam_problem_results`, `contests`, `contest_participants`, `contest_submissions`, `contest_problem_results`, `contest_admin_operations`, `audit_logs`
@@ -6945,7 +7123,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
     | `action` | string | Y | 문맥 검증·관리 조치 종류. 해당 허용 값 적용 |
     | `expectedJudgeAttempt` | integer | Y | 처리 대상 종결 채점 회차 |
     | `reason` | string | Y | 조치 사유. 1~500자 |
@@ -7022,7 +7200,7 @@
     
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
     | `expectedResultRevision` | string | Y | 재확정 대상의 이전 결과 버전 문자열 |
     | `reason` | string | Y | 조치 사유. 1~500자 |
     
@@ -7135,8 +7313,10 @@
 
 #### 4.6.7 관리자 작업 상태 조회
 
-- **Method / URI:** `GET /api/v1/admin/contest-operations/{operationId}`
-- **인증:** `ADMIN` 또는 본인이 요청한 `EXAM_RETRY` 작업의 현재 시험 운영자. C가 작업 소유자·시험·D 구성원 권한 재검증.
+- **Method / URI:**
+    - 관리자: `GET /api/v1/admin/contest-operations?operationId={operationId}`, `GET /api/v1/admin/contest-operations/{operationId}`
+    - 시험 운영자: `GET /api/v1/exams/{examId}/operations?operationId={operationId}`, `GET /api/v1/exams/{examId}/operations/{operationId}`
+- **인증:** 관리자 경로는 `ADMIN` 전용. 시험 경로는 해당 시험 스터디의 현재 `LEADER`·`MANAGER` 전용이며 본인이 요청한 해당 시험의 `EXAM_RETRY` 작업만 조회한다. C가 작업 소유자·시험·D 구성원 권한을 재검증한다.
 - **대응 테이블:** `contest_admin_operations`
 - **설명:** 관리자 작업 상태 조회
 - **요청 헤더:**
@@ -7150,7 +7330,8 @@
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `operationId` | string | Y | — | Path · 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `examId` | string | 시험 경로에서 Y | — | Path · 시험 ID 문자열 |
+    | `operationId` | string | Y | — | Query 또는 Path · 호출자 생성 멱등 작업 ID. 1~100자. `/`가 포함된 ID는 URL 인코딩한 쿼리 값으로 전달한다. |
 - **요청 본문:** 없음
 - **응답 헤더:**
     
@@ -7347,8 +7528,9 @@
 - **비고:**
     - **MEMBER:** 자원 잠금 아래 실제 입장한 미확정 시험·대회가 있으면 WITHDRAWAL_BLOCKED_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 등록·입장을 차단한다.
     - **STUDY:** PREPARED와 신규 시험 생성 차단을 저장한다.
-    - 모든 SCHEDULED 시험을 동일 취소 계약으로 취소하고 등록자에게 알린다.
-    - 아직 시간상 진행 중인 시험이 있으면 202·ready=false·blockingExamIds 반환; 재요청 시 종료를 확인한다.
+    - 모든 SCHEDULED 시험을 동일 취소 계약으로 취소하고 등록자에게 알린다. 취소 이벤트의 `reason`은 `스터디 종료 준비로 시험이 취소되었습니다.`이다.
+    - 같은 `operationId`로 재요청하면 최초 `canceledExamIds`를 반환하고 현재 시험 상태로 `ready`와 `blockingExamIds`를 계산한다.
+    - 아직 시간상 진행 중인 시험이 있으면 202와 함께 `ready=false` 및 `blockingExamIds`를 반환한다.
     - 모든 시험이 CLOSED/FINALIZED/CANCELED면 ready=true. 아직 미확정인 CLOSED 시험은 차단하지 않는다.
     - **PROBLEM:** SCHEDULED 또는 시간상 진행 중인 시험·대회에 포함되면 PROBLEM_IN_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 문제 편입을 막는다.
     - EXAM_ONLY 종료공개와 고정 회차 채점은 가드와 분리한다.
@@ -7359,7 +7541,7 @@
     - 다른 본문은 422 IDEMPOTENCY_KEY_CONFLICT. 다른 PREPARED 작업이 점유하면 409 CONTEST_OPERATION_BLOCKED. expectedSourceVersion < 저장 sourceVersion은 409 SOURCE_VERSION_CONFLICT.
     - **PROBLEM 응답:** 신규 준비 성공은 200·`PREPARED`·`ready=true`이며 `canceledExamIds`·`blockingExamIds`는 빈 배열이다. 예정·진행 참조가 있으면 `PROBLEM_IN_ACTIVE_EXAM`(409)이며 PREPARED를 남기지 않는다. PROBLEM 준비로 시험·대회를 자동 취소하지 않는다.
     - **직렬화:** PROBLEM prepare와 시험 생성·문제 교체·대회 생성의 해당 문제 편입은 같은 `(PROBLEM, problemId)` 가드 행을 잠근다. 신규 가드 행은 유일 제약으로 먼저 확보한 후 잠근다. 둘 중 먼저 커밋한 결과를 다른 쪽이 확인하므로 사용 조회 뒤 신규 편입을 끼워 넣을 수 없다. 원격 HTTP는 이 잠금 밖에서 끝낸다.
-    - **준비 전 상태:** PROBLEM_HIDE는 다른 미종결 작업이 없는 OPEN 또는 BLOCKED에서 준비한다. prepared_from_state와 operation_result=PENDING을 같은 가드 트랜잭션에 저장한다. 반복 prepare는 원래 준비·종결 결과를 반환하고 기존 결과를 초기화하지 않는다.
+    - **준비 전 상태:** PROBLEM_HIDE는 다른 미종결 작업이 없는 OPEN 또는 BLOCKED에서 준비한다. prepared_from_state와 operation_result=PENDING을 같은 가드 트랜잭션에 저장한다. 회원·문제의 종결 작업은 작업별로 보존한다. 이후 다른 작업을 준비했어도 동일 prepare는 기존 결과를 반환하며 가드를 다시 준비하지 않는다.
     - **작업 유형:** MEMBER/WITHDRAWAL은 member-service, STUDY/STUDY_CLOSE는 study-service, PROBLEM/PROBLEM_HIDE는 problem-service만 호출한다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
@@ -7367,7 +7549,7 @@
 
 - **Method / URI:** `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/complete`, `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/cancel`
 - **인증:** §4.7.3의 자원 소유 서비스.
-- **대응 테이블:** `contest_resource_guards`
+- **대응 테이블:** `contest_resource_guards`, `contest_guard_operation_history`
 - **설명:** 자원 작업 완료·취소
 - **요청 헤더:** 없음
 - **요청 파라미터:**
@@ -7404,13 +7586,15 @@
     - **complete:** 소유 서비스가 자기 DB 상태를 변경한 뒤 호출한다.
     - 가드 operationId 일치와 expectedSourceVersion보다 큰 결과 버전을 확인해 operation_result=COMMITTED로 종결한다. source_version은 기존값과 결과 버전 중 큰 값으로 보존한다. PROBLEM은 최신 source_status가 결과보다 큰 버전의 PUBLIC이고 GENERAL 재공개인 경우에만 OPEN, 그 외 BLOCKED로 반영한다. PROBLEM complete의 버전은 Problem COMMITTED 결과와 같아야 하며, cancel은 원래 기대 버전을 사용하고 원천 상태를 증가시키지 않는다.
     - STUDY는 ready=true일 때만 완료한다.
-    - MemberWithdrawn/StudyClosed/ProblemStateChanged도 같은 완료 처리를 복구한다.
-    - **cancel:** 소유 서비스가 작업을 실행하지 않았음(`ABORTED`)을 확정한 뒤 취소한다. OPEN에서 준비한 작업은 OPEN으로 복귀한다. PROBLEM의 BLOCKED에서 후속 보관을 준비했으면 prepared_from_state=BLOCKED로 복원하고 operation_result=ABORTED를 보존한다.
-    - 반복 complete/cancel은 같은 operationResult와 상태를 반환한다. 취소는 현재 작업의 ABORTED 확인과 원래 기대 버전을 요구한다. 더 최신 원천 상태가 있으면 GENERAL·PUBLIC만 OPEN, PRIVATE·ARCHIVED는 BLOCKED이며, 그 외에는 준비 전 상태로 복원한다. 원천 버전은 감소시키지 않는다.
+    - `StudyClosed`와 `ProblemStateChanged`는 같은 완료 처리를 복구한다. 다른 준비 작업 중 관찰한 스터디 종료는 준비를 유지하고 이후 취소 시에도 신규 생성을 차단한다.
+    - `MemberWithdrawn`은 탈퇴 상태와 원천 버전을 반영한다. `PREPARED`인 회원 가드는 유지하며, 대사로 복구할 때는 §1.7.3에서 같은 `operationId`의 `COMMITTED` 결과와 완료 버전을 확인한 뒤 종결한다.
+    - **cancel:** 소유 서비스가 작업을 실행하지 않았음(`ABORTED`)을 확정한 뒤 취소한다. OPEN에서 준비한 작업은 OPEN으로 복귀하되 MEMBER의 더 최신 탈퇴 상태는 BLOCKED로 보존한다. PROBLEM의 BLOCKED에서 후속 보관을 준비했으면 prepared_from_state=BLOCKED로 복원하고 operation_result=ABORTED를 보존한다.
+    - 반복 complete/cancel은 같은 operationResult와 상태를 반환한다. 취소는 현재 작업의 ABORTED 확인과 원래 기대 버전을 요구한다. 문제는 준비 중 새로 반영한 스냅샷이 기대 버전 이상이고 최신 원천 버전과 같을 때 GENERAL·PUBLIC만 OPEN으로 복원한다. PRIVATE·ARCHIVED는 BLOCKED이며, 최신 스냅샷이 없으면 준비 전 상태로 복원한다. 원천 버전은 감소시키지 않는다.
     - 이미 완료된 작업은 취소 불가(409 OPERATION_ALREADY_COMPLETED). 스터디 준비로 취소된 시험을 자동 복원하지 않는다.
     - **응답 조건:** 반복 완료·취소는 같은 결과 반환. 오래된 작업 ID는 409 OPERATION_NOT_CURRENT.
+    - **종결 이력:** 직접 호출·대사·이벤트의 확인 경로를 가드 변경과 함께 저장한다. 사유는 직접 호출에서 받은 경우만 저장한다.
     - **복구:** C는 PREPARED 1분 초과 건을 5분 주기로 소유 서비스 operation 상태 API로 대사한다.
-    - COMMITTED는 complete, ABORTED는 cancel, PENDING/조회 실패는 유지·운영 알림. TTL 자동 해제 없음. PROBLEM의 GENERAL 재공개는 현재 작업을 덮어쓰지 않는 더 큰 PUBLIC 이벤트에만 OPEN이며 ARCHIVED는 해제하지 않는다. 미해결 PREPARED의 다른 작업을 PUBLIC 스냅샷만으로 취소하지 않는다. 해당 스냅샷의 sourceVersion·visibility·scope는 source_version·source_status·source_scope에 함께 보존하고 작업 종결 뒤 최신 상태로 차단을 결정한다. 오래된 스냅샷은 무시하고 ARCHIVED는 후속 해제하지 않는다.
+    - COMMITTED는 complete, ABORTED는 cancel, PENDING/조회 실패는 유지·운영 알림. TTL 자동 해제 없음. PROBLEM의 GENERAL 재공개는 현재 작업을 덮어쓰지 않는 더 큰 PUBLIC 이벤트에만 OPEN이며 ARCHIVED는 해제하지 않는다. 미해결 PREPARED의 다른 작업을 PUBLIC 스냅샷만으로 취소하지 않는다. 완료 버전과 전체 스냅샷 버전을 분리한다. 더 최신 전체 스냅샷은 보존하되 완료 버전보다 오래된 공개 스냅샷은 차단을 해제하지 않는다. ARCHIVED는 후속 해제하지 않는다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
 #### 4.7.5 스터디 시험 상태 조회
@@ -8382,6 +8566,9 @@
     
 - **에러:**
     - `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **동시성/멱등 보장:**
+    - 순회 결과와 실시간 `SubmissionJudged`(J1)를 함께 반영한다. 같은 `submissionId`의 같거나 낮은 `judgeAttempt`는 건너뛰고, 순회 결과에 없다는 이유로 동시에 반영된 이벤트의 행을 지우지 않는다.
+    - 순회 중 J1 유실이 확인되면 해당 이벤트를 재전달해 복제본 반영을 확인한다. 유실 범위를 특정할 수 없거나 재전달로 반영을 확인할 수 없으면, 대상 회원의 신규 일반 풀이 접수가 재조회 완료까지 중지되고 진행 중 채점이 모두 종결됐음을 운영 절차로 확인할 수 있을 때 첫 페이지부터 다시 조회한다. 이 전제나 복구 결과를 확인할 수 없으면 재동기화 완료를 보류하고 운영에 알린다.
 - **외부 의존:**
     - `GET /internal/v1/submissions/accepted?context=PRACTICE&userId=` (judge) — 실패 시 재동기화 중단, 운영 알림
 
@@ -8923,9 +9110,9 @@
 | 서비스 | 절 | API |
 | --- | --- | --- |
 | member | 1.6.1 ~ 1.6.3 | 회원 목록, 정지·해제, 권한 변경 |
-| problem | 2.3.1 ~ 2.3.11, 2.4, 2.5.2 ~ 2.5.4 | 문제 등록·회차·공개·비공개·보관·검증, 이미지, 태그 |
-| judge | 3.2.1 ~ 3.2.5 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구 |
-| contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, `FAILED` 0점 확정, 결과 재확정 |
+| problem | 2.3.1 ~ 2.3.11, 2.4, 2.5.2 ~ 2.5.4, 2.8.1 | 문제 등록·회차·공개·비공개·보관·검증, 이미지, 태그, 실패 Outbox 재처리 |
+| judge | 3.2.1 ~ 3.2.6 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구, 실패 Outbox 재처리 |
+| contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, 시험 실패 재처리·작업 조회, `FAILED` 0점 확정, 결과 재확정. 시험 운영자 경로는 §4.6.3·§4.6.7 참조 |
 | study | 5.6.1 ~ 5.6.2 | 스터디 강제 종료, AC 복제본 재동기화 |
 | notification | 7.2.1 | 시스템 전역 공지 알림 브로드캐스트 |
 
@@ -8974,11 +9161,12 @@
 | --- | --- | --- | --- | --- | --- |
 | `ExamSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 시험 제출·자동 제출 접수 트랜잭션 | C |
 | `ContestSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 대회 제출 접수 트랜잭션 | C |
-| `DiagnosisSubmissionRequested` v1 (확정 필요) | member | judge | SQS (경로 확정 필요) | 진단 문항 제출·자동 제출 | E |
+| `DiagnosisSubmissionRequested` v1 | member | judge | SQS `exam-submission-queue` | 진단 문항 제출·자동 제출 접수 트랜잭션 | E |
 | `SubmissionJudged` v1 | judge | notification, study, member, integration, problem | SNS 팬아웃 | `PRACTICE` 회차 정상 종결과 결과 커밋 | B |
 | `ExamSubmissionJudged` v1 | judge | contest | SNS 팬아웃 | `EXAM` 회차 정상 종결 | B |
 | `ContestSubmissionJudged` v1 | judge | contest | SNS 팬아웃 | `CONTEST` 회차 정상 종결 | B |
-| `SubmissionFailed` v1 | judge | notification, contest (진단 채점 시 member) | SNS 팬아웃 | 실행 시도 상한 초과로 `FAILED` | B |
+| `DiagnosisSubmissionJudged` v1 | judge | member | `judge-events` → `member-queue` | `DIAGNOSIS` 회차 정상 종결 | B |
+| `SubmissionFailed` v1 | judge | notification, contest(시험·대회), member(진단) | SNS 팬아웃 | 실행 시도 상한 또는 전체 처리 기한 초과로 `FAILED` | B |
 | `ProblemStateChanged` v2 | problem | study, contest | SNS 팬아웃 | 공개 상태·사용 회차·통과 언어 변경 | B |
 | `ProblemValidationRequested` v1 | problem | judge | 검증 SQS 직접 | 관리자 접수·새 회차 자동 검증 요청 커밋 | B |
 | `ProblemValidationCompleted` v1 | judge | problem | SNS 팬아웃 | 검증 최종 판정·결과 Outbox 커밋 | B |

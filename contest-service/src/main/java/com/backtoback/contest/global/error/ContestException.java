@@ -1,5 +1,7 @@
 package com.backtoback.contest.global.error;
 
+import org.springframework.http.HttpHeaders;
+
 import com.backtoback.common.exception.BusinessException;
 import com.backtoback.common.exception.ErrorCode;
 
@@ -20,5 +22,10 @@ public class ContestException extends BusinessException {
     public ContestException(ErrorCode errorCode, Throwable cause) {
         super(errorCode);
         initCause(cause);
+    }
+
+    /** 재시도 시간 등 오류 응답 헤더를 함께 전달한다. */
+    public ContestException(ErrorCode errorCode, HttpHeaders headers) {
+        super(errorCode, headers);
     }
 }

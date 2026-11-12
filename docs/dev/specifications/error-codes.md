@@ -1,7 +1,7 @@
 # 에러 코드 표
 
 > “API 명세서 v1.0 — 전문” 의 에러 코드 표
-> 
+>
 
 #### **Common · Auth**
 
@@ -18,6 +18,15 @@
 | `AUTH_LOGIN_CODE_INVALID` | 401 | 로그인 교환 코드가 없거나 만료됨 |
 | `AUTH_OAUTH_FAILED` | 502 | GitHub OAuth 응답 실패 |
 | `AUTH_ACCESS_DENIED` | 403 | 해당 리소스에 접근 권한 없음 |
+
+#### **Outbox 운영 (problem · judge)**
+
+Problem의 기존 오류 코드를 Judge 수동 재처리에도 사용하는 보완안이다. API 명세서 §2.8.1·§3.2.6을 따른다.
+
+| 오류 코드 | HTTP | 설명 |
+| --- | --- | --- |
+| `OUTBOX_EVENT_NOT_FOUND` | 404 | 요청을 받은 서비스 DB에 대상 Outbox 이벤트가 없거나 발생 7일 초과 |
+| `OUTBOX_EVENT_NOT_REPROCESSABLE` | 409 | 대상이 `FAILED`가 아니거나, 재처리 조건부 갱신에 실패함 |
 
 #### **Member · Level · Diagnosis**
 
@@ -68,15 +77,15 @@
 | 오류 코드 | HTTP | 설명 |
 | --- | --- | --- |
 | `UNSUPPORTED_LANGUAGE` | 400 | 지원하지 않거나 비활성 언어 |
-| `CODE_TOO_LARGE` | 413 | UTF-8 코드 64KB 초과 |
+| `CODE_TOO_LARGE` | 413 | UTF-8 코드 64KiB 초과. 시험 Draft·직접 제출은 채점 요청 이벤트의 직렬화 크기가 256KiB를 넘을 때도 반환한다. |
 | `SUBMISSION_RATE_LIMITED` | 429 | 분당 10회 또는 동일 문제 5초 간격 초과 (`Retry-After`) |
 | `SUBMISSION_NOT_FOUND` | 404 | 제출을 찾을 수 없거나 본인 제출이 아님 |
 | `SUBMISSION_JUDGING_IN_PROGRESS` | 409 | 진행 중 채점 회차가 있는 제출에 재채점·재처리 요청 |
 | `SUBMISSION_REJUDGE_NOT_ALLOWED` | 409 | 재채점 대상이 아님 (`PRACTICE`, 정상 판정, 결과 확정 후) |
 | `SUBMISSION_RUNTIME_UNAVAILABLE` | 409 | 지정된 실행 환경 스냅샷 부재·언어 불일치 또는 고정 런타임 미지원으로 신규 접수·재채점·재처리 불가 |
 | `SUBMISSION_REJUDGE_INPUT_UNAVAILABLE` | 409 | 원본 회차 데이터가 없거나 손상 |
-| `RUN_RATE_LIMITED` | 429 | 코드 실행(Run) 요청 한도 초과 |
-| `RUN_IN_PROGRESS` | 429 | 같은 회원의 Run이 실행 중 (`run:{memberId}` 락) |
+| `RUN_RATE_LIMITED` | 429 | 일반 Run 요청 시 같은 회원의 일반·시험 Run이 이미 실행 중 (동시 1개) |
+| `RUN_IN_PROGRESS` | 429 | 시험 내부 Run 요청 시 같은 회원의 일반·시험 Run이 이미 실행 중 (`run:{memberId}` 락, 동시 1개) |
 | `JUDGE0_CONNECTION_FAILED` | 503 | Judge0 연결 실패 또는 통신 시간 초과 |
 | `JUDGE0_RESPONSE_FAILED` | 503 | Judge0의 HTTP 오류 또는 올바르지 않은 응답 |
 | `JUDGE0_CONFIGURATION_INVALID` | 503 | Judge0 서버 주소 미설정으로 실행 요청 불가 |
@@ -89,6 +98,7 @@
 | `EXAM_NOT_FOUND` / `CONTEST_NOT_FOUND` | 404 | 부모 문맥 없음 |
 | `EXAM_SUBMISSION_NOT_FOUND` | 404 | 시험 접수 없음 |
 | `EXAM_NOT_ELIGIBLE` | 403 | 등록 시 `APPROVED` 구성원 복제본 없음 |
+| `EXAM_PARTICIPANT_LIMIT_REACHED` | 409 | 활성 참가 10,000명에 도달한 시험에 신규 등록 요청 |
 | `EXAM_NOT_REGISTERED` / `CONTEST_NOT_REGISTERED` | 403 | 활성 등록 없음 |
 | `EXAM_NOT_STARTED` / `CONTEST_NOT_STARTED` | 403 | 시작 전 입장·문제 조회 |
 | `EXAM_CLOSED` / `CONTEST_CLOSED` | 409 | 신규 저장·제출·Run 마감 |
@@ -98,6 +108,7 @@
 | `EXAM_REVISION_CONFLICT` / `CONTEST_REVISION_CONFLICT` | 409 | `version` 충돌 |
 | `EXAM_STUDY_CLOSED` | 409 | 스터디 종료 또는 종료 준비 |
 | `EXAM_PROBLEM_NOT_AVAILABLE` / `CONTEST_PROBLEM_NOT_AVAILABLE` | 409 | 새 편입할 공개 상태·범위 불일치 |
+| `CONTEST_DEPENDENCY_UNAVAILABLE` | 503 | Contest가 사용하는 스터디·문제 등 외부 의존 조회 실패 또는 불완전한 응답 |
 | `EXAM_PROBLEM_NOT_INCLUDED` / `CONTEST_PROBLEM_NOT_INCLUDED` | 404 | 문맥에 없는 문제 |
 | `PROBLEM_REVISION_NOT_INCLUDED` | 404 | 고정 회차와 불일치 |
 | `EXAM_PARTICIPATION_CANCELLATION_CLOSED` / `CONTEST_PARTICIPATION_CANCELLATION_CLOSED` | 409 | 시작 후 참가 취소 |
@@ -145,6 +156,7 @@
 | `HINT_LEVEL_SKIPPED` | 409 | 앞 단계 힌트를 받기 전에 다음 단계 요청 |
 | `HINT_DAILY_LIMIT_EXCEEDED` | 429 | 일일 힌트 요청 한도(20회) 초과 |
 | `HINT_REQUEST_NOT_FOUND` | 404 | 힌트 요청이 없거나 본인 요청이 아님 |
+| `HINT_FEATURE_DISABLED` | 503 | 힌트 기능 비활성화(기능 토글 off) |
 
 #### **Notification · GitHub**
 

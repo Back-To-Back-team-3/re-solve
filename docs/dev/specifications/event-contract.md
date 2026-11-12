@@ -1,7 +1,7 @@
 # 이벤트 계약서 v1.0
 
-> 최종 수정일: 2026.10.07(수)
-> 
+> 최종 수정일: 2026.11.11(화)
+>
 
 ---
 
@@ -56,7 +56,7 @@
 
 | 순서 값 | 이벤트 | 비교 단위 | 반영 조건 | 동일 값 처리 |
 | --- | --- | --- | --- | --- |
-| `judgeAttempt` | `SubmissionJudged`, `ExamSubmissionJudged`, `ContestSubmissionJudged`, `SubmissionFailed` | `submissionId` | 수신 > 저장 | 무시 (contest는 상충 시 격리) |
+| `judgeAttempt` | `SubmissionJudged`, `ExamSubmissionJudged`, `ContestSubmissionJudged`, `DiagnosisSubmissionJudged`, `SubmissionFailed` | `submissionId` | 수신 > 저장 | 무시 (contest는 상충 시 격리) |
 | `sourceVersion` | `MemberUpdated`, `MemberSuspended`, `MemberWithdrawn`, `ProblemStateChanged`, `StudyClosed` | 원천 애그리게이트 | 수신 > 저장 | 무시 |
 | `profileVersion` | `LearningProfileUpdated` | `memberId` | 수신 > 저장 | 무시 |
 | `contextRevision` / `examRevision` / `contestRevision` | 참가·설정·상태 이벤트 | `examId`·`contestId` | 수신 ≥ 저장 (종단 이벤트는 항상 우선) | 반영 (멱등) |
@@ -79,7 +79,7 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 메시지 최대 크기 | SQS 256KB. 코드 64KB 상한으로 채점 요청도 범위 안 |
+| 메시지 최대 크기 | 직렬화한 공통 헤더와 업무 필드를 합쳐 256KiB 이하. 코드 64KiB 이하만으로 JSON 이스케이프 후 크기가 보장되지는 않는다. 시험 Draft·직접 제출의 추가 검사는 API §4.2.4·§4.2.5를 따른다. |
 | Outbox 보관 | `PUBLISHED` 후 7일, 일 1회 정리 배치 |
 | `processed_events` 보관 | 14일 (SQS 최대 보관 14일과 동일) |
 | DLQ 보관 | 14일 (`MessageRetentionPeriod` 최대) |
@@ -115,6 +115,7 @@ flowchart LR
         QI[integration-queue]
         QX[exam-submission-queue]
         QV[problem-validation-queue]
+        QA[ai-queue]
     end
     M --> TM
     P --> TP
@@ -131,7 +132,7 @@ flowchart LR
     TP --> QS & QC
     TJ --> QM & QP & QC & QS & QN & QI
     TC --> QP & QS & QN
-    TS --> QM & QP & QC & QN
+    TS --> QM & QP & QC & QN & QA
     TI --> QN
 ```
 
@@ -160,6 +161,7 @@ flowchart LR
 | `study-queue` | study | 16 | 120초 | 5회 |
 | `notification-queue` | notification | 19 | 120초 | 5회 |
 | `integration-queue` | integration | 2 | 120초 | 5회 |
+| `ai-queue` | ai | 1 | 120초 | 5회 |
 - `exam-submission-queue`는 SSE-SQS(또는 KMS) 암호화와 judge 전용 수신 권한을 적용한다(코드 포함).
 - 구독 이벤트 목록은 §5 매트릭스가 원본이다. 필터 정책은 매트릭스에서 생성한다.
 
@@ -183,6 +185,8 @@ flowchart LR
 | M4 | `LearningProfileUpdated` v1 | member | study | SNS | 프로필 입력·변경, 레벨 확정·변경 | `profileVersion` | 확정 |
 | M5 | `TagLevelChanged` v1 | member | notification | SNS | 진단 결과·승급·하향·쿨타임 해제 | — | 확정 |
 | M6 | `DiagnosisSubmissionRequested` v1 | member | judge | SQS `exam-submission-queue` | 진단 문항 제출·자동 제출 | — | 확정 |
+| M7 | `DiagnosisStarted` v1 | member | study | SNS | 진단 세션 시작 (`IN_PROGRESS` 진입) | — | 확정 |
+| M8 | `DiagnosisClosed` v1 | member | study | SNS | 진단 세션 종료 (`IN_PROGRESS → CLOSED`) | — | 확정 |
 | P1 | `ProblemStateChanged` v1 / v2 | problem | study, contest | SNS | v1 기존 공개 계약 / v2 공개 상태·사용 회차·통과 언어 변경 | `sourceVersion` | v1 기존 계약 / v2 소비자 전환 확인 필요 |
 | P2 | `ProblemValidationRequested` v1 | problem | judge | 검증 SQS 직접 | 검증 접수·자동 재검증 요청 저장 | `validationId` 멱등 | 제공·소비 담당 확인 필요 |
 | P3 | `ProblemValidationCompleted` v1 | judge | problem | SNS | 검증 최종 판정 저장 | `validationId` 종결 1회 | 제공·소비 담당 확인 필요 |
@@ -214,6 +218,7 @@ flowchart LR
 | S6 | `AssignmentDeadlineApproaching` v1 | study | notification | SNS | 마감 24시간 이내 1회 | — | 확정 |
 | S7 | `AssignmentIncompleteRepeated` v1 | study | notification | SNS | 연속 2회 `INCOMPLETE` 발견 | — | 확정 |
 | S8 | `HintReady` v1 | study (AI 모듈) | notification, member(확정 필요) | SNS | 힌트 종결 (`READY`·`FALLBACK`·`BLOCKED`) | — | 확정 |
+| S9 | `HintRequested` v1 | study | ai | SNS | `hint_requests` REQUESTED INSERT와 같은 트랜잭션에서 Outbox 기록. aggregate = `hintRequestId` | — | 확정 |
 | I1 | `GitHubSyncFailed` v1 | integration | notification | SNS | Sync Job 최종 `FAILED` | — | 확정 |
 - API B.2와 다른 행: `StudyMemberJoined` 구독에서 notification 제외(대응 알림 유형 없음, API 7.0), `ContestParticipantRegistered`·`Canceled` 구독에서 notification 제외(대회는 `ContestStarted`로 알림). `MemberUpdated`·`MemberSuspended`의 "전 서비스"는 `member_replicas` 보유 서비스(problem·contest·study, ERD §3)로 한정했다. 근거는 §8.1.
 
@@ -269,7 +274,7 @@ flowchart LR
 
 | 소비자 | 처리 (정책 §9.4) |
 | --- | --- |
-| study | 가입 `APPROVED → LEFT`(카운터 −1)·`PENDING → CANCELED`, 학습 프로필 복제본·추천 결과·힌트 차단 복제본 삭제, 가입마다 `StudyMemberLeft`(`MEMBER_WITHDRAWN`) 발행. `member_ac_replicas`·진행 기록은 유지 |
+| study | 가입 `APPROVED → LEFT`(카운터 −1)·`PENDING → CANCELED`, 학습 프로필 복제본·추천 결과·힌트 차단 복제본 삭제, 가입마다 `StudyMemberLeft`(`MEMBER_WITHDRAWN`) 발행. `member_replicas` `member_status = WITHDRAWN`·`source_version` 갱신(지연 M1·M2 덮어쓰기 차단). `member_ac_replicas`·진행 기록은 유지 |
 | problem | `member_replicas` 익명화("탈퇴한 사용자"), 공유 풀이 `CANCELED` |
 | contest | 익명화, `MEMBER` 자원 가드 완료(도입 시). 참가 기록·결과는 유지 |
 | notification | 해당 회원 알림 물리 삭제, SSE 연결 종료 |
@@ -365,6 +370,38 @@ flowchart LR
 | 소비자 | 처리 |
 | --- | --- |
 | judge | `uk_submissions_context_source_submission(DIAGNOSIS, id)`로 멱등 생성, 레벨 접근 제한 미적용 |
+
+#### M7 `DiagnosisStarted` v1
+
+- **발행:** `diagnosis_attempts` 상태 `IN_PROGRESS` 진입 트랜잭션. aggregate = `diagnosisAttemptId`.
+- **경로:** SNS 팬아웃.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `diagnosisAttemptId` | string | Y | `diagnosis_attempts.id` |
+| `memberId` | string | Y |  |
+| `tagId` | string | Y | 진단 태그 ID |
+| `problemIds` | string[] | Y | 진단 세션 문제 ID 목록 |
+| `startsAt` | string (date-time) | Y | `diagnosis_attempts.started_at` |
+| `endsAt` | string (date-time) | Y | `diagnosis_attempts.ends_at` |
+
+| 소비자 | 처리 |
+| --- | --- |
+| study | `hint_block_replicas` 문제별 INSERT (`context_type=DIAGNOSIS`, `context_id=diagnosisAttemptId`, `context_revision=1` 고정) |
+
+#### M8 `DiagnosisClosed` v1
+
+- **발행:** `diagnosis_attempts` 상태 `IN_PROGRESS → CLOSED` 또는 만료 전이 트랜잭션. aggregate = `diagnosisAttemptId`.
+- **경로:** SNS 팬아웃.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `diagnosisAttemptId` | string | Y | `diagnosis_attempts.id` |
+| `memberId` | string | Y |  |
+
+| 소비자 | 처리 |
+| --- | --- |
+| study | `hint_block_replicas DELETE WHERE context_type = 'DIAGNOSIS' AND context_id = diagnosisAttemptId` |
 
 ### 4.2 problem (담당 B)
 
@@ -645,6 +682,9 @@ flowchart LR
 | `submissionType` | string | C1 | `MANUAL` / `AUTO` |
 | `receivedAt` | string (date-time) | Y | 불변 접수 시각 (AUTO는 `personal_ends_at`) |
 
+- 시험 Draft 저장과 신규 직접 제출은 향후 자동 제출을 포함한 채점 요청의 공통 직렬화 결과가 헤더 포함 256KiB 이하인지 확인한다. 기존 초과 Draft는 원문을 보존한 `FAILED` 자동 접수(`dispatch_failure_code=CODE_TOO_LARGE`, `judge_attempt=0`)와 참가 종료를 함께 저장한다. 해당 접수는 Judge 요청·Outbox를 만들지 않고, 관리자 0점 종결 전까지 결과 확정을 보류한다(API §4.2.6·§4.6.4).
+- 시험 접수는 최초 요청 메시지 전체를 접수와 함께 불변 보존한다. 원본 Outbox 삭제 후에도 대사에서 보존본과 접수 연결을 검증해 같은 `eventId`·헤더·본문으로 복원한다. 보존본과 원본이 모두 없는 기존 접수는 새 이벤트 ID를 만들지 않고 운영 오류로 남긴다 (DB §4.4.6, 스케줄러 §4.6).
+
 | 소비자 | 처리 |
 | --- | --- |
 | judge | `processed_events`·`submissions`(`QUEUED`, `submitted_at = receivedAt`)·`judge_jobs`(`PENDING`)를 한 트랜잭션 저장 후 메시지 삭제. `uk_submissions_context_source_submission` 위반 = 이미 접수 → 삭제만. judge 수신 시각으로 마감을 재판정하지 않는다 |
@@ -748,7 +788,7 @@ flowchart LR
 
 | 이벤트 | 발행 시점 | 필드 (aggregate = `examId`) | 소비자 처리 |
 | --- | --- | --- | --- |
-| `ExamStarted` | `ExamLifecycleScheduler` `IN_PROGRESS` 전이 | `examId`, `studyId`, `examRevision`, `startsAt`, `endsAt` | study: 차단 행 존재 확인(진단 지표). 차단은 시각 판정이라 필수 아님 |
+| `ExamStarted` | `ExamLifecycleScheduler` `IN_PROGRESS` 전이 | `examId`, `studyId`, `examRevision`, `startsAt`, `endsAt` | study: GENERATING 힌트 요청 BLOCKED 전이 + HintReady(result=BLOCKED) Outbox 발행. 차단 행 존재 확인(진단 지표) |
 | `ExamClosed` | `CLOSED` 전이 (전체 마감 초과) | `examId`, `studyId`, `examRevision`, `closedAt` | study: 해당 시험 차단 행 삭제 + 종단 표식. 알림 없음 |
 | `ExamCanceled` | 시작 전 취소 API, 스터디 종료 준비 | `examId`, `studyId`, `examRevision`, `canceledAt`, `reason`, `targetMemberIds` | study: 차단 삭제 + 종단. notification: `EXAM_CANCELED`, 예약 무효화 |
 
@@ -881,6 +921,26 @@ flowchart LR
 | member (확정 필요) | `READY`·`FALLBACK`이면 `hint_usage_replicas` `(memberId, problemId)` INSERT IGNORE(최초 시각 유지) → 해당 문제 AC 점수 1/2로 성취도 재계산 |
 - 순서 주의: 힌트 사용이 AC보다 늦게 와도 결과가 같도록 member는 성취도를 매번 재계산한다. 힌트 사용 시각과 AC 접수 시각의 선후로 1/2점 여부를 가를지는 E·D 확정 필요(§8.2).
 
+#### S9 `HintRequested` v1
+
+- **발행:** `hint_requests` REQUESTED INSERT와 같은 트랜잭션에서 Outbox 기록. aggregate = `hintRequestId`.
+- **경로:** SNS `study-events` 팬아웃 → SQS `ai-queue`.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `hintRequestId` | string | Y | `hint_requests.id` |
+| `memberId` | string | Y |  |
+| `problemId` | string | Y |  |
+| `problemRevisionId` | string | Y | 캐시 키 `hint:cache:{problemRevisionId}:{level}` |
+| `level` | integer (1~3) | Y | 1=접근방향 2=핵심아이디어 3=풀이절차 |
+| `problemTitle` | string | Y |  |
+| `problemBody` | string | Y | Markdown 원문. LLM 프롬프트 입력 |
+| `problemTags` | string[] | Y | 알고리즘 태그 목록. 비어 있으면 `[]` |
+
+| 소비자 | 처리 |
+| --- | --- |
+| ai | LLM 비동기 힌트 생성 — 캐시 조회 후 미적중 시 생성 → `HintReady` 발행 |
+
 ### 4.6 integration (담당 A)
 
 #### I1 `GitHubSyncFailed` v1
@@ -896,47 +956,50 @@ flowchart LR
 
 이 표가 SNS 구독 필터 정책의 원본이다. ● = 구독, ○ = 구독(확정 필요), 빈칸 = 구독 안 함.
 
-| 이벤트 | judge | member | problem | contest | study | notification | integration |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `MemberUpdated` |  |  | ● | ● | ● |  |  |
-| `MemberSuspended` |  |  | ● | ● | ● |  |  |
-| `MemberWithdrawn` |  |  | ● | ● | ● | ● | ● |
-| `LearningProfileUpdated` |  |  |  |  | ● |  |  |
-| `TagLevelChanged` |  |  |  |  |  | ● |  |
-| `DiagnosisSubmissionRequested` | ● |  |  |  |  |  |  |
-| `ProblemStateChanged` v1 / v2 |  |  |  | ● | ● |  |  |
-| `ProblemValidationRequested` v1 | ● |  |  |  |  |  |  |
-| `ProblemValidationCompleted` v1 |  |  | ● |  |  |  |  |
-| `SubmissionJudged` |  | ● | ● |  | ● | ● | ● |
-| `ExamSubmissionJudged` |  |  |  | ● |  |  |  |
-| `ContestSubmissionJudged` |  |  |  | ● |  |  |  |
-| `SubmissionFailed` |  | ● (진단) |  | ● |  | ● |  |
-| `DiagnosisSubmissionJudged` |  | ● |  |  |  |  |  |
-| `ExamSubmissionRequested` | ● |  |  |  |  |  |  |
-| `ContestSubmissionRequested` | ● |  |  |  |  |  |  |
-| `ExamParticipantRegistered` |  |  |  |  | ● | ● |  |
-| `ContestParticipantRegistered` |  |  |  |  | ● |  |  |
-| `ExamParticipantCanceled` |  |  |  |  | ● | ● |  |
-| `ContestParticipantCanceled` |  |  |  |  | ● |  |  |
-| `ExamUpdated` |  |  |  |  | ● | ● |  |
-| `ExamStarted` |  |  |  |  | ● |  |  |
-| `ExamClosed` |  |  |  |  | ● |  |  |
-| `ExamCanceled` |  |  |  |  | ● | ● |  |
-| `ExamFinalized` |  |  |  |  |  | ● |  |
-| `ContestStarted` |  |  |  |  |  | ● |  |
-| `ContestEnded` |  |  | ● |  | ● |  |  |
-| `ContestCanceled` |  |  |  |  | ● | ● |  |
-| `ContestFinalized` |  |  |  |  |  | ● |  |
-| `StudyMemberJoined` |  |  | ● | ● |  |  |  |
-| `StudyMemberLeft` |  |  | ● | ● |  | ● |  |
-| `StudyApplicationDecided` |  |  |  |  |  | ● |  |
-| `StudyClosed` |  |  |  | ● |  |  |  |
-| `AssignmentPublished` |  |  |  |  |  | ● |  |
-| `AssignmentDeadlineApproaching` |  |  |  |  |  | ● |  |
-| `AssignmentIncompleteRepeated` |  |  |  |  |  | ● |  |
-| `HintReady` |  | ○ |  |  |  | ● |  |
-| `GitHubSyncFailed` |  |  |  |  |  | ● |  |
-| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 16 | 19 | 2 |
+| 이벤트 | judge | member | problem | contest | study | notification | integration | ai |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `MemberUpdated` |  |  | ● | ● | ● |  |  |  |
+| `MemberSuspended` |  |  | ● | ● | ● |  |  |  |
+| `MemberWithdrawn` |  |  | ● | ● | ● | ● | ● |  |
+| `LearningProfileUpdated` |  |  |  |  | ● |  |  |  |
+| `TagLevelChanged` |  |  |  |  |  | ● |  |  |
+| `DiagnosisSubmissionRequested` | ● |  |  |  |  |  |  |  |
+| `DiagnosisStarted` |  |  |  |  | ● |  |  |  |
+| `DiagnosisClosed` |  |  |  |  | ● |  |  |  |
+| `ProblemStateChanged` v1 / v2 |  |  |  | ● | ● |  |  |  |
+| `ProblemValidationRequested` v1 | ● |  |  |  |  |  |  |  |
+| `ProblemValidationCompleted` v1 |  |  | ● |  |  |  |  |  |
+| `SubmissionJudged` |  | ● | ● |  | ● | ● | ● |  |
+| `ExamSubmissionJudged` |  |  |  | ● |  |  |  |  |
+| `ContestSubmissionJudged` |  |  |  | ● |  |  |  |  |
+| `SubmissionFailed` |  | ● (진단) |  | ● |  | ● |  |  |
+| `DiagnosisSubmissionJudged` |  | ● |  |  |  |  |  |  |
+| `ExamSubmissionRequested` | ● |  |  |  |  |  |  |  |
+| `ContestSubmissionRequested` | ● |  |  |  |  |  |  |  |
+| `ExamParticipantRegistered` |  |  |  |  | ● | ● |  |  |
+| `ContestParticipantRegistered` |  |  |  |  | ● |  |  |  |
+| `ExamParticipantCanceled` |  |  |  |  | ● | ● |  |  |
+| `ContestParticipantCanceled` |  |  |  |  | ● |  |  |  |
+| `ExamUpdated` |  |  |  |  | ● | ● |  |  |
+| `ExamStarted` |  |  |  |  | ● |  |  |  |
+| `ExamClosed` |  |  |  |  | ● |  |  |  |
+| `ExamCanceled` |  |  |  |  | ● | ● |  |  |
+| `ExamFinalized` |  |  |  |  |  | ● |  |  |
+| `ContestStarted` |  |  |  |  |  | ● |  |  |
+| `ContestEnded` |  |  | ● |  | ● |  |  |  |
+| `ContestCanceled` |  |  |  |  | ● | ● |  |  |
+| `ContestFinalized` |  |  |  |  |  | ● |  |  |
+| `StudyMemberJoined` |  |  | ● | ● |  |  |  |  |
+| `StudyMemberLeft` |  |  | ● | ● |  | ● |  |  |
+| `StudyApplicationDecided` |  |  |  |  |  | ● |  |  |
+| `StudyClosed` |  |  |  | ● |  |  |  |  |
+| `AssignmentPublished` |  |  |  |  |  | ● |  |  |
+| `AssignmentDeadlineApproaching` |  |  |  |  |  | ● |  |  |
+| `AssignmentIncompleteRepeated` |  |  |  |  |  | ● |  |  |
+| `HintReady` |  | ○ |  |  |  | ● |  |  |
+| `HintRequested` |  |  |  |  |  |  |  | ● |
+| `GitHubSyncFailed` |  |  |  |  |  | ● |  |  |
+| **합계** | 3 (+1) | 2 (+2) | 8 | 10 | 18 | 19 | 2 | 1 |
 
 ### 5.1 소비자 구현 체크리스트
 
@@ -1006,7 +1069,7 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 
 1. 대시보드에서 DLQ 메시지의 `eventType`·`eventId`·`correlationId`로 원인 로그를 찾는다.
 2. 원인(코드 버그·데이터 불일치)을 수정해 배포한다.
-3. SQS redrive로 원래 큐에 되돌린다. 이미 반영된 메시지는 `processed_events`로 흡수된다.
+3. SQS redrive로 원래 큐에 되돌린다. 시험 제출은 [시험 제출 DLQ 재전달 감사](../../operations/env-example.md#시험-제출-dlq-재전달-감사) 절에 따라 확인 큐에서 이동 메시지를 대조한 뒤 원래 제출 큐에 전송한다. 이미 반영된 메시지는 `processed_events`로 흡수된다.
 4. `processed_events` 보관(14일)을 넘긴 메시지는 재처리 전 해당 순서 값을 확인해 중복 반영이 없음을 검증한다.
 5. 재처리 사실을 `audit_logs`(judge: DLQ 재처리)에 남긴다.
 
@@ -1018,8 +1081,8 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 | --- | --- | --- |
 | 4 | `SubmissionJudged`에 `problemTagIds`·`language`·`problemTitle`·`judgedAt` 추가 | J1 표 (하위 호환 추가) |
 | 6 | `HintReady` member 구독, `completedAt` 추가, 힌트 사용 1/2점 판정 기준(AC보다 먼저 쓴 힌트만?) | S8 |
-| 7 | `hint_block_replicas.participant_id` 컬럼 추가 (참가 취소 우선 규칙 구현) | C5 처리 |
-| 8 | 진단 중 힌트 차단 판정 경로 | 후보: member `DiagnosisStarted`/`DiagnosisClosed` 이벤트로 study 복제본, 또는 study → member 내부 조회 |
+| 7 | ~~`hint_block_replicas.participant_id` 컬럼 추가 (참가 취소 우선 규칙 구현)~~ 생략 확정 — UK `(member_id, context_type, context_id, problem_id)`로 충분 (2026-11-10) | C5 처리 |
+| 8 | ~~진단 중 힌트 차단 판정 경로~~ 이벤트 방식 선택됨 — M7 `DiagnosisStarted`·M8 `DiagnosisClosed` (2026-11-10) | M7·M8 §4.1 |
 | 9 | SNS 토픽·큐 이름, 최대 수신 횟수(5회) | §2 |
 | 10 | `study_membership_replicas` 재동기화 API | §7.2 |
 | 11 | `practice_result_replicas` 재동기화용 판정 무관 조회 | §7.2 |

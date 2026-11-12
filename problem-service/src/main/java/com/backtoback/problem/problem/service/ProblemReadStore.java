@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.problem.global.error.ProblemErrorCode;
 import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.domain.Problem;
 import com.backtoback.problem.problem.domain.ProblemRevision;
@@ -17,6 +18,7 @@ import com.backtoback.problem.problem.dto.request.ProblemSearchRequest;
 import com.backtoback.problem.problem.repository.ProblemRepository;
 import com.backtoback.problem.problem.repository.ProblemRevisionRepository;
 import com.backtoback.problem.problem.repository.ProblemSearchRepository;
+import com.backtoback.problem.problem.repository.ProblemSearchRepository.DiagnosisCandidate;
 import com.backtoback.problem.problem.repository.ProblemValidationRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -98,6 +100,25 @@ public class ProblemReadStore {
                         || "CONTEST".equals(purpose) && problem.getScope() == ProblemScope.EXAM_ONLY);
             return item(id, problem, revision, available, false);
         }).toList();
+    }
+
+    /**
+     * 진단 태그가 존재하는지 확인하고 같은 조회 시점의 후보를 조회한다.
+     *
+     * @param tagId 진단 태그 ID
+     * @return 난이도별로 고른 후보
+     * @throws ProblemException 태그 ID가 양수가 아니거나 태그가 존재하지 않는 경우
+     */
+    @Transactional(readOnly = true)
+    public List<DiagnosisCandidate> diagnosisCandidates(long tagId) {
+        if (tagId <= 0) {
+            throw new ProblemException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        }
+        if (!Boolean.TRUE
+            .equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM tags WHERE id=?)", Boolean.class, tagId))) {
+            throw new ProblemException(ProblemErrorCode.PROBLEM_TAG_NOT_FOUND);
+        }
+        return search.findDiagnosisCandidates(tagId);
     }
 
     /**

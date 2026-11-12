@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -42,6 +43,7 @@ import com.backtoback.judge.judging.service.execution.ExecutionCodeGenerator;
 import com.backtoback.judge.judging.service.execution.JudgeResultEvaluator;
 import com.backtoback.judge.judging.service.execution.dto.ExecutionSource;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionCreateResponse;
+import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse;
 import com.backtoback.judge.judging.service.execution.dto.JudgeExecutionResultResponse.State;
 import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.backtoback.judge.judging.service.execution.dto.JudgeTestResult;
@@ -64,6 +66,7 @@ class SubmissionWorkerTest {
     @Mock
     private JudgeResultEvaluator evaluator;
     private SubmissionWorker worker;
+    private JudgeEngineCircuit circuit;
     private SubmissionJudgingDataResponse data;
     private final JudgeRuntime runtime = new JudgeRuntime("java", 91, "Java (OpenJDK 17.0.6)", "17.0.6", null);
     private final SubmissionLease lease
@@ -76,6 +79,7 @@ class SubmissionWorkerTest {
      */
     @BeforeEach
     void prepare() throws InterruptedException {
+        circuit = new JudgeEngineCircuit(Clock.systemUTC());
         worker
             = new SubmissionWorker(
                 store,
@@ -85,7 +89,8 @@ class SubmissionWorkerTest {
                 List.of(generator),
                 client,
                 evaluator,
-                Clock.fixed(Instant.parse("2026-10-31T00:00:00Z"), ZoneOffset.UTC)
+                Clock.fixed(Instant.parse("2026-10-31T00:00:00Z"), ZoneOffset.UTC),
+                circuit
             );
         data
             = new SubmissionJudgingDataResponse(
@@ -111,7 +116,8 @@ class SubmissionWorkerTest {
                             false,
                             new SubmissionJudgingDataResponse.Asset("second", "v1", "b".repeat(64))
                         )
-                    )
+                    ),
+                List.of()
             );
         given(store.claim()).willReturn(Optional.of(lease));
         given(store.active(lease)).willReturn(true);
@@ -138,8 +144,12 @@ class SubmissionWorkerTest {
             assertThat(org.slf4j.MDC.get("correlationId")).isEqualTo(lease.correlationId());
             return new JudgeExecutionCreateResponse("token", runtime);
         });
+        given(client.find("token"))
+            .willReturn(
+                new JudgeExecutionResultResponse(State.COMPLETED, 3, "1", null, null, null, null, null, 0, null)
+            );
         given(store.saveToken(eq(lease), anyInt(), eq("token"))).willReturn(true);
-        given(store.saveResult(eq(lease), anyInt(), any())).willReturn(true);
+        given(store.saveResult(eq(lease), anyInt(), any(), any())).willReturn(true);
         given(evaluator.evaluate(any(), any(), eq("1"), eq(1024), eq(64)))
             .willReturn(
                 new JudgeTestResult(State.COMPLETED, JudgeVerdict.WA, 1, null, "0", null, null),
@@ -149,7 +159,78 @@ class SubmissionWorkerTest {
         verify(assets).read(data.cases().get(0).asset());
         verify(assets).read(data.cases().get(1).asset());
         verify(client, times(2)).create(any());
-        verify(store).complete(lease, data, null);
+        verify(store).complete(lease, data);
+    }
+
+    /** 임대 회수 후 결과 조회가 타임아웃되어도 같은 토큰으로 재조회해 채점을 마치는지 확인한다. */
+    @Test
+    @DisplayName("회수한 테스트의 결과 조회가 타임아웃되면 같은 Judge0 토큰으로 재조회해 완료한다")
+    void retriesTimedOutPollWithResumedToken() {
+        given(store.completedOrders(lease)).willReturn(java.util.Set.of(1));
+        given(store.resumableTokens(lease)).willReturn(Map.of(2, "second"));
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        var response = new JudgeExecutionResultResponse(State.COMPLETED, 3, "1", null, null, null, null, null, 0, null);
+        var result = new JudgeTestResult(State.COMPLETED, JudgeVerdict.AC, 1, null, "1", null, null);
+        given(client.find("second"))
+            .willThrow(new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED))
+            .willReturn(response);
+        given(evaluator.evaluate(eq(response), any(), eq("1"), eq(1024), eq(64))).willReturn(result);
+        given(store.saveResult(lease, 2, "second", result)).willReturn(true);
+
+        assertThat(worker.runOnce()).isTrue();
+        verify(client, never()).find("first");
+        verify(client, times(2)).find("second");
+        verify(client, never()).create(any());
+        verify(store).saveResult(lease, 2, "second", result);
+        verify(store).complete(lease, data);
+    }
+
+    /** 미확정 외부 제출은 고정 환경을 저장한 뒤 그 환경으로 Judge0를 호출한다. */
+    @Test
+    @DisplayName("외부 제출은 런타임과 테스트를 먼저 확정한 뒤 해당 런타임으로 실행한다")
+    void initializesExternalBeforeExecution() {
+        given(store.input(lease)).willReturn(new SubmissionExecutionInput(1, 1, "java", "code", null));
+        given(store.initializeExternal(lease, data, "java")).willReturn(Optional.of(runtime));
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        given(store.beginCreate(lease, 1)).willReturn(true);
+        given(client.create(any())).willThrow(new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED));
+
+        assertThat(worker.runOnce()).isTrue();
+
+        var order = inOrder(store, languages, client);
+        order.verify(store).initializeExternal(lease, data, "java");
+        order.verify(store).validateCases(lease, data);
+        order.verify(languages).requireRuntime("java", runtime);
+        order.verify(client).create(any());
+    }
+
+    /** 선점 후 첫 HTTP 호출 전에 서킷이 열리면 미호출 작업을 같은 시도에 반환한다. */
+    @Test
+    @DisplayName("선점 후 자료 조회 중 서킷이 열리면 실행 생성 없이 임대를 반환한다")
+    void releasesUncalledClaimWhenCircuitOpens() {
+        given(dataClient.find(1, 1)).willAnswer(call -> {
+            try (var other = circuit.acquire().orElseThrow()) {
+                for (int index = 0; index < 5; index++) {
+                    try {
+                        other.invoke(() -> {
+                            throw new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED);
+                        });
+                    } catch (JudgeException expected) {
+                        // 다른 워커의 연속 통신 실패를 재현한다.
+                    }
+                }
+            }
+            return data;
+        });
+        given(generator.generate(any(), eq("code"), any()))
+            .willReturn(new ExecutionSource(JudgeLanguage.JAVA, "generated", "stdin"));
+        assertThat(worker.runOnce()).isTrue();
+        verify(store).releaseUncalled(lease);
+        verify(store, never()).beginCreate(any(), anyInt());
+        verify(client, never()).create(any());
+        verify(store, never()).fail(any(), any());
     }
 
     /** 생성기 오류가 Judge0 장애로 기록되거나 외부 실행을 생성하지 않는지 확인한다. */
@@ -173,7 +254,7 @@ class SubmissionWorkerTest {
         given(client.create(any())).willThrow(new JudgeException(JudgeErrorCode.JUDGE0_CONNECTION_FAILED));
         assertThat(worker.runOnce()).isTrue();
         verify(client, times(1)).create(any());
-        verify(store, never()).complete(any(), any(), any());
+        verify(store, never()).complete(any(), any());
         verify(store, never()).fail(any(), any());
     }
 

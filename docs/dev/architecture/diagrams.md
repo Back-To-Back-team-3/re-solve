@@ -274,7 +274,7 @@ stateDiagram-v2
 ### 1.4 진단 테스트 흐름
 
 - 목적: 진단 시작부터 종료·채점·레벨 확정까지와 이탈 복구를 보여준다.
-- 경합·실패 포인트: 동시 시작, 수동 종료와 만료 경합, 종료 후 저장, 채점 `FAILED`(쿨타임 면제). 진단 채점 요청 경로·결과 이벤트명은 확정 필요(이벤트 계약서 M6·J5).
+- 경합·실패 포인트: 동시 시작, 수동 종료와 만료 경합, 종료 후 저장, 채점 `FAILED`(쿨타임 면제). 진단 채점 요청과 결과는 이벤트 계약서 M6·J5·J4를 따른다.
 
 ```mermaid
 sequenceDiagram
@@ -315,7 +315,7 @@ sequenceDiagram
         S->>M: ends_at+3초 도달 → CLOSED(EXPIRED) + AUTO 제출
     end
     Note over M,S: 두 경로는 같은 조건부 UPDATE → 한쪽만 종료
-    J-->>M: DiagnosisSubmissionJudged / SubmissionFailed (확정 필요)
+    J-->>M: judge-events → member-queue (DiagnosisSubmissionJudged / SubmissionFailed)
     M->>M: 모든 제출 종결 시 CLOSED → SCORED<br/>AC 문항 최고 난이도 = 결과, level = max(현재, 결과)
     opt FAILED 포함
         M->>M: is_cooldown_exempt = true

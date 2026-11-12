@@ -25,12 +25,14 @@ import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.common.event.store.JdbcEventCleanupStore;
+import com.backtoback.common.event.store.JdbcOutboxStore;
 import com.backtoback.common.scheduling.config.EventCleanupStorageConfiguration;
 
 /**
@@ -237,6 +239,42 @@ class EventRecordCleanupIntegrationTest {
             .isInstanceOf(IllegalTransactionStateException.class);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class)).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM processed_events", Integer.class)).isEqualTo(1);
+    }
+
+    /**
+     * 삭제 트랜잭션이 열린 상태에서 다른 DB 연결로 Outbox 발행 완료까지 커밋할 수 있는지 검증한다.
+     */
+    @Test
+    @DisplayName("만료 Outbox 정리 중 다른 연결에서 대기 Outbox를 발행 완료로 갱신한다")
+    void publishesPendingEventWhileCleanupTransactionIsOpen() {
+        // given
+        saveOutbox(1, "PENDING", null);
+        saveOutbox(2, "PUBLISHED", NOW.minusDays(8));
+        var manager = context.getBean(PlatformTransactionManager.class);
+        var relayTransaction = new TransactionTemplate(manager);
+        relayTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        var outbox = new JdbcOutboxStore(jdbcTemplate);
+        var cleanupStore = new JdbcEventCleanupStore(jdbcTemplate) {
+            /** {@inheritDoc} */
+            @Override
+            public int deletePublishedBefore(LocalDateTime cutoff) {
+                int deleted = store.deletePublishedBefore(cutoff);
+                // 정리 트랜잭션을 중단한 상태에서 별도 연결로 실제 선점·갱신 쿼리를 실행한다.
+                relayTransaction.executeWithoutResult(status -> {
+                    jdbcTemplate.execute("SET SESSION innodb_lock_wait_timeout = 1");
+                    var pending = outbox.lockNextPending(0).orElseThrow();
+                    assertThat(pending.id()).isEqualTo(1);
+                    outbox.markPublished(pending.id(), NOW);
+                });
+                return deleted;
+            }
+        };
+        var cleanup = new EventRecordCleanupService(cleanupStore, context.getBean(Clock.class), manager);
+
+        // when & then
+        assertThat(cleanup.cleanPublishedEvents()).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForList("SELECT id FROM outbox_events WHERE status='PUBLISHED'", Long.class))
+            .containsExactly(1L);
     }
 
     /**

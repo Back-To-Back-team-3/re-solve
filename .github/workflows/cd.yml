@@ -1,75 +1,135 @@
-name: CD
+name: Re:Solve Backend CD (ECS Fargate)
 
 on:
-  workflow_run:
-    workflows: ["Docker Build & Push"]
-    types:
-      - completed
-    branches: [ develop, main ]
+  push:
+    branches: [ "main" ]
   workflow_dispatch:
     inputs:
-      environment:
-        description: '배포 환경'
+      target_service:
+        description: '배포할 서비스 선택 (전체 배포는 all)'
         required: true
-        default: 'staging'
+        default: 'all'
         type: choice
         options:
-          - staging
-          - production
-      services:
-        description: '배포할 서비스 (공백으로 구분, 미입력 시 all)'
+          - all
+          - api-gateway
+          - member-service
+          - problem-service
+          - judge-service
+          - contest-service
+          - study-service
+          - notification-service
+          - integration-service
+          - ai-service
+          - analytics-service
+      target_tag:
+        description: '배포할 이미지 태그'
         required: false
-        default: 'all'
-        type: string
+        default: 'latest'
 
 permissions:
+  id-token: write  # AWS OIDC 연동 필수
   contents: read
 
+env:
+  AWS_REGION: ap-northeast-2
+  AWS_ACCOUNT_ID: "179923444818"
+  ECS_CLUSTER: "resolve-cluster"
+
 jobs:
-  deploy:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-24.04
-    concurrency:
-      group: cd-${{ github.event.inputs.environment || (github.event.workflow_run.head_branch == 'main' && 'production' || 'staging') }}
-      cancel-in-progress: false
+  build-and-deploy:
+    name: Build & Deploy to AWS ECS
+    runs-on: ubuntu-latest
+
     steps:
-      - name: 배포 환경 및 대상 서비스 결정
-        id: env
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TARGET_ENV="${{ github.event.inputs.environment }}"
-            TARGET_SERVICES="${{ github.event.inputs.services || 'all' }}"
-          else
-            if [ "${{ github.event.workflow_run.head_branch }}" = "main" ]; then
-              TARGET_ENV="production"
-            else
-              TARGET_ENV="staging"
-            fi
-            TARGET_SERVICES="all"
-          fi
-          echo "target_env=$TARGET_ENV" >> $GITHUB_OUTPUT
-          echo "target_services=$TARGET_SERVICES" >> $GITHUB_OUTPUT
-          echo "🚀 배포 대상 환경: $TARGET_ENV"
-          echo "🚀 배포 대상 서비스: $TARGET_SERVICES"
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: EC2 원격 배포 실행 (SSH)
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
         with:
-          host: ${{ steps.env.outputs.target_env == 'production' && secrets.PROD_EC2_HOST || secrets.STAGING_EC2_HOST }}
-          username: ${{ steps.env.outputs.target_env == 'production' && secrets.PROD_EC2_USER || secrets.STAGING_EC2_USER }}
-          key: ${{ steps.env.outputs.target_env == 'production' && secrets.PROD_EC2_SSH_KEY || secrets.STAGING_EC2_SSH_KEY }}
-          port: 22
-          script: |
-            set -eo pipefail
-            APP_DIR="${{ steps.env.outputs.target_env == 'production' && (secrets.PROD_APP_DIR || '/home/ubuntu/re-solve') || (secrets.STAGING_APP_DIR || '/home/ubuntu/re-solve') }}"
-            cd "$APP_DIR"
-            
-            echo "📥 저장소 코드 갱신 중..."
-            git fetch origin
-            BRANCH="${{ github.event.workflow_run.head_branch || (steps.env.outputs.target_env == 'production' && 'main' || 'develop') }}"
-            git checkout "$BRANCH"
-            git pull origin "$BRANCH"
+          java-version: '21'
+          distribution: 'temurin'
 
-            echo "🚀 배포 스크립트 실행..."
-            chmod +x ./scripts/deploy/*.sh
-            ./scripts/deploy/deploy.sh ${{ steps.env.outputs.target_services }}
+      - name: Cache Gradle Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # 1. 전체 서비스 Jar 빌드
+      - name: Build Spring Boot Jars
+        run: ./gradlew bootJar -x test
+
+      # 2. AWS OIDC 자격 증명 설정
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 3. Amazon ECR 로그인
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 4. 루트 Dockerfile을 사용해 이미지 빌드(linux/amd64), ECR 푸시 및 ECS 서비스 롤링 배포
+      - name: Build, Push to ECR & Update ECS Services
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          ALL_SERVICES=(
+            "api-gateway"
+            "member-service"
+            "problem-service"
+            "judge-service"
+            "contest-service"
+            "study-service"
+            "notification-service"
+            "integration-service"
+            "ai-service"
+            "analytics-service"
+          )
+
+          TARGET="${{ github.event.inputs.target_service || 'all' }}"
+          TAG="${{ github.event.inputs.target_tag || 'latest' }}"
+
+          if [ "$TARGET" == "all" ]; then
+            SERVICES=("${ALL_SERVICES[@]}")
+          else
+            SERVICES=("$TARGET")
+          fi
+
+          for SERVICE in "${SERVICES[@]}"; do
+            if [ ! -d "./$SERVICE" ]; then
+              echo "⚠️ ./$SERVICE 디렉터리가 없어 건너뜁니다."
+              continue
+            fi
+
+            IMAGE_REPO="${ECR_REGISTRY}/re-solve-${SERVICE}"
+            echo "=========================================="
+            echo "🚀 Building & Pushing $SERVICE (linux/amd64)..."
+            echo "=========================================="
+
+            docker build \
+              --platform linux/amd64 \
+              -t "${IMAGE_REPO}:${TAG}" \
+              -t "${IMAGE_REPO}:${GITHUB_SHA}" \
+              -f ./Dockerfile "./${SERVICE}"
+
+            docker push "${IMAGE_REPO}:${TAG}"
+            docker push "${IMAGE_REPO}:${GITHUB_SHA}"
+
+            echo "🔄 Updating ECS Service: $SERVICE in cluster $ECS_CLUSTER..."
+            aws ecs update-service \
+              --region "${AWS_REGION}" \
+              --cluster "${ECS_CLUSTER}" \
+              --service "${SERVICE}" \
+              --force-new-deployment > /dev/null || echo "⚠️ ECS 서비스 $SERVICE 업데이트 실패 (아직 생성되지 않았을 수 있음)"
+
+            echo "✅ $SERVICE 처리 완료!"
+          done

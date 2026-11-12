@@ -180,6 +180,8 @@
 > 
 - `UnlinkedAssetCleanupScheduler` — 매일 04:30, 미연결 본문·테스트·이미지·검증 코드의 유예 경과 파일 정리
 - `TagCreationRecordCleanupScheduler` — 매시 정각, 만료된 태그 생성 멱등 기록 정리
+- `OutboxCleanupScheduler` — 7일 경과 발행 완료 Outbox 이벤트 정리 (→ 공통 §0.2.2)
+- `ProcessedEventCleanupScheduler` — 14일 경과 소비 기록 정리 (→ 공통 §0.2.3)
 
 > 문제 공개·회차 전이는 관리자 API가 즉시 수행하므로 상태 전이 스케줄러는 없다. 검수 워크플로(P2, 보류)를 도입하면 심사 만료 스케줄러를 추가한다.
 > 
@@ -269,7 +271,7 @@
 - `JudgeTokenRecoveryScheduler` — 30초, Judge0 token 응답 유실(`UNKNOWN`) 복구
 - `JudgeReconciliationScheduler` — 5분, `submissions` ↔ `judge_jobs` 상태 대사
 - `RunLockReconciliationScheduler` — 1분, 비정상 종료된 `run:{memberId}` 락 해제
-- `JudgeBacklogMonitorScheduler` — 1분, 적체·서킷 상태 지표
+- `JudgeQueueMetrics` — Prometheus 수집 주기에 현재 DB 적체·실패 지표 관측
 
 ### 3.0 상태 대응 (정책 §10)
 
@@ -292,15 +294,18 @@
 | 트랜잭션 경계 | ① 선점 Tx: `RUNNING`·`lease_token` 신규·`lease_until = now + 120초`·`try_count`는 그대로, 제출 `JUDGING` ② Tx 밖: 채점 데이터 조회·Judge0 실행·폴링 ③ 결과 Tx: 상태·임대 토큰·처리 기한 조건부 UPDATE + 제출 반영 + Outbox |
 | 임대 연장 | 실행 중 30초마다 `UPDATE … SET lease_until = now + 120초 WHERE id = :id AND status = 'RUNNING' AND lease_token = :token AND deadline_at > :now`. 0행이면 즉시 실행 중단 |
 | 상태 전이 | 성공: 작업 `SUCCEEDED`, 제출 `COMPLETED`(+판정). `SYSTEM_ERROR`: `try_count + 1`, `RETRY_WAITING`·`next_run_at = now + 10초/30초`, 제출 `QUEUED`. `try_count > 3`: 작업·제출 `FAILED` |
-| 발행 이벤트 | 문맥별 `SubmissionJudged` / `ExamSubmissionJudged` / `ContestSubmissionJudged`(+진단 확정 필요), 실패 시 `SubmissionFailed` |
+| 발행 이벤트 | 문맥별 `SubmissionJudged` / `ExamSubmissionJudged` / `ContestSubmissionJudged` / `DiagnosisSubmissionJudged`, 실패 시 `SubmissionFailed` |
 | 지표 | 대기→선점 p95(평시 ≤ 10초, 마감 폭주 ≤ 60초), 실행 시간, 시도 결과별 건수 |
 
 **동작:**
 
-1. 선점 후 `judge_job_runs`에 시도 1행을 만들고 고정 회차 채점 데이터(2.6.2)를 조회한다. 조회 실패는 `SYSTEM_ERROR` 처리.
+1. 선점 후 서킷 호출 허가를 확인하고, 허가받은 실행은 `judge_job_runs`에 시도 1행을 만든 뒤 고정 회차 채점 데이터(2.6.2)를 조회한다. 조회 실패는 기존 `SYSTEM_ERROR`로 처리한다. 서킷 차단으로 호출하지 못한 선점 반환은 실행 이력 생성 전에 처리한다.
 2. 테스트별로 `judge_test_results.token_status`를 보고 `NOT_CREATED`면 Judge0 실행 생성, `CREATED`면 기존 token으로 폴링만 한다(조회 실패로 새 실행 생성 금지, T2-09-03). 생성 응답이 유실되면 `UNKNOWN`으로 기록하고 3.3이 복구한다.
 3. 전체 테스트 종결 후 판정 정규화(MLE 메모리 보정 포함) → 결과 Tx에서 `WHERE status = 'RUNNING' AND lease_token = :token AND deadline_at > :now`로 저장. 0행이면 결과를 버린다. 실행 생성·폴링을 시작하기 전에도 기한을 확인하며, 기한이 지났으면 추가 호출을 중단하고 3.2의 실패 종결 대상으로 둔다.
-4. Judge0 서킷이 열리면 새 선점을 멈춘다(정책 §3.4). 실행 중 작업은 임대 만료로 회수되도록 둔다. 3.2의 기한 초과 작업 종결은 서킷 상태나 선점 중단과 무관하게 계속 수행한다.
+4. 서킷 허가를 받지 못한 미호출 선점 작업은 `status = RUNNING AND lease_token = :token AND deadline_at > :now` 조건으로 `RETRY_WAITING`·제출 `QUEUED`에 반환하고, `try_count`를 늘리지 않은 채 임대 토큰·만료를 해제한다. 이미 호출한 작업은 토큰을 보존하고 기존 임대 회수·재개 기준을 따른다. 기한이 지난 작업은 대기로 반환하지 않으며 3.2의 실패 종결은 서킷 상태와 관계없이 계속 수행한다.
+5. 정책 §3.4의 복구 확인 시각이 되면 인스턴스 안에서 호출 허가 1개만 원자적으로 부여하고, 일반 선점을 중단한 상태에서도 기존 선점 조건으로 작업 1개를 선정한다. 저장된 token이 있으면 조회, 없으면 기존 token 상태에 따라 실행 생성·응답 유실 복구를 적용한다. 첫 실제 Judge0 응답으로 서킷 복구를 판단한다. 후보가 없거나 호출하지 못했으면 허가를 반환해 다음 폴링에서 다시 확인하며 성공으로 간주하지 않는다. 정상 선점은 서킷이 닫힌 뒤 재개한다.
+- 서킷 응답은 HTTP 호출 시작 시각의 세대를 기준으로 반영한다. 이전 차단·복구 주기의 늦은 응답은 현재 서킷을 바꾸지 않으며 복구 확인이 성공한 뒤 같은 작업의 후속 호출은 새 세대에서 실패를 집계한다. `judge_engine_circuit_state`는 CLOSED=0, OPEN=1, HALF_OPEN=2다.
+
 
 **동시성 설계 포인트:**
 
@@ -330,17 +335,20 @@
 | 상태 전이 | 기한 초과는 원래 상태에서 `FAILED`로 직접 종결한다. 기한 내 임대 만료·장시간 실행 회수는 `RUNNING → RETRY_WAITING`(`try_count + 1`, 실행 시도 `LEASE_EXPIRED`), 제출 `QUEUED`. `try_count > 3`이면 `FAILED`로 종결한다. |
 | 실패 반영 | 작업의 `finished_at`을 기록하고 `lease_token`·`lease_until`을 해제한다. 최신 채점 회차와 일치하는 제출을 `FAILED`로 전이하고 같은 트랜잭션에서 `SubmissionFailed` Outbox를 기록한다. WA 등 사용자 판정으로 바꾸지 않는다. |
 
-- 대상 1건당 별도 트랜잭션에서 현재 상태와 기한을 재검증한다. `SUCCEEDED`·`FAILED`는 처리하지 않으며 정상 결과와 실패 이벤트를 중복 반영하지 않는다.
-- 기한 초과 대기 작업은 `WHERE id = :id AND status = :observedStatus AND deadline_at <= :now`로 종결한다. 실행 시도 이력을 새로 만들거나 `try_count`를 늘리지 않는다. 실행기와 경합해 상태가 바뀌면 이번 갱신은 0행으로 건너뛰고 다음 회차에서 재조회한다.
-- 기한 초과 `RUNNING` 작업은 상태·관측한 `lease_token`·`deadline_at <= :now` 조건으로 종결한다. 미종결 실행 시도는 `SYSTEM_ERROR`로 마무리하며, 늦은 실행 결과는 상태·토큰·기한 조건에 의해 폐기한다.
-- 기한 내 임대 회수 UPDATE는 상태·관측한 `lease_token` 외에 임대 만료 또는 장시간 실행 조건도 다시 확인한다. 그사이 결과가 저장됐거나 해당 회수 조건이 해소됐으면 0행으로 건너뛴다. 이 회수는 기존대로 `try_count`에 포함한다(정책 §3.4).
+- 검증 기한 초과 종결, 제출 임대 회수, §3.3 토큰 회수는 채점 선점과 분리된 회수 전용 스케줄러에서 실행한다.
+- 회수 회차의 실행 예산은 12초이며 DB 연결 대기와 유효성 검사를 포함한다. Judge 연결 풀의 대기 상한은 2초, 유효성 검사 상한은 1초다. 두 상한과 쿼리에 필요한 1초를 확보할 수 있을 때만 건별 트랜잭션을 시작한다. 연결을 확보하면 남은 시간으로 JDBC 제한시간을 줄인다. §3.3의 토큰 회수에도 같은 기준을 적용한다.
+- 대상 1건당 별도 트랜잭션에서 최신 채점 회차와 회수 조건을 확인하고 `FOR UPDATE SKIP LOCKED`로 작업을 잠근다. 실행기가 잠근 작업은 건너뛰며, 이미 `SUCCEEDED`·`FAILED`인 작업은 조회 대상에서 제외한다.
+- 잠근 대기 작업의 기한이 지났으면 `try_count`를 늘리지 않고 종결한다.
+- 직전 임대 토큰이 없는 대기 작업은 실행 이력 행 없이 종결한다. 생성 응답 유실로 같은 시도의 재선점을 기다리며 직전 임대 토큰과 시작 시각을 보존한 작업은 예외다. 재선점 전 기한이 지나면 이미 시작한 시도의 종료 이력을 `SYSTEM_ERROR`로 한 건 기록한다.
+- 잠근 `RUNNING` 작업의 기한이 지났으면 해당 임대의 미종결 실행 시도를 `SYSTEM_ERROR`로 마무리한다. 늦은 실행 결과는 상태·토큰·기한 조건에 의해 폐기한다.
+- 기한 내에는 임대가 만료됐거나 장시간 실행 조건을 충족한 `RUNNING` 작업만 회수한다. 이 회수는 `try_count`에 포함한다(정책 §3.4).
 - 기한 초과 종결은 Judge0 서킷이 열려 있어도 수행한다. 상태 변경은 30초 주기의 회차별 처리량 범위에서 처리하므로 정확히 기한 시각에 완료됨을 보장하지 않는다. 서비스·DB 중단 중에는 기한을 연장하지 않고 복구 후 다시 조회해 종결한다. 종결된 회차는 되살리지 않는다(T2-09-04).
 
 | 경합 상대 | 상황 | 결과 | 근거 |
 | --- | --- | --- | --- |
-| 실행기 결과 저장 | 회수와 결과 저장 동시 | 먼저 커밋한 쪽 | 둘 다 `lease_token` 조건 |
+| 실행기 결과 저장 | 회수와 결과 저장 동시 | 먼저 잠근 쪽이 반영 | 회수는 잠긴 작업을 건너뛰고, 실행기는 현재 임대만 갱신 |
 | 실행기 임대 연장 | 연장 직전 회수 | 회수 성공 시 연장 0행 → 실행기 중단 | 동일 |
-| 실행기 선점 | 기한 초과 대기 작업의 선점·종결 경합 | 기한이 지난 작업은 선점하지 않음. 종결은 관측 상태 조건으로 한 번만 반영 | `deadline_at`·상태 조건 |
+| 실행기 선점 | 기한 초과 대기 작업의 선점·종결 경합 | 기한이 지난 작업은 선점하지 않음. 종결은 잠근 작업에 한 번만 반영 | `deadline_at`·행 잠금 |
 
 ### 3.3 `JudgeTokenRecoveryScheduler` — Judge0 응답 유실 복구
 
@@ -358,7 +366,7 @@
 | --- | --- |
 | 실행 방식 | `fixedDelay = 5분`, `initialDelay = 5분` |
 | 잠금 | ShedLock `JudgeReconciliationScheduler`, `lockAtMostFor = 4분` |
-| 대상 조회 | `submissions.status IN ('QUEUED','JUDGING') AND updated_at < now() - 2분`과 최신 회차 작업 조인 / `idx_submissions_status_updated_at` |
+| 대상 조회 | `submissions.status IN ('QUEUED','JUDGING','RETRY_WAITING') AND updated_at < now() - 2분`과 최신 회차 작업 조인 / `idx_submissions_status_updated_at` |
 
 | 불일치 | 원인 추정 | 조치 |
 | --- | --- | --- |
@@ -368,6 +376,12 @@
 | 제출 `QUEUED`/`JUDGING`, 작업 `FAILED` | 동일 | 제출 `FAILED` + `SubmissionFailed` |
 | 작업 `RUNNING` 임대 만료 | 회수 지연 | 3.2에 위임 |
 - 모든 보정은 제출 행 `WHERE status = :observed AND judge_attempt = :attempt` 조건부 UPDATE. 정상 경로가 먼저 끝났으면 0행.
+- 회차당 최대 100건·2분 안에서 처리하며 상태 대사는 선점·임대 회수와 분리된 유지보수 스케줄러를 사용한다. 성공 이벤트의 고정 회차 메타데이터는 행 잠금 밖에서 조회하고, 건별 트랜잭션에서 작업·제출 순서로 잠근 뒤 회차·관측 상태를 재검증한다.
+- 목록·작업 누락 확인·적체 관측 조회와 건별 보정의 트랜잭션 제한시간은 각각 5초다. 후보 처리 전 원격 호출·연결 획득·보정을 위한 15초가 남지 않으면 이번 회차를 종료한다. 대사용 원격 조회의 연결·응답 읽기는 각각 `judge.clients.timeout`과 2초 중 작은 값으로 제한하여 일반 클라이언트 설정이 커져도 이 예산을 유지한다.
+- `scheduler.run.duration`과 `scheduler.items{result=corrected|skipped|failed|missing}`에 `scheduler=JudgeReconciliationScheduler` 태그를 기록한다. `scheduler.backlog.oldest.seconds`는 같은 작업명 태그로 수집하며, 순회 커서와 무관한 전체 대사 후보의 가장 오래된 `updated_at` 경과 초다. 후보가 없으면 0이고, 지표 조회는 상태를 변경하지 않는다.
+- 후보는 제출 ID 오름차순으로 조회하며 인스턴스 메모리에 마지막으로 확인한 ID를 보관한다. 작업 누락·건별 실패도 순회 위치를 전진시키되 실행 예산 부족으로 확인하지 못한 후보는 건너뛰지 않는다. 해당 ID 뒤에 후보가 없으면 위치를 초기화하고 다음 회차에 처음부터 재시도한다. 재기동 시 처음부터 시작하며 인스턴스 간 위치를 공유하거나 DB에 저장하지 않는다.
+- 기존 제출에 남아 있는 `RETRY_WAITING`도 대사 대상으로 포함하고, 최신 작업이 대기 중이면 정책 §3.2의 제출 상태인 `QUEUED`로 정규화한다.
+- 성공 보정은 기존 테스트 결과로 집계하고 작업의 종결 시각과 실행 시도 이력을 보존하되 제출의 갱신 시각은 보정 시각으로 기록한다. 작업 누락은 WARN 로그와 `judge.reconciliation.missing.jobs` 지표로 운영에 알리며 임의 작업을 생성하지 않는다.
 
 ### 3.5 `RunLockReconciliationScheduler` — Run 락 정리
 
@@ -376,17 +390,22 @@
 | 실행 방식 | `fixedDelay = 1분` |
 | 잠금 | ShedLock `RunLockReconciliationScheduler`, `lockAtMostFor = 50초` |
 | 대상 | Redis `run:{memberId}` 키 (값 = 소유 토큰·인스턴스 ID·시작 시각) 중 시작 후 40초 초과 |
-| 처리 | 소유 인스턴스의 실행 레지스트리(`run:active:{instanceId}`, 하트비트 10초)에 토큰이 없으면 Lua `compare-and-delete`로 해제 |
+| 실행 레지스트리 | `run:active:{instanceId}`에 토큰별 마지막 하트비트 시각을 기록한다. 인스턴스 ID는 기동마다 새로 만든다. |
+| 하트비트·만료 | 각 Run은 10초마다 자기 토큰의 시각을 갱신하고, 30초 동안 갱신되지 않은 토큰은 만료로 판단한다. 레지스트리 키도 하트비트마다 30초 만료를 갱신하지만, 다른 Run의 갱신으로 중단된 토큰의 생존 시간을 연장하지 않는다. |
+| 처리 | 소유 인스턴스의 레지스트리 키가 만료됐거나 해당 토큰이 없거나 토큰 하트비트가 만료됐으면 관측한 소유 토큰을 Lua `compare-and-delete`로 대조해 제한을 해제한다. |
 - Run에 TTL 쿨다운을 두지 않는다는 정책(§3.2)을 지키면서, 인스턴스 비정상 종료로 영원히 `RUN_IN_PROGRESS`가 되는 것을 막는다. 40초 = 실행 기한 30초 + 중단 처리 여유.
 - 정상 경로 해제와 경합해도 소유 토큰 비교 삭제라 다른 실행의 락을 지우지 않는다.
+- Redis 조회 실패를 레지스트리 만료·실행 종료로 간주하지 않고 다음 정리에서 다시 확인한다. 소유권을 잃은 실행은 재개하거나 다른 실행의 제한을 해제하지 않는다.
 
-### 3.6 `JudgeBacklogMonitorScheduler` — 적체 지표
+### 3.6 `JudgeQueueMetrics` — 적체 지표
 
 | 항목 | 값 |
 | --- | --- |
-| 실행 방식 | `fixedDelay = 1분` (ShedLock, 1대) |
-| 처리 | 상태별 작업 수, 가장 오래된 `PENDING` 대기 시간, 서킷 상태를 게이지로 기록. 상태 변경 없음 |
+| 실행 방식 | 기존 Prometheus 수집 주기마다 읽기 전용 쿼리로 관측한다. 관측 쿼리의 제한시간은 2초다. |
+| 처리 | 상태별 작업 수와 가장 오래된 `PENDING` 대기 시간을 집계한다. 인스턴스별 서킷 상태와 신규 실패 발생 건수를 함께 관측하며, 수집이 작업 상태를 변경하지 않는다. |
 | 알림 | 채점 대기 60초 초과 2분 지속, `FAILED` 신규 발생 (정책 §11) — Grafana 경보 규칙 |
+- 기존 `judge_jobs_pending_count`와 `scheduler_backlog_oldest_seconds`의 이름·`scheduler` 라벨과 경보 임계값을 유지한다. 대기 작업이 없으면 두 지표는 0이다.
+- 상태별 작업 수는 DB 현재 상태를 게이지로 집계한다. 실패 누적값은 종단 `FAILED` 작업 수를 사용해 같은 행의 반복 수집으로 증가하지 않는다. 인스턴스가 여러 개면 같은 DB 지표를 `max`로 집계한다. 서킷은 각 인스턴스의 현재 상태를 제공하고 회원·제출 ID를 지표 라벨로 사용하지 않는다.
 
 > SQS `exam-submission-queue` 소비는 스케줄러가 아니라 리스너다. 소비 Tx 규칙은 이벤트 계약서 C1·C2.
 > 
@@ -429,13 +448,15 @@
 | --- | --- |
 | 소유 서비스·패키지 | `contest-service` / `exam` |
 | 실행 방식 | `fixedDelay = 5초`, `initialDelay = 5초` |
-| 잠금 | ShedLock `ExamLifecycleScheduler`. §4.0 임대·행 잠금 순서 적용 |
+| 잠금 | ShedLock `ExamLifecycleScheduler`. 이 배치가 실행되는 동안 30초 임대를 주기적으로 갱신한다. §4.0 행 잠금 순서 적용 |
 | 한 회차 처리량 | 페이지당 100건, 20초 뒤 새 선정 중단. 남은 대상은 다음 회차 |
 | 트랜잭션 경계 | 시험 1건당 1트랜잭션 |
-| 대상 조회 | `SCHEDULED AND starts_at <= now` 또는 `IN_PROGRESS AND ends_at < now` |
+| 대상 조회 | `SCHEDULED AND starts_at <= now` 또는 `IN_PROGRESS AND ends_at < now`. 전이 시각·ID 순으로 마지막 시도 지점 뒤를 조회하고 끝에 도달하면 처음으로 돌아가 실패 대상도 재시도한다. 재기동 시 처음부터 조회한다. |
 | 상태 전이 | SCHEDULED → IN_PROGRESS → CLOSED. 미입장 활성 REGISTERED → ABSENT |
 | 발행 이벤트 | ExamStarted / ExamClosed |
 | 지표 | §4.0 공통 지표 및 대상 상태·회차·버전별 보류 원인 |
+
+`ExamLifecycleScheduler`의 이벤트 추적용 작업명은 `exam-lifecycle`이며 `correlationId`는 `sched-exam-lifecycle-{UUID}`다. ShedLock 이름은 위 표를 따른다.
 
 **동작:**
 
@@ -477,10 +498,11 @@
 **동작:**
 
 1. 부모 → 참가자 잠금 뒤 후보 조건을 다시 확인한다. FIXED의 초기 personalEndsAt은 전체 마감이며, 수동 종료가 요청 시각으로 줄인다.
-2. 문제별 전체 언어 최대 seq Draft 하나를 선택한다. 최신 코드가 빈 문자열이면 오래된 언어 코드로 대체하지 않는다. 마지막 접수 seq보다 큰 비어 있지 않은 Draft만 AUTO로 생성한다.
+2. 문제별 전체 언어 최대 seq Draft 하나를 선택한다. 최신 코드가 빈 문자열이거나 공백만 있으면 오래된 언어 코드로 대체하지 않는다. 마지막 접수 seq보다 큰 유효 Draft만 AUTO로 생성한다. 고정 회차의 지원 언어는 원격에서 잠금 밖에 조회하고 접수 전에 대조한다.
 3. AUTO의 received_at은 개인 종료 기준 시각으로 고정한다. 실행 시각으로 바꾸지 않는다. 기존 직접 제출은 다시 요청하지 않는다.
-4. 대상이 없어도 auto_submitted_at·FINISHED·이력을 기록한다. 어느 단계든 실패하면 전체 롤백한다.
+4. 대상이 없어도 auto_submitted_at·FINISHED·이력을 기록한다. 기존 Draft의 크기 초과·지원 불가 언어는 원문·언어·각각 `CODE_TOO_LARGE`·`UNSUPPORTED_LANGUAGE` 사유를 보존한 FAILED 자동 접수(`judge_attempt=0`)로 기록하고 해당 Outbox는 만들지 않는다. 나머지 접수·Outbox·완료 표식·종료와 원자 저장하며 저장 실패는 전체 롤백한다. 지원 언어 조회 결과가 없거나 잠금 후 고정 회차와 일치하지 않는 경우도 롤백하고 재시도한다. 관리자 0점 종결 전까지 결과 확정을 보류한다.
 5. 정지 전 서버에 커밋된 Draft는 정지 후에도 자동 제출한다. 정지·스터디 탈퇴는 이미 접수한 유효성을 소급 취소하지 않는다.
+6. 실패 후보의 개인 마감·ID를 순회 위치로 저장하고 다음 회차는 그 뒤에서 시작한다. 끝에 도달하면 처음으로 돌아가 실패 후보도 재시도한다. Redis 장애 중에는 해당 인스턴스의 마지막 시도 위치를 사용한다. 복구 시 미반영 위치·초기화를 먼저 동기화하며, 동기화 전에는 이전 Redis 값으로 되돌아가지 않는다.
 
 **동시성 설계 포인트:**
 
@@ -628,7 +650,7 @@
 1. B의 by-receipt API로 context·receiptId를 조회한다. submissionId·userId·문제·고정 회차·submittedAt을 원래 접수와 대조하며 불일치는 격리·운영 오류 기록한다.
 2. DB §6.4.2의 회차 비교와 결과 재계산을 적용한다. judge_attempt는 마지막 종결 반영 회차, 목표 회차는 관리자 작업의 target_judge_attempt다.
 3. 작은 회차·같은 회차 동일 결과는 무시한다. 같은 회차 상충은 격리한다. 큰 최초 결과 또는 허용 재처리 회차만 적용한다.
-4. B에 없는 접수는 기존 Outbox 상태를 확인해 동일 receiptId·eventId 요청을 재전달한다. 새 C 접수·seq를 만들지 않으며 B receipt 유일 제약이 중복 채점을 막는다.
+4. B에 없는 접수는 기존 Outbox 상태를 확인해 동일 receiptId·eventId 요청을 재전달한다. 원본 행이 삭제됐으면 접수의 불변 요청 보존본을 접수·고정 회차와 검증해 같은 헤더·본문으로 복원한다. 원본과 보존본이 모두 없거나 보존본이 불일치하면 발행하지 않고 오류·실패 지표를 남긴다. 새 C 접수·seq·eventId를 만들지 않으며 B receipt 유일 제약이 중복 채점을 막는다.
 5. QUEUED/JUDGING/RETRY_WAITING을 임의 FAILED로 바꾸지 않는다. judge_jobs 임대·워커 회수·Run 락 복구는 B가 담당한다(§3.2·§3.5).
 6. FINALIZED에 상충하는 새 회차가 발견되면 기존 스냅샷을 보존하고 오류 기록만 남긴다.
 
@@ -648,27 +670,29 @@
 
 **명세서와의 관계:** API §4.8.4·부록 B / DB §4.4.6·§4.4.11·§6.4.2
 
+전달 전 크기 초과·지원 불가 언어로 생성된 시험 실패 접수(`dispatch_failure_code=CODE_TOO_LARGE`·`UNSUPPORTED_LANGUAGE`)는 Judge 대사 대상에서 제외한다. 원문·언어·실패 사유를 보존한 채 관리자 종결(API §4.6.4)을 기다린다.
+
 ### 4.7 `ContestOperationReconciliationScheduler` — 관리자·자원 준비 복구
 
 | 항목 | 값 |
 | --- | --- |
 | 소유 서비스·패키지 | `contest-service` / `operation` |
 | 실행 방식 | `fixedDelay = 5분`, `initialDelay = 5분` |
-| 잠금 | ShedLock `ContestOperationReconciliationScheduler`. §4.0 임대·행 잠금 순서 적용 |
+| 잠금 | ShedLock `ContestOperationReconciliationScheduler`. 실행 중 30초 임대를 갱신한다. §4.0 행 잠금 순서 적용 |
 | 한 회차 처리량 | 페이지당 100건, 20초 뒤 새 선정 중단. 남은 대상은 다음 회차 |
 | 트랜잭션 경계 | 원격 확인 후 관리자 작업·접수 또는 가드·감사를 새 트랜잭션에 반영 |
-| 대상 조회 | 생성·갱신 후 1분 이상 미종결 원격 관리자 작업과 PREPARED 가드 |
+| 대상 조회 | 갱신 후 1분 이상 지난 미종결 원격 관리자 작업과 준비·마지막 대사 시도 후 1분 이상 지난 PREPARED 가드 |
 | 상태 전이 | 관리자 PENDING → 확인된 SUCCEEDED/FAILED. 원격 COMMITTED·ABORTED 확인 시 API §4.7.4 완료·취소 규칙 적용. 준비 전 상태·종결 결과·더 최신 원천 상태 보존 |
 | 발행 이벤트 | 원격 완료 결과의 기존 이벤트 복구만. 새로운 확정 알림 없음 |
 | 지표 | §4.0 공통 지표 및 대상 상태·회차·버전별 보류 원인 |
 
 **동작:**
 
-1. EXAM_RETRY는 같은 operationId·expectedJudgeAttempt로 B 계약(API §3.3.7)을 재요청하고 접수 상태를 대사한다. 응답 유실로 새 operationId를 만들지 않는다.
+1. EXAM_RETRY는 오래 갱신되지 않은 작업부터 선택하고 조회 전에 확인 시각을 기록한다. 순회 위치는 한 회차에서만 사용하므로 확인 시각 저장에 실패한 작업도 다음 회차에 다시 선택된다. 같은 operationId·expectedJudgeAttempt로 B 계약(API §3.3.7)을 재요청하고 접수 상태를 대사한다. 응답 유실로 새 operationId를 만들지 않는다.
 2. 성공 목표를 targetJudgeAttempt에 저장한다. 마지막 반영 judge_attempt보다 큰 목표일 때만 REQUESTED·is_zero_confirmed=false로 전이하고 judge_attempt는 유지한다. 이미 목표 이상 결과가 반영됐으면 상태·판정을 보존한다.
 3. 확인된 작업 SUCCEEDED·감사 로그를 함께 저장한다. B가 동일 작업 미실행 실패를 확정하면 FAILED·마지막 오류로 종결한다. 타임아웃·5xx·조회 실패는 미실행 증거가 아니다.
 4. CONTEST_CREATE는 같은 대회·고정 회차·선택 버전·설정 관리자로 미확인 B 연결을 재요청한다. 전체 확인은 SUCCEEDED, 확정 거절·미완료 상태의 시작 시각 경과는 대회 CANCELED·FAILED·감사·취소 Outbox로 함께 종결한다. 해당 작업 SUCCEEDED 전에는 대회를 노출·참가·시작시키지 않는다.
-5. 가드 소유 서비스 작업 상태를 조회한다. COMMITTED이면 complete 규칙, ABORTED이면 준비 전 상태와 결과를 보존하는 cancel 규칙을 적용한다. PENDING·404·통신 실패는 PREPARED를 유지한다.
+5. 가드는 마지막 대사 시도 시각과 행 ID 순으로 선정한다. 시도 이력이 없으면 준비 시각을 사용하고, 준비 시각도 없는 기존 행은 생성 시각을 사용한다. 원격 조회 전에 시도 시각을 기록하며, 스냅샷 갱신은 선정 순서에 영향을 주지 않는다. 시도 시각 저장에 실패하면 이번 회차의 다음 후보로 진행하고 해당 가드는 다음 회차에 다시 선정할 수 있다. 가드 소유 서비스가 COMMITTED를 반환하면 complete, ABORTED를 반환하면 준비 전 상태와 결과를 보존하는 cancel 규칙을 적용한다. PENDING·404·통신 실패는 PREPARED를 유지한다.
 6. 가드 잠금 뒤 operationId·sourceVersion을 다시 비교한다. 새 작업·새 버전을 이전 응답으로 덮어쓰지 않는다. 동일 완료·취소는 멱등이다.
 7. STUDY 준비로 취소한 예정 시험은 ABORTED여도 자동 복원하지 않는다. 진행 시험은 원래 마감까지 종료 처리를 계속한다. 가드 자동 해제 TTL을 두지 않는다.
 
@@ -710,6 +734,7 @@
 4. 공동 순위는 memberId를 제외한 앞 세 값으로 판정한다. 정책 §6·DB §6.4.2에 따라 부동소수 합성 score는 사용하지 않는다. 값 상한 초과는 캐시 오류·DB 조회로 처리한다.
 5. 새 버전 키 전체 생성 후 Lua로 작은 버전 교체를 거절하고 포인터·버전을 원자 교체한다. 같은 버전 재구성은 동일 결과만 만들며 이전 키는 교체 성공 후 삭제한다.
 6. API는 캐시 없음·버전 불일치 때 DB를 조회한다. 시험 점수 캐시도 같은 검증을 적용한다. SSE 재연결은 현재 DB 버전을 안내하며 전송 성공을 결과 저장 성공으로 간주하지 않는다.
+7. 시험 캐시는 데이터·포인터를 동일 TTL(기본 1시간)로 저장한다. 확정 후 정기 재생성은 `finalized_at` 기준 기본 7일까지로 제한하며, 기간이 지난 시험은 DB 순위 생성 없이 관측 버전 이하의 캐시만 삭제한다. 과거 무기한 키도 순회 중 정리하고 더 새 버전은 보존한다. 이후 사용자 조회는 DB 스냅샷을 사용하며 조회 시 생성한 캐시는 TTL로 만료된다. 설정은 DB §6.4.2·환경변수 예시의 Contest 시험 순위 캐시를 따른다.
 
 **동시성 설계 포인트:**
 

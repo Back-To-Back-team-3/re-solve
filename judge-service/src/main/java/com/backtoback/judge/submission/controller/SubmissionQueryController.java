@@ -19,18 +19,18 @@ import com.backtoback.judge.submission.service.SubmissionQueryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
-/** 본인 일반 풀이 조회 API. */
+/** 본인 제출 목록과 일반 풀이 원본 코드 조회 API. */
 @RestController
 @RequiredArgsConstructor
 public class SubmissionQueryController {
     private final SubmissionQueryService queries;
 
     /**
-     * 본인 일반 제출 목록을 조회한다. (API 명세서 §3.1.4)
+     * 본인 일반·시험·진단 제출 목록을 조회한다. (API 명세서 §3.1.4)
      *
      * @param user Gateway에서 인증한 회원
      * @param request 검증할 목록 필터와 페이지 조건
-     * @return 일반 제출 요약 페이지
+     * @return 본인 제출 요약 페이지
      */
     @GetMapping("/api/v1/me/submissions")
     public ResponseEntity<ApiResponse<PageResponse<SubmissionListResponse>>> list(

@@ -60,4 +60,16 @@ public class MemberReplicaRepository {
             .stream()
             .findFirst();
     }
+
+    /** 시험 저장 트랜잭션이 끝날 때까지 회원 복제본의 상태 갱신을 기다리게 한다. */
+    public Optional<String> lockStatus(long memberId) {
+        return jdbcTemplate
+            .query(
+                "SELECT member_status FROM member_replicas WHERE member_id = ? FOR UPDATE",
+                (result, row) -> result.getString(1),
+                memberId
+            )
+            .stream()
+            .findFirst();
+    }
 }

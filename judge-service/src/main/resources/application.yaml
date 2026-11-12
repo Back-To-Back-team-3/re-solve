@@ -5,6 +5,9 @@ spring:
     url: ${SPRING_DATASOURCE_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+    hikari:
+      connection-timeout: 2000
+      validation-timeout: 1000
   jpa:
     open-in-view: false
     show-sql: false
@@ -44,7 +47,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus
   endpoint:
     health:
       show-details: never
@@ -63,3 +66,4 @@ judge:
     enabled: ${JUDGE_MESSAGING_ENABLED:false}
     topic-arn: ${JUDGE_EVENTS_TOPIC_ARN:}
     validation-queue-url: ${PROBLEM_VALIDATION_QUEUE_URL:}
+    submission-queue-url: ${JUDGE_SUBMISSION_QUEUE_URL:}

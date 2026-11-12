@@ -13,6 +13,7 @@ import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.client.MemberStatusResponse;
 import com.backtoback.contest.exam.repository.MemberReplicaRepository;
 import com.backtoback.contest.exam.repository.StudyMembershipReplicaRepository;
+import com.backtoback.contest.operation.service.MemberGuardTransitions;
 
 import tools.jackson.databind.JsonNode;
 
@@ -36,6 +37,7 @@ public class ReplicaEventHandlers {
     ReplicaHandlers replicaHandlers(
         MemberReplicaRepository members,
         StudyMembershipReplicaRepository memberships,
+        MemberGuardTransitions memberGuards,
         Clock clock
     ) {
         return new ReplicaHandlers(List.of(handler("MemberUpdated", event -> {
@@ -83,7 +85,9 @@ public class ReplicaEventHandlers {
             var data = event.payload();
             long memberId = id(data, "memberId");
             aggregate(event, memberId);
-            members.sync(memberId, "탈퇴한 사용자", null, "WITHDRAWN", version(data), now(clock));
+            long sourceVersion = version(data);
+            memberGuards.observeWithdrawal(memberId, sourceVersion);
+            members.sync(memberId, "탈퇴한 사용자", null, "WITHDRAWN", sourceVersion, now(clock));
         }),
             handler("StudyMemberJoined", event -> syncMembership(event, memberships, clock, true)),
             handler("StudyMemberLeft", event -> syncMembership(event, memberships, clock, false))
