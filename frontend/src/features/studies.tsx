@@ -28,6 +28,7 @@ import {
 } from "@/components/ui";
 import { Pet } from "@/components/pet";
 import { useQuery, Pager } from "./problem-list";
+import { MembersTab } from "./study-members";
 const goalLabel: Record<GoalType, string> = {
   EMPLOYMENT: "취업 준비",
   CONTEST: "대회 준비",
@@ -420,7 +421,12 @@ export function StudyPage({ id }: { id: string }) {
           {tab === "members" && (
             <div className="stack">
               {memberGuard ?? (
-                <p className="muted">구성원 목록은 다음 커밋에서 연동합니다.</p>
+                <MembersTab
+                  studyId={id}
+                  myMembership={myM}
+                  version={version}
+                  onRefresh={refresh}
+                />
               )}
             </div>
           )}

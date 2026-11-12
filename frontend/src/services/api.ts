@@ -377,21 +377,30 @@ export const studyApi = {
     );
   },
   approveMember: (studyId: string, membershipId: string) =>
-    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}/approval`, {
-      method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      body: "{}",
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "APPROVED", reason: null }),
     }),
   rejectMember: (studyId: string, membershipId: string, reason?: string) =>
-    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}/rejection`, {
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "REJECTED", reason: reason ?? null }),
+    }),
+  removeMember: (studyId: string, membershipId: string, reason: string) =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "REMOVED", reason }),
+    }),
+  changeRole: (studyId: string, membershipId: string, role: "MANAGER" | "MEMBER") =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+  delegateLeader: (studyId: string, targetMembershipId: string) =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/leader-delegation`, {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({ reason }),
-    }),
-  removeMember: (studyId: string, membershipId: string, reason?: string) =>
-    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}`, {
-      method: "DELETE",
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ targetMembershipId }),
     }),
   getAssignments: (studyId: string, params: { status?: AssignmentStatus; page?: number; size?: number } = {}) => {
     const q = new URLSearchParams();
