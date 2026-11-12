@@ -788,7 +788,7 @@ flowchart LR
 
 | 이벤트 | 발행 시점 | 필드 (aggregate = `examId`) | 소비자 처리 |
 | --- | --- | --- | --- |
-| `ExamStarted` | `ExamLifecycleScheduler` `IN_PROGRESS` 전이 | `examId`, `studyId`, `examRevision`, `startsAt`, `endsAt` | study: 차단 행 존재 확인(진단 지표). 차단은 시각 판정이라 필수 아님 |
+| `ExamStarted` | `ExamLifecycleScheduler` `IN_PROGRESS` 전이 | `examId`, `studyId`, `examRevision`, `startsAt`, `endsAt` | study: GENERATING 힌트 요청 BLOCKED 전이 + HintReady(result=BLOCKED) Outbox 발행. 차단 행 존재 확인(진단 지표) |
 | `ExamClosed` | `CLOSED` 전이 (전체 마감 초과) | `examId`, `studyId`, `examRevision`, `closedAt` | study: 해당 시험 차단 행 삭제 + 종단 표식. 알림 없음 |
 | `ExamCanceled` | 시작 전 취소 API, 스터디 종료 준비 | `examId`, `studyId`, `examRevision`, `canceledAt`, `reason`, `targetMemberIds` | study: 차단 삭제 + 종단. notification: `EXAM_CANCELED`, 예약 무효화 |
 

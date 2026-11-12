@@ -6,11 +6,13 @@ import org.springframework.stereotype.Component;
 import com.backtoback.study.hint.event.dto.ContestTerminatedPayload;
 import com.backtoback.study.hint.event.dto.DiagnosisClosedPayload;
 import com.backtoback.study.hint.event.dto.DiagnosisStartedPayload;
+import com.backtoback.study.hint.event.dto.ExamStartedPayload;
 import com.backtoback.study.hint.event.dto.ExamTerminatedPayload;
 import com.backtoback.study.hint.event.dto.ExamUpdatedPayload;
 import com.backtoback.study.hint.event.dto.HintReadyConsumedPayload;
 import com.backtoback.study.hint.event.dto.ParticipantCanceledPayload;
 import com.backtoback.study.hint.event.dto.ParticipantRegisteredPayload;
+import com.backtoback.study.hint.service.ExamStartedConsumerService;
 import com.backtoback.study.hint.service.HintBlockReplicaConsumerService;
 import com.backtoback.study.hint.service.HintReadyConsumerService;
 import com.backtoback.study.membership.service.MemberWithdrawnConsumerService;
@@ -46,6 +48,7 @@ public class SubmissionJudgedEventListener {
     private static final String CONTEST_ENDED_EVENT_TYPE = "ContestEnded";
     private static final String CONTEST_CANCELED_EVENT_TYPE = "ContestCanceled";
     private static final String DIAGNOSIS_STARTED_EVENT_TYPE = "DiagnosisStarted";
+    private static final String EXAM_STARTED_EVENT_TYPE = "ExamStarted";
     private static final String DIAGNOSIS_CLOSED_EVENT_TYPE = "DiagnosisClosed";
     private static final String MDC_CORRELATION_ID = "correlationId";
     private static final String MDC_EVENT_ID = "eventId";
@@ -56,6 +59,7 @@ public class SubmissionJudgedEventListener {
     private final SubmissionJudgedConsumerService consumerService;
     private final HintBlockReplicaConsumerService hintBlockReplicaConsumerService;
     private final HintReadyConsumerService hintReadyConsumerService;
+    private final ExamStartedConsumerService examStartedConsumerService;
 
     @SqsListener("${study.sqs.queue-name:study-queue}")
     public void onMessage(String messageBody) {
@@ -123,6 +127,12 @@ public class SubmissionJudgedEventListener {
             if (DIAGNOSIS_CLOSED_EVENT_TYPE.equals(eventType)) {
                 DiagnosisClosedPayload event = objectMapper.treeToValue(payload, DiagnosisClosedPayload.class);
                 hintBlockReplicaConsumerService.consumeDiagnosisClosed(event);
+                return;
+            }
+
+            if (EXAM_STARTED_EVENT_TYPE.equals(eventType)) {
+                ExamStartedPayload event = objectMapper.treeToValue(payload, ExamStartedPayload.class);
+                examStartedConsumerService.consume(event);
                 return;
             }
 
