@@ -17,6 +17,7 @@ public class LlmCircuitBreakerConfig {
             = CircuitBreakerConfig
                 .custom()
                 .failureRateThreshold(100f)
+                .slidingWindowSize(5)
                 .minimumNumberOfCalls(5)
                 .waitDurationInOpenState(Duration.ofSeconds(30))
                 .recordExceptions(Exception.class)
