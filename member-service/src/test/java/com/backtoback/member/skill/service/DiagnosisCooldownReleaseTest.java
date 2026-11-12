@@ -156,7 +156,7 @@ class DiagnosisCooldownReleaseTest {
         jdbcTemplate.update("update member_tag_levels set level = 'LV3' where member_id = ?", promoted);
         jdbcTemplate.update("update member_tag_levels set level = 'LV2' where member_id = ?", changedLevel);
         for (CooldownRelease release : picked) {
-            scoringService.notifyCooldownReleased(release.attemptId(), closedBefore);
+            scoringService.notifyCooldownReleased(release.memberId(), release.attemptId(), closedBefore);
         }
 
         assertThat(cooldownEvents(restarted)).isEmpty();
