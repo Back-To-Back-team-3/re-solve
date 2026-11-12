@@ -111,7 +111,7 @@ export const memberApi = {
   getTagLevels: () =>
     apiFetch<{ content: TagLevel[] }>("/api/v1/members/me/tag-levels"),
   startDiagnosis: (tagId: string) =>
-    apiFetch<{ diagnosisId: string }>("/api/v1/members/me/diagnoses", {
+    apiFetch<{ diagnosisId: string }>("/api/v1/diagnoses", {
       method: "POST",
       body: JSON.stringify({ tagId }),
     }),
