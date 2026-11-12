@@ -306,7 +306,6 @@ export const studyApi = {
   }) =>
     apiFetch<{ studyId: string }>("/api/v1/studies", {
       method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify(body),
     }),
   getList: (params: {
@@ -397,7 +396,6 @@ export const studyApi = {
   delegateLeader: (studyId: string, targetMembershipId: string) =>
     apiFetch<void>(`/api/v1/studies/${studyId}/leader-delegation`, {
       method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify({ targetMembershipId }),
     }),
   getAssignments: (studyId: string, params: { status?: AssignmentStatus; page?: number; size?: number } = {}) => {
