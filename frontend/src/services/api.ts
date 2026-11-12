@@ -98,7 +98,7 @@ export const authApi = {
     apiFetch<void>("/api/v1/auth/logout", { method: "POST" }),
 };
 
-// 회원 API (§1.2·§1.4)
+// 회원 API (§1.2·§1.4·§1.5)
 export const memberApi = {
   getMe: () => apiFetch<Member>("/api/v1/members/me"),
   updateMe: (body: { nickname: string }) =>
@@ -108,6 +108,11 @@ export const memberApi = {
     }),
   getTagLevels: () =>
     apiFetch<{ content: TagLevel[] }>("/api/v1/members/me/tag-levels"),
+  startDiagnosis: (tagId: string) =>
+    apiFetch<{ diagnosisId: string }>("/api/v1/members/me/diagnoses", {
+      method: "POST",
+      body: JSON.stringify({ tagId }),
+    }),
 };
 
 // 문제 태그 API — B 도메인 §2.5.1 (SkillPage 태그 이름 표시용)

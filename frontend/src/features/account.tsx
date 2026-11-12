@@ -1,14 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { apiFetch, authApi, memberApi, problemTagApi } from "@/services/api";
-import { useResource } from "@/services/hooks";
+import { authApi, memberApi } from "@/services/api";
+import { SkillPage } from "@/features/account-skill";
 import { useWorkspace } from "@/stores/workspace";
 import { Pet } from "@/components/pet";
 import {
   Button,
   Empty,
-  ErrorState,
   Go,
   Heading,
   Loading,
@@ -249,80 +248,3 @@ export function MyPage() {
   );
 }
 
-function cooldownDaysFrom(cooldownEndsAt: string | null): number {
-  if (!cooldownEndsAt) return 0;
-  return Math.ceil((new Date(cooldownEndsAt).getTime() - new Date().getTime()) / 86400000);
-}
-
-function SkillPage() {
-  const tagLevelsR = useResource(memberApi.getTagLevels, "tag-levels");
-  const tagsR = useResource(problemTagApi.getTags, "problem-tags");
-
-  if (tagLevelsR.loading || tagsR.loading) return <Loading />;
-  if (tagLevelsR.error)
-    return <ErrorState message={tagLevelsR.error.message} retry={tagLevelsR.retry} />;
-  if (tagsR.error)
-    return <ErrorState message={tagsR.error.message} retry={tagsR.retry} />;
-
-  const levels = tagLevelsR.data?.content ?? [];
-  const allTags = tagsR.data?.content ?? [];
-
-  return (
-    <Section title="태그별 진단 레벨">
-      <div className="stack">
-        {allTags.map((tag) => {
-          const tl = levels.find((l) => l.tagId === tag.tagId);
-          const inProgress = tl?.diagnosis.inProgressDiagnosisId != null;
-          const cooldown = tl?.diagnosis.cooldownEndsAt;
-          const cooldownDays = cooldownDaysFrom(cooldown ?? null);
-          return (
-            <div key={tag.tagId} className="card row">
-              <span>{tag.name}</span>
-              {!tl && (
-                <Button
-                  onClick={() =>
-                    apiFetch<unknown>("/api/v1/members/me/diagnoses", {
-                      method: "POST",
-                      body: JSON.stringify({ tagId: tag.tagId }),
-                    }).catch(() => null)
-                  }
-                >
-                  진단 시작
-                </Button>
-              )}
-              {tl && inProgress && (
-                <Button disabled title="준비 중">
-                  이어서 풀기
-                </Button>
-              )}
-              {tl && !inProgress && (
-                <div className="row">
-                  <span className="badge">{tl.level}</span>
-                  {tl.achievements[0] && (
-                    <span className="muted">
-                      {tl.achievements[0].achievementRate.toFixed(0)}%
-                    </span>
-                  )}
-                  <Button
-                    disabled={!!cooldown && cooldownDays > 0}
-                    title={
-                      cooldown && cooldownDays > 0 ? `D-${cooldownDays}` : undefined
-                    }
-                    onClick={() =>
-                      apiFetch<unknown>("/api/v1/members/me/diagnoses", {
-                        method: "POST",
-                        body: JSON.stringify({ tagId: tag.tagId }),
-                      }).catch(() => null)
-                    }
-                  >
-                    {cooldown && cooldownDays > 0 ? `D-${cooldownDays}` : "재응시"}
-                  </Button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </Section>
-  );
-}
