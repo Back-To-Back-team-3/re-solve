@@ -131,7 +131,7 @@ export function MyPage() {
   if (r.error)
     return (
       <div className="container">
-        <ErrorState message={r.error} retry={r.retry} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
   const db = r.data!,

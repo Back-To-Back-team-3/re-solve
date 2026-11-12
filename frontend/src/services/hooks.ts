@@ -1,46 +1,74 @@
 "use client";
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { getRevision, subscribe } from "./mock-api";
-export function useResource<T>(load: () => Promise<T>, key = "") {
-  const revision = useSyncExternalStore(subscribe, getRevision, () => 0);
-  const [result, setResult] = useState<{
-    key: string;
-    data: T | undefined;
-    loading: boolean;
-    error: string;
-  }>({ key, data: undefined, loading: true, error: "" });
-  const [retry, setRetry] = useState(0);
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ApiError } from "./api";
+
+export function useResource<T>(
+  load: () => Promise<T>,
+  key = "",
+): { data: T | undefined; loading: boolean; error: ApiError | null; retry: () => void } {
+  const [data, setData] = useState<T | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
   useEffect(() => {
-    let alive = true;
-    setResult((r) => ({
-      key,
-      data: r.key === key ? r.data : undefined,
-      loading: r.key !== key || r.data === undefined,
-      error: "",
-    }));
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
     load()
-      .then((data) => {
-        if (alive) setResult({ key, data, loading: false, error: "" });
+      .then((d) => {
+        if (!cancelled) { setData(d); setLoading(false); }
       })
-      .catch((e) => {
-        if (alive)
-          setResult({
-            key,
-            data: undefined,
-            loading: false,
-            error: e.message || "불러오지 못했습니다.",
-          });
+      .catch((e: ApiError) => {
+        if (!cancelled) { setError(e); setLoading(false); }
       });
-    return () => {
-      alive = false;
-    };
-    // The explicit key describes the service arguments; service closures are recreated by rendering.
+    return () => { cancelled = true; };
+    // load는 렌더링마다 재생성되므로 key와 retryCount만 deps로 사용
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, revision, retry]);
-  return {
-    ...result,
-    data: result.key === key ? result.data : undefined,
-    loading: result.key !== key || result.loading,
-    retry: () => setRetry((x) => x + 1),
-  };
+  }, [key, retryCount]);
+
+  const retry = useCallback(() => setRetryCount((n) => n + 1), []);
+  return { data, loading, error, retry };
+}
+
+export function usePollUntil<T>(
+  loadFn: () => Promise<T>,
+  isDone: (data: T) => boolean,
+  options?: { intervalMs?: number; timeoutMs?: number },
+): { data: T | undefined; loading: boolean; error: ApiError | null; polling: boolean } {
+  const { intervalMs = 1500, timeoutMs = 30000 } = options ?? {};
+  const [data, setData] = useState<T | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [polling, setPolling] = useState(false);
+  const startedAt = useRef(0);
+
+  useEffect(() => {
+    startedAt.current = Date.now();
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const result = await loadFn();
+        if (cancelled) return;
+        setData(result);
+        setLoading(false);
+        if (isDone(result)) { setPolling(false); return; }
+        if (Date.now() - startedAt.current >= timeoutMs) {
+          setError({ code: "TIMEOUT", message: "채점 시간이 초과됐습니다" });
+          setPolling(false);
+          return;
+        }
+        setPolling(true);
+        setTimeout(tick, intervalMs);
+      } catch (e) {
+        if (!cancelled) { setError(e as ApiError); setLoading(false); setPolling(false); }
+      }
+    };
+    tick();
+    return () => { cancelled = true; };
+    // loadFn과 isDone은 렌더링마다 재생성될 수 있으므로 의도적으로 초기값만 사용
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return { data, loading, error, polling };
 }
