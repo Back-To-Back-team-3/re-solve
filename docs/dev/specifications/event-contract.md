@@ -224,7 +224,7 @@ flowchart LR
 | S7 | `AssignmentIncompleteRepeated` v1 | study | notification | SNS | 연속 2회 `INCOMPLETE` 발견 | — | 확정 |
 | S8 | `HintReady` v1 | study (AI 모듈) | notification, member(확정 필요) | SNS | 힌트 종결 (`READY`·`FALLBACK`·`BLOCKED`) | — | 확정 |
 | S9 | `HintRequested` v1 | study | ai | SNS | `hint_requests` REQUESTED INSERT와 같은 트랜잭션에서 Outbox 기록. aggregate = `hintRequestId` | — | 확정 |
-| A1 | `HintReady` v1 | ai | study | SNS `ai-events` → `study-queue` | LLM 힌트 생성 완료 (캐시 미적중 경로). aggregate = `hintRequestId` | — | 확정 |
+| A1 | `HintReady` v1 | ai | study | SNS `ai-events` → `study-queue` | 캐시 적중 또는 LLM 생성 완료 시 발행. aggregate = `hintRequestId` | — | 확정 |
 | I1 | `GitHubSyncFailed` v1 | integration | notification | SNS | Sync Job 최종 `FAILED` | — | 확정 |
 - API B.2와 다른 행: `StudyMemberJoined` 구독에서 notification 제외(대응 알림 유형 없음, API 7.0), `ContestParticipantRegistered`·`Canceled` 구독에서 notification 제외(대회는 `ContestStarted`로 알림). `MemberUpdated`·`MemberSuspended`의 "전 서비스"는 `member_replicas` 보유 서비스(problem·contest·study, ERD §3)로 한정했다. 근거는 §8.1.
 
@@ -962,7 +962,7 @@ flowchart LR
 
 #### A1 `HintReady` v1
 
-- **발행:** LLM 힌트 생성 완료 시. study-service가 `REQUESTED → GENERATING` 전이 허용 후 LLM 처리. 결과가 `READY` / `FALLBACK`이면 발행하고, ai-service는 Outbox를 사용하지 않는다. aggregate = `hintRequestId`.
+- **발행:** 힌트 처리 완료 시. study-service가 `REQUESTED → GENERATING` 전이 허용 후, 캐시 적중이면 LLM 없이 즉시 발행하고, 미적중이면 LLM 처리 후 발행. 결과가 `READY` / `FALLBACK`이면 발행하고, ai-service는 Outbox를 사용하지 않는다. aggregate = `hintRequestId`.
 - **경로:** SNS `ai-events` 팬아웃 → SQS `study-queue`.
 
 | 필드 | 타입 | 필수 | 설명 |
@@ -973,7 +973,7 @@ flowchart LR
 | `problemRevisionId` | string | Y | Redis 캐시 키 `hint:cache:{problemRevisionId}:{level}` |
 | `level` | integer (1~3) | Y |  |
 | `result` | string | Y | `READY` / `FALLBACK` |
-| `isCached` | boolean | Y | true = Redis 캐시 적중 (ai-queue로 재수신된 경우 없음; 항상 false) |
+| `isCached` | boolean | Y | 캐시 적중 시 true, LLM 생성 완료 또는 FALLBACK 시 false |
 | `completedAt` | string (date-time) | Y | LLM 처리 완료 시각 |
 
 | 소비자 | 처리 |
