@@ -1,5 +1,6 @@
 package com.backtoback.gateway;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 
@@ -7,6 +8,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.UUID;
 import java.util.function.Function;
@@ -103,7 +105,11 @@ class GatewayCorsRoutingTests {
             .expectHeader()
             .valueEquals("Access-Control-Allow-Credentials", "true")
             .expectHeader()
-            .valueEquals("Access-Control-Allow-Methods", "GET")
+            .value(
+                "Access-Control-Allow-Methods",
+                value -> assertThat(Arrays.stream(value.split(",")).map(String::trim).toList())
+                    .containsExactlyInAnyOrder("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+            )
             .expectHeader()
             .valueEquals("Access-Control-Allow-Headers", "Authorization")
             .expectHeader()
