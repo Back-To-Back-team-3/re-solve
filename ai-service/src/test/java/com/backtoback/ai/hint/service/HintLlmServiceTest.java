@@ -36,6 +36,8 @@ import com.backtoback.ai.hint.dto.HintRequestedPayload;
 import com.backtoback.ai.hint.event.HintReadyPublishPayload;
 import com.backtoback.ai.hint.publisher.HintReadyEventPublisher;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+
 @ExtendWith(MockitoExtension.class)
 class HintLlmServiceTest {
 
@@ -53,11 +55,16 @@ class HintLlmServiceTest {
     HintReadyEventPublisher hintReadyEventPublisher;
     @Mock
     HintPromptTemplate hintPromptTemplate;
+    @Mock
+    HintGuardrailService hintGuardrailService;
+
+    CircuitBreaker llmCircuitBreaker;
 
     HintLlmService sut;
 
     @BeforeEach
     void setUp() {
+        llmCircuitBreaker = CircuitBreaker.ofDefaults("test-llm");
         sut
             = new HintLlmService(
                 studyInternalClient,
@@ -65,7 +72,9 @@ class HintLlmServiceTest {
                 redisTemplate,
                 hintReadyEventPublisher,
                 hintPromptTemplate,
-                FIXED_CLOCK
+                FIXED_CLOCK,
+                hintGuardrailService,
+                llmCircuitBreaker
             );
     }
 
@@ -87,7 +96,7 @@ class HintLlmServiceTest {
     }
 
     @Test
-    @DisplayName("캐시 미적중 후 LLM 정상 완료 시 isCached=false·result=READY로 HintReady 발행 및 Redis 저장")
+    @DisplayName("캐시 미적중 후 LLM 정상 완료·가드레일 통과 시 isCached=false·result=READY로 HintReady 발행 및 Redis 저장")
     void process_cacheMiss_llmSuccess_storesInRedisAndPublishesHintReady() {
         HintRequestedPayload event = makeEvent();
         given(redisTemplate.opsForValue()).willReturn(valueOps);
@@ -95,6 +104,7 @@ class HintLlmServiceTest {
         given(hintPromptTemplate.systemPrompt()).willReturn("system");
         given(hintPromptTemplate.userPrompt(anyInt(), any(), any(), any())).willReturn("user");
         given(chatClient.prompt().system(anyString()).user(anyString()).call().content()).willReturn("LLM 힌트");
+        given(hintGuardrailService.check(anyString(), any())).willReturn(GuardrailResult.pass("LLM 힌트"));
 
         sut.process(event);
 
