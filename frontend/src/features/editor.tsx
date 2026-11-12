@@ -379,12 +379,24 @@ function Buffer({
     persist();
     setBusy(true);
     try {
-      const receipt = await judgeApi.submit({
-        problemRevisionId: problem.problemRevisionId,
-        language,
-        sourceCode: codeRef.current,
-      });
-      setJudgeSubmissionId(receipt.submissionId);
+      if (examId) {
+        await contestApi.submitExam(examId, {
+          problemId: problem.id,
+          language,
+          sourceCode: codeRef.current,
+          seq: seqRef.current,
+        });
+        setJudgeError(null);
+        setSaved("제출 완료");
+        setBusy(false);
+      } else {
+        const receipt = await judgeApi.submit({
+          problemRevisionId: problem.problemRevisionId,
+          language,
+          sourceCode: codeRef.current,
+        });
+        setJudgeSubmissionId(receipt.submissionId);
+      }
     } catch (e) {
       const err = e as { message?: string };
       setJudgeError(err.message ?? "제출에 실패했습니다.");
