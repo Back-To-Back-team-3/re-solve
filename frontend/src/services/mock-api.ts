@@ -120,10 +120,6 @@ export const api = {
     await read();
     return structuredClone({ problems, tags });
   },
-  async problem(id: string) {
-    await read();
-    return problems.find((p) => p.id === id) || null;
-  },
   async tags() {
     await read();
     return tags;

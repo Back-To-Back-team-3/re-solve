@@ -2,6 +2,7 @@ import type {
   AdminMember,
   AuthTokenResponse,
   Member,
+  ProblemDetail,
   ProblemFilter,
   ProblemListItem,
   ServerPage,
@@ -130,6 +131,8 @@ export const problemTagApi = {
 
 // 문제 API (§2.1)
 export const problemApi = {
+  getDetail: (problemId: string) =>
+    apiFetch<ProblemDetail>(`/api/v1/problems/${problemId}`),
   getList: (filter: ProblemFilter = {}) => {
     const q = new URLSearchParams();
     if (filter.keyword) q.set("keyword", filter.keyword);

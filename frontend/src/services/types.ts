@@ -228,6 +228,44 @@ export interface ProblemFilter {
   page?: number;
   size?: number;
 }
+
+// GET /api/v1/problems/{problemId} §2.1.2 상세 조회
+export type ProblemFunctionParamType = {
+  kind: string;
+  elementType?: ProblemFunctionParamType;
+};
+
+export interface ProblemDetail {
+  problemId: string;
+  problemRevisionId: string;
+  revisionNumber: number;
+  title: string;
+  difficulty: number;
+  tags: { tagId: string; name: string }[];
+  publishedAt: string;
+  solvedStatus: SolvedStatus;
+  description: string;
+  constraints: string;
+  examples: string;
+  functionSpec: {
+    name: "solution";
+    parameters: { name: string; type: ProblemFunctionParamType }[];
+    returnType: ProblemFunctionParamType;
+  };
+  executionLimits: {
+    timeMs: number;
+    memoryKb: number;
+    wallTimeMs: number;
+    outputLimitKb: number;
+  };
+  supportedLanguages: Language[];
+  starterCodes: { language: Language; sourceCode: string }[];
+  samples: {
+    testAssetId: string;
+    argumentTexts: Record<string, string>;
+    expectedReturnText: string;
+  }[];
+}
 export interface Page<T> {
   items: T[];
   page: number;

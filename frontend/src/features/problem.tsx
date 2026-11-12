@@ -4,7 +4,8 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
-import type { Problem } from "@/services/types";
+import { problemApi } from "@/services/api";
+import type { Language, Problem, ProblemDetail } from "@/services/types";
 import {
   Badge,
   ErrorState,
@@ -16,6 +17,7 @@ import {
 import { CodeEditor } from "./editor";
 import { SubmissionList } from "./problem-list";
 import { Board, Note } from "./board";
+import { useWorkspace } from "@/stores/workspace";
 export function ProblemDescription({
   problem,
   exam = false,
@@ -68,14 +70,37 @@ export function ProblemDescription({
     </section>
   );
 }
+function toProblem(d: ProblemDetail): Problem {
+  return {
+    id: d.problemId,
+    problemRevisionId: d.problemRevisionId,
+    title: d.title,
+    difficulty: d.difficulty,
+    tags: d.tags,
+    description: d.description,
+    constraints: d.constraints,
+    examples: d.examples,
+    functionSpec: {
+      name: "solution",
+      parameters: d.functionSpec.parameters.map((p) => ({
+        name: p.name,
+        type: p.type.kind,
+      })),
+      returnType: d.functionSpec.returnType.kind,
+    },
+    starterCodes: Object.fromEntries(
+      d.starterCodes.map((s) => [s.language, s.sourceCode]),
+    ) as Record<Language, string>,
+    samples: d.samples.map((s) => ({
+      input: Object.values(s.argumentTexts).join(", "),
+      expected: s.expectedReturnText,
+    })),
+  };
+}
+
 export function ProblemPage({ id }: { id: string }) {
-  const r = useResource(
-    async () => ({
-      problem: await api.problem(id),
-      user: await api.currentUser(),
-    }),
-    id,
-  );
+  const member = useWorkspace((s) => s.member);
+  const r = useResource(() => problemApi.getDetail(id), id);
   if (r.loading)
     return (
       <div className="container">
@@ -88,20 +113,20 @@ export function ProblemPage({ id }: { id: string }) {
         <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
-  if (!r.data?.problem) return <NotFound what="문제" />;
+  if (!r.data) return <NotFound what="문제" />;
+  const problem = toProblem(r.data);
   return (
     <>
       <div className="exam-bar">
         <Go className="small" href="/problems">
           ← 문제 목록
         </Go>
-        <span className="muted">자동 저장 · 모의 채점</span>
       </div>
       <div className="workspace">
-        <ProblemDescription key={id} problem={r.data.problem} />
+        <ProblemDescription key={id} problem={problem} />
         <CodeEditor
-          problem={r.data.problem}
-          userId={r.data.user?.id || "guest"}
+          problem={problem}
+          userId={member?.memberId || "guest"}
         />
       </div>
     </>
