@@ -271,8 +271,19 @@ export function StudyPage({ id }: { id: string }) {
           )}
           {tab === "problems" && (
             <ProblemTable
-              items={problems.filter((p) => s.problemIds.includes(p.id))}
-              db={db}
+              items={problems
+                .filter((p) => s.problemIds.includes(p.id))
+                .map((p) => ({
+                  problemId: p.id,
+                  problemRevisionId: p.problemRevisionId,
+                  revisionNumber: 0,
+                  title: p.title,
+                  difficulty: p.difficulty,
+                  tags: p.tags,
+                  publishedAt: "",
+                  solvedStatus: "UNSOLVED" as const,
+                  supportedLanguages: [],
+                }))}
             />
           )}{" "}
           {tab === "board" && <Board scope={`study:${id}`} />}
@@ -353,7 +364,7 @@ export function StudyCreate() {
               condition: String(f.get("condition")),
               tagIds: selected,
               problemIds: problems
-                .filter((p) => selected.includes(p.tagId))
+                .filter((p) => p.tags.some((t) => selected.includes(t.tagId)))
                 .map((p) => p.id),
             });
             router.push(`/studies/${s.id}`);

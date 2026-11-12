@@ -3,13 +3,12 @@ import type {
   Database,
   Exam,
   ExamSession,
+  JudgeState,
   Language,
-  Problem,
-  ProblemFilter,
-  Scenario,
   Study,
   Submission,
   User,
+  Verdict,
 } from "./types";
 export const DB_KEY = "resolve:mock:v1";
 const listeners = new Set<() => void>();
@@ -86,63 +85,28 @@ export function solvedStatus(
       s.kind === "submit" &&
       !s.examId,
   );
-  return rows.some((s) => s.verdict === "AC")
-    ? "SOLVED"
-    : rows.some((s) => s.state === "COMPLETED")
-      ? "WRONG"
-      : "UNSOLVED";
+  return rows.some((s) => s.verdict === "AC") ? "SOLVED" : "UNSOLVED";
 }
-export function filterProblems(
-  list: Problem[],
-  filter: ProblemFilter,
-  submissions: Submission[],
-  userId: string | null,
-) {
-  const matches = list.filter(
-    (p) =>
-      (!filter.keyword ||
-        `${p.id} ${p.title}`.includes(filter.keyword.trim())) &&
-      (!filter.tag || p.tagId === filter.tag) &&
-      (!filter.difficulty || p.difficulty === Number(filter.difficulty)) &&
-      (!filter.status ||
-        solvedStatus(p.id, submissions, userId) === filter.status),
-  );
-  matches.sort((a, b) =>
-    filter.sort === "rate"
-      ? b.rate - a.rate
-      : filter.sort === "difficulty"
-        ? a.difficulty - b.difficulty
-        : Number(b.id) - Number(a.id),
-  );
-  const size = Math.max(1, Math.min(100, filter.size || 5)),
-    totalPages = Math.ceil(matches.length / size),
-    page = Math.min(
-      Math.max(0, Number.isFinite(filter.page) ? Math.floor(filter.page!) : 0),
-      Math.max(0, totalPages - 1),
-    );
-  return {
-    items: matches.slice(page * size, (page + 1) * size),
-    page,
-    size,
-    totalElements: matches.length,
-    totalPages,
-  };
-}
-export function resolveSubmission(s: Submission, now = Date.now()): Submission {
+type SubmissionWithScenario = Submission & { scenario?: Verdict | "FAILED" };
+export function resolveSubmission(
+  s: SubmissionWithScenario,
+  now = Date.now(),
+): Submission {
   const age = now - s.createdAt;
   if (s.state === "COMPLETED" || s.state === "FAILED") return s;
-  if (age < 350) return { ...s, state: "ACCEPTED" };
-  if (age < 700) return { ...s, state: "QUEUED" };
-  if (age < 1300) return { ...s, state: "RUNNING" };
+  if (age < 350) return { ...s, state: "QUEUED" as JudgeState };
+  if (age < 700) return { ...s, state: "JUDGING" as JudgeState };
+  if (age < 1300) return { ...s, state: "JUDGING" as JudgeState };
+  const scenario = s.scenario ?? "AC";
   return {
     ...s,
-    state: s.scenario === "FAILED" ? "FAILED" : "COMPLETED",
-    verdict: s.scenario === "FAILED" ? null : s.scenario,
+    state: scenario === "FAILED" ? "FAILED" : "COMPLETED",
+    verdict: scenario === "FAILED" ? null : (scenario as Verdict),
     finishedAt: s.createdAt + 1300,
     passedCount:
-      s.scenario === "AC"
+      scenario === "AC"
         ? s.totalCount
-        : ["FAILED", "CE", "RE", "MLE"].includes(s.scenario)
+        : ["FAILED", "CE", "RE", "MLE"].includes(scenario)
           ? 0
           : Math.max(0, s.totalCount - 1),
   };
@@ -155,14 +119,6 @@ export const api = {
   async catalog() {
     await read();
     return structuredClone({ problems, tags });
-  },
-  async problems(filter: ProblemFilter = {}) {
-    const db = await read();
-    return filterProblems(problems, filter, db.submissions, db.currentUserId);
-  },
-  async problem(id: string) {
-    await read();
-    return problems.find((p) => p.id === id) || null;
   },
   async tags() {
     await read();
@@ -212,7 +168,9 @@ export const api = {
     return change((db) => Object.assign(user(db), values));
   },
   async configure(
-    values: Partial<Pick<Database, "scenario" | "simulateReadError">>,
+    values: Partial<Pick<Database, "simulateReadError">> & {
+      scenario?: Verdict | "FAILED";
+    },
   ) {
     return change((db) => Object.assign(db, values));
   },
@@ -233,50 +191,6 @@ export const api = {
     return list
       .map((s) => resolveSubmission(s))
       .sort((a, b) => b.createdAt - a.createdAt);
-  },
-  async submit(input: {
-    problemId: string;
-    language: Language;
-    sourceCode: string;
-    kind: "run" | "submit";
-    examId?: string;
-  }) {
-    return change((db) => {
-      const u = user(db),
-        p = problems.find((p) => p.id === input.problemId);
-      if (!p) throw new Error("문제를 찾을 수 없습니다.");
-      if (input.examId) {
-        const session = db.sessions.find(
-          (s) => s.examId === input.examId && s.userId === u.id,
-        );
-        if (!session || session.finishedAt || session.endsAt <= Date.now())
-          throw new Error("종료된 시험에는 제출할 수 없습니다.");
-      }
-      const s: Submission = {
-        ...input,
-        id: crypto.randomUUID(),
-        userId: u.id,
-        problemRevisionId: p.problemRevisionId,
-        scenario: db.scenario,
-        state: "ACCEPTED",
-        verdict: null,
-        createdAt: Date.now(),
-        passedCount: 0,
-        totalCount: input.kind === "run" ? p.samples.length : 5,
-        cpuTimeMs: 24,
-        memoryKiB: 32768,
-      };
-      db.submissions.push(s);
-      return s;
-    });
-  },
-  async settle(id: string) {
-    return change((db) => {
-      const i = db.submissions.findIndex((s) => s.id === id);
-      if (i < 0) throw new Error("제출을 찾을 수 없습니다.");
-      db.submissions[i] = resolveSubmission(db.submissions[i]);
-      return db.submissions[i];
-    });
   },
   async studies() {
     return (await read()).studies;
@@ -441,15 +355,14 @@ export const api = {
           language: draft.language,
           sourceCode: draft.sourceCode,
           kind: "submit",
-          state: "ACCEPTED",
+          state: "QUEUED" as JudgeState,
           verdict: null,
-          scenario: db.scenario,
           createdAt: Date.now(),
           passedCount: 0,
           totalCount: 5,
           cpuTimeMs: 24,
           memoryKiB: 32768,
-        });
+        } as Submission & { scenario?: Verdict | "FAILED" });
       }
       s.finishedAt = s.finishedAt || Date.now();
       db.submissions = db.submissions.map((x) =>
@@ -518,4 +431,4 @@ export const labels: Record<string, string> = {
   python3: "Python",
   cpp: "C++",
 };
-export type { ExamSession, Scenario };
+export type { ExamSession };

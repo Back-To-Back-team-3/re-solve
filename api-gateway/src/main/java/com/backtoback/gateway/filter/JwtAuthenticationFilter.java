@@ -51,26 +51,22 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 .write(exchange, HttpStatus.FORBIDDEN, "AUTH_ACCESS_DENIED", "내부 API는 외부에서 접근할 수 없습니다.");
         }
 
+        // 2. 개발용 인증 우회 — Whitelist보다 먼저 확인해 공개 경로에서도 사용자 컨텍스트를 주입한다.
+        boolean hasBypassUser
+            = exchange.getRequest().getHeaders().getFirst(RemoveExternalHeadersFilter.USER_ID_HEADER) != null;
+        if (authProperties.isBypassEnabled() && hasBypassUser) {
+            ServerHttpRequest mutatedRequest
+                = exchange.getRequest().mutate().header(RemoveExternalHeadersFilter.USER_ROLE_HEADER, "USER").build();
+            return chain.filter(exchange.mutate().request(mutatedRequest).build());
+        }
+
         String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         boolean hasBearerToken = StringUtils.hasText(authHeader) && authHeader.startsWith(BEARER_PREFIX);
 
-        // 2. 토큰이 없는 경우 처리
+        // 3. 토큰이 없는 경우 처리
         if (!hasBearerToken) {
             if (whiteListMatcher.isWhiteList(exchange.getRequest())) {
                 return chain.filter(exchange);
-            }
-
-            // 개발용 인증 우회 허용 확인
-            boolean hasBypassUser
-                = exchange.getRequest().getHeaders().getFirst(RemoveExternalHeadersFilter.USER_ID_HEADER) != null;
-            if (authProperties.isBypassEnabled() && hasBypassUser) {
-                ServerHttpRequest mutatedRequest
-                    = exchange
-                        .getRequest()
-                        .mutate()
-                        .header(RemoveExternalHeadersFilter.USER_ROLE_HEADER, "USER")
-                        .build();
-                return chain.filter(exchange.mutate().request(mutatedRequest).build());
             }
 
             return ErrorResponseWriter.write(exchange, HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "인증 토큰이 필요합니다.");

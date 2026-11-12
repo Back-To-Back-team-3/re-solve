@@ -3,9 +3,10 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Search } from "lucide-react";
-import { api, labels, solvedStatus } from "@/services/mock-api";
+import { labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
-import type { Problem, Database, Submission } from "@/services/types";
+import { problemApi } from "@/services/api";
+import type { ProblemListItem, Submission, SubmissionHistoryItem, Verdict } from "@/services/types";
 import { useCatalog } from "@/services/catalog";
 import {
   Badge,
@@ -16,14 +17,7 @@ import {
   Loading,
   date,
 } from "@/components/ui";
-export function ProblemTable({
-  items,
-  db,
-}: {
-  items: Problem[];
-  db?: Database;
-}) {
-  const { tags } = useCatalog();
+export function ProblemTable({ items }: { items: ProblemListItem[] }) {
   return (
     <div className="table-wrap">
       <table>
@@ -34,41 +28,26 @@ export function ProblemTable({
             <th>문제 제목</th>
             <th>난이도</th>
             <th>알고리즘</th>
-            <th>정답률</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((p) => {
-            const status = db
-              ? solvedStatus(p.id, db.submissions, db.currentUserId)
-              : "UNSOLVED";
-            return (
-              <tr key={p.id}>
-                <td>
-                  <Badge
-                    tone={
-                      status === "SOLVED"
-                        ? "success"
-                        : status === "WRONG"
-                          ? "error"
-                          : ""
-                    }
-                  >
-                    {labels[status]}
-                  </Badge>
-                </td>
-                <td className="mono">{p.id}</td>
-                <td>
-                  <Link href={`/problems/${p.id}`}>{p.title}</Link>
-                </td>
-                <td>
-                  <Badge>Lv. {p.difficulty}</Badge>
-                </td>
-                <td>{tags.find((t) => t.id === p.tagId)?.name}</td>
-                <td className="mono">{p.rate}%</td>
-              </tr>
-            );
-          })}
+          {items.map((p) => (
+            <tr key={p.problemId}>
+              <td>
+                <Badge tone={p.solvedStatus === "SOLVED" ? "success" : ""}>
+                  {labels[p.solvedStatus]}
+                </Badge>
+              </td>
+              <td className="mono">{p.problemId}</td>
+              <td>
+                <Link href={`/problems/${p.problemId}`}>{p.title}</Link>
+              </td>
+              <td>
+                <Badge>Lv. {p.difficulty}</Badge>
+              </td>
+              <td>{p.tags.map((t) => t.name).join(", ")}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -110,6 +89,59 @@ export function SubmissionList({ items }: { items: Submission[] }) {
           <span className="badge">모의</span>
         </div>
       ))}
+    </div>
+  );
+}
+const VERDICT_LABELS: Record<string, string> = {
+  AC: "정답", WA: "오답", TLE: "시간 초과",
+  MLE: "메모리 초과", RE: "런타임 에러", CE: "컴파일 에러",
+};
+function submissionTone(verdict: Verdict | null): string {
+  if (!verdict) return "pending";
+  if (verdict === "AC") return "success";
+  if (verdict === "WA" || verdict === "RE") return "error";
+  return "warning";
+}
+export function ProblemSubmissionList({ items }: { items: SubmissionHistoryItem[] }) {
+  if (!items.length)
+    return (
+      <Empty
+        title="제출 기록이 없어요"
+        description="문제를 제출하면 여기에 결과가 남아요."
+      />
+    );
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>판정</th>
+            <th>언어</th>
+            <th>실행 시간</th>
+            <th>메모리</th>
+            <th>제출 시각</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((s) => (
+            <tr key={s.submissionId}>
+              <td>
+                <Badge tone={submissionTone(s.verdict)}>
+                  {s.verdict
+                    ? (VERDICT_LABELS[s.verdict] ?? s.verdict)
+                    : labels[s.status]}
+                </Badge>
+              </td>
+              <td>{labels[s.language]}</td>
+              <td>{s.maxTimeMs != null ? `${s.maxTimeMs}ms` : "—"}</td>
+              <td>{s.maxMemoryKb != null ? `${Math.round(s.maxMemoryKb / 1024)}MB` : "—"}</td>
+              <td className="muted">
+                {new Date(s.submittedAt).toLocaleString("ko-KR")}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -175,17 +207,14 @@ export function ProblemsPage() {
   useEffect(() => setKeyword(appliedKeyword), [appliedKeyword]);
   const filter = {
     keyword: params.get("keyword") || "",
-    tag: params.get("tag") || "",
+    tagIds: params.get("tagIds") || "",
     difficulty: params.get("difficulty") || "",
-    status: params.get("status") || "",
+    solvedStatus: params.get("solvedStatus") || "",
     sort: params.get("sort") || "",
     page: Number(params.get("page") || 0),
   };
   const resource = useResource(
-    async () => ({
-      page: await api.problems(filter),
-      db: await api.snapshot(),
-    }),
+    () => problemApi.getList(filter),
     params.toString(),
   );
   return (
@@ -216,7 +245,7 @@ export function ProblemsPage() {
         </label>
         {[
           {
-            key: "tag",
+            key: "tagIds",
             label: "모든 알고리즘",
             options: tags.map((t) => [t.id, t.name]),
           },
@@ -226,17 +255,14 @@ export function ProblemsPage() {
             options: [1, 2, 3, 4, 5].map((n) => [String(n), `Lv. ${n}`]),
           },
           {
-            key: "status",
+            key: "solvedStatus",
             label: "모든 상태",
-            options: ["UNSOLVED", "SOLVED", "WRONG"].map((s) => [s, labels[s]]),
+            options: ["UNSOLVED", "SOLVED"].map((s) => [s, labels[s]]),
           },
           {
             key: "sort",
             label: "최신순",
-            options: [
-              ["difficulty", "쉬운 문제순"],
-              ["rate", "정답률순"],
-            ],
+            options: [["difficulty,asc", "쉬운 문제순"]],
           },
         ].map((f) => (
           <select
@@ -264,15 +290,11 @@ export function ProblemsPage() {
           <>
             <div className="row between">
               <p>
-                총 <b>{resource.data.page.totalElements}</b>문제
+                총 <b>{resource.data.totalElements}</b>문제
               </p>
-              <span className="muted">목업 문제 · 함수형 풀이</span>
             </div>
-            {resource.data.page.items.length ? (
-              <ProblemTable
-                items={resource.data.page.items}
-                db={resource.data.db}
-              />
+            {resource.data.content.length ? (
+              <ProblemTable items={resource.data.content} />
             ) : (
               <Empty
                 title="검색 결과가 없어요"
@@ -283,9 +305,9 @@ export function ProblemsPage() {
                       setKeyword("");
                       change({
                         keyword: "",
-                        tag: "",
+                        tagIds: "",
                         difficulty: "",
-                        status: "",
+                        solvedStatus: "",
                         page: "0",
                       });
                     }}
@@ -295,36 +317,11 @@ export function ProblemsPage() {
                 }
               />
             )}
-            <div className="row" style={{ justifyContent: "center" }}>
-              <Button
-                disabled={resource.data.page.page === 0}
-                onClick={() =>
-                  change({ page: String(resource.data!.page.page - 1) })
-                }
-              >
-                이전
-              </Button>
-              {Array.from({ length: resource.data.page.totalPages }, (_, i) => (
-                <Button
-                  className={i === resource.data?.page.page ? "primary" : ""}
-                  key={i}
-                  aria-label={`${i + 1} 페이지`}
-                  onClick={() => change({ page: String(i) })}
-                >
-                  {i + 1}
-                </Button>
-              ))}
-              <Button
-                disabled={
-                  resource.data.page.page >= resource.data.page.totalPages - 1
-                }
-                onClick={() =>
-                  change({ page: String(resource.data!.page.page + 1) })
-                }
-              >
-                다음
-              </Button>
-            </div>
+            <Pager
+              page={resource.data.page}
+              totalPages={resource.data.totalPages}
+              onChange={(p) => change({ page: String(p) })}
+            />
           </>
         )
       )}

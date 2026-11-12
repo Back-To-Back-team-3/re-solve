@@ -95,15 +95,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setTokenGetter(() => store.getState().accessToken);
     setAccessTokenSetter(setAccessToken);
 
-    authApi
-      .refresh()
-      .then(({ accessToken }) => {
-        setAccessToken(accessToken);
-        return memberApi.getMe();
-      })
-      .then((member) => setMember(member))
-      .catch(() => clearMember())
-      .finally(() => setAuthReady(true));
+    if (process.env.NEXT_PUBLIC_DEV_BYPASS_USER_ID) {
+      memberApi
+        .getMe()
+        .then((member) => setMember(member))
+        .catch(() => clearMember())
+        .finally(() => setAuthReady(true));
+    } else {
+      authApi
+        .refresh()
+        .then(({ accessToken }) => {
+          setAccessToken(accessToken);
+          return memberApi.getMe();
+        })
+        .then((member) => setMember(member))
+        .catch(() => clearMember())
+        .finally(() => setAuthReady(true));
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 비인증 가드 — authReady 이후 비로그인 상태에서 보호 경로에 접근하면 로그인 페이지로 이동한다.

@@ -232,7 +232,19 @@ export function ExamDetail({
           </Section>
           <Section title="출제 문제">
             <ProblemTable
-              items={problems.filter((p) => e.problemIds.includes(p.id))}
+              items={problems
+                .filter((p) => e.problemIds.includes(p.id))
+                .map((p) => ({
+                  problemId: p.id,
+                  problemRevisionId: p.problemRevisionId,
+                  revisionNumber: 0,
+                  title: p.title,
+                  difficulty: p.difficulty,
+                  tags: p.tags,
+                  publishedAt: "",
+                  solvedStatus: "UNSOLVED" as const,
+                  supportedLanguages: [],
+                }))}
             />
           </Section>
         </div>
