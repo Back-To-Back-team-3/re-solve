@@ -1,16 +1,30 @@
 import type {
+  ActiveTimeSlot,
   AdminMember,
   AdminProblemListItem,
+  AssignmentDetail,
+  AssignmentStatus,
+  AssignmentSummary,
   AuthTokenResponse,
+  GoalType,
+  JoinType,
   JudgeResult,
   Language,
   Member,
+  MembershipCreated,
+  MembershipStatus,
   ProblemDetail,
   ProblemFilter,
   ProblemListItem,
   ProblemVisibility,
   RunResponse,
   ServerPage,
+  SkillLevel,
+  StudyDetail,
+  StudyMeItem,
+  StudyMemberItem,
+  StudyRecommendationsPage,
+  StudySummary,
   SubmissionHistoryItem,
   SubmissionReceipt,
   TagLevel,
@@ -85,6 +99,7 @@ async function apiFetchInner<T>(
     } catch {}
     throw { code: "UNAUTHORIZED", message: "로그인이 필요합니다" } satisfies ApiError;
   }
+
 
   let json: ApiResponse<T>;
   try {
@@ -265,5 +280,128 @@ export const adminApi = {
     apiFetch<{ memberId: string; role: UserRole }>(
       `/api/v1/admin/members/${memberId}/role`,
       { method: "PATCH", body: JSON.stringify({ role, reason }) },
+    ),
+};
+
+// 스터디 API (§5)
+export const studyApi = {
+  create: (body: {
+    name: string;
+    description: string;
+    goal: GoalType;
+    skillLevel: SkillLevel;
+    preferredLanguage: Language;
+    activeTimeSlot: ActiveTimeSlot;
+    capacity: number;
+    joinType: JoinType;
+    isAutoReopen: boolean;
+  }) =>
+    apiFetch<{ studyId: string }>("/api/v1/studies", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getList: (params: {
+    keyword?: string;
+    goal?: GoalType;
+    skillLevel?: SkillLevel;
+    preferredLanguage?: Language;
+    activeTimeSlot?: ActiveTimeSlot;
+    joinType?: JoinType;
+    status?: string;
+    sort?: string;
+    page?: number;
+    size?: number;
+  } = {}) => {
+    const q = new URLSearchParams();
+    if (params.keyword) q.set("keyword", params.keyword);
+    if (params.goal) q.set("goal", params.goal);
+    if (params.skillLevel) q.set("skillLevel", params.skillLevel);
+    if (params.preferredLanguage) q.set("preferredLanguage", params.preferredLanguage);
+    if (params.activeTimeSlot) q.set("activeTimeSlot", params.activeTimeSlot);
+    if (params.joinType) q.set("joinType", params.joinType);
+    if (params.status) q.set("status", params.status);
+    if (params.sort) q.set("sort", params.sort);
+    if (params.page != null) q.set("page", String(params.page));
+    if (params.size != null) q.set("size", String(params.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<StudySummary>>(
+      `/api/v1/studies${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getDetail: (studyId: string) =>
+    apiFetch<StudyDetail>(`/api/v1/studies/${studyId}`),
+  getMyStudies: (params: { status?: MembershipStatus; page?: number; size?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.page != null) q.set("page", String(params.page));
+    if (params.size != null) q.set("size", String(params.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<StudyMeItem>>(`/api/v1/studies/me${qs ? `?${qs}` : ""}`);
+  },
+  getRecommendations: (params: { page?: number; size?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.page != null) q.set("page", String(params.page));
+    if (params.size != null) q.set("size", String(params.size));
+    const qs = q.toString();
+    return apiFetch<StudyRecommendationsPage>(
+      `/api/v1/studies/recommendations${qs ? `?${qs}` : ""}`,
+    );
+  },
+  join: (studyId: string) =>
+    apiFetch<MembershipCreated>(`/api/v1/studies/${studyId}/memberships`, {
+      method: "POST",
+    }),
+  leave: (studyId: string) =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/me`, {
+      method: "DELETE",
+    }),
+  getMembers: (studyId: string, params: { status?: MembershipStatus; page?: number; size?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.page != null) q.set("page", String(params.page));
+    if (params.size != null) q.set("size", String(params.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<StudyMemberItem>>(
+      `/api/v1/studies/${studyId}/memberships${qs ? `?${qs}` : ""}`,
+    );
+  },
+  approveMember: (studyId: string, membershipId: string) =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "APPROVED", reason: null }),
+    }),
+  rejectMember: (studyId: string, membershipId: string, reason?: string) =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "REJECTED", reason: reason ?? null }),
+    }),
+  removeMember: (studyId: string, membershipId: string, reason: string) =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "REMOVED", reason }),
+    }),
+  changeRole: (studyId: string, membershipId: string, role: "MANAGER" | "MEMBER") =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+  delegateLeader: (studyId: string, targetMembershipId: string) =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/leader-delegation`, {
+      method: "POST",
+      body: JSON.stringify({ targetMembershipId }),
+    }),
+  getAssignments: (studyId: string, params: { status?: AssignmentStatus; page?: number; size?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.page != null) q.set("page", String(params.page));
+    if (params.size != null) q.set("size", String(params.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<AssignmentSummary>>(
+      `/api/v1/studies/${studyId}/assignments${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getAssignmentDetail: (studyId: string, assignmentId: string) =>
+    apiFetch<AssignmentDetail>(
+      `/api/v1/studies/${studyId}/assignments/${assignmentId}`,
     ),
 };
