@@ -309,6 +309,20 @@ export type JudgeResult = {
   compileMessage: string | null;
 };
 
+// GET /api/v1/me/submissions §3.1.4 목록 항목
+export type SubmissionHistoryItem = {
+  submissionId: string;
+  problemId: string;
+  language: Language;
+  context: "PRACTICE" | "EXAM" | "DIAGNOSIS";
+  contextId: string | null;
+  status: JudgeState;
+  verdict: Verdict | null;
+  maxTimeMs: number | null;
+  maxMemoryKb: number | null;
+  submittedAt: string;
+};
+
 // POST /api/v1/submissions §3.1.2 접수 응답 (202)
 export type SubmissionReceipt = {
   submissionId: string;

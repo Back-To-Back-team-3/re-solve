@@ -9,6 +9,7 @@ import type {
   ProblemListItem,
   RunResponse,
   ServerPage,
+  SubmissionHistoryItem,
   SubmissionReceipt,
   TagLevel,
   UserRole,
@@ -179,6 +180,10 @@ export const judgeApi = {
     }),
   getStatus: (submissionId: string) =>
     apiFetch<JudgeResult>(`/api/v1/submissions/${submissionId}`),
+  getSubmissions: (problemId: string) =>
+    apiFetch<ServerPage<SubmissionHistoryItem>>(
+      `/api/v1/me/submissions?problemId=${encodeURIComponent(problemId)}&context=PRACTICE`,
+    ),
 };
 
 // 관리자 API (§1.6)

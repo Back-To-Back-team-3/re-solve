@@ -6,7 +6,7 @@ import { Search } from "lucide-react";
 import { labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
 import { problemApi } from "@/services/api";
-import type { ProblemListItem, Submission } from "@/services/types";
+import type { ProblemListItem, Submission, SubmissionHistoryItem, Verdict } from "@/services/types";
 import { useCatalog } from "@/services/catalog";
 import {
   Badge,
@@ -89,6 +89,59 @@ export function SubmissionList({ items }: { items: Submission[] }) {
           <span className="badge">모의</span>
         </div>
       ))}
+    </div>
+  );
+}
+const VERDICT_LABELS: Record<string, string> = {
+  AC: "정답", WA: "오답", TLE: "시간 초과",
+  MLE: "메모리 초과", RE: "런타임 에러", CE: "컴파일 에러",
+};
+function submissionTone(verdict: Verdict | null): string {
+  if (!verdict) return "pending";
+  if (verdict === "AC") return "success";
+  if (verdict === "WA" || verdict === "RE") return "error";
+  return "warning";
+}
+export function ProblemSubmissionList({ items }: { items: SubmissionHistoryItem[] }) {
+  if (!items.length)
+    return (
+      <Empty
+        title="제출 기록이 없어요"
+        description="문제를 제출하면 여기에 결과가 남아요."
+      />
+    );
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>판정</th>
+            <th>언어</th>
+            <th>실행 시간</th>
+            <th>메모리</th>
+            <th>제출 시각</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((s) => (
+            <tr key={s.submissionId}>
+              <td>
+                <Badge tone={submissionTone(s.verdict)}>
+                  {s.verdict
+                    ? (VERDICT_LABELS[s.verdict] ?? s.verdict)
+                    : labels[s.status]}
+                </Badge>
+              </td>
+              <td>{labels[s.language]}</td>
+              <td>{s.maxTimeMs != null ? `${s.maxTimeMs}ms` : "—"}</td>
+              <td>{s.maxMemoryKb != null ? `${Math.round(s.maxMemoryKb / 1024)}MB` : "—"}</td>
+              <td className="muted">
+                {new Date(s.submittedAt).toLocaleString("ko-KR")}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

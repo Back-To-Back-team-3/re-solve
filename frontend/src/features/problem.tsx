@@ -2,9 +2,8 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
-import { problemApi } from "@/services/api";
+import { judgeApi, problemApi } from "@/services/api";
 import type { Language, Problem, ProblemDetail } from "@/services/types";
 import {
   Badge,
@@ -15,7 +14,7 @@ import {
   Tabs,
 } from "@/components/ui";
 import { CodeEditor } from "./editor";
-import { SubmissionList } from "./problem-list";
+import { ProblemSubmissionList } from "./problem-list";
 import { Board, Note } from "./board";
 import { useWorkspace } from "@/stores/workspace";
 export function ProblemDescription({
@@ -26,7 +25,7 @@ export function ProblemDescription({
   exam?: boolean;
 }) {
   const [tab, setTab] = useState("description"),
-    r = useResource(() => api.submissions(problem.id), problem.id);
+    r = useResource(() => judgeApi.getSubmissions(problem.id), problem.id + "-subs");
   return (
     <section className="problem-panel stack">
       <div className="row wrap">
@@ -61,7 +60,7 @@ export function ProblemDescription({
         (r.error ? (
           <ErrorState message={r.error.message} retry={r.retry} />
         ) : (
-          <SubmissionList items={r.data || []} />
+          <ProblemSubmissionList items={r.data?.content || []} />
         ))}
       {tab === "questions" && (
         <Board scope={`problem:${problem.id}`} title="질문 작성" />
