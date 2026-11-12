@@ -1,5 +1,6 @@
 import type {
   AdminMember,
+  AdminProblemListItem,
   AuthTokenResponse,
   JudgeResult,
   Language,
@@ -7,6 +8,7 @@ import type {
   ProblemDetail,
   ProblemFilter,
   ProblemListItem,
+  ProblemVisibility,
   RunResponse,
   ServerPage,
   SubmissionHistoryItem,
@@ -183,6 +185,47 @@ export const judgeApi = {
   getSubmissions: (problemId: string) =>
     apiFetch<ServerPage<SubmissionHistoryItem>>(
       `/api/v1/me/submissions?problemId=${encodeURIComponent(problemId)}&context=PRACTICE`,
+    ),
+};
+
+// 관리자 문제 API (§2.3)
+export const adminProblemApi = {
+  getList: (filter: { visibility?: string; page?: number; size?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (filter.visibility) q.set("visibility", filter.visibility);
+    if (filter.page != null) q.set("page", String(filter.page));
+    if (filter.size != null) q.set("size", String(filter.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<AdminProblemListItem>>(
+      `/api/v1/admin/problems${qs ? `?${qs}` : ""}`,
+    );
+  },
+  publish: (problemId: string, rowVersion: number) =>
+    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+      `/api/v1/admin/problems/${problemId}/publication`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ rowVersion }),
+      },
+    ),
+  unpublish: (problemId: string, rowVersion: number) =>
+    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+      `/api/v1/admin/problems/${problemId}/unpublication`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ rowVersion }),
+      },
+    ),
+  archive: (problemId: string, rowVersion: number, reason: string) =>
+    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+      `/api/v1/admin/problems/${problemId}/archive`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ rowVersion, reason }),
+      },
     ),
 };
 

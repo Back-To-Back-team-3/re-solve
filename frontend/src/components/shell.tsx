@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Moon, Sun, Settings, UserRound, LogOut } from "lucide-react";
 import { CatalogProvider } from "@/services/catalog";
-import { WorkspaceProvider } from "@/stores/workspace";
+import { WorkspaceProvider, useWorkspace } from "@/stores/workspace";
 import { api, labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
 import type { Verdict } from "@/services/types";
@@ -21,7 +21,8 @@ function Frame({ children }: { children: ReactNode }) {
   const path = usePathname(),
     { data: user, loading: authLoading } = useResource(api.currentUser),
     action = useAction(),
-    toast = useToast();
+    toast = useToast(),
+    member = useWorkspace((s) => s.member);
   const [theme, setTheme] = useState("light"),
     [demo, setDemo] = useState(false),
     [scenario, setScenario] = useState<Verdict | "FAILED">("AC");
@@ -70,6 +71,14 @@ function Frame({ children }: { children: ReactNode }) {
                 {title}
               </Link>
             ))}
+            {member?.role === "ADMIN" && (
+              <Link
+                href="/admin/problems"
+                className={path.startsWith("/admin") ? "active" : ""}
+              >
+                문제 관리
+              </Link>
+            )}
           </nav>
           <div className="header-actions">
             <Button

@@ -323,6 +323,24 @@ export type SubmissionHistoryItem = {
   submittedAt: string;
 };
 
+// --- api-spec §2.3 관리자 문제 타입 ---
+
+export type ProblemVisibility = "PUBLIC" | "PRIVATE" | "ARCHIVED";
+
+// GET /api/v1/admin/problems §2.3.2 목록 항목
+export type AdminProblemListItem = {
+  problemId: string;
+  problemRevisionId: string;
+  revisionNumber: number;
+  title: string;
+  authorId: string;
+  scope: "GENERAL" | "EXAM_ONLY";
+  visibility: ProblemVisibility;
+  rowVersion: number;
+  currentProblemRevisionId: string | null;
+  supportedLanguages: Language[];
+};
+
 // POST /api/v1/submissions §3.1.2 접수 응답 (202)
 export type SubmissionReceipt = {
   submissionId: string;
