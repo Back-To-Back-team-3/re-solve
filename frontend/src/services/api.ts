@@ -6,6 +6,17 @@ import type {
   AssignmentStatus,
   AssignmentSummary,
   AuthTokenResponse,
+  CreateExamRequest,
+  DraftSaveRequest,
+  DraftSaveResponse,
+  ExamCreated,
+  ExamDetail,
+  ExamFinishResponse,
+  ExamProblemsResponse,
+  ExamStartResponse,
+  ExamSubmitRequest,
+  ExamSubmitResponse,
+  ExamSummary,
   GoalType,
   JoinType,
   JudgeResult,
@@ -13,10 +24,14 @@ import type {
   Member,
   MembershipCreated,
   MembershipStatus,
+  MyParticipation,
+  MyResultResponse,
+  Page,
   ProblemDetail,
   ProblemFilter,
   ProblemListItem,
   ProblemVisibility,
+  RankingResponse,
   RunResponse,
   ServerPage,
   SkillLevel,
@@ -404,4 +419,62 @@ export const studyApi = {
     apiFetch<AssignmentDetail>(
       `/api/v1/studies/${studyId}/assignments/${assignmentId}`,
     ),
+};
+
+// 모의 코테·시험 API (§4)
+export const contestApi = {
+  getExamList: (studyId: string) =>
+    apiFetch<Page<ExamSummary>>(`/api/v1/studies/${studyId}/exams`),
+
+  createExam: (studyId: string, body: CreateExamRequest) =>
+    apiFetch<ExamCreated>(`/api/v1/studies/${studyId}/exams`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getExamDetail: (examId: string) =>
+    apiFetch<ExamDetail>(`/api/v1/exams/${examId}`),
+
+  registerParticipant: (examId: string) =>
+    apiFetch<MyParticipation>(`/api/v1/exams/${examId}/participants`, {
+      method: "POST",
+    }),
+
+  cancelParticipant: (examId: string) =>
+    apiFetch<void>(`/api/v1/exams/${examId}/participants/me/cancellation`, {
+      method: "POST",
+    }),
+
+  startExam: (examId: string) =>
+    apiFetch<ExamStartResponse>(`/api/v1/exams/${examId}/start`, {
+      method: "POST",
+    }),
+
+  getExamProblems: (examId: string) =>
+    apiFetch<ExamProblemsResponse>(`/api/v1/exams/${examId}/problems`),
+
+  saveDraft: (examId: string, problemId: string, body: DraftSaveRequest) =>
+    apiFetch<DraftSaveResponse>(`/api/v1/exams/${examId}/drafts/${problemId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  submitExam: (examId: string, body: ExamSubmitRequest) =>
+    apiFetch<ExamSubmitResponse>(`/api/v1/exams/${examId}/submissions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  finishExam: (examId: string) =>
+    apiFetch<ExamFinishResponse>(`/api/v1/exams/${examId}/finish`, {
+      method: "POST",
+    }),
+
+  getMyResult: (examId: string) =>
+    apiFetch<MyResultResponse>(`/api/v1/exams/${examId}/results/me`),
+
+  getRanking: (examId: string, after?: string) => {
+    const query = after ? `?after=${encodeURIComponent(after)}` : "";
+    return apiFetch<RankingResponse>(`/api/v1/exams/${examId}/results${query}`);
+  },
 };
