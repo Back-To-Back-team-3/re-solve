@@ -232,6 +232,14 @@ export const adminProblemApi = {
     ),
 };
 
+// 문제 태그 API — B 도메인 §2.5.1 (SkillPage 태그 이름 표시용)
+export const problemTagApi = {
+  getTags: () =>
+    apiFetch<{
+      content: { tagId: string; name: string; displayOrder: number }[];
+    }>("/api/v1/problems/tags"),
+};
+
 // 관리자 API (§1.6)
 export const adminApi = {
   getMembers: (params: {
