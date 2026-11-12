@@ -72,7 +72,10 @@ export function ExamRoom({ id }: { id: string }) {
     if (!personalEndsAt || !r.data) return;
     if (remaining === 0 && !expired.current) {
       expired.current = true;
-      router.replace(`/exams/${id}/result`);
+      contestApi
+        .finishExam(id)
+        .catch(() => {})
+        .finally(() => router.replace(`/exams/${id}/result`));
     }
   }, [remaining, personalEndsAt, r.data, id, router]);
 
@@ -108,6 +111,9 @@ export function ExamRoom({ id }: { id: string }) {
 
   async function finish() {
     setFinishing(true);
+    try {
+      await contestApi.finishExam(id);
+    } catch {}
     router.push(`/exams/${id}/result`);
     setFinishing(false);
   }

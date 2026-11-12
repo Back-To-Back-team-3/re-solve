@@ -11,7 +11,7 @@ import {
   Empty,
 } from "@/components/ui";
 import { labels } from "@/services/mock-api";
-import { judgeApi } from "@/services/api";
+import { judgeApi, contestApi } from "@/services/api";
 import { usePollUntil } from "@/services/hooks";
 import {
   draftKey,
@@ -223,6 +223,7 @@ function Buffer({
     memory = useWorkspace((s) => s.drafts[key]);
   const codeRef = useRef(""),
     readyRef = useRef(false),
+    seqRef = useRef("1"),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [code, setCode] = useState(""),
     [ready, setReady] = useState(false),
@@ -237,20 +238,41 @@ function Buffer({
     [judgeError, setJudgeError] = useState<string | null>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   useEffect(() => {
-    let initial = memory;
-    try {
-      initial = initial || readDraft(key) || undefined;
-    } catch {
-      setSaved("복원 실패 · 입력 내용은 복사해 보관해 주세요.");
+    if (examId) {
+      try {
+        const raw = localStorage.getItem(
+          `re-solve:editor:draft:exam:${examId}:${problem.id}`,
+        );
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (typeof d.code === "string") codeRef.current = d.code;
+          if (typeof d.seq === "string") seqRef.current = d.seq;
+          setSaved("저장된 코드 복원 완료");
+        } else {
+          codeRef.current = problem.starterCodes[language] ?? "";
+          setSaved("초기 코드");
+        }
+      } catch {
+        codeRef.current = problem.starterCodes[language] ?? "";
+        setSaved("초기 코드");
+      }
+      setCode(codeRef.current);
+    } else {
+      let initial = memory;
+      try {
+        initial = initial || readDraft(key) || undefined;
+      } catch {
+        setSaved("복원 실패 · 입력 내용은 복사해 보관해 주세요.");
+      }
+      codeRef.current =
+        initial?.revisionId === problem.problemRevisionId
+          ? initial.code
+          : problem.starterCodes[language];
+      setCode(codeRef.current);
+      setSaved(initial ? "저장된 코드 복원 완료" : "초기 코드");
     }
-    codeRef.current =
-      initial?.revisionId === problem.problemRevisionId
-        ? initial.code
-        : problem.starterCodes[language];
-    setCode(codeRef.current);
     readyRef.current = true;
     setReady(true);
-    setSaved(initial ? "저장된 코드 복원 완료" : "초기 코드");
     const flush = () => {
       if (!readyRef.current) return;
       clearTimeout(timer.current);
@@ -287,19 +309,42 @@ function Buffer({
     setDraft(key, d);
     try {
       saveDraft(key, d);
-      setSaved("저장 완료");
+      if (!examId) setSaved("저장 완료");
       return true;
     } catch {
       setSaved("저장 실패 · 코드를 복사해 보관해 주세요.");
       return false;
     }
   }
+  async function persistExam() {
+    if (!examId) return;
+    try {
+      const res = await contestApi.saveDraft(examId, problem.id, {
+        language,
+        sourceCode: codeRef.current,
+        seq: seqRef.current,
+      });
+      if (res.applied) {
+        seqRef.current = String(parseInt(res.serverSeq) + 1);
+        try {
+          localStorage.setItem(
+            `re-solve:editor:draft:exam:${examId}:${problem.id}`,
+            JSON.stringify({ language, code: codeRef.current, seq: res.serverSeq }),
+          );
+        } catch {}
+        setSaved("저장 완료");
+      }
+    } catch {}
+  }
   function edit(value: string) {
     codeRef.current = value;
     setCode(value);
     setSaved("저장 중…");
     clearTimeout(timer.current);
-    timer.current = setTimeout(persist, 500);
+    timer.current = setTimeout(() => {
+      persist();
+      persistExam();
+    }, 500);
   }
   async function handleRun() {
     persist();
