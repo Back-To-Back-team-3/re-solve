@@ -35,6 +35,10 @@ public class HintGuardrailService {
     private final HintPromptTemplate hintPromptTemplate;
 
     public GuardrailResult check(String hintText, HintRequestedPayload event) {
+        if (hintText == null || hintText.isBlank()) {
+            log.warn("LLM 응답 비어 있음, 폴백 전이 hintRequestId={}", event.hintRequestId());
+            return GuardrailResult.fallback();
+        }
         if (!containsCode(hintText)) {
             return GuardrailResult.pass(hintText);
         }
@@ -54,6 +58,10 @@ public class HintGuardrailService {
             return GuardrailResult.fallback();
         }
 
+        if (regenerated == null || regenerated.isBlank()) {
+            log.warn("재생성 응답 비어 있음, 폴백 전이 hintRequestId={}", event.hintRequestId());
+            return GuardrailResult.fallback();
+        }
         if (!containsCode(regenerated)) {
             log.info("재생성 성공, 가드레일 통과 hintRequestId={}", event.hintRequestId());
             return GuardrailResult.pass(regenerated);
