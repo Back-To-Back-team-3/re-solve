@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiError } from "./api";
 
 export function useResource<T>(
@@ -83,6 +83,14 @@ export function useSSE(
 ): { connected: boolean; lastEventId: string | null } {
   const [connected, setConnected] = useState(false);
   const [lastEventId, setLastEventId] = useState<string | null>(null);
+  const onMessageRef = useRef(options?.onMessage);
+  const onErrorRef = useRef(options?.onError);
+
+  // 매 렌더 후 최신 콜백을 ref에 반영해 스테일 클로저 방지 (useLayoutEffect: 렌더 직후, EventSource 핸들러보다 먼저)
+  useLayoutEffect(() => {
+    onMessageRef.current = options?.onMessage;
+    onErrorRef.current = options?.onError;
+  });
 
   useEffect(() => {
     if (!url || options?.enabled === false) return;
@@ -91,19 +99,18 @@ export function useSSE(
     es.onopen = () => setConnected(true);
     es.onmessage = (e) => {
       setLastEventId(e.lastEventId || null);
-      options?.onMessage(e);
+      onMessageRef.current?.(e);
     };
     es.onerror = () => {
       setConnected(false);
-      options?.onError?.();
+      onErrorRef.current?.();
     };
 
     return () => {
       es.close();
       setConnected(false);
     };
-    // options 객체는 렌더링마다 재생성되므로 url과 enabled만 deps로 사용
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // options 객체는 렌더링마다 재생성되므로 url과 enabled만 deps로 사용; 콜백은 ref로 최신값 참조
   }, [url, options?.enabled]);
 
   return { connected, lastEventId };
