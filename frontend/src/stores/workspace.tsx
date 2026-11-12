@@ -1,7 +1,21 @@
 "use client";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { createStore, useStore } from "zustand";
-import type { Language } from "../services/types";
+import {
+  authApi,
+  memberApi,
+  setAccessTokenSetter,
+  setTokenGetter,
+} from "../services/api";
+import type { Language, Member } from "../services/types";
+import { Loading } from "../components/ui";
 export interface Draft {
   code: string;
   revisionId: string;
@@ -26,11 +40,20 @@ export function readDraft(key: string): Draft | null {
 export function saveDraft(key: string, draft: Draft) {
   localStorage.setItem("resolve:draft:" + key, JSON.stringify(draft));
 }
+const PUBLIC_PATHS = ["/", "/login", "/auth/callback"];
+
 interface Workspace {
+  member: Member | null;
+  accessToken: string | null;
+  authReady: boolean;
   drafts: Record<string, Draft>;
   language: Language;
   fontSize: number;
   activeProblems: Record<string, string>;
+  setMember: (member: Member) => void;
+  clearMember: () => void;
+  setAccessToken: (token: string) => void;
+  setAuthReady: (ready: boolean) => void;
   setDraft: (key: string, d: Draft) => void;
   setLanguage: (l: Language) => void;
   setFontSize: (n: number) => void;
@@ -38,10 +61,17 @@ interface Workspace {
 }
 const createWorkspace = () =>
   createStore<Workspace>((set) => ({
+    member: null,
+    accessToken: null,
+    authReady: false,
     drafts: {},
     language: "python3",
     fontSize: 14,
     activeProblems: {},
+    setMember: (member) => set({ member }),
+    clearMember: () => set({ member: null, accessToken: null }),
+    setAccessToken: (accessToken) => set({ accessToken }),
+    setAuthReady: (authReady) => set({ authReady }),
     setDraft: (key, d) => set((s) => ({ drafts: { ...s.drafts, [key]: d } })),
     setLanguage: (language) => {
       set({ language });
@@ -53,6 +83,42 @@ const createWorkspace = () =>
 const Context = createContext<ReturnType<typeof createWorkspace> | null>(null);
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [store] = useState(createWorkspace);
+  const router = useRouter();
+  const pathname = usePathname();
+  const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+
+  // 앱 시작 시 1회 — Refresh Token으로 인증 상태를 복원하고 회원 정보를 가져온다.
+  useEffect(() => {
+    const { setAccessToken, setMember, clearMember, setAuthReady } =
+      store.getState();
+
+    setTokenGetter(() => store.getState().accessToken);
+    setAccessTokenSetter(setAccessToken);
+
+    authApi
+      .refresh()
+      .then(({ accessToken }) => {
+        setAccessToken(accessToken);
+        return memberApi.getMe();
+      })
+      .then((member) => setMember(member))
+      .catch(() => clearMember())
+      .finally(() => setAuthReady(true));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 비인증 가드 — authReady 이후 비로그인 상태에서 보호 경로에 접근하면 로그인 페이지로 이동한다.
+  useEffect(() => {
+    const { authReady, member } = store.getState();
+    if (!authReady || member !== null || isPublicPath) return;
+    const returnTo = window.location.pathname + window.location.search;
+    router.push(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+  });
+
+  const authReady = useStore(store, (s) => s.authReady);
+  if (!authReady && !isPublicPath) {
+    return <Loading />;
+  }
+
   return <Context.Provider value={store}>{children}</Context.Provider>;
 }
 export function useWorkspace<T>(selector: (s: Workspace) => T) {

@@ -1,14 +1,13 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api } from "@/services/mock-api";
-import { useResource } from "@/services/hooks";
+import { authApi, memberApi } from "@/services/api";
+import { SkillPage } from "@/features/account-skill";
 import { useWorkspace } from "@/stores/workspace";
 import { Pet } from "@/components/pet";
 import {
   Button,
   Empty,
-  ErrorState,
   Go,
   Heading,
   Loading,
@@ -16,7 +15,47 @@ import {
   Tabs,
   useAction,
 } from "@/components/ui";
-import { SubmissionList } from "./problem-list";
+export function CallbackPage() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const setMember = useWorkspace((s) => s.setMember);
+  const setAccessToken = useWorkspace((s) => s.setAccessToken);
+  const setAuthReady = useWorkspace((s) => s.setAuthReady);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loginCode = params.get("loginCode");
+    const redirectPath = safeReturn(params.get("redirectPath"));
+    if (!loginCode) {
+      setError("유효하지 않은 접근입니다.");
+      return;
+    }
+    let isNew = false;
+    authApi
+      .exchangeToken(loginCode)
+      .then(({ accessToken, member }) => {
+        setAccessToken(accessToken);
+        isNew = member.isNewMember;
+        return memberApi.getMe();
+      })
+      .then((fullMember) => {
+        setMember(fullMember);
+        setAuthReady(true);
+        router.push(isNew ? "/dashboard?newMember=true" : redirectPath);
+      })
+      .catch(() => setError("로그인 처리 중 오류가 발생했습니다."));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (error)
+    return (
+      <div className="container stack">
+        <p>{error}</p>
+        <Go href="/login">로그인 페이지로</Go>
+      </div>
+    );
+  return <Loading />;
+}
+
 export function safeReturn(value: string | null) {
   return value?.startsWith("/") &&
     !value.startsWith("//") &&
@@ -24,11 +63,8 @@ export function safeReturn(value: string | null) {
     ? value
     : "/dashboard";
 }
-export function AuthPage({ signup = false }: { signup?: boolean }) {
-  const router = useRouter(),
-    params = useSearchParams(),
-    action = useAction(),
-    [busy, setBusy] = useState(false);
+export function AuthPage() {
+  const params = useSearchParams();
   return (
     <div className="auth-layout">
       <div className="auth-art">
@@ -41,102 +77,38 @@ export function AuthPage({ signup = false }: { signup?: boolean }) {
         </h2>
         <p>오늘의 한 문제가 내일의 자신감으로.</p>
       </div>
-      <form
-        className="card stack"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          const form = e.currentTarget,
-            f = new FormData(form);
-          await action(
-            async () => {
-              const email = String(f.get("email"));
-              if (signup) await api.signup(email, String(f.get("name")));
-              else await api.login(email);
-              form.reset();
-              router.push(safeReturn(params.get("returnTo")));
-            },
-            signup ? "데모 계정을 만들었습니다." : "데모 로그인했습니다.",
-            false,
-          );
-          setBusy(false);
-        }}
-      >
+      <div className="card stack">
         <Heading
-          title={signup ? "회원가입" : "다시 만나서 반가워요"}
-          description="실제 인증 없이 체험하는 데모 계정입니다."
+          title="다시 만나서 반가워요"
+          description="GitHub 계정으로 로그인합니다."
         />
-        {signup && (
-          <label className="field">
-            닉네임
-            <input
-              name="name"
-              className="input"
-              required
-              minLength={2}
-              maxLength={20}
-              autoComplete="nickname"
-            />
-          </label>
-        )}
-        <label className="field">
-          이메일
-          <input
-            name="email"
-            type="email"
-            className="input"
-            required
-            autoComplete="email"
-            placeholder="player@resolve.demo"
-          />
-        </label>
-        <label className="field">
-          비밀번호
-          <input
-            type="password"
-            className="input"
-            required
-            minLength={4}
-            autoComplete={signup ? "new-password" : "current-password"}
-          />
-        </label>
-        <p className="notice">
-          입력한 비밀번호는 저장하거나 전송하지 않습니다. 데모 로그인은 이메일로
-          사용자를 구분합니다.
-        </p>
-        <Button className="primary" disabled={busy}>
-          {signup ? "데모 회원가입" : "데모 로그인"}
-        </Button>
-        <Go
-          href={`${signup ? "/login" : "/signup"}?returnTo=${encodeURIComponent(safeReturn(params.get("returnTo")))}`}
+        <Button
+          className="primary"
+          onClick={() => {
+            const returnTo = params.get("returnTo");
+            // OAuth 외부 리다이렉트 — router.push는 CSR 내부 라우팅이므로 사용 불가
+            window.location.href = returnTo
+              ? `/api/v1/auth/github?redirectPath=${encodeURIComponent(safeReturn(returnTo))}`
+              : "/api/v1/auth/github";
+          }}
         >
-          {signup ? "이미 계정이 있어요" : "처음이라면, 회원가입"}
-        </Go>
-      </form>
+          GitHub으로 로그인
+        </Button>
+      </div>
     </div>
   );
 }
 export function MyPage() {
-  const r = useResource(api.snapshot),
+  const member = useWorkspace((s) => s.member),
+    setMember = useWorkspace((s) => s.setMember),
+    clearMember = useWorkspace((s) => s.clearMember),
     action = useAction(),
+    router = useRouter(),
     [tab, setTab] = useState("profile"),
     fontSize = useWorkspace((s) => s.fontSize),
     setFontSize = useWorkspace((s) => s.setFontSize);
-  if (r.loading)
-    return (
-      <div className="container">
-        <Loading />
-      </div>
-    );
-  if (r.error)
-    return (
-      <div className="container">
-        <ErrorState message={r.error.message} retry={r.retry} />
-      </div>
-    );
-  const db = r.data!,
-    u = db.users.find((x) => x.id === db.currentUserId);
-  if (!u)
+
+  if (!member)
     return (
       <div className="container">
         <Empty
@@ -145,19 +117,20 @@ export function MyPage() {
         />
       </div>
     );
+
   return (
     <div className="container stack">
       <Heading
-        title={`${u.name}님의 마이페이지`}
+        title={`${member.nickname}님의 마이페이지`}
         eyebrow="MY PROFILE"
         description="학습 기록과 설정을 한곳에서 관리하세요."
       />
       <div className="card row">
         <Pet size={90} />
         <div>
-          <h2>{u.name}</h2>
-          <p>{u.email}</p>
-          <p className="muted">{u.goal}</p>
+          <h2>{member.nickname}</h2>
+          {member.email && <p>{member.email}</p>}
+          <p className="muted">@{member.githubLogin}</p>
         </div>
       </div>
       <Tabs
@@ -165,8 +138,8 @@ export function MyPage() {
         onChange={setTab}
         items={[
           { id: "profile", label: "프로필" },
+          { id: "skill", label: "스킬" },
           { id: "submissions", label: "제출 기록" },
-          { id: "activity", label: "참여 활동" },
           { id: "settings", label: "설정" },
         ]}
       />
@@ -177,11 +150,12 @@ export function MyPage() {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
             action(
-              () =>
-                api.profile({
-                  name: String(f.get("name")).trim(),
-                  goal: String(f.get("goal")),
-                }),
+              async () => {
+                const updated = await memberApi.updateMe({
+                  nickname: String(f.get("nickname")).trim(),
+                });
+                setMember(updated);
+              },
               "프로필을 저장했습니다.",
             );
           }}
@@ -189,61 +163,37 @@ export function MyPage() {
           <label className="field">
             닉네임
             <input
-              name="name"
+              name="nickname"
               className="input"
-              defaultValue={u.name}
+              defaultValue={member.nickname}
               minLength={2}
-              maxLength={20}
+              maxLength={50}
               required
             />
           </label>
-          <label className="field">
-            나의 목표
-            <input
-              name="goal"
-              className="input"
-              defaultValue={u.goal}
-              maxLength={100}
-            />
-          </label>
           <Button className="primary">프로필 저장</Button>
+          <Button
+            type="button"
+            onClick={() =>
+              action(
+                async () => {
+                  await authApi.logout();
+                  clearMember();
+                  router.push("/login");
+                },
+                "로그아웃했습니다.",
+              )
+            }
+          >
+            로그아웃
+          </Button>
         </form>
       )}
+      {tab === "skill" && <SkillPage />}
       {tab === "submissions" && (
         <Section title="최근 제출">
-          <SubmissionList
-            items={db.submissions
-              .filter((s) => s.userId === u.id && s.kind === "submit")
-              .slice()
-              .sort((a, b) => b.createdAt - a.createdAt)}
-          />
+          <Empty title="제출 기록을 불러오는 중입니다." />
         </Section>
-      )}
-      {tab === "activity" && (
-        <div className="grid-2">
-          <Section title="참여 스터디">
-            {db.studies
-              .filter(
-                (s) => s.members.includes(u.id) || s.applicants.includes(u.id),
-              )
-              .map((s) => (
-                <Go key={s.id} href={`/studies/${s.id}`}>
-                  {s.title}
-                </Go>
-              ))}
-          </Section>
-          <Section title="참여 시험">
-            <div className="stack-sm">
-              {db.exams
-                .filter((e) => e.participants.includes(u.id))
-                .map((e) => (
-                  <Go key={e.id} href={`/exams/${e.id}`}>
-                    {e.title}
-                  </Go>
-                ))}
-            </div>
-          </Section>
-        </div>
       )}
       {tab === "settings" && (
         <Section title="화면과 에디터 설정">
@@ -252,11 +202,15 @@ export function MyPage() {
               테마
               <select
                 className="input"
-                defaultValue={document.documentElement.dataset.theme || "light"}
+                defaultValue={
+                  typeof document !== "undefined"
+                    ? (document.documentElement.dataset.theme ?? "light")
+                    : "light"
+                }
                 onChange={(e) => {
                   document.documentElement.dataset.theme = e.target.value;
                   try {
-                    localStorage.setItem("resolve:theme", e.target.value);
+                    localStorage.setItem("re-solve:settings:theme", e.target.value);
                   } catch {}
                 }}
               >
@@ -274,10 +228,10 @@ export function MyPage() {
                   setFontSize(size);
                   try {
                     const prev = JSON.parse(
-                      localStorage.getItem("resolve:editor") || "{}",
+                      localStorage.getItem("re-solve:settings:editor") ?? "{}",
                     );
                     localStorage.setItem(
-                      "resolve:editor",
+                      "re-solve:settings:editor",
                       JSON.stringify({ ...prev, fontSize: size }),
                     );
                   } catch {}
@@ -296,3 +250,4 @@ export function MyPage() {
     </div>
   );
 }
+
