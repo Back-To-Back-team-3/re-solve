@@ -5,7 +5,6 @@ import type {
   ExamSession,
   JudgeState,
   Language,
-  Study,
   Submission,
   User,
   Verdict,
@@ -191,35 +190,6 @@ export const api = {
     return list
       .map((s) => resolveSubmission(s))
       .sort((a, b) => b.createdAt - a.createdAt);
-  },
-  async createStudy(
-    input: Omit<
-      Study,
-      "id" | "members" | "applicants" | "ownerId" | "deadline" | "reason"
-    >,
-  ) {
-    return change((db) => {
-      const u = user(db);
-      if (
-        input.title.trim().length < 2 ||
-        input.description.trim().length < 10 ||
-        !input.tagIds.length ||
-        input.capacity < 2 ||
-        input.capacity > 30
-      )
-        throw new Error("스터디 필수값을 확인해 주세요.");
-      const s: Study = {
-        ...input,
-        id: crypto.randomUUID(),
-        members: [u.id],
-        applicants: [],
-        ownerId: u.id,
-        deadline: Date.now() + 604800000,
-        reason: "새롭게 시작한 스터디",
-      };
-      db.studies.push(s);
-      return s;
-    });
   },
   async applyStudy(id: string) {
     return change((db) => {

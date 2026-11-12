@@ -3,8 +3,9 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Users, Clock, ArrowRight, Plus } from "lucide-react";
 import { api } from "@/services/mock-api";
+import { studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
-import type { Study } from "@/services/types";
+import type { Study, GoalType, SkillLevel, ActiveTimeSlot, JoinType, Language } from "@/services/types";
 import { useCatalog } from "@/services/catalog";
 import {
   Badge,
@@ -333,10 +334,8 @@ export function StudyPage({ id }: { id: string }) {
   );
 }
 export function StudyCreate() {
-  const { tags, problems } = useCatalog();
   const action = useAction(),
     router = useRouter(),
-    [selected, setSelected] = useState<string[]>(["hash"]),
     [busy, setBusy] = useState(false);
   return (
     <div className="container">
@@ -350,25 +349,38 @@ export function StudyCreate() {
         onSubmit={async (e) => {
           e.preventDefault();
           const f = new FormData(e.currentTarget);
-          if (!selected.length) return;
           setBusy(true);
-          await action(async () => {
-            const s = await api.createStudy({
-              title: String(f.get("title")).trim(),
-              description: String(f.get("description")).trim(),
-              goal: String(f.get("goal")),
-              level: String(f.get("level")),
-              time: String(f.get("time")),
-              capacity: Number(f.get("capacity")),
-              visibility: f.get("visibility") as "public" | "private",
-              condition: String(f.get("condition")),
-              tagIds: selected,
-              problemIds: problems
-                .filter((p) => p.tags.some((t) => selected.includes(t.tagId)))
-                .map((p) => p.id),
-            });
-            router.push(`/studies/${s.id}`);
-          }, "스터디를 만들었습니다.");
+          await action(
+            async () => {
+              let studyId: string;
+              try {
+                const res = await studyApi.create({
+                  name: String(f.get("name")).trim(),
+                  description: String(f.get("description")).trim(),
+                  goal: f.get("goal") as GoalType,
+                  skillLevel: f.get("skillLevel") as SkillLevel,
+                  preferredLanguage: f.get("preferredLanguage") as Language,
+                  activeTimeSlot: f.get("activeTimeSlot") as ActiveTimeSlot,
+                  capacity: Number(f.get("capacity")),
+                  joinType: f.get("joinType") as JoinType,
+                  isAutoReopen: f.get("isAutoReopen") === "on",
+                });
+                studyId = res.studyId;
+              } catch (err) {
+                const code = (err as { code?: string }).code;
+                throw new Error(
+                  code === "STUDY_JOIN_LIMIT_EXCEEDED"
+                    ? "최대 5개 스터디에 참여할 수 있습니다."
+                    : code === "MEMBER_SUSPENDED"
+                      ? "계정이 정지되어 스터디를 만들 수 없습니다."
+                      : ((err as { message?: string }).message ?? "오류가 발생했습니다."),
+                );
+              }
+              router.push(`/studies/${studyId}`);
+            },
+            "스터디를 만들었습니다.",
+            false,
+          );
           setBusy(false);
         }}
       >
@@ -376,10 +388,10 @@ export function StudyCreate() {
           스터디 이름
           <input
             className="input"
-            name="title"
+            name="name"
             required
-            minLength={2}
-            maxLength={60}
+            minLength={1}
+            maxLength={200}
             placeholder="예: 매일 한 문제, 코테 루틴"
           />
         </label>
@@ -388,28 +400,44 @@ export function StudyCreate() {
           <textarea
             className="input"
             name="description"
-            required
-            minLength={10}
-            maxLength={1000}
-            placeholder="함께할 활동을 10자 이상 소개해 주세요."
-          />
-        </label>
-        <label className="field">
-          학습 목표
-          <input
-            className="input"
-            name="goal"
-            required
-            placeholder="예: 매주 3문제 풀고 풀이 공유하기"
+            maxLength={500}
+            placeholder="스터디를 소개해 주세요. (선택)"
           />
         </label>
         <div className="form-grid">
           <label className="field">
-            난이도
-            <select className="input" name="level">
-              <option>입문 · Lv. 1–2</option>
-              <option>중급 · Lv. 3</option>
-              <option>심화 · Lv. 4–5</option>
+            학습 목표
+            <select className="input" name="goal" required>
+              <option value="EMPLOYMENT">취업 준비</option>
+              <option value="CONTEST">대회 준비</option>
+              <option value="STUDY">순수 학습</option>
+            </select>
+          </label>
+          <label className="field">
+            실력 수준
+            <select className="input" name="skillLevel" required>
+              <option value="LV0">LV0 · 입문</option>
+              <option value="LV1">LV1 · 초급</option>
+              <option value="LV2">LV2 · 중급</option>
+              <option value="LV3">LV3 · 고급</option>
+              <option value="MASTER">MASTER</option>
+            </select>
+          </label>
+          <label className="field">
+            선호 언어
+            <select className="input" name="preferredLanguage" required>
+              <option value="java">Java</option>
+              <option value="python3">Python</option>
+              <option value="cpp">C++</option>
+            </select>
+          </label>
+          <label className="field">
+            활동 시간대
+            <select className="input" name="activeTimeSlot" required>
+              <option value="MORNING">오전</option>
+              <option value="AFTERNOON">오후</option>
+              <option value="EVENING">저녁</option>
+              <option value="NIGHT">심야</option>
             </select>
           </label>
           <label className="field">
@@ -419,63 +447,32 @@ export function StudyCreate() {
               name="capacity"
               type="number"
               min={2}
-              max={30}
-              defaultValue={6}
+              max={10}
+              defaultValue={10}
               required
             />
-          </label>
-          <label className="field">
-            진행 시간
-            <input
-              className="input"
-              name="time"
-              placeholder="매주 수요일 20:00"
-              required
-            />
-          </label>
-          <label className="field">
-            공개 범위
-            <select className="input" name="visibility">
-              <option value="public">공개</option>
-              <option value="private">비공개</option>
-            </select>
           </label>
         </div>
         <fieldset className="stack-sm">
-          <legend>알고리즘 태그 (1개 이상)</legend>
-          <div className="row wrap">
-            {tags.map((t) => (
-              <label key={t.id} className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(t.id)}
-                  onChange={(e) =>
-                    setSelected(
-                      e.target.checked
-                        ? [...selected, t.id]
-                        : selected.filter((x) => x !== t.id),
-                    )
-                  }
-                />
-                {t.name}
-              </label>
-            ))}
+          <legend>가입 방식</legend>
+          <div className="row">
+            <label className="checkbox-row">
+              <input type="radio" name="joinType" value="INSTANT" defaultChecked />
+              즉시 가입
+            </label>
+            <label className="checkbox-row">
+              <input type="radio" name="joinType" value="APPROVAL" />
+              승인 후 가입
+            </label>
           </div>
-          {!selected.length && (
-            <p className="error-text">태그를 1개 이상 선택해 주세요.</p>
-          )}
         </fieldset>
-        <label className="field">
-          참가 조건
-          <input
-            className="input"
-            name="condition"
-            placeholder="누구나 환영합니다"
-          />
+        <label className="checkbox-row">
+          <input type="checkbox" name="isAutoReopen" />
+          모집 완료 후 자동 재모집
         </label>
         <div className="row">
           <Go href="/studies">취소</Go>
-          <Button className="primary grow" disabled={busy || !selected.length}>
+          <Button className="primary grow" disabled={busy}>
             스터디 생성
           </Button>
         </div>
