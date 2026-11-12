@@ -54,6 +54,8 @@ async function apiFetchInner<T>(
     ...(init?.headers as Record<string, string> | undefined),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  const bypassUserId = process.env.NEXT_PUBLIC_DEV_BYPASS_USER_ID;
+  if (bypassUserId) headers["X-User-Id"] = bypassUserId;
 
   let res: Response;
   try {
