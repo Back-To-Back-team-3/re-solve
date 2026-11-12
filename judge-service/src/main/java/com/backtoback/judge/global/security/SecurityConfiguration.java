@@ -47,7 +47,9 @@ public class SecurityConfiguration {
             )
             // request 인증 설정
             .authorizeHttpRequests(authorize -> {
-                authorize.requestMatchers("/actuator/health", "/actuator/health/**").permitAll();
+                authorize
+                    .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/prometheus")
+                    .permitAll();
                 // 내부 API는 Gateway와 네트워크에서 외부 접근을 차단한다.
                 authorize.requestMatchers("/internal", "/internal/**").permitAll();
                 authorize
