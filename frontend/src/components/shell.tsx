@@ -9,6 +9,7 @@ import { api, labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
 import type { Verdict } from "@/services/types";
 import { Button, Modal, ToastProvider, useAction, useToast } from "./ui";
+import { NotificationBell } from "@/features/notifications";
 const nav = [
   ["/", "연습하기"],
   ["/dashboard", "학습 현황"],
@@ -101,6 +102,7 @@ function Frame({ children }: { children: ReactNode }) {
               <UserRound size={16} />
               <span className="profile-label">{user?.name || "로그인"}</span>
             </Link>
+            {user && <NotificationBell />}
             {user && (
               <Button
                 className="icon-btn"
