@@ -349,7 +349,7 @@ export function ExamDetail({
                         () =>
                           contestApi
                             .cancelParticipant(id)
-                            .then(() => r.retry()),
+                            .then(() => { router.refresh(); r.retry(); }),
                         "참가를 취소했습니다.",
                       )
                     }
@@ -363,7 +363,7 @@ export function ExamDetail({
                         () =>
                           contestApi
                             .registerParticipant(id)
-                            .then(() => r.retry()),
+                            .then(() => { router.refresh(); r.retry(); }),
                         "참가 신청했습니다.",
                       )
                     }
