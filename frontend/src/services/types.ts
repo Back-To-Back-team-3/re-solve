@@ -219,6 +219,177 @@ export interface ServerPage<T> {
   hasNext: boolean;
 }
 
+// ===== Contest/Exam 실서버 타입 (api-spec §4) =====
+
+export type ExamStatusServer =
+  | "SCHEDULED"
+  | "IN_PROGRESS"
+  | "CLOSED"
+  | "FINALIZED"
+  | "CANCELED";
+
+export type ParticipantStatus =
+  | "REGISTERED"
+  | "STARTED"
+  | "FINISHED"
+  | "ABSENT"
+  | "CANCELED";
+
+export type ResultStatus = "HIDDEN" | "PROVISIONAL" | "FINALIZED";
+
+export type SubmissionReceptionStatus =
+  | "ACCEPTED"
+  | "REQUESTED"
+  | "JUDGED"
+  | "FAILED";
+
+export interface MyParticipation {
+  participantId: string;
+  status: ParticipantStatus;
+  enteredAt: string | null;
+  personalEndsAt: string;
+}
+
+export interface ExamSummary {
+  examId: string;
+  studyId: string;
+  title: string;
+  status: ExamStatusServer;
+  startsAt: string;
+  endsAt: string;
+  participantCount: number;
+  problemCount: number;
+}
+
+export interface ExamDetail {
+  examId: string;
+  studyId: string;
+  title: string;
+  mode: string;
+  status: ExamStatusServer;
+  startsAt: string;
+  endsAt: string;
+  serverNow: string;
+  totalScore: string;
+  problemCount: number;
+  examRevision: string;
+  version: string;
+  resultRevision: string;
+  myParticipation: MyParticipation | null;
+}
+
+export interface ExamProblem {
+  problemId: string;
+  title: string;
+  body: string;
+  score: string | null;
+  languages: Language[];
+}
+
+export interface ExamProblemsResponse {
+  problems: ExamProblem[];
+  serverNow: string;
+  personalEndsAt: string;
+}
+
+export interface DraftSaveRequest {
+  language: Language;
+  sourceCode: string;
+  seq: string;
+}
+
+export interface DraftSaveResponse {
+  applied: boolean;
+  serverSeq: string;
+  savedAt: string;
+  personalEndsAt: string;
+  serverNow: string;
+}
+
+export interface ExamSubmitRequest {
+  problemId: string;
+  language: Language;
+  sourceCode: string;
+  seq: string;
+}
+
+export interface ExamSubmitResponse {
+  examSubmissionId: string;
+  status: SubmissionReceptionStatus;
+  receivedAt: string;
+  draftSeq: string;
+  personalEndsAt: string;
+}
+
+export interface ExamFinishResponse {
+  participantId: string;
+  status: ParticipantStatus;
+  personalEndsAt: string;
+  autoSubmittedAt: string | null;
+  autoSubmissionIds: string[];
+}
+
+export interface RankingItem {
+  memberId: string;
+  nickname: string;
+  score: string | null;
+  rank: number | null;
+  pending: boolean;
+}
+
+export interface RankingResponse {
+  resultStatus: ResultStatus;
+  resultRevision: number;
+  items: RankingItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface MyResultProblem {
+  problemId: string;
+  verdict: string | null;
+  score: string | null;
+  passedCount: number | null;
+  totalCount: number | null;
+}
+
+export interface MyResultResponse {
+  resultStatus: ResultStatus;
+  rank: number | null;
+  score: string | null;
+  problems: MyResultProblem[];
+}
+
+export interface CreateExamProblem {
+  problemId: string;
+  score: string;
+  displayOrder: number;
+}
+
+export interface CreateExamRequest {
+  title: string;
+  mode: "FIXED";
+  startsAt: string;
+  endsAt: string;
+  problems: CreateExamProblem[];
+}
+
+export interface ExamCreated {
+  examId: string;
+  studyId: string;
+  status: ExamStatusServer;
+  examRevision: string;
+  version: string;
+  resultRevision: string;
+  startsAt: string;
+  endsAt: string;
+  totalScore: string;
+}
+
+export interface ExamStartResponse {
+  serverNow: string;
+}
+
 export interface ProblemFilter {
   keyword?: string;
   tagIds?: string;

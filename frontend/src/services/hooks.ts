@@ -115,3 +115,25 @@ export function useSSE(
 
   return { connected, lastEventId };
 }
+
+export function useExamRankingSSE(
+  examId: string,
+  enabled: boolean,
+  onUpdate: () => void,
+): void {
+  const onUpdateRef = useRef(onUpdate);
+  useLayoutEffect(() => {
+    onUpdateRef.current = onUpdate;
+  });
+
+  useEffect(() => {
+    if (!enabled) return;
+    const es = new EventSource(`/api/v1/exams/${examId}/events`, {
+      withCredentials: true,
+    });
+    es.addEventListener("exam-result-updated", () => {
+      onUpdateRef.current();
+    });
+    return () => es.close();
+  }, [examId, enabled]);
+}
