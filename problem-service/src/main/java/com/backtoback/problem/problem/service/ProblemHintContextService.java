@@ -1,6 +1,7 @@
 package com.backtoback.problem.problem.service;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -17,13 +18,15 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class ProblemHintContextService {
+    // 정책 §8.1에 따라 전체 이벤트의 헤더·식별자용 여유 16KiB를 남긴다.
+    private static final int MAX_HINT_INPUT_BYTES = 240 * 1024;
     private final ProblemHintContextStore store;
     private final ProblemAssetObjectReader reader;
     private final ProblemImageStorageProperties storage;
     private final ObjectMapper mapper;
 
     /**
-     * 힌트 허용 자료만 조회하고 저장소 장애·손상 원문은 의존 장애로 거절한다.
+     * 힌트 허용 자료만 조회하고 크기 초과는 비가용, 저장소 장애·손상 원문은 의존 장애로 거절한다.
      *
      * @param problemId 문제 식별자
      * @return Study에 제공할 힌트 가능 여부와 입력 자료
@@ -48,6 +51,11 @@ public class ProblemHintContextService {
             }
             String markdown
                 = body.description() + "\n\n## 제한 사항\n\n" + body.constraints() + "\n\n## 예시\n\n" + body.examples();
+            var input
+                = Map.of("problemTitle", snapshot.title(), "problemBody", markdown, "problemTags", snapshot.tags());
+            if (mapper.writeValueAsBytes(input).length > MAX_HINT_INPUT_BYTES) {
+                return new Context(problemId, null, null, null, List.of(), false);
+            }
             return new Context(problemId, snapshot.revisionId(), snapshot.title(), markdown, snapshot.tags(), true);
         } catch (ProblemException failure) {
             throw failure;

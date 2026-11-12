@@ -3491,7 +3491,8 @@
     - `problemRevisionId`는 최신 작성 회차가 아니라 검증을 통과한 현재 사용 회차 ID다.
     - `problemBody`는 해당 회차의 설명·제한 사항·예시를 위 순서의 Markdown으로 조합한다. 숨김 테스트·정답 코드·사용자 코드는 포함하지 않는다.
     - `problemTags`는 해당 회차의 태그 이름이며 태그 ID 순으로 반환한다. 태그가 없으면 빈 배열이다.
-    - 문제가 존재하지만 힌트 대상이 아니면 `isHintAvailable=false`, `problemRevisionId`·`problemTitle`·`problemBody`는 `null`, `problemTags`는 빈 배열이다. 이 경우 저장소 원문을 조회하지 않는다.
+    - 문제가 존재하지만 공개 상태·회차 등 힌트 대상 조건을 충족하지 않으면 `isHintAvailable=false`, `problemRevisionId`·`problemTitle`·`problemBody`는 `null`, `problemTags`는 빈 배열이다. 이 경우 저장소 원문을 조회하지 않는다.
+    - 원문 조합 후 정책 §8.1의 임시 힌트 입력 크기 기준을 초과해도 같은 비가용 응답을 반환한다. 이 검사는 원문 조회 후 수행하며, 본문을 잘라서 제공하지 않는다. Study의 404 응답·일일 횟수·기존 캐시 처리도 해당 정책을 따른다.
 - **에러:**
     - `COMMON_INVALID_REQUEST`(400) / 문제 ID가 양수 BIGINT가 아님
     - `PROBLEM_NOT_FOUND`(404) / 존재하지 않는 문제
