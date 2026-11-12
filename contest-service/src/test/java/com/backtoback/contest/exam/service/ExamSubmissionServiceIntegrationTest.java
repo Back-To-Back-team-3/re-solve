@@ -20,6 +20,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.dto.ExamSubmissionRequest;
 import com.backtoback.contest.exam.service.ExamDraftStore.SaveRequest;
@@ -33,6 +34,24 @@ class ExamSubmissionServiceIntegrationTest extends ExamIntegrationTestSupport {
     private jakarta.persistence.EntityManagerFactory entityManagerFactory;
     @MockitoSpyBean
     private ExamSubmissionRequestStore requestStore;
+
+    /** 현재 탈퇴 상태면 활성 복제본이 남아 있어도 신규 제출을 접수하지 않는다. */
+    @Test
+    @DisplayName("현재 탈퇴한 회원은 신규 시험 제출을 할 수 없다")
+    void currentWithdrawalBlocksSubmission() {
+        // given
+        given(refresh.refresh(7)).willReturn("WITHDRAWN");
+        given(content.supportedLanguages(Long.parseLong(examId), 101, 1001)).willReturn(java.util.List.of("java"));
+
+        // when & then
+        assertThatThrownBy(() -> submissions.submit(examId, "7", new ExamSubmissionRequest("101", "java", "코드", "1")))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
+            );
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM exam_submissions", Integer.class)).isZero();
+    }
 
     @Test
     @DisplayName("OSIV에 남은 참가 엔티티가 있어도 잠금 뒤 완료된 수동 종료를 다시 읽는다")

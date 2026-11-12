@@ -75,6 +75,88 @@ class ReplicaEventConsumerTest {
     @MockitoBean
     private MemberClient members;
 
+    /** 현재 상태 응답은 표시 정보가 없어도 확인하되 복제본을 생성하지 않는다. */
+    @Test
+    @DisplayName("복제본 필드 없는 활성 회원 조회는 상태를 반환하고 복제본을 만들지 않는다")
+    void statusWithoutSnapshotDoesNotCreateReplica() {
+        // given
+        jdbc.update("DELETE FROM member_replicas WHERE member_id=420");
+        given(members.fetch(420L)).willReturn(new MemberStatusResponse("420", "ACTIVE", "USER", null, null, null));
+
+        // when
+        var status = memberReplicaService.refresh(420L);
+
+        // then
+        assertThat(status).isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM member_replicas WHERE member_id=420", Integer.class))
+            .isZero();
+    }
+
+    /** 정지 상태는 이전 활성 복제본보다 우선해 신규 요청을 차단할 수 있다. */
+    @Test
+    @DisplayName("현재 조회가 정지 상태이면 활성 복제본을 갱신하지 않고 정지를 반환한다")
+    void statusWithoutSnapshotDoesNotOverrideReplica() {
+        // given
+        consumer
+            .consume(
+                event(
+                    UUID.randomUUID().toString(),
+                    "MemberUpdated",
+                    "421",
+                    "\"memberId\":\"421\",\"sourceVersion\":3,\"status\":\"ACTIVE\",\"nickname\":\"기존\""
+                ),
+                mock(Runnable.class)
+            );
+        given(members.fetch(421L)).willReturn(new MemberStatusResponse("421", "SUSPENDED", "USER", null, null, null));
+
+        // when & then
+        assertThat(memberReplicaService.refresh(421L)).isEqualTo("SUSPENDED");
+        var row = jdbc.queryForMap("SELECT member_status,source_version FROM member_replicas WHERE member_id=421");
+        assertThat(row.get("member_status")).isEqualTo("ACTIVE");
+        assertThat(((Number)row.get("source_version")).longValue()).isEqualTo(3);
+    }
+
+    /** 버전이 있는 오래된 정지 응답은 더 최신 활성 복제본을 덮지 않는다. */
+    @Test
+    @DisplayName("오래된 정지 스냅샷보다 최신 활성 복제본의 상태를 사용한다")
+    void olderSuspensionSnapshotDoesNotReplaceActiveReplica() {
+        // given
+        consumer
+            .consume(
+                event(
+                    UUID.randomUUID().toString(),
+                    "MemberUpdated",
+                    "423",
+                    "\"memberId\":\"423\",\"sourceVersion\":3,\"status\":\"ACTIVE\",\"nickname\":\"최신\""
+                ),
+                mock(Runnable.class)
+            );
+        given(members.fetch(423L)).willReturn(new MemberStatusResponse("423", "SUSPENDED", "USER", 2L, "이전", null));
+
+        // when & then
+        assertThat(memberReplicaService.refresh(423L)).isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForObject("SELECT source_version FROM member_replicas WHERE member_id=423", Long.class))
+            .isEqualTo(3L);
+    }
+
+    /** 부분 정지 이벤트에는 버전과 표시 정보가 있는 스냅샷이 계속 필요하다. */
+    @Test
+    @DisplayName("정지 이벤트 보완 응답에 스냅샷이 없으면 소비 기록과 ACK를 남기지 않는다")
+    void suspensionRequiresVersionedSnapshot() {
+        // given
+        given(members.fetch(422L)).willReturn(new MemberStatusResponse("422", "SUSPENDED", "USER", null, null, null));
+        var listener = new ReplicaEventListener(decoder, consumer, members, processedEvents, transactions);
+        var ack = mock(Acknowledgement.class);
+        var eventId = UUID.randomUUID().toString();
+        var message
+            = event(eventId, "MemberSuspended", "422", "\"memberId\":\"422\",\"sourceVersion\":2,\"suspended\":true");
+
+        // when & then
+        assertThatThrownBy(() -> listener.receive(message, ack)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(processed(eventId)).isZero();
+        verify(ack, never()).acknowledge();
+    }
+
     @Test
     @DisplayName("조회 중 더 최신 이벤트가 저장돼 있으면 저장된 회원 상태를 반환한다")
     void refreshReturnsNewerStoredStatus() {

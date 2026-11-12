@@ -66,7 +66,7 @@ public class ReplicaEventHandlers {
             if (snapshot == null) {
                 throw new IllegalStateException("Member snapshot is required");
             }
-            snapshot.validate(memberId);
+            snapshot.validateSnapshot(memberId);
             String expected = suspended.asBoolean() ? "SUSPENDED" : "ACTIVE";
             if (snapshot.sourceVersion() < eventVersion
                 || (snapshot.sourceVersion() == eventVersion && !expected.equals(snapshot.status()))) {

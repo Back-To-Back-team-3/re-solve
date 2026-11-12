@@ -260,6 +260,23 @@ class ExamManagementServiceTest {
         verify(problems).saveAll(any());
     }
 
+    /** 현재 회원이 정지 상태면 시험 생성 전에 거절한다. */
+    @Test
+    @DisplayName("현재 회원이 정지 상태이면 시험 생성 권한을 거절한다")
+    void rejectsCurrentlySuspendedCreator() {
+        // given
+        given(members.refresh(7)).willReturn("SUSPENDED");
+
+        // when & then
+        assertThatThrownBy(() -> service.create("12", "7", request(List.of(new Problem("1", "100.00", 1)))))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
+            );
+        verifyNoInteractions(dependencies, guards, exams, problems);
+    }
+
     /** 원격 확인 뒤 복제본에서 정지를 확인하면 시험과 문제를 저장하지 않는다. */
     @Test
     @DisplayName("저장 단계에서 정지된 회원의 시험 생성 요청을 거절한다")

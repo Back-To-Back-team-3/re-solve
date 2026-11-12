@@ -80,6 +80,7 @@ class ExamRunServiceTest {
     @DisplayName("실제 입장한 활성 참가자의 Run은 고정 회차를 Judge에 전달한다")
     void sendsPinnedRevision() {
         // given
+        given(refresh.refresh(7)).willReturn("ACTIVE");
         var exam
             = Exam
                 .create(
@@ -136,6 +137,7 @@ class ExamRunServiceTest {
     @DisplayName("취소된 시험의 Run은 시작 시각 전에 취소 오류로 거절한다")
     void rejectsCanceledExam() {
         // given
+        given(refresh.refresh(7)).willReturn("ACTIVE");
         var exam
             = Exam
                 .create(
@@ -164,6 +166,25 @@ class ExamRunServiceTest {
             .isInstanceOf(ContestException.class)
             .satisfies(
                 error -> assertThat(((ContestException)error).getErrorCode()).isEqualTo(ContestErrorCode.EXAM_CANCELED)
+            );
+        verifyNoInteractions(judge);
+    }
+
+    /** 복제본보다 현재 회원 조회가 정지라면 Judge에 요청하지 않는다. */
+    @Test
+    @DisplayName("현재 회원이 정지 상태이면 활성 복제본이 있어도 Run을 차단한다")
+    void rejectsCurrentSuspension() {
+        // given
+        given(refresh.refresh(7)).willReturn("SUSPENDED");
+
+        // when & then
+        assertThatThrownBy(
+            () -> service.run("55", "7", "101", new ExamRunService.RunRequest("java", "code", List.of()))
+        )
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(ContestErrorCode.MEMBER_SUSPENDED)
             );
         verifyNoInteractions(judge);
     }

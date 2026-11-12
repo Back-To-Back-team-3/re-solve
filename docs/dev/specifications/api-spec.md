@@ -7932,6 +7932,9 @@
 
 - **Method / URI:** `GET /internal/v1/members/{memberId}/status`
 - **비고:** 신규 등록·입장·Draft·제출·Run 전 `ACTIVE` 확인. 이미 접수한 동일 요청 반환·자동 제출·채점 반영·읽기는 소급 취소 안 함.
+- 현재 상태 응답의 `memberId`·`status`·`role`을 확인한다. `sourceVersion`과 `nickname`이 없는 응답으로 회원 복제본을 생성하거나 갱신하지 않는다. 버전과 표시 정보가 함께 제공되면 원천 버전을 비교해 반영한다.
+- `MemberSuspended`의 부분 이벤트를 복제본에 반영하려면 원천 버전과 표시 정보가 포함된 조회 응답이 필요하다. 해당 정보가 없으면 소비 기록과 ACK를 남기지 않고 재수신한다.
+- 시험 생성·설정 변경과 참가·Draft·직접 제출·Run은 기존 회원 복제본도 확인한다. 복제본이 없거나 비활성이면 신규 쓰기·Run을 허용하지 않는다. Judge의 §4.7.1 Run 문맥 검증도 활성 복제본을 요구한다.
 
 #### 4.8.9 외부 작업 상태 대사 (member·study·problem)
 
