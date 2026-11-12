@@ -21,11 +21,14 @@ import type {
   JoinType,
   JudgeResult,
   Language,
+  MarkAllReadResponse,
+  MarkReadResponse,
   Member,
   MembershipCreated,
   MembershipStatus,
   MyParticipation,
   MyResultResponse,
+  NotificationListResponse,
   Page,
   ProblemDetail,
   ProblemFilter,
@@ -43,6 +46,7 @@ import type {
   SubmissionHistoryItem,
   SubmissionReceipt,
   TagLevel,
+  UnreadCountResponse,
   UserRole,
   UserStatus,
 } from "./types";
@@ -477,4 +481,29 @@ export const contestApi = {
     const query = after ? `?after=${encodeURIComponent(after)}` : "";
     return apiFetch<RankingResponse>(`/api/v1/exams/${examId}/results${query}`);
   },
+};
+
+// 알림 API (§7)
+export const notificationApi = {
+  getList: (params: { page?: number; size?: number; unreadOnly?: boolean } = {}) => {
+    const q = new URLSearchParams();
+    if (params.page != null) q.set("page", String(params.page));
+    if (params.size != null) q.set("size", String(params.size));
+    if (params.unreadOnly != null) q.set("unreadOnly", String(params.unreadOnly));
+    const qs = q.toString();
+    return apiFetch<NotificationListResponse>(
+      `/api/v1/notifications${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getUnreadCount: () =>
+    apiFetch<UnreadCountResponse>("/api/v1/notifications/unread-count"),
+  markRead: (notificationId: string) =>
+    apiFetch<MarkReadResponse>(
+      `/api/v1/notifications/${notificationId}/read`,
+      { method: "PATCH" },
+    ),
+  markAllRead: () =>
+    apiFetch<MarkAllReadResponse>("/api/v1/notifications/read-all", {
+      method: "PATCH",
+    }),
 };

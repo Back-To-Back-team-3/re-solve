@@ -137,3 +137,29 @@ export function useExamRankingSSE(
     return () => es.close();
   }, [examId, enabled]);
 }
+
+export function useNotificationSSE(
+  onNotification: (event: import("./types").SSENotificationEvent) => void,
+): void {
+  const onNotificationRef = useRef(onNotification);
+  useLayoutEffect(() => {
+    onNotificationRef.current = onNotification;
+  });
+
+  useEffect(() => {
+    const es = new EventSource("/api/v1/notifications/subscribe", {
+      withCredentials: true,
+    });
+    es.addEventListener("notification", (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as import("./types").SSENotificationEvent;
+        onNotificationRef.current(data);
+      } catch {
+        // 파싱 실패 시 무시
+      }
+    });
+    // heartbeat 이벤트는 연결 유지 목적이므로 무시한다.
+    es.addEventListener("heartbeat", () => {});
+    return () => es.close();
+  }, []);
+}
