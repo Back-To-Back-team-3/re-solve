@@ -1,10 +1,12 @@
 import type {
   AdminMember,
   AuthTokenResponse,
+  Language,
   Member,
   ProblemDetail,
   ProblemFilter,
   ProblemListItem,
+  RunResponse,
   ServerPage,
   TagLevel,
   UserRole,
@@ -147,6 +149,22 @@ export const problemApi = {
       `/api/v1/problems${qs ? `?${qs}` : ""}`,
     );
   },
+};
+
+// 채점 API (§3.1)
+export const judgeApi = {
+  run: (body: {
+    problemId: string;
+    problemRevisionId: string;
+    language: Language;
+    sourceCode: string;
+    useSamples: boolean;
+    customInputs: { argumentTexts: Record<string, string> }[];
+  }) =>
+    apiFetch<RunResponse>("/api/v1/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };
 
 // 관리자 API (§1.6)

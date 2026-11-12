@@ -13,13 +13,14 @@ import {
   useToast,
 } from "@/components/ui";
 import { api, labels } from "@/services/mock-api";
+import { judgeApi } from "@/services/api";
 import {
   draftKey,
   readDraft,
   saveDraft,
   useWorkspace,
 } from "@/stores/workspace";
-import type { Language, Problem, Submission } from "@/services/types";
+import type { Language, Problem, RunResponse, Submission } from "@/services/types";
 const Monaco = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => <div className="skeleton pixel">LOADING EDITOR...</div>,
@@ -103,6 +104,49 @@ export function CodeEditor({
     </div>
   );
 }
+function RunResult({ result }: { result: RunResponse }) {
+  if (result.compileMessage) {
+    return <pre className="error-text">{result.compileMessage}</pre>;
+  }
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>결과</th>
+            <th>출력</th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.results.map((t, i) => (
+            <tr key={i}>
+              <td>{i + 1}</td>
+              <td>
+                <Badge
+                  tone={
+                    t.verdict === "AC"
+                      ? "success"
+                      : t.verdict
+                        ? "error"
+                        : ""
+                  }
+                >
+                  {t.verdict === "AC"
+                    ? "통과"
+                    : t.verdict
+                      ? labels[t.verdict]
+                      : "실행"}
+                </Badge>
+              </td>
+              <td className="mono">{t.actualReturnText ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 function Buffer({
   problem,
   userId,
@@ -127,7 +171,10 @@ function Buffer({
     [saved, setSaved] = useState("복원 중…"),
     [reset, setReset] = useState(false),
     [submission, setSubmission] = useState<Submission | null>(null),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [runResult, setRunResult] = useState<RunResponse | null>(null),
+    [runError, setRunError] = useState<string | null>(null),
+    [busyRun, setBusyRun] = useState(false);
   const action = useAction(),
     toast = useToast();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -217,7 +264,33 @@ function Buffer({
     if (submission && ["COMPLETED", "FAILED"].includes(submission.state))
       setBusy(false);
   }, [submission]);
-  async function judge(kind: "run" | "submit") {
+  async function handleRun() {
+    persist();
+    setBusyRun(true);
+    setRunResult(null);
+    setRunError(null);
+    setSubmission(null);
+    try {
+      setRunResult(
+        await judgeApi.run({
+          problemId: problem.id,
+          problemRevisionId: problem.problemRevisionId,
+          language,
+          sourceCode: codeRef.current,
+          useSamples: true,
+          customInputs: [],
+        }),
+      );
+    } catch (e) {
+      const err = e as { message?: string };
+      setRunError(err.message ?? "실행에 실패했습니다.");
+    } finally {
+      setBusyRun(false);
+    }
+  }
+  async function judge(kind: "submit") {
+    setRunResult(null);
+    setRunError(null);
     persist();
     setBusy(true);
     const ok = await action(async () =>
@@ -304,8 +377,8 @@ function Buffer({
           </Button>
           <Button
             className="small"
-            disabled={busy || !ready}
-            onClick={() => judge("run")}
+            disabled={busyRun || busy || !ready}
+            onClick={handleRun}
           >
             <Play size={14} />
             실행
@@ -321,14 +394,14 @@ function Buffer({
         </div>
       </div>
       <section className="results stack-sm">
-        <div className="row between">
-          <h3>실행 결과</h3>
-          <Badge tone="warning">모의 결과</Badge>
-        </div>
-        <p className="muted">
-          코드를 실제로 평가하지 않습니다. 데모 설정의 시나리오를 반환합니다.
-        </p>
-        {!submission ? (
+        <h3>실행 결과</h3>
+        {busyRun ? (
+          <p className="muted">실행 중…</p>
+        ) : runError ? (
+          <p className="error-text">{runError}</p>
+        ) : runResult ? (
+          <RunResult result={runResult} />
+        ) : !submission ? (
           <Empty
             title="코드를 실행해 보세요"
             description="공개 예제 실행 또는 전체 제출을 선택할 수 있어요."
@@ -348,25 +421,13 @@ function Buffer({
                 {labels[submission.verdict || submission.state]}
               </Badge>
               <span>
-                {submission.kind === "run" ? "공개 예제 실행" : "전체 제출"} ·{" "}
-                {submission.passedCount} / {submission.totalCount}
+                모의 제출 · {submission.passedCount} / {submission.totalCount}
               </span>
             </div>
             {submission.state === "COMPLETED" &&
               Array.from({ length: submission.totalCount }, (_, i) => (
                 <div className="result-case" key={i}>
-                  <div>
-                    <b>
-                      {submission.kind === "run" ? "공개 예제" : "숨김 테스트"}{" "}
-                      {i + 1}
-                    </b>
-                    {submission.kind === "run" && (
-                      <p className="mono">
-                        입력 {problem.samples[i].input} → 기대값{" "}
-                        {problem.samples[i].expected}
-                      </p>
-                    )}
-                  </div>
+                  <b>숨김 테스트 {i + 1}</b>
                   <Badge
                     tone={i < submission.passedCount ? "success" : "error"}
                   >
