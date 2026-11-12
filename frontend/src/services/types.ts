@@ -687,3 +687,72 @@ export type AssignmentDetail = {
     avgOnTimeRate: number;
   };
 };
+
+// --- api-spec §7 notification-service A 도메인 실서버 타입 ---
+
+export type NotificationType =
+  | "SUBMISSION_JUDGED"
+  | "SUBMISSION_FAILED"
+  | "EXAM_STARTING_SOON"
+  | "EXAM_FINALIZED"
+  | "EXAM_UPDATED"
+  | "EXAM_CANCELED"
+  | "CONTEST_STARTED"
+  | "CONTEST_FINALIZED"
+  | "CONTEST_CANCELED"
+  | "STUDY_APPLICATION_DECIDED"
+  | "ASSIGNMENT_PUBLISHED"
+  | "ASSIGNMENT_DEADLINE_APPROACHING"
+  | "ASSIGNMENT_INCOMPLETE_REPEATED"
+  | "LEVEL_CHANGED"
+  | "HINT_READY"
+  | "GITHUB_SYNC_FAILED"
+  | "SYSTEM_NOTICE";
+
+// GET /api/v1/notifications 항목 (api-spec §7.1.1)
+export interface NotificationItem {
+  notificationId: string;
+  type: NotificationType;
+  title: string;
+  content: string;
+  linkUrl: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+// GET /api/v1/notifications 응답 (api-spec §7.1.1)
+export interface NotificationListResponse {
+  unreadCount: number;
+  content: NotificationItem[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  hasNext: boolean;
+}
+
+// GET /api/v1/notifications/unread-count 응답 (api-spec §7.1.2)
+export interface UnreadCountResponse {
+  unreadCount: number;
+}
+
+// PATCH /api/v1/notifications/{notificationId}/read 응답 (api-spec §7.1.3)
+export interface MarkReadResponse {
+  unreadCount: number;
+}
+
+// PATCH /api/v1/notifications/read-all 응답 (api-spec §7.1.4)
+export interface MarkAllReadResponse {
+  updatedCount: number;
+  unreadCount: number;
+}
+
+// SSE /api/v1/notifications/stream 이벤트 페이로드 (api-spec §7.1.5)
+export interface SSENotificationEvent {
+  notificationId: string;
+  type: NotificationType;
+  title: string;
+  content: string;
+  linkUrl: string;
+  createdAt: string;
+}
