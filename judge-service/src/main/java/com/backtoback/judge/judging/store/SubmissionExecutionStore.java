@@ -678,6 +678,26 @@ public class SubmissionExecutionStore {
     }
 
     /**
+     * 서킷 차단으로 Judge0를 호출하지 못한 선점을 같은 회차·시도에 반환한다. (스케줄러 §3.1)
+     *
+     * @param lease 아직 실행하지 않은 현재 임대
+     * @return 기한 내 현재 임대를 반환했는지 여부
+     */
+    @Transactional
+    public boolean releaseUncalled(SubmissionLease lease) {
+        if (!owns(lease)) {
+            return false;
+        }
+        var instant = now();
+        jdbc.update("""
+            UPDATE judge_jobs SET status='RETRY_WAITING',lease_token=NULL,lease_until=NULL,next_run_at=?,updated_at=?
+            WHERE id=?
+            """, instant, instant, lease.jobId());
+        jdbc.update("UPDATE submissions SET status='QUEUED',updated_at=? WHERE id=?", instant, lease.submissionId());
+        return true;
+    }
+
+    /**
      * 불명확한 실행은 보존하고 확정한 시스템 실패만 재시도하거나 종결한다.
      *
      * @param lease 현재 작업의 회차·실행 시도·임대 소유권

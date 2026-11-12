@@ -39,6 +39,7 @@ public class SubmissionWorker {
     private final JudgeClient client;
     private final JudgeResultEvaluator evaluator;
     private final Clock clock;
+    private final JudgeEngineCircuit circuit;
 
     /**
      * 작업을 선점해 DB 트랜잭션 밖에서 실행한다. 생성 응답이 불명확하면 재생성하지 않고 복구 대상으로 남긴다.
@@ -51,6 +52,22 @@ public class SubmissionWorker {
         if (Thread.currentThread().isInterrupted()) {
             return false;
         }
+        var permission = circuit.acquire();
+        if (permission.isEmpty()) {
+            return false;
+        }
+        try (var permit = permission.orElseThrow()) {
+            return runPermitted(permit);
+        }
+    }
+
+    /**
+     * 서킷 허가를 가진 작업 한 건을 실행하고 실제 호출 직전 차단을 재확인한다.
+     *
+     * @param permit 현재 인스턴스의 호출 허가
+     * @return 작업을 선점했는지 여부
+     */
+    private boolean runPermitted(JudgeEngineCircuit.Permit permit) {
         var claimed = store.claim();
         if (claimed.isEmpty()) {
             return false;
@@ -113,7 +130,16 @@ public class SubmissionWorker {
                 var source = generator.generate(data.functionSpec(), input.sourceCode(), content.argumentTexts());
                 errorCode = "JUDGE0_UNAVAILABLE";
                 var result
-                    = execute(heartbeat, input, data, test, content, source, resumableTokens.get(test.testOrder()));
+                    = execute(
+                        heartbeat,
+                        input,
+                        data,
+                        test,
+                        content,
+                        source,
+                        resumableTokens.get(test.testOrder()),
+                        permit
+                    );
                 if (result.isEmpty()) {
                     return true;
                 }
@@ -149,6 +175,7 @@ public class SubmissionWorker {
      * @param content 비교할 테스트 원문
      * @param source 생성이 완료된 실행 코드
      * @param previousToken 회수된 작업에 저장된 Judge0 토큰, 새 실행이면 null
+     * @param permit 현재 작업의 서킷 호출 허가
      * @return 저장한 결과, 소유권 상실 또는 생성 응답 불명이면 빈 값
      * @throws InterruptedException 결과 대기 중 실행 스레드가 중단된 경우
      */
@@ -159,25 +186,34 @@ public class SubmissionWorker {
         SubmissionJudgingDataResponse.TestCase test,
         SubmissionJudgingDataResponse.TestContent content,
         ExecutionSource source,
-        String previousToken
+        String previousToken,
+        JudgeEngineCircuit.Permit permit
     )
         throws InterruptedException {
         var limits = data.executionLimits();
         var lease = heartbeat.lease();
         String token = previousToken;
         if (token == null) {
-            token = create(heartbeat, input, data, test, source);
+            token = create(heartbeat, input, data, test, source, permit);
             if (token == null) {
                 return Optional.empty();
             }
         }
+        String lookupToken = token;
         while (!Thread.currentThread().isInterrupted() && heartbeat.active()) {
             JudgeTestResult result;
             try {
+                var response = permit.invoke(() -> client.find(lookupToken));
+                if (response.isEmpty()) {
+                    if (!permit.hasCalled()) {
+                        store.releaseUncalled(lease);
+                    }
+                    return Optional.empty();
+                }
                 result
                     = evaluator
                         .evaluate(
-                            client.find(token),
+                            response.orElseThrow(),
                             data.functionSpec().returnType(),
                             content.expectedReturnText(),
                             limits.memoryKb(),
@@ -204,6 +240,7 @@ public class SubmissionWorker {
      * @param data 실행 제한을 담은 채점 자료
      * @param test 실행할 테스트
      * @param source 생성할 프로그램과 표준 입력
+     * @param permit 현재 작업의 서킷 호출 허가
      * @return 저장을 마친 Judge0 토큰, 생성이 확정되지 않으면 null
      */
     private String create(
@@ -211,18 +248,30 @@ public class SubmissionWorker {
         SubmissionExecutionInput input,
         SubmissionJudgingDataResponse data,
         SubmissionJudgingDataResponse.TestCase test,
-        ExecutionSource source
+        ExecutionSource source,
+        JudgeEngineCircuit.Permit permit
     ) {
         var limits = data.executionLimits();
         var lease = heartbeat.lease();
-        if (!heartbeat.active() || !store.beginCreate(lease, test.testOrder())) {
+        if (!heartbeat.active()) {
             return null;
         }
         JudgeExecutionCreateResponse created;
         try {
-            created
-                = client
+            var response = permit.invoke(() -> {
+                if (!store.beginCreate(lease, test.testOrder())) {
+                    return null;
+                }
+                return client
                     .create(source.toRequest(input.runtime(), limits.timeMs(), limits.wallTimeMs(), limits.memoryKb()));
+            });
+            if (response.isEmpty()) {
+                if (!permit.hasCalled()) {
+                    store.releaseUncalled(lease);
+                }
+                return null;
+            }
+            created = response.orElseThrow();
         } catch (JudgeException failure) {
             Integer status = failure.getUpstreamStatus();
             if (status != null && status >= 400 && status < 500 && status != 408) {
