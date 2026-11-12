@@ -21,11 +21,13 @@ function NotificationDropdown({
   onOpenChange,
   unreadCount,
   onUnreadCountChange,
+  reloadKey,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   unreadCount: number;
   onUnreadCountChange: (count: number) => void;
+  reloadKey: number;
 }) {
   const router = useRouter();
   const [items, setItems] = useState<NotificationItem[]>([]);
@@ -33,11 +35,12 @@ function NotificationDropdown({
 
   useEffect(() => {
     if (!open) return;
+    setLoaded(false);
     notificationApi.getList({ page: 0, size: 20 }).then((res) => {
       setItems(res.content);
       setLoaded(true);
     });
-  }, [open]);
+  }, [open, reloadKey]);
 
   const handleMarkRead = useCallback(
     (item: NotificationItem) => {
@@ -111,6 +114,7 @@ function NotificationDropdown({
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     notificationApi.getUnreadCount().then((res) => {
@@ -121,9 +125,7 @@ export function NotificationBell() {
   const handleSSEEvent = useCallback(() => {
     setUnreadCount((prev) => prev + 1);
     if (open) {
-      // 드롭다운이 열려 있으면 목록 갱신을 위해 open을 토글한다.
-      setOpen(false);
-      setTimeout(() => setOpen(true), 0);
+      setReloadKey((k) => k + 1);
     }
   }, [open]);
 
@@ -148,6 +150,7 @@ export function NotificationBell() {
         onOpenChange={setOpen}
         unreadCount={unreadCount}
         onUnreadCountChange={setUnreadCount}
+        reloadKey={reloadKey}
       />
     </Popover.Root>
   );
