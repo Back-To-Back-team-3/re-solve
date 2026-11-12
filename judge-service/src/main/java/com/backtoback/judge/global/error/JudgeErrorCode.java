@@ -30,6 +30,7 @@ public enum JudgeErrorCode implements ErrorCode {
     EXAM_CLOSED(HttpStatus.CONFLICT, "시험 실행 시간이 종료되었습니다."),
     // 동기 실행의 전체 기한을 넘긴 요청이다.
     RUN_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "코드 실행 제한 시간을 초과했습니다."),
+    SUBMISSION_REJUDGE_NOT_ALLOWED(HttpStatus.CONFLICT, "현재 상태의 채점 작업은 복구할 수 없습니다."),
     SUBMISSION_NOT_FOUND(HttpStatus.NOT_FOUND, "제출을 찾을 수 없습니다."),
     PROBLEM_VALIDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "검증 작업을 찾을 수 없습니다."),
     PROBLEM_NOT_AVAILABLE(HttpStatus.NOT_FOUND, "제출할 수 없는 문제입니다."),
