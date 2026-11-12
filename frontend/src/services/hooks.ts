@@ -72,3 +72,39 @@ export function usePollUntil<T>(
 
   return { data, loading, error, polling };
 }
+
+export function useSSE(
+  url: string | null,
+  options?: {
+    onMessage: (event: MessageEvent) => void;
+    onError?: () => void;
+    enabled?: boolean;
+  },
+): { connected: boolean; lastEventId: string | null } {
+  const [connected, setConnected] = useState(false);
+  const [lastEventId, setLastEventId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!url || options?.enabled === false) return;
+
+    const es = new EventSource(url, { withCredentials: true });
+    es.onopen = () => setConnected(true);
+    es.onmessage = (e) => {
+      setLastEventId(e.lastEventId || null);
+      options?.onMessage(e);
+    };
+    es.onerror = () => {
+      setConnected(false);
+      options?.onError?.();
+    };
+
+    return () => {
+      es.close();
+      setConnected(false);
+    };
+    // options 객체는 렌더링마다 재생성되므로 url과 enabled만 deps로 사용
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, options?.enabled]);
+
+  return { connected, lastEventId };
+}
