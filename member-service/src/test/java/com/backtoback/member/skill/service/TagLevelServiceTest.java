@@ -40,6 +40,7 @@ import com.backtoback.member.skill.domain.LevelChangeReason;
 import com.backtoback.member.skill.domain.MemberLevelHistory;
 import com.backtoback.member.skill.domain.MemberTagLevel;
 import com.backtoback.member.skill.domain.TagLevel;
+import com.backtoback.member.skill.repository.DiagnosisAttemptRepository;
 import com.backtoback.member.skill.repository.MemberLevelHistoryRepository;
 import com.backtoback.member.skill.repository.MemberTagLevelRepository;
 import com.backtoback.member.skill.store.PracticeResultStore;
@@ -69,12 +70,20 @@ class TagLevelServiceTest {
     @Mock
     private PracticeResultStore practiceResultStore;
 
+    @Mock
+    private DiagnosisAttemptRepository diagnosisAttemptRepository;
+
     private TagLevelService tagLevelService;
 
     @BeforeEach
     void setUp() {
         SkillProperties properties
-            = new SkillProperties("http://problem-service", Duration.ofDays(3), Map.of(TagLevel.LV1, LV1_TO_LV2));
+            = new SkillProperties(
+                "http://problem-service",
+                false,
+                Duration.ofDays(3),
+                Map.of(TagLevel.LV1, LV1_TO_LV2)
+            );
         Clock clock = Clock.fixed(NOW.atZone(SEOUL).toInstant(), SEOUL);
         tagLevelService
             = new TagLevelService(
@@ -85,6 +94,7 @@ class TagLevelServiceTest {
                 problemTagClient,
                 properties,
                 practiceResultStore,
+                diagnosisAttemptRepository,
                 clock
             );
     }

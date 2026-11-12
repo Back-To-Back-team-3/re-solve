@@ -36,7 +36,11 @@ public record TagLevelListResponse(List<TagLevelItem> content) {
                 tagLevel.getLevel().name(),
                 tagLevel.getLevel().getAccessibleMaxDifficulty(),
                 summary.achievements().stream().map(Achievement::from).toList(),
-                new Diagnosis(summary.diagnosisEligible(), toOffset(summary.cooldownEndsAt()), null),
+                new Diagnosis(
+                    summary.diagnosisEligible(),
+                    toOffset(summary.cooldownEndsAt()),
+                    summary.inProgressDiagnosisId() == null ? null : String.valueOf(summary.inProgressDiagnosisId())
+                ),
                 NextPromotion.from(summary.nextPromotion())
             );
         }
@@ -59,7 +63,7 @@ public record TagLevelListResponse(List<TagLevelItem> content) {
     }
 
     /**
-     * @param inProgressDiagnosisId 진행 중인 진단 ID. 진단(1.5) 구현 전까지 항상 {@code null}
+     * @param inProgressDiagnosisId 이 태그의 진행 중인 진단 ID. 없으면 {@code null}
      */
     public record Diagnosis(boolean isEligible, OffsetDateTime cooldownEndsAt, String inProgressDiagnosisId) {
     }

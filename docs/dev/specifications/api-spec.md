@@ -774,7 +774,8 @@
     - `DIAGNOSIS_NOT_ELIGIBLE`(409) / 레벨 `LV3`·`MASTER`
     - `DIAGNOSIS_COOLDOWN`(409) / 직전 종료 + 3일 전 (`Retry-After` 포함)
     - `DIAGNOSIS_ALREADY_IN_PROGRESS`(409)
-    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 출제 후보 조회 실패
+    - `DIAGNOSIS_PROBLEMS_UNAVAILABLE`(409) / 난이도 1·2·3 중 출제 후보가 없는 난이도가 있음 (태그 진입 1.4.2로 Lv.1 시작 안내)
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 출제 후보 조회 실패, 또는 운영 스위치(`MEMBER_DIAGNOSIS_ENABLED`)가 꺼져 있음
     - `MEMBER_SUSPENDED`(403)
 - **동시성/멱등 보장:** 생성 컬럼 `active_tag_id` + `uk_diagnosis_attempts_member_active_tag`. 동시 시작 두 건 중 하나는 `DIAGNOSIS_ALREADY_IN_PROGRESS`.
 - **외부 의존:**
@@ -831,16 +832,12 @@
 - **인증:** 로그인 필요 (본인)
 - **대응 테이블:** `diagnosis_problems`
 - **설명:** 진단에 고정한 회차의 본문·함수 명세·공개 예제를 반환한다. 레벨 접근 제한을 적용하지 않는다.
-- **응답 (200):** 태그 수정(2.5.3) 응답 구조와 같다.
-    
+- **응답 (200):** problem 고정 회차 본문 조회(2.6.3)의 응답 객체를 `data`에 그대로 담는다(본문·함수 명세·실행 제한·기본 코드·공개 예제).
     ```json
-      { 
-    	  "success": true, 
-    	  "message": "태그가 수정되었습니다.", 
-    	  "data": { 
-    		  "tagId": "2", 
-    		  "name": "그리디" 
-    	  } 
+      {
+        "success": true,
+        "message": null,
+        "data": { "problemId": "301", "problemRevisionId": "1001", "title": "두 수의 합", "difficulty": 1, "description": "## 문제\n…", "samples": [] }
       }
     ```
     
@@ -853,7 +850,7 @@
 
 - **Method / URI:** `PUT /api/v1/diagnoses/{diagnosisId}/problems/{problemId}/draft`
 - **인증:** 로그인 필요 (본인)
-- **Rate Limit:** 응시자당 초당 1회 (초과 요청은 마지막 요청만 반영)
+- **Rate Limit:** 응시자당 초당 1회 (초과 요청은 마지막 요청만 반영) — 아직 적용하지 않음(`seq` 비교와 응시 잠금으로 순서·정합성만 보장, 부하 측정 후 적용 여부 결정)
 - **대응 테이블:** `diagnosis_drafts`
 - **설명:** 작성 중 코드를 저장한다. 입력이 2초 멈추면, 입력 중에도 최대 10초마다 호출한다.
 - **요청 바디:**
@@ -883,7 +880,7 @@
     - 늦게 도착한 이전 Draft는 `applied: false`와 서버 `seq`를 반환한다.
 - **에러:**
     - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409), `CODE_TOO_LARGE`(413)
-- **동시성/멱등 보장:** `WHERE seq < :incomingSeq` 조건부 UPDATE. 서버 접수 시각이 `ends_at`을 넘으면 거절.
+- **동시성/멱등 보장:** 응시 행을 잠근 뒤 문항의 모든 언어 중 가장 큰 `seq`보다 클 때만 저장(순번은 문항 단위). 같은 `seq` 재전송·늦게 도착한 이전 `seq`는 `applied: false`. 서버 접수 시각(잠금 대기 전)이 `ends_at`을 넘거나 응시가 `IN_PROGRESS`가 아니면 거절.
 
 #### 1.5.5 진단 문항 제출
 
