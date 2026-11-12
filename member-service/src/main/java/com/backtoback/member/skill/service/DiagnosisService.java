@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -20,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.global.error.MemberErrorCode;
 import com.backtoback.member.global.error.MemberException;
+import com.backtoback.member.member.service.MemberEventPublisher;
 import com.backtoback.member.member.service.MemberService;
 import com.backtoback.member.skill.client.ProblemDiagnosisClient;
 import com.backtoback.member.skill.client.ProblemDiagnosisClient.Candidate;
@@ -36,6 +38,8 @@ import com.backtoback.member.skill.store.DiagnosisDraftStore;
 import com.backtoback.member.skill.store.DiagnosisDraftStore.Draft;
 import com.backtoback.member.skill.store.DiagnosisDraftStore.LastSubmission;
 import com.backtoback.member.skill.store.DiagnosisDraftStore.SaveResult;
+import com.backtoback.member.skill.store.DiagnosisSubmissionStore;
+import com.backtoback.member.skill.store.DiagnosisSubmissionStore.Submission;
 
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.JsonNode;
@@ -48,11 +52,17 @@ public class DiagnosisService {
      * 진단 제출 코드 상한 (이벤트 계약 M6): UTF-8 64KB.
      */
     private static final int MAX_SOURCE_BYTES = 64 * 1024;
+    private static final Set<String> LANGUAGES = Set.of("java", "python3", "cpp");
+    private static final Duration SUBMISSION_INTERVAL = Duration.ofSeconds(5);
+    private static final String CLOSE_SUBMITTED = "SUBMITTED";
+    private static final String CLOSE_EXPIRED = "EXPIRED";
 
     private final DiagnosisAttemptRepository attemptRepository;
     private final DiagnosisProblemRepository problemRepository;
     private final MemberTagLevelRepository tagLevelRepository;
     private final DiagnosisDraftStore draftStore;
+    private final DiagnosisSubmissionStore submissionStore;
+    private final MemberEventPublisher memberEventPublisher;
     private final MemberService memberService;
     private final ProblemTagClient problemTagClient;
     private final ProblemDiagnosisClient problemDiagnosisClient;
@@ -154,6 +164,158 @@ public class DiagnosisService {
         }
         // shortcut: 응시자당 초당 1회 Rate Limit 미적용(seq 조건으로 순서는 보장), 부하 측정에서 저장이 몰리면 Redis 제한을 넣는다.
         return draftStore.save(attempt.getId(), problemId, language, sourceCode, seq, receivedAt);
+    }
+
+    /**
+     * 진단 문항 제출 (API 명세서 1.5.5). Draft 반영·접수·{@code DiagnosisSubmissionRequested}(M6)를 한 트랜잭션에 저장한다.
+     * 같은 {@code (진단, 문항, seq)}는 기존 접수를 돌려준다(재전송이 종료 뒤에 와도 같다).
+     */
+    @Transactional
+    public Submission submit(
+        Long memberId,
+        Long diagnosisId,
+        Long problemId,
+        String language,
+        String sourceCode,
+        long seq
+    ) {
+        LocalDateTime receivedAt = now();
+        DiagnosisAttempt attempt
+            = attemptRepository
+                .findForUpdateByIdAndMemberId(diagnosisId, memberId)
+                .orElseThrow(() -> new MemberException(MemberErrorCode.DIAGNOSIS_NOT_FOUND));
+        DiagnosisProblem problem = getProblem(attempt, problemId);
+        Optional<Submission> existing = submissionStore.find(attempt.getId(), problemId, seq);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        if (!attempt.isOpenAt(receivedAt)) {
+            throw new MemberException(MemberErrorCode.DIAGNOSIS_CLOSED);
+        }
+        if (!LANGUAGES.contains(language)) {
+            throw new MemberException(MemberErrorCode.UNSUPPORTED_LANGUAGE);
+        }
+        if (sourceCode.getBytes(StandardCharsets.UTF_8).length > MAX_SOURCE_BYTES) {
+            throw new MemberException(MemberErrorCode.CODE_TOO_LARGE);
+        }
+        Optional<LocalDateTime> last = submissionStore.lastReceivedAt(attempt.getId(), problemId);
+        if (last.isPresent() && receivedAt.isBefore(last.get().plus(SUBMISSION_INTERVAL))) {
+            throw new MemberException(MemberErrorCode.SUBMISSION_RATE_LIMITED);
+        }
+        draftStore.save(attempt.getId(), problemId, language, sourceCode, seq, receivedAt);
+        long submissionId
+            = submissionStore.insert(attempt.getId(), problemId, seq, DiagnosisSubmissionStore.MANUAL, receivedAt);
+        requestJudging(
+            attempt,
+            problem,
+            submissionId,
+            language,
+            sourceCode,
+            seq,
+            DiagnosisSubmissionStore.MANUAL,
+            receivedAt
+        );
+        return new Submission(submissionId, DiagnosisSubmissionStore.ACCEPTED, receivedAt);
+    }
+
+    /**
+     * 진단 최종 제출 (API 명세서 1.5.6). 제한 시각이 이미 지났으면 만료 종료와 같게 {@code ends_at} 기준으로 닫는다.
+     */
+    @Transactional
+    public DiagnosisAttempt finish(Long memberId, Long diagnosisId) {
+        LocalDateTime receivedAt = now();
+        DiagnosisAttempt attempt
+            = attemptRepository
+                .findForUpdateByIdAndMemberId(diagnosisId, memberId)
+                .orElseThrow(() -> new MemberException(MemberErrorCode.DIAGNOSIS_NOT_FOUND));
+        if (attempt.getStatus() != DiagnosisStatus.IN_PROGRESS) {
+            throw new MemberException(MemberErrorCode.DIAGNOSIS_CLOSED);
+        }
+        if (attempt.isOpenAt(receivedAt)) {
+            close(attempt, CLOSE_SUBMITTED, receivedAt);
+        } else {
+            close(attempt, CLOSE_EXPIRED, attempt.getEndsAt());
+        }
+        return attempt;
+    }
+
+    /**
+     * 만료 종료 (스케줄러 1.1). 응시 1건당 1트랜잭션이며, 최종 제출이 먼저 닫았으면 아무것도 하지 않는다.
+     *
+     * @return 이번에 닫았으면 {@code true}
+     */
+    @Transactional
+    public boolean expire(Long diagnosisId) {
+        Optional<DiagnosisAttempt> attempt = attemptRepository.findForUpdateById(diagnosisId);
+        if (attempt.isEmpty() || attempt.get().getStatus() != DiagnosisStatus.IN_PROGRESS) {
+            return false;
+        }
+        close(attempt.get(), CLOSE_EXPIRED, attempt.get().getEndsAt());
+        return true;
+    }
+
+    /**
+     * 응시를 닫고 쿨타임을 시작하며, 마지막 제출 이후 바뀐 Draft를 문항마다 자동 제출한다(접수 시각 = 종료 시각).
+     */
+    private void close(DiagnosisAttempt attempt, String reason, LocalDateTime closedAt) {
+        attempt.close(reason, closedAt);
+        tagLevelRepository
+            .findByMemberIdAndTagId(attempt.getMemberId(), attempt.getTagId())
+            .ifPresent(tagLevel -> tagLevel.diagnosisEnded(closedAt));
+        Map<Long, Draft> drafts = draftStore.findLatest(attempt.getId());
+        for (DiagnosisProblem problem : problemRepository
+            .findAllByDiagnosisAttemptIdOrderByDifficultyAsc(attempt.getId())) {
+            Draft draft = drafts.get(problem.getProblemId());
+            if (draft == null || draft.sourceCode().isBlank()
+                || draft.seq() <= submissionStore.maxSubmittedSeq(attempt.getId(), problem.getProblemId())) {
+                continue;
+            }
+            long submissionId
+                = submissionStore
+                    .insert(
+                        attempt.getId(),
+                        problem.getProblemId(),
+                        draft.seq(),
+                        DiagnosisSubmissionStore.AUTO,
+                        closedAt
+                    );
+            requestJudging(
+                attempt,
+                problem,
+                submissionId,
+                draft.language(),
+                draft.sourceCode(),
+                draft.seq(),
+                DiagnosisSubmissionStore.AUTO,
+                closedAt
+            );
+        }
+        // shortcut: 자동 제출 0건이고 모든 제출이 종결이면 SCORED까지 진행하는 처리(스케줄러 1.1 동작 3) 없음, 채점 결과 수신(③)에서 넣는다.
+    }
+
+    private void requestJudging(
+        DiagnosisAttempt attempt,
+        DiagnosisProblem problem,
+        long submissionId,
+        String language,
+        String sourceCode,
+        long seq,
+        String submissionType,
+        LocalDateTime receivedAt
+    ) {
+        memberEventPublisher
+            .diagnosisSubmissionRequested(
+                attempt.getId(),
+                submissionId,
+                attempt.getMemberId(),
+                problem.getProblemId(),
+                problem.getProblemRevisionId(),
+                language,
+                sourceCode,
+                seq,
+                submissionType,
+                receivedAt
+            );
     }
 
     /**

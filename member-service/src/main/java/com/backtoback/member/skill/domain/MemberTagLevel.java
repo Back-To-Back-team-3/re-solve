@@ -66,6 +66,13 @@ public class MemberTagLevel extends BaseTimeEntity {
     }
 
     /**
+     * 진단이 끝난 시각을 기록해 재응시 쿨타임을 시작한다 (정책 및 상태 8.3).
+     */
+    public void diagnosisEnded(LocalDateTime endedAt) {
+        this.lastDiagnosisEndedAt = endedAt;
+    }
+
+    /**
      * 진단으로 태그에 처음 진입한다 (API 명세서 1.5.1). 레벨은 {@code LV0}으로 두고 진단 결과로 확정한다.
      */
     public static MemberTagLevel enterForDiagnosis(Long memberId, Long tagId, LocalDateTime enteredAt) {
