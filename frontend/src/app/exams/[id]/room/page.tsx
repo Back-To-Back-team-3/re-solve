@@ -1,4 +1,4 @@
-import { ExamRoom } from "@/features/exams";
+import { ExamRoom } from "@/features/exams-room";
 export default async function Page({
   params,
 }: {

@@ -1,4 +1,4 @@
-import { ExamResult } from "@/features/exams";
+import { ExamResult } from "@/features/exams-result";
 export default async function Page({
   params,
 }: {
