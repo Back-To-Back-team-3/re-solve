@@ -2,10 +2,9 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
-import type { Problem } from "@/services/types";
-import { useCatalog } from "@/services/catalog";
+import { judgeApi, problemApi } from "@/services/api";
+import type { Language, Problem, ProblemDetail } from "@/services/types";
 import {
   Badge,
   ErrorState,
@@ -15,8 +14,9 @@ import {
   Tabs,
 } from "@/components/ui";
 import { CodeEditor } from "./editor";
-import { SubmissionList } from "./problem-list";
+import { ProblemSubmissionList } from "./problem-list";
 import { Board, Note } from "./board";
+import { useWorkspace } from "@/stores/workspace";
 export function ProblemDescription({
   problem,
   exam = false,
@@ -24,15 +24,14 @@ export function ProblemDescription({
   problem: Problem;
   exam?: boolean;
 }) {
-  const { tags } = useCatalog();
   const [tab, setTab] = useState("description"),
-    r = useResource(() => api.submissions(problem.id), problem.id);
+    r = useResource(() => judgeApi.getSubmissions(problem.id), problem.id + "-subs");
   return (
     <section className="problem-panel stack">
       <div className="row wrap">
         <Badge>Lv. {problem.difficulty}</Badge>
         <Badge tone="accent">
-          {tags.find((t) => t.id === problem.tagId)?.name}
+          {problem.tags[0]?.name}
         </Badge>
         <small>#{problem.id}</small>
       </div>
@@ -61,7 +60,7 @@ export function ProblemDescription({
         (r.error ? (
           <ErrorState message={r.error.message} retry={r.retry} />
         ) : (
-          <SubmissionList items={r.data || []} />
+          <ProblemSubmissionList items={r.data?.content || []} />
         ))}
       {tab === "questions" && (
         <Board scope={`problem:${problem.id}`} title="질문 작성" />
@@ -70,14 +69,37 @@ export function ProblemDescription({
     </section>
   );
 }
+function toProblem(d: ProblemDetail): Problem {
+  return {
+    id: d.problemId,
+    problemRevisionId: d.problemRevisionId,
+    title: d.title,
+    difficulty: d.difficulty,
+    tags: d.tags,
+    description: d.description,
+    constraints: d.constraints,
+    examples: d.examples,
+    functionSpec: {
+      name: "solution",
+      parameters: d.functionSpec.parameters.map((p) => ({
+        name: p.name,
+        type: p.type.kind,
+      })),
+      returnType: d.functionSpec.returnType.kind,
+    },
+    starterCodes: Object.fromEntries(
+      d.starterCodes.map((s) => [s.language, s.sourceCode]),
+    ) as Record<Language, string>,
+    samples: d.samples.map((s) => ({
+      input: Object.values(s.argumentTexts).join(", "),
+      expected: s.expectedReturnText,
+    })),
+  };
+}
+
 export function ProblemPage({ id }: { id: string }) {
-  const r = useResource(
-    async () => ({
-      problem: await api.problem(id),
-      user: await api.currentUser(),
-    }),
-    id,
-  );
+  const member = useWorkspace((s) => s.member);
+  const r = useResource(() => problemApi.getDetail(id), id);
   if (r.loading)
     return (
       <div className="container">
@@ -90,20 +112,20 @@ export function ProblemPage({ id }: { id: string }) {
         <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
-  if (!r.data?.problem) return <NotFound what="문제" />;
+  if (!r.data) return <NotFound what="문제" />;
+  const problem = toProblem(r.data);
   return (
     <>
       <div className="exam-bar">
         <Go className="small" href="/problems">
           ← 문제 목록
         </Go>
-        <span className="muted">자동 저장 · 모의 채점</span>
       </div>
       <div className="workspace">
-        <ProblemDescription key={id} problem={r.data.problem} />
+        <ProblemDescription key={id} problem={problem} />
         <CodeEditor
-          problem={r.data.problem}
-          userId={r.data.user?.id || "guest"}
+          problem={problem}
+          userId={member?.memberId || "guest"}
         />
       </div>
     </>

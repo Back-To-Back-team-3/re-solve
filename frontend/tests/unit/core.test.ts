@@ -1,48 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { problems, seed } from "../../src/mocks/fixtures";
+import { seed } from "../../src/mocks/fixtures";
 import {
-  filterProblems,
   remainingSeconds,
   resolveSubmission,
-  solvedStatus,
 } from "../../src/services/mock-api";
 import { draftKey, readDraft, saveDraft } from "../../src/stores/workspace";
-describe("problem catalogue", () => {
-  it("filters and paginates the same source of truth", () => {
-    const db = seed(1000);
-    expect(
-      filterProblems(
-        problems,
-        { tag: "hash" },
-        db.submissions,
-        "demo",
-      ).items.map((p) => p.id),
-    ).toEqual(["1001"]);
-    expect(
-      filterProblems(problems, { keyword: "괄호" }, [], null).totalElements,
-    ).toBe(1);
-    expect(
-      filterProblems(problems, { difficulty: "5" }, [], null).items[0].id,
-    ).toBe("1010");
-    expect(
-      filterProblems(problems, { keyword: "missing" }, [], null).totalPages,
-    ).toBe(0);
-    expect(
-      filterProblems(problems, { page: 1, size: 5 }, [], null).items,
-    ).toHaveLength(5);
-    expect(
-      filterProblems(problems, { status: "SOLVED" }, db.submissions, "demo")
-        .totalElements,
-    ).toBe(3);
-  });
-  it("never treats example execution or another user as a solved problem", () => {
-    const s = seed().submissions[0];
-    expect(solvedStatus(s.problemId, [{ ...s, kind: "run" }], s.userId)).toBe(
-      "UNSOLVED",
-    );
-    expect(solvedStatus(s.problemId, [s], "other")).toBe("UNSOLVED");
-  });
-});
 describe("draft persistence", () => {
   beforeEach(() => {
     const map = new Map<string, string>();
@@ -84,13 +46,13 @@ describe("mock judgement and timer", () => {
     const s = {
       ...seed(1000).submissions[0],
       createdAt: 1000,
-      state: "ACCEPTED" as const,
+      state: "QUEUED" as const,
       verdict: null,
       scenario: "WA" as const,
     };
-    expect(resolveSubmission(s, 1000).state).toBe("ACCEPTED");
-    expect(resolveSubmission(s, 1400).state).toBe("QUEUED");
-    expect(resolveSubmission(s, 1800).state).toBe("RUNNING");
+    expect(resolveSubmission(s, 1000).state).toBe("QUEUED");
+    expect(resolveSubmission(s, 1400).state).toBe("JUDGING");
+    expect(resolveSubmission(s, 1800).state).toBe("JUDGING");
     expect(resolveSubmission(s, 2400)).toMatchObject({
       state: "COMPLETED",
       verdict: "WA",

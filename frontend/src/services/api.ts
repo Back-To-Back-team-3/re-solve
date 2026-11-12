@@ -1,7 +1,18 @@
 import type {
   AdminMember,
+  AdminProblemListItem,
   AuthTokenResponse,
+  JudgeResult,
+  Language,
   Member,
+  ProblemDetail,
+  ProblemFilter,
+  ProblemListItem,
+  ProblemVisibility,
+  RunResponse,
+  ServerPage,
+  SubmissionHistoryItem,
+  SubmissionReceipt,
   TagLevel,
   UserRole,
   UserStatus,
@@ -43,6 +54,8 @@ async function apiFetchInner<T>(
     ...(init?.headers as Record<string, string> | undefined),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  const bypassUserId = process.env.NEXT_PUBLIC_DEV_BYPASS_USER_ID;
+  if (bypassUserId) headers["X-User-Id"] = bypassUserId;
 
   let res: Response;
   try {
@@ -123,6 +136,99 @@ export const problemTagApi = {
     apiFetch<{
       content: { tagId: string; name: string; displayOrder: number }[];
     }>("/api/v1/problems/tags"),
+};
+
+// 문제 API (§2.1)
+export const problemApi = {
+  getDetail: (problemId: string) =>
+    apiFetch<ProblemDetail>(`/api/v1/problems/${problemId}`),
+  getList: (filter: ProblemFilter = {}) => {
+    const q = new URLSearchParams();
+    if (filter.keyword) q.set("keyword", filter.keyword);
+    if (filter.tagIds) q.set("tagIds", filter.tagIds);
+    if (filter.difficulty) q.set("difficulty", filter.difficulty);
+    if (filter.solvedStatus) q.set("solvedStatus", filter.solvedStatus);
+    if (filter.sort) q.set("sort", filter.sort);
+    if (filter.page != null) q.set("page", String(filter.page));
+    if (filter.size != null) q.set("size", String(filter.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<ProblemListItem>>(
+      `/api/v1/problems${qs ? `?${qs}` : ""}`,
+    );
+  },
+};
+
+// 채점 API (§3.1)
+export const judgeApi = {
+  run: (body: {
+    problemId: string;
+    problemRevisionId: string;
+    language: Language;
+    sourceCode: string;
+    useSamples: boolean;
+    customInputs: { argumentTexts: Record<string, string> }[];
+  }) =>
+    apiFetch<RunResponse>("/api/v1/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  submit: (body: {
+    problemRevisionId: string;
+    language: Language;
+    sourceCode: string;
+  }) =>
+    apiFetch<SubmissionReceipt>("/api/v1/submissions", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(body),
+    }),
+  getStatus: (submissionId: string) =>
+    apiFetch<JudgeResult>(`/api/v1/submissions/${submissionId}`),
+  getSubmissions: (problemId: string) =>
+    apiFetch<ServerPage<SubmissionHistoryItem>>(
+      `/api/v1/me/submissions?problemId=${encodeURIComponent(problemId)}&context=PRACTICE`,
+    ),
+};
+
+// 관리자 문제 API (§2.3)
+export const adminProblemApi = {
+  getList: (filter: { visibility?: string; page?: number; size?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (filter.visibility) q.set("visibility", filter.visibility);
+    if (filter.page != null) q.set("page", String(filter.page));
+    if (filter.size != null) q.set("size", String(filter.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<AdminProblemListItem>>(
+      `/api/v1/admin/problems${qs ? `?${qs}` : ""}`,
+    );
+  },
+  publish: (problemId: string, rowVersion: number) =>
+    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+      `/api/v1/admin/problems/${problemId}/publication`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ rowVersion }),
+      },
+    ),
+  unpublish: (problemId: string, rowVersion: number) =>
+    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+      `/api/v1/admin/problems/${problemId}/unpublication`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ rowVersion }),
+      },
+    ),
+  archive: (problemId: string, rowVersion: number, reason: string) =>
+    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+      `/api/v1/admin/problems/${problemId}/archive`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ rowVersion, reason }),
+      },
+    ),
 };
 
 // 관리자 API (§1.6)

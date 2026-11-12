@@ -243,7 +243,19 @@ export function HomePage() {
       </section>
       <div className="home-bottom">
         <Section title="오늘의 도전" href="/problems">
-          <ProblemTable items={problems.slice(0, 4)} db={r.data} />
+          <ProblemTable
+            items={problems.slice(0, 4).map((p) => ({
+              problemId: p.id,
+              problemRevisionId: p.problemRevisionId,
+              revisionNumber: 0,
+              title: p.title,
+              difficulty: p.difficulty,
+              tags: p.tags,
+              publishedAt: "",
+              solvedStatus: "UNSOLVED" as const,
+              supportedLanguages: [],
+            }))}
+          />
         </Section>
         <Section title="성장 일기">
           {[
@@ -313,7 +325,7 @@ export function HomePage() {
   );
 }
 export function DashboardPage() {
-  const { tags, problems } = useCatalog();
+  const { problems } = useCatalog();
   const r = useResource(api.snapshot);
   if (r.loading)
     return (
@@ -368,7 +380,7 @@ export function DashboardPage() {
                   <div className="grow">
                     <b>{p.title}</b>
                     <p className="muted">
-                      {tags.find((t) => t.id === p.tagId)?.name}
+                      {p.tags[0]?.name}
                     </p>
                   </div>
                   <Badge>Lv.{p.difficulty}</Badge>
