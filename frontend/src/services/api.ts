@@ -356,14 +356,12 @@ export const studyApi = {
       `/api/v1/studies/recommendations${qs ? `?${qs}` : ""}`,
     );
   },
-  join: (studyId: string, message?: string) =>
+  join: (studyId: string) =>
     apiFetch<MembershipCreated>(`/api/v1/studies/${studyId}/memberships`, {
       method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({ message }),
     }),
-  leave: (studyId: string, membershipId: string) =>
-    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/${membershipId}`, {
+  leave: (studyId: string) =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/memberships/me`, {
       method: "DELETE",
     }),
   getMembers: (studyId: string, params: { status?: MembershipStatus; page?: number; size?: number } = {}) => {

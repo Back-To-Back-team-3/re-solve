@@ -359,7 +359,7 @@ export function StudyPage({ id }: { id: string }) {
       return;
     await action(
       async () => {
-        await studyApi.leave(id, myM.membershipId);
+        await studyApi.leave(id);
         refresh();
       },
       isPending ? "신청을 취소했습니다." : "탈퇴했습니다.",
