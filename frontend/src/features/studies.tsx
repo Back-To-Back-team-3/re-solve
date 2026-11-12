@@ -29,6 +29,7 @@ import {
 import { Pet } from "@/components/pet";
 import { useQuery, Pager } from "./problem-list";
 import { MembersTab } from "./study-members";
+import { AssignmentsTab } from "./study-assignments";
 const goalLabel: Record<GoalType, string> = {
   EMPLOYMENT: "취업 준비",
   CONTEST: "대회 준비",
@@ -433,7 +434,7 @@ export function StudyPage({ id }: { id: string }) {
           {tab === "problems" && (
             <div className="stack">
               {memberGuard ?? (
-                <p className="muted">문제집은 다음 커밋에서 연동합니다.</p>
+                <AssignmentsTab studyId={id} version={version} />
               )}
             </div>
           )}
