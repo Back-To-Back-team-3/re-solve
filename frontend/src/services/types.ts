@@ -747,7 +747,7 @@ export interface MarkAllReadResponse {
   unreadCount: number;
 }
 
-// SSE /api/v1/notifications/stream 이벤트 페이로드 (api-spec §7.1.5)
+// SSE /api/v1/notifications/subscribe 이벤트 페이로드 (api-spec §7.1.1)
 export interface SSENotificationEvent {
   notificationId: string;
   type: NotificationType;
