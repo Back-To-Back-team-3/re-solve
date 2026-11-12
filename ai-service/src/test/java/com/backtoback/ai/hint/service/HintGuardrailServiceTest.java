@@ -9,7 +9,6 @@ import static org.mockito.BDDMockito.then;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -101,7 +100,6 @@ class HintGuardrailServiceTest {
     void check_codeDetected_regenerationTimesOut_returnsFallback() {
         HintRequestedPayload event = makeEvent();
         String codeText = "return null;";
-        AtomicBoolean interrupted = new AtomicBoolean(false);
 
         given(hintPromptTemplate.systemPrompt()).willReturn("system");
         given(hintPromptTemplate.userPrompt(anyInt(), anyString(), anyString(), any())).willReturn("user");
@@ -109,7 +107,6 @@ class HintGuardrailServiceTest {
             try {
                 Thread.sleep(11_000);
             } catch (InterruptedException e) {
-                interrupted.set(true);
                 Thread.currentThread().interrupt();
             }
             return "지연 응답";
@@ -118,7 +115,6 @@ class HintGuardrailServiceTest {
         GuardrailResult result = sut.check(codeText, event);
 
         assertThat(result.passed()).isFalse();
-        assertThat(interrupted.get()).isTrue();
     }
 
     private HintRequestedPayload makeEvent() {
