@@ -349,3 +349,170 @@ export type SubmissionReceipt = {
   submittedAt: string;
   statusUrl: string;
 };
+
+// --- api-spec §5 study-service D 도메인 실서버 타입 ---
+
+export type GoalType = "EMPLOYMENT" | "CONTEST" | "STUDY";
+export type SkillLevel = "LV0" | "LV1" | "LV2" | "LV3" | "MASTER";
+export type ActiveTimeSlot = "MORNING" | "AFTERNOON" | "EVENING" | "NIGHT";
+export type JoinType = "INSTANT" | "APPROVAL";
+export type StudyStatus = "RECRUITING" | "ACTIVE" | "CLOSED";
+export type MembershipStatus =
+  | "PENDING"
+  | "APPROVED"
+  | "LEFT"
+  | "REMOVED"
+  | "REJECTED"
+  | "CANCELED"
+  | "EXPIRED";
+export type MembershipRole = "LEADER" | "MANAGER" | "MEMBER";
+export type AssignmentStatus = "SCHEDULED" | "OPEN" | "CLOSED";
+export type AssignmentItemStatus =
+  | "NOT_STARTED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "INCOMPLETE";
+export type CompletionType = "PRE_SOLVED" | "ON_TIME" | "LATE";
+export type AssignmentProblemStatus = "ACTIVE" | "EXCLUDED";
+
+// GET /api/v1/studies 항목 (api-spec §5.1.1)
+export type StudySummary = {
+  studyId: string;
+  name: string;
+  goal: GoalType;
+  skillLevel: SkillLevel;
+  preferredLanguage: Language;
+  activeTimeSlot: ActiveTimeSlot;
+  capacity: number;
+  memberCount: number;
+  status: StudyStatus;
+  joinType: JoinType;
+  lastActivityAt: string;
+  createdAt: string;
+};
+
+// GET /api/v1/studies/me 항목 (api-spec §5.1.3)
+export type StudyMeItem = {
+  studyId: string;
+  name: string;
+  studyStatus: StudyStatus;
+  membershipId: string;
+  membershipStatus: MembershipStatus;
+  role: MembershipRole;
+  joinedAt: string;
+};
+
+// GET /api/v1/studies/recommendations content 항목 (api-spec §5.1.4)
+export type StudyRecommendation = {
+  studyId: string;
+  name: string;
+  score: number | null;
+  reasons: string[];
+  memberCount: number;
+  capacity: number;
+  status: StudyStatus;
+};
+
+// GET /api/v1/studies/recommendations data 래퍼 (api-spec §5.1.4)
+export type StudyRecommendationsPage = ServerPage<StudyRecommendation> & {
+  mode: "PERSONALIZED" | "POPULAR";
+  isProfileRequired: boolean;
+};
+
+// GET /api/v1/studies/{studyId} (api-spec §5.1.2)
+export type StudyDetail = {
+  studyId: string;
+  name: string;
+  description: string;
+  goal: GoalType;
+  skillLevel: SkillLevel;
+  preferredLanguage: Language;
+  activeTimeSlot: ActiveTimeSlot;
+  capacity: number;
+  memberCount: number;
+  status: StudyStatus;
+  joinType: JoinType;
+  isAutoReopen: boolean;
+  version: number;
+  leader: { memberId: string; nickname: string };
+  myMembership: {
+    membershipId: string;
+    status: MembershipStatus;
+    role: MembershipRole;
+  } | null;
+  createdAt: string;
+};
+
+// GET /api/v1/studies/{studyId}/memberships 항목 (api-spec §5.2.4)
+export type StudyMemberItem = {
+  membershipId: string;
+  memberId: string;
+  nickname: string;
+  role: MembershipRole;
+  status: MembershipStatus;
+  joinedAt: string | null;
+  appliedAt?: string;
+  expiresAt?: string | null;
+  learningProfile?: {
+    goal: GoalType;
+    tagLevels: Record<string, string>;
+    preferredLanguages: Language[];
+  } | null;
+};
+
+// POST /api/v1/studies/{studyId}/memberships 응답 (api-spec §5.2.2)
+export type MembershipCreated = {
+  membershipId: string;
+  status: MembershipStatus;
+  expiresAt: string | null;
+};
+
+// GET /api/v1/studies/{studyId}/assignments 항목 (api-spec §5.4.2)
+export type AssignmentSummary = {
+  assignmentId: string;
+  title: string;
+  tagId: string;
+  status: AssignmentStatus;
+  activeProblemCount: number;
+  startsAt: string;
+  deadlineAt: string | null;
+  myStatus: {
+    status: AssignmentItemStatus;
+    completedCount: number;
+    onTimeCount: number;
+  } | null;
+};
+
+// GET /api/v1/studies/{studyId}/assignments/{assignmentId} (api-spec §5.4.3)
+export type AssignmentDetail = {
+  assignmentId: string;
+  title: string;
+  goal: string;
+  tagId: string;
+  status: AssignmentStatus;
+  isPreSolvedAllowed: boolean;
+  startsAt: string;
+  deadlineAt: string | null;
+  problems: Array<{
+    problemId: string;
+    assignedRevisionId: string;
+    revisionNumber: number | null;
+    title: string;
+    difficulty: number;
+    tags: string[];
+    status: AssignmentProblemStatus;
+    myCompletionType: CompletionType | null;
+  }>;
+  memberProgress: Array<{
+    memberId: string;
+    nickname: string;
+    status: AssignmentItemStatus;
+    completedCount: number;
+    onTimeCount: number;
+    activeProblemCount: number;
+  }>;
+  studyStats: {
+    avgCompletionRate: number;
+    avgOnTimeRate: number;
+  };
+};

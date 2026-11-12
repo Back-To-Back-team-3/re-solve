@@ -192,12 +192,6 @@ export const api = {
       .map((s) => resolveSubmission(s))
       .sort((a, b) => b.createdAt - a.createdAt);
   },
-  async studies() {
-    return (await read()).studies;
-  },
-  async study(id: string) {
-    return (await read()).studies.find((s) => s.id === id) || null;
-  },
   async createStudy(
     input: Omit<
       Study,
