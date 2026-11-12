@@ -3758,7 +3758,7 @@
 
 #### 2.8.1 실패 Outbox 재처리
 
-> 서비스별 경로와 재요청 처리는 확정했다. 아래 동시성 처리 상세는 검토안이며, Judge 계약은 §3.2.6을 따른다.
+> Problem의 서비스별 경로·재요청·동시성 처리 계약을 정의한다. Judge 계약은 §3.2.6을 따른다.
 
 - **Method / URI:** `POST /api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses`
 - **인증:** `ADMIN`
@@ -3778,6 +3778,7 @@
     ```
 
 - **에러:**
+    - `COMMON_INVALID_REQUEST`(400): 양수가 아닌 Outbox ID, 공백 사유 또는 500자 초과 사유
     - `OUTBOX_EVENT_NOT_FOUND`(404): 존재하지 않는 ID이거나 발생 7일 초과
     - `OUTBOX_EVENT_NOT_REPROCESSABLE`(409): `FAILED` 외 상태
 - **서비스별 경로 구분 — 확정:** 각 서비스의 `outbox_events.id`는 자기 DB 안에서만 유일하다. 서비스는 경로로 구분하고, 바디로 임의의 서비스나 스키마를 지정하지 않는다.
@@ -3788,7 +3789,7 @@
     | Judge | `/api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses` |
 
     - Gateway는 각 경로를 해당 서비스로 전달한다. 서비스는 자기 DB의 Outbox만 조회·변경한다.
-- **동시성/멱등 보장 — 구현 보완안:**
+- **동시성/멱등 보장:**
     - 자기 서비스의 Outbox 대상 행을 `SELECT ... FOR UPDATE`로 잠그고, 잠금 획득 후 공통 `Clock` 기준 서울 시각을 정한다. 대상 없음·발생 7일 초과는 404, `FAILED` 외 상태는 409다. 발생 시각이 정확히 `now - 7일`이면 허용한다.
     - 상태를 다시 확인한 뒤 `WHERE id = :id AND status = 'FAILED' AND occurred_at >= :cutoff` 조건부 UPDATE로 `status=PENDING`, `retry_count=0`, `published_at=NULL`, `updated_at=now`를 반영한다.
     - 영향 행이 정확히 1건일 때만 감사와 202 응답을 확정한다. 0건이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)로 롤백하며 성공 응답·감사를 남기지 않는다.
@@ -3798,7 +3799,7 @@
         - `created_at`에는 잠금 획득 후 정한 기준 시각을 서울 시간대·마이크로초 정밀도로 기록한다. 변경 전후 값·감사 시각은 ERD §3.3과 정책 §9.4를 따른다.
     - `reason`은 공백만 허용하지 않는 1~500자다(ERD §3.3의 저장 길이).
     - `event_id`·`payload`·`occurred_at`·`correlation_id`는 보존하고 기존 공통 Relay가 재발행한다. Relay도 같은 Outbox 행을 잠그므로 행 단위로 직렬화된다.
-- **비고:** 동시 운영 요청의 성공·409 분기, 실제 전환 1건당 감사 1건, 감사 실패 전체 롤백, Relay 경합, 정확히 7일인 경계값을 구현 회귀 테스트로 확인한다. 이 보완안에서는 테이블·컬럼·환경변수를 추가하지 않는다.
+- **비고:** 동시 운영 요청의 성공·409 분기, 실제 전환 1건당 감사 1건, 감사 실패 전체 롤백, Relay 경합, 정확히 7일인 경계값을 구현 회귀 테스트로 확인한다. 테이블·컬럼·환경변수를 추가하지 않는다.
 
 ## 3. 제출·채점 (judge)
 
