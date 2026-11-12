@@ -13,11 +13,10 @@ spring:
   ai:
     openai:
       api-key: ${OPENAI_API_KEY:}
-      connect-timeout: 10s
-      read-timeout: 15s
       chat:
+        timeout: 15s
         options:
-          model: gpt-4o-mini-mini
+          model: gpt-4o-mini
 
 ai:
   sqs:
