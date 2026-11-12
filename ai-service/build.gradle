@@ -49,9 +49,10 @@ dependencies {
     // Redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
-    // AWS Messaging (SQS)
+    // AWS Messaging (SQS / SNS)
     implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sns'
 
     // Spring AI
     implementation platform('org.springframework.ai:spring-ai-bom:2.0.0')

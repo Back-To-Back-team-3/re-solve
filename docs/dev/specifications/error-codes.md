@@ -157,6 +157,7 @@ Problem의 기존 오류 코드를 Judge 수동 재처리에도 사용하는 보
 | `HINT_DAILY_LIMIT_EXCEEDED` | 429 | 일일 힌트 요청 한도(20회) 초과 |
 | `HINT_REQUEST_NOT_FOUND` | 404 | 힌트 요청이 없거나 본인 요청이 아님 |
 | `HINT_FEATURE_DISABLED` | 503 | 힌트 기능 비활성화(기능 토글 off) |
+| `HINT_INVALID_STATUS_TRANSITION` | 409 | 현재 상태에서 대상 상태로의 전이가 허용되지 않음 |
 
 #### **Notification · GitHub**
 
