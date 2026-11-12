@@ -100,6 +100,7 @@ export function AuthPage() {
 }
 export function MyPage() {
   const member = useWorkspace((s) => s.member),
+    setMember = useWorkspace((s) => s.setMember),
     clearMember = useWorkspace((s) => s.clearMember),
     action = useAction(),
     router = useRouter(),
@@ -149,10 +150,12 @@ export function MyPage() {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
             action(
-              () =>
-                memberApi.updateMe({
+              async () => {
+                const updated = await memberApi.updateMe({
                   nickname: String(f.get("nickname")).trim(),
-                }),
+                });
+                setMember(updated);
+              },
               "프로필을 저장했습니다.",
             );
           }}
