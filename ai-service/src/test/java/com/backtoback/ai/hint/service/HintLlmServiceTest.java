@@ -37,6 +37,7 @@ import com.backtoback.ai.hint.event.HintReadyPublishPayload;
 import com.backtoback.ai.hint.publisher.HintReadyEventPublisher;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 
 @ExtendWith(MockitoExtension.class)
 class HintLlmServiceTest {
@@ -157,6 +158,76 @@ class HintLlmServiceTest {
 
         assertThatThrownBy(() -> sut.process(event)).isInstanceOf(RestClientException.class);
         then(hintReadyEventPublisher).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("FALLBACK 마커 캐시 존재 시 LLM 미호출, isCached=true·result=FALLBACK으로 HintReady 발행")
+    void process_fallbackCacheHit_publishesFallbackWithIsCachedTrue() {
+        HintRequestedPayload event = makeEvent();
+        given(redisTemplate.opsForValue()).willReturn(valueOps);
+        given(valueOps.get(anyString())).willReturn(null);
+        given(redisTemplate.hasKey(anyString())).willReturn(Boolean.TRUE);
+
+        sut.process(event);
+
+        then(chatClient).shouldHaveNoInteractions();
+        ArgumentCaptor<HintReadyPublishPayload> captor = ArgumentCaptor.forClass(HintReadyPublishPayload.class);
+        then(hintReadyEventPublisher).should().publish(captor.capture());
+        assertThat(captor.getValue().isCached()).isTrue();
+        assertThat(captor.getValue().result()).isEqualTo("FALLBACK");
+    }
+
+    @Test
+    @DisplayName("서킷브레이커 OPEN 중 LLM 호출 시 result=FALLBACK으로 HintReady 발행")
+    void process_circuitBreakerOpen_publishesFallbackHintReady() {
+        CircuitBreaker openCb
+            = CircuitBreaker
+                .of(
+                    "test-llm-open",
+                    CircuitBreakerConfig.custom().failureRateThreshold(100f).minimumNumberOfCalls(1).build()
+                );
+        openCb.transitionToOpenState();
+        HintLlmService sutWithOpenCb
+            = new HintLlmService(
+                studyInternalClient,
+                Optional.of(chatClient),
+                redisTemplate,
+                hintReadyEventPublisher,
+                hintPromptTemplate,
+                FIXED_CLOCK,
+                hintGuardrailService,
+                openCb
+            );
+        HintRequestedPayload event = makeEvent();
+        given(redisTemplate.opsForValue()).willReturn(valueOps);
+        given(valueOps.get(anyString())).willReturn(null);
+
+        sutWithOpenCb.process(event);
+
+        then(chatClient).shouldHaveNoInteractions();
+        ArgumentCaptor<HintReadyPublishPayload> captor = ArgumentCaptor.forClass(HintReadyPublishPayload.class);
+        then(hintReadyEventPublisher).should().publish(captor.capture());
+        assertThat(captor.getValue().result()).isEqualTo("FALLBACK");
+    }
+
+    @Test
+    @DisplayName("가드레일 fallback() 반환 시 FALLBACK 마커 1h 저장 후 result=FALLBACK으로 HintReady 발행")
+    void process_guardrailFallback_storesFallbackMarkerAndPublishesFallback() {
+        HintRequestedPayload event = makeEvent();
+        given(redisTemplate.opsForValue()).willReturn(valueOps);
+        given(valueOps.get(anyString())).willReturn(null);
+        given(hintPromptTemplate.systemPrompt()).willReturn("system");
+        given(hintPromptTemplate.userPrompt(anyInt(), any(), any(), any())).willReturn("user");
+        given(chatClient.prompt().system(anyString()).user(anyString()).call().content()).willReturn("for(;;) 무한");
+        given(hintGuardrailService.check(anyString(), any())).willReturn(GuardrailResult.fallback());
+
+        sut.process(event);
+
+        then(valueOps).should().set(eq("hint:fallback:rev-001:1"), eq("1"), any(Duration.class));
+        ArgumentCaptor<HintReadyPublishPayload> captor = ArgumentCaptor.forClass(HintReadyPublishPayload.class);
+        then(hintReadyEventPublisher).should().publish(captor.capture());
+        assertThat(captor.getValue().isCached()).isFalse();
+        assertThat(captor.getValue().result()).isEqualTo("FALLBACK");
     }
 
     private HintRequestedPayload makeEvent() {
