@@ -23,8 +23,6 @@ import tools.jackson.databind.JsonNode;
 @RequiredArgsConstructor
 public class SubmissionJudgedHandler implements EventHandler {
 
-    private static final Set<String> VERDICTS = Set.of("AC", "WA", "TLE", "MLE", "RE", "CE");
-
     private final PracticeResultService practiceResultService;
 
     @Override
@@ -40,14 +38,14 @@ public class SubmissionJudgedHandler implements EventHandler {
     @Override
     public void handle(ReceivedEvent event) {
         JsonNode data = event.payload();
-        long submissionId = id(data, "submissionId");
+        long submissionId = EventFields.id(data, "submissionId");
         if (!String.valueOf(submissionId).equals(event.metadata().aggregateId())) {
             throw new IllegalArgumentException("aggregateId does not match submissionId");
         }
-        String verdict = text(data, "verdict");
-        int difficulty = integer(data, "problemDifficulty");
-        int judgeAttempt = integer(data, "judgeAttempt");
-        if (!VERDICTS.contains(verdict) || difficulty < 1 || difficulty > 3 || judgeAttempt < 1) {
+        String verdict = EventFields.text(data, "verdict");
+        int difficulty = EventFields.integer(data, "problemDifficulty");
+        int judgeAttempt = EventFields.integer(data, "judgeAttempt");
+        if (!EventFields.VERDICTS.contains(verdict) || difficulty < 1 || difficulty > 3 || judgeAttempt < 1) {
             throw new IllegalArgumentException("Invalid verdict, problemDifficulty or judgeAttempt");
         }
         JsonNode tags = data.get("problemTagIds");
@@ -55,54 +53,22 @@ public class SubmissionJudgedHandler implements EventHandler {
             throw new IllegalArgumentException("problemTagIds must be a non-empty array");
         }
         Set<Long> tagIds = new LinkedHashSet<>();
-        tags.forEach(tag -> tagIds.add(parseId(tag, "problemTagIds")));
+        tags.forEach(tag -> tagIds.add(EventFields.parseId(tag, "problemTagIds")));
         practiceResultService
             .apply(
                 new PracticeResult(
                     submissionId,
-                    id(data, "userId"),
-                    id(data, "problemId"),
+                    EventFields.id(data, "userId"),
+                    EventFields.id(data, "problemId"),
                     difficulty,
                     verdict,
                     judgeAttempt,
                     OffsetDateTime
-                        .parse(text(data, "submittedAt"))
+                        .parse(EventFields.text(data, "submittedAt"))
                         .atZoneSameInstant(ClockConfiguration.SERVICE_ZONE)
                         .toLocalDateTime(),
                     tagIds
                 )
             );
-    }
-
-    private static String text(JsonNode data, String field) {
-        JsonNode value = data.get(field);
-        if (value == null || !value.isString() || value.asString().isBlank()) {
-            throw new IllegalArgumentException("Missing field: " + field);
-        }
-        return value.asString();
-    }
-
-    private static int integer(JsonNode data, String field) {
-        JsonNode value = data.get(field);
-        if (value == null || !value.isIntegralNumber() || !value.canConvertToInt()) {
-            throw new IllegalArgumentException("Invalid field: " + field);
-        }
-        return value.asInt();
-    }
-
-    private static long id(JsonNode data, String field) {
-        JsonNode value = data.get(field);
-        if (value == null) {
-            throw new IllegalArgumentException("Missing field: " + field);
-        }
-        return parseId(value, field);
-    }
-
-    // 계약상 ID는 숫자 문자열이다.
-    private static long parseId(JsonNode value, String field) {
-        if (!value.isString() || !value.asString().matches("[1-9][0-9]{0,18}")) {
-            throw new IllegalArgumentException("Invalid id: " + field);
-        }
-        return Long.parseLong(value.asString());
     }
 }

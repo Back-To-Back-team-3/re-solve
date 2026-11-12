@@ -57,7 +57,7 @@ class DiagnosisControllerTest {
     @DisplayName("1.5.1 진단 시작은 201과 문자열 ID, +09:00 시각, 출제 문항을 준다")
     void startReturnsCreated() throws Exception {
         LocalDateTime now = LocalDateTime.of(2026, 10, 3, 20, 0);
-        DiagnosisAttempt attempt = DiagnosisAttempt.start(7L, 3L, now);
+        DiagnosisAttempt attempt = DiagnosisAttempt.start(7L, 3L, "해시", now);
         ReflectionTestUtils.setField(attempt, "id", 120L);
         given(diagnosisService.start(7L, 3L))
             .willReturn(new StartedDiagnosis(attempt, List.of(new Candidate(1, "301", "1001", "두 수의 합")), now));
@@ -171,7 +171,7 @@ class DiagnosisControllerTest {
     @Test
     @DisplayName("1.5.6 최종 제출은 CLOSED와 +09:00 종료 시각, 안내 메시지를 준다")
     void finishReturnsClosed() throws Exception {
-        DiagnosisAttempt attempt = DiagnosisAttempt.start(7L, 3L, LocalDateTime.of(2026, 10, 3, 20, 0));
+        DiagnosisAttempt attempt = DiagnosisAttempt.start(7L, 3L, "해시", LocalDateTime.of(2026, 10, 3, 20, 0));
         ReflectionTestUtils.setField(attempt, "id", 120L);
         attempt.close("SUBMITTED", LocalDateTime.of(2026, 10, 3, 20, 40));
         given(diagnosisService.finish(7L, 120L)).willReturn(attempt);

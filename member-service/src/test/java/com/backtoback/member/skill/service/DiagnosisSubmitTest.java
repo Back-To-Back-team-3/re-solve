@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -282,7 +283,7 @@ class DiagnosisSubmitTest {
     }
 
     private long start(long memberId, long tagId) {
-        given(problemTagClient.exists(tagId)).willReturn(true);
+        given(problemTagClient.findName(tagId)).willReturn(Optional.of("태그"));
         given(problemDiagnosisClient.candidates(tagId)).willReturn(CANDIDATES);
         return diagnosisService.start(memberId, tagId).attempt().getId();
     }

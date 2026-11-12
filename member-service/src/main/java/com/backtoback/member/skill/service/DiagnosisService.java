@@ -63,6 +63,7 @@ public class DiagnosisService {
     private final DiagnosisDraftStore draftStore;
     private final DiagnosisSubmissionStore submissionStore;
     private final MemberEventPublisher memberEventPublisher;
+    private final DiagnosisScoringService scoringService;
     private final MemberService memberService;
     private final ProblemTagClient problemTagClient;
     private final ProblemDiagnosisClient problemDiagnosisClient;
@@ -80,10 +81,12 @@ public class DiagnosisService {
         if (!properties.diagnosisEnabled()) {
             throw new MemberException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
-        boolean entered = checkStartable(memberId, tagId, now()).isPresent();
-        if (!entered && !problemTagClient.exists(tagId)) {
-            throw new MemberException(MemberErrorCode.LEVEL_TAG_NOT_FOUND);
-        }
+        checkStartable(memberId, tagId, now());
+        // 태그 이름은 결과 알림(TagLevelChanged) 문구용으로 응시에 남긴다. 채점 결과를 받는 중에는 problem을 부르지 않는다.
+        String tagName
+            = problemTagClient
+                .findName(tagId)
+                .orElseThrow(() -> new MemberException(MemberErrorCode.LEVEL_TAG_NOT_FOUND));
         List<Candidate> picked = pick(problemDiagnosisClient.candidates(tagId));
         try {
             return transactionTemplate.execute(status -> {
@@ -92,7 +95,8 @@ public class DiagnosisService {
                 if (checkStartable(memberId, tagId, now).isEmpty()) {
                     tagLevelRepository.save(MemberTagLevel.enterForDiagnosis(memberId, tagId, now));
                 }
-                DiagnosisAttempt attempt = attemptRepository.saveAndFlush(DiagnosisAttempt.start(memberId, tagId, now));
+                DiagnosisAttempt attempt
+                    = attemptRepository.saveAndFlush(DiagnosisAttempt.start(memberId, tagId, tagName, now));
                 List<DiagnosisProblem> problems = new ArrayList<>();
                 for (Candidate candidate : picked) {
                     problems
@@ -290,7 +294,8 @@ public class DiagnosisService {
                 closedAt
             );
         }
-        // shortcut: 자동 제출 0건이고 모든 제출이 종결이면 SCORED까지 진행하는 처리(스케줄러 1.1 동작 3) 없음, 채점 결과 수신(③)에서 넣는다.
+        // 자동 제출이 없고 이미 모든 제출이 종결됐으면 같은 트랜잭션에서 확정한다(스케줄러 1.1 동작 3).
+        scoringService.scoreIfReady(attempt);
     }
 
     private void requestJudging(

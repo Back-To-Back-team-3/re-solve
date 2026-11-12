@@ -42,6 +42,9 @@ public class DiagnosisAttempt extends BaseTimeEntity {
     @Column(nullable = false)
     private Long tagId;
 
+    @Column(length = 200)
+    private String tagName;
+
     @Enumerated(EnumType.STRING)
     @Column(
         nullable = false,
@@ -66,6 +69,10 @@ public class DiagnosisAttempt extends BaseTimeEntity {
     @Column(length = 30)
     private TagLevel resultLevel;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 30)
+    private TagLevel appliedLevel;
+
     @Column(
         name = "is_cooldown_exempt",
         nullable = false
@@ -74,16 +81,37 @@ public class DiagnosisAttempt extends BaseTimeEntity {
 
     private LocalDateTime scoredAt;
 
-    private DiagnosisAttempt(Long memberId, Long tagId, LocalDateTime startedAt) {
+    private DiagnosisAttempt(Long memberId, Long tagId, String tagName, LocalDateTime startedAt) {
         this.memberId = memberId;
         this.tagId = tagId;
+        this.tagName = tagName;
         this.status = DiagnosisStatus.IN_PROGRESS;
         this.startedAt = startedAt;
         this.endsAt = startedAt.plus(TIME_LIMIT);
     }
 
-    public static DiagnosisAttempt start(Long memberId, Long tagId, LocalDateTime startedAt) {
-        return new DiagnosisAttempt(memberId, tagId, startedAt);
+    public static DiagnosisAttempt start(Long memberId, Long tagId, String tagName, LocalDateTime startedAt) {
+        return new DiagnosisAttempt(memberId, tagId, tagName, startedAt);
+    }
+
+    /**
+     * 결과를 확정한다 (정책 및 상태 8.3, {@code CLOSED → SCORED}). 호출하는 쪽이 응시 행을 잠그고 {@code CLOSED}인지 확인한다.
+     *
+     * @param cooldownExempt 채점 장애({@code FAILED})가 있어 재응시 쿨타임을 적용하지 않는지
+     */
+    public void score(
+        BigDecimal score,
+        TagLevel resultLevel,
+        TagLevel appliedLevel,
+        boolean cooldownExempt,
+        LocalDateTime now
+    ) {
+        this.status = DiagnosisStatus.SCORED;
+        this.score = score;
+        this.resultLevel = resultLevel;
+        this.appliedLevel = appliedLevel;
+        this.cooldownExempt = cooldownExempt;
+        this.scoredAt = now;
     }
 
     /**

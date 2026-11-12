@@ -42,6 +42,7 @@ class DiagnosisDisabledTest {
                 mock(DiagnosisDraftStore.class),
                 mock(DiagnosisSubmissionStore.class),
                 mock(MemberEventPublisher.class),
+                mock(DiagnosisScoringService.class),
                 mock(MemberService.class),
                 problemTagClient,
                 problemDiagnosisClient,

@@ -66,6 +66,25 @@ public class MemberTagLevel extends BaseTimeEntity {
     }
 
     /**
+     * 진단 결과를 반영한다 (정책 및 상태 8.3). 재응시로 레벨을 내리지 않고({@code max(현재, 결과)}), 진단 최고 결과를 남긴다.
+     * 채점 장애로 쿨타임이 면제되면 종료 시각을 지워 바로 다시 볼 수 있게 한다.
+     *
+     * @return 반영 후 레벨
+     */
+    public TagLevel applyDiagnosis(TagLevel result, boolean cooldownExempt) {
+        if (result.ordinal() > level.ordinal()) {
+            this.level = result;
+        }
+        if (diagnosedLevel == null || result.ordinal() > diagnosedLevel.ordinal()) {
+            this.diagnosedLevel = result;
+        }
+        if (cooldownExempt) {
+            this.lastDiagnosisEndedAt = null;
+        }
+        return level;
+    }
+
+    /**
      * 진단이 끝난 시각을 기록해 재응시 쿨타임을 시작한다 (정책 및 상태 8.3).
      */
     public void diagnosisEnded(LocalDateTime endedAt) {
