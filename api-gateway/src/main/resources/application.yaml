@@ -11,28 +11,30 @@ spring:
       password: ${REDIS_PASSWORD:}
   cloud:
     gateway:
-      globalcors:
-        cors-configurations:
-          '[/**]':
-            allowed-origin-patterns:
-              - ${FRONTEND_ORIGIN:http://localhost:8080}
-              - http://localhost:3000
-              - http://localhost:8080
-              - https://*.netlify.app
-            allowed-methods:
-              - GET
-              - POST
-              - PUT
-              - PATCH
-              - DELETE
-              - OPTIONS
-            allowed-headers:
-              - "*"
-            exposed-headers:
-              - Authorization
-              - X-Correlation-Id
-            allow-credentials: true
-            max-age: 3600
+      server:
+        webflux:
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowed-origin-patterns:
+                  - ${FRONTEND_ORIGIN:http://localhost:8080}
+                  - http://localhost:3000
+                  - http://localhost:8080
+                  - https://*.netlify.app
+                allowed-methods:
+                  - GET
+                  - POST
+                  - PUT
+                  - PATCH
+                  - DELETE
+                  - OPTIONS
+                allowed-headers:
+                  - "*"
+                exposed-headers:
+                  - Authorization
+                  - X-Correlation-Id
+                allow-credentials: true
+                max-age: 3600
 
 management:
   endpoints:
