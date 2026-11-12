@@ -1,11 +1,14 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Clock, Users, Plus, Flag } from "lucide-react";
 import { api, labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
-import type { Exam } from "@/services/types";
-import { useCatalog } from "@/services/catalog";
+import { contestApi, studyApi } from "@/services/api";
+import type {
+  ExamStatusServer,
+  ExamSummary,
+} from "@/services/types";
 import {
   Badge,
   Button,
@@ -21,18 +24,133 @@ import {
   useAction,
 } from "@/components/ui";
 import { Pet } from "@/components/pet";
-import { ProblemTable, useQuery, pageSlice, Pager } from "./problem-list";
-export function ExamsPage({ contest = false }: { contest?: boolean }) {
-  const r = useResource(
-      () => api.exams(contest ? "contest" : "exam"),
-      String(contest),
-    ),
-    { params, change } = useQuery();
+import { useQuery, pageSlice, Pager } from "./problem-list";
+
+const serverLabels: Record<ExamStatusServer, string> = {
+  SCHEDULED: "예정",
+  IN_PROGRESS: "진행 중",
+  CLOSED: "종료됨",
+  FINALIZED: "최종 확정",
+  CANCELED: "취소",
+};
+
+const serverTone = (s: ExamStatusServer) =>
+  s === "IN_PROGRESS" ? "success" : s === "SCHEDULED" ? "accent" : "";
+
+export function ExamsPage({
+  contest = false,
+  studyId,
+}: {
+  contest?: boolean;
+  studyId?: string;
+}) {
+  const { params, change } = useQuery();
   const appliedKeyword = params.get("keyword") || "";
   const [search, setSearch] = useState(appliedKeyword);
   useEffect(() => setSearch(appliedKeyword), [appliedKeyword]);
   const status = params.get("status") || "all";
-  const matching = (r.data || []).filter(
+
+  const realR = useResource(
+    () =>
+      studyId
+        ? contestApi.getExamList(studyId)
+        : Promise.resolve({
+            items: [] as ExamSummary[],
+            page: 0,
+            size: 0,
+            totalElements: 0,
+            totalPages: 0,
+          }),
+    studyId ?? "none",
+  );
+
+  const mockR = useResource(
+    () => api.exams(contest ? "contest" : "exam"),
+    String(contest),
+  );
+
+  if (studyId) {
+    const items = (realR.data?.items ?? []).filter(
+      (e) =>
+        (status === "all" || e.status === status) &&
+        e.title.includes(appliedKeyword),
+    );
+    return (
+      <div className="container stack">
+        <Heading
+          title="모의 코딩테스트"
+          eyebrow="MOCK EXAM"
+          description="시간 안에 생각을 코드로. 꾸준한 연습을 실전 감각으로 바꿔 보세요."
+          action={
+            <Go className="primary" href={`/exams/new?studyId=${studyId}`}>
+              <Plus size={18} />
+              시험 만들기
+            </Go>
+          }
+        />
+        <Tabs
+          value={status}
+          onChange={(s) => change({ status: s })}
+          items={(
+            [
+              "all",
+              ...Object.keys(serverLabels),
+            ] as Array<"all" | ExamStatusServer>
+          ).map((s) => ({
+            id: s,
+            label: s === "all" ? "전체" : serverLabels[s as ExamStatusServer],
+          }))}
+        />
+        {realR.loading ? (
+          <Loading />
+        ) : realR.error ? (
+          <ErrorState message={realR.error.message} retry={realR.retry} />
+        ) : items.length ? (
+          <div className="grid-3">
+            {items.map((e) => (
+              <article key={e.examId} className="card exam-card">
+                <div className="row between">
+                  <Badge tone={serverTone(e.status)}>
+                    {serverLabels[e.status]}
+                  </Badge>
+                  <Flag size={24} />
+                </div>
+                <h3>{e.title}</h3>
+                <p>{date(new Date(e.startsAt).getTime())}</p>
+                <div className="row wrap">
+                  <span>{e.problemCount}문제</span>
+                  <span className="row">
+                    <Users size={16} />
+                    {e.participantCount}명
+                  </span>
+                </div>
+                <Go
+                  className={`actions ${
+                    e.status === "FINALIZED" || e.status === "CLOSED"
+                      ? ""
+                      : "primary"
+                  }`}
+                  href={`/exams/${e.examId}`}
+                >
+                  {e.status === "FINALIZED" || e.status === "CLOSED"
+                    ? "결과 살펴보기"
+                    : "자세히 보기"}
+                </Go>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            title="이 상태의 시험이 없어요"
+            description="다른 상태를 선택하거나 새로운 모의 코테를 만들어 보세요."
+          />
+        )}
+      </div>
+    );
+  }
+
+  // mock path (unchanged)
+  const matching = (mockR.data || []).filter(
     (e) =>
       (status === "all" || e.status === status) &&
       e.title.includes(appliedKeyword),
@@ -93,10 +211,10 @@ export function ExamsPage({ contest = false }: { contest?: boolean }) {
         </select>
         <Button>검색</Button>
       </form>
-      {r.loading ? (
+      {mockR.loading ? (
         <Loading />
-      ) : r.error ? (
-        <ErrorState message={r.error.message} retry={r.retry} />
+      ) : mockR.error ? (
+        <ErrorState message={mockR.error.message} retry={mockR.retry} />
       ) : items.length ? (
         <div className="grid-3">
           {items.map((e) => (
@@ -148,6 +266,7 @@ export function ExamsPage({ contest = false }: { contest?: boolean }) {
     </div>
   );
 }
+
 export function ExamDetail({
   id,
   contest = false,
@@ -155,17 +274,10 @@ export function ExamDetail({
   id: string;
   contest?: boolean;
 }) {
-  const { problems } = useCatalog();
-  const r = useResource(
-      async () => ({
-        exam: await api.exam(id),
-        user: await api.currentUser(),
-        session: await api.session(id),
-      }),
-      id,
-    ),
-    action = useAction(),
-    router = useRouter();
+  const r = useResource(() => contestApi.getExamDetail(id), id);
+  const router = useRouter();
+  const action = useAction();
+
   if (r.loading)
     return (
       <div className="container">
@@ -178,9 +290,16 @@ export function ExamDetail({
         <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
-  const e = r.data?.exam;
+  const e = r.data;
   if (!e) return <NotFound what="시험" />;
-  const joined = e.participants.includes(r.data?.user?.id || "");
+
+  const joined = !!e.myParticipation;
+  const ended =
+    e.status === "CLOSED" ||
+    e.status === "FINALIZED" ||
+    e.status === "CANCELED";
+  const myFinished = e.myParticipation?.status === "FINISHED";
+
   return (
     <div className="container stack">
       <Go className="small" href={contest ? "/contests" : "/exams"}>
@@ -189,92 +308,81 @@ export function ExamDetail({
       <Heading
         title={e.title}
         eyebrow="READY TO CHALLENGE"
-        description={e.description}
-        action={<Badge tone="accent">{labels[e.status]}</Badge>}
+        description=""
+        action={
+          <Badge tone={serverTone(e.status)}>{serverLabels[e.status]}</Badge>
+        }
       />
       <div className="detail-grid">
-        <div className="stack">
-          <Section title="시험 안내">
-            <div className="stack">
-              <div className="row">
-                <Pet level={3} />
-                <div>
-                  <h3>집중하는 시간, 성장하는 실력</h3>
-                  <p className="muted">
-                    모든 실행·채점 결과는 미리 정한 시나리오에 따른 목업입니다.
-                  </p>
-                </div>
-              </div>
-              <p>{e.description}</p>
-              <div className="inset stack-sm">
-                <p>일시: {date(e.startsAt)}</p>
-                <p>제한 시간: {e.duration}분</p>
-                <p>참가 조건: {e.condition || "누구나 참가할 수 있어요."}</p>
-                <p>
-                  공개 범위: {e.visibility === "public" ? "공개" : "비공개"}
-                </p>
-              </div>
-              <p>
-                Java, Python, C++을 사용할 수 있습니다. 응시를 시작한 시각부터
-                제한 시간이 적용됩니다.
-              </p>
-            </div>
-          </Section>
-          <Section title="출제 문제">
-            <ProblemTable
-              items={problems
-                .filter((p) => e.problemIds.includes(p.id))
-                .map((p) => ({
-                  problemId: p.id,
-                  problemRevisionId: p.problemRevisionId,
-                  revisionNumber: 0,
-                  title: p.title,
-                  difficulty: p.difficulty,
-                  tags: p.tags,
-                  publishedAt: "",
-                  solvedStatus: "UNSOLVED" as const,
-                  supportedLanguages: [],
-                }))}
-            />
-          </Section>
-        </div>
-        <Section title="대기실">
+        <Section title="시험 안내">
           <div className="stack">
             <div className="row">
-              <Users />
-              <b>{e.participants.length}명 참가</b>
+              <Pet level={3} />
+              <div>
+                <h3>집중하는 시간, 성장하는 실력</h3>
+                <p className="muted">
+                  응시를 시작한 시각부터 종료 시각까지 제한이 적용됩니다.
+                </p>
+              </div>
             </div>
-            <p className="muted">
-              예정된 시험도 데모에서는 바로 입장하여 흐름을 확인할 수 있습니다.
-            </p>
-            {e.status === "ended" || r.data?.session?.finishedAt ? (
+            <div className="inset stack-sm">
+              <p>시작 일시: {date(new Date(e.startsAt).getTime())}</p>
+              <p>종료 일시: {date(new Date(e.endsAt).getTime())}</p>
+              <p>총점: {e.totalScore}점</p>
+              <p>문제 수: {e.problemCount}개</p>
+            </div>
+            <p>Java, Python, C++을 사용할 수 있습니다.</p>
+          </div>
+        </Section>
+        <Section title="대기실">
+          <div className="stack">
+            {ended || myFinished ? (
               <Go className="primary" href={`/exams/${id}/result`}>
                 결과 확인
               </Go>
             ) : (
               <>
-                <Button
-                  onClick={() =>
-                    action(
-                      () => api.joinExam(id),
-                      joined ? "참가를 취소했습니다." : "참가 신청했습니다.",
-                    )
-                  }
-                >
-                  {joined ? "참가 취소" : "참가 신청"}
-                </Button>
+                {joined ? (
+                  <Button
+                    onClick={() =>
+                      action(
+                        () =>
+                          contestApi
+                            .cancelParticipant(id)
+                            .then(() => r.retry()),
+                        "참가를 취소했습니다.",
+                      )
+                    }
+                  >
+                    참가 취소
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() =>
+                      action(
+                        () =>
+                          contestApi
+                            .registerParticipant(id)
+                            .then(() => r.retry()),
+                        "참가 신청했습니다.",
+                      )
+                    }
+                  >
+                    참가 신청
+                  </Button>
+                )}
                 <Button
                   className="primary"
                   onClick={() =>
                     action(async () => {
-                      const s = await api.startExam(id);
-                      router.push(
-                        `/exams/${id}/${s.finishedAt ? "result" : "room"}`,
-                      );
+                      await contestApi.startExam(id);
+                      router.push(`/exams/${id}/room`);
                     })
                   }
                 >
-                  {r.data?.session ? "이어서 응시" : "데모 응시 시작"}
+                  {e.myParticipation?.status === "STARTED"
+                    ? "이어서 응시"
+                    : "응시 시작"}
                 </Button>
               </>
             )}
@@ -285,12 +393,57 @@ export function ExamDetail({
     </div>
   );
 }
+
+type ProblemItem = { problemId: string; title: string; difficulty: number };
+
 export function ExamCreate() {
-  const { problems } = useCatalog();
-  const router = useRouter(),
-    action = useAction(),
-    [selected, setSelected] = useState<string[]>(["1001"]),
-    [busy, setBusy] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const studyId = searchParams.get("studyId") ?? "";
+  const action = useAction();
+
+  const [problems, setProblems] = useState<ProblemItem[]>([]);
+  const [loadingProblems, setLoadingProblems] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [scores, setScores] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!studyId) return;
+    setLoadingProblems(true);
+    studyApi
+      .getAssignments(studyId)
+      .then((page) =>
+        Promise.all(
+          page.content.map((a) =>
+            studyApi.getAssignmentDetail(studyId, a.assignmentId),
+          ),
+        ),
+      )
+      .then((details) => {
+        const seen = new Set<string>();
+        const flat: ProblemItem[] = [];
+        details.forEach((d) =>
+          d.problems.forEach((p) => {
+            if (!seen.has(p.problemId)) {
+              seen.add(p.problemId);
+              flat.push({
+                problemId: p.problemId,
+                title: p.title,
+                difficulty: p.difficulty,
+              });
+            }
+          }),
+        );
+        setProblems(flat);
+        const defaultScores: Record<string, string> = {};
+        flat.forEach((p) => (defaultScores[p.problemId] = "100"));
+        setScores(defaultScores);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingProblems(false));
+  }, [studyId]);
+
   return (
     <div className="container">
       <Heading
@@ -305,17 +458,18 @@ export function ExamCreate() {
           setBusy(true);
           const f = new FormData(e.currentTarget);
           await action(async () => {
-            const exam = await api.createExam({
-              kind: "exam",
+            const result = await contestApi.createExam(studyId, {
               title: String(f.get("title")).trim(),
-              description: String(f.get("description")).trim(),
-              duration: Number(f.get("duration")),
-              startsAt: new Date(String(f.get("startsAt"))).getTime(),
-              problemIds: selected,
-              visibility: f.get("visibility") as Exam["visibility"],
-              condition: String(f.get("condition")),
+              mode: "FIXED",
+              startsAt: new Date(String(f.get("startsAt"))).toISOString(),
+              endsAt: new Date(String(f.get("endsAt"))).toISOString(),
+              problems: selected.map((pid, idx) => ({
+                problemId: pid,
+                score: scores[pid] ?? "100",
+                displayOrder: idx + 1,
+              })),
             });
-            router.push(`/exams/${exam.id}`);
+            router.push(`/exams/${result.examId}`);
           }, "모의 코테를 만들었습니다.");
           setBusy(false);
         }}
@@ -330,16 +484,6 @@ export function ExamCreate() {
             maxLength={60}
           />
         </label>
-        <label className="field">
-          시험 소개
-          <textarea
-            className="input"
-            name="description"
-            required
-            minLength={10}
-            maxLength={1000}
-          />
-        </label>
         <div className="form-grid">
           <label className="field">
             시작 일시
@@ -351,61 +495,64 @@ export function ExamCreate() {
             />
           </label>
           <label className="field">
-            제한 시간 (분)
+            종료 일시
             <input
               className="input"
-              name="duration"
-              type="number"
-              defaultValue={120}
-              min={1}
-              max={300}
+              name="endsAt"
+              type="datetime-local"
               required
-            />
-          </label>
-          <label className="field">
-            공개 범위
-            <select className="input" name="visibility">
-              <option value="public">공개</option>
-              <option value="private">비공개</option>
-            </select>
-          </label>
-          <label className="field">
-            참가 조건
-            <input
-              className="input"
-              name="condition"
-              placeholder="누구나 참여 가능"
             />
           </label>
         </div>
         <fieldset className="stack-sm">
-          <legend>문제 선택 · {selected.length}개</legend>
+          <legend>
+            문제 선택 · {selected.length}개
+            {loadingProblems && " (불러오는 중…)"}
+          </legend>
           {problems.map((p) => (
-            <label className="checkbox-row" key={p.id}>
-              <input
-                type="checkbox"
-                checked={selected.includes(p.id)}
-                onChange={(e) =>
-                  setSelected(
-                    e.target.checked
-                      ? [...selected, p.id]
-                      : selected.filter((id) => id !== p.id),
-                  )
-                }
-              />
-              <span className="grow">
-                {p.id}. {p.title}
-              </span>
-              <Badge>Lv.{p.difficulty}</Badge>
-            </label>
+            <div className="row" key={p.problemId}>
+              <label className="checkbox-row grow">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(p.problemId)}
+                  onChange={(ev) =>
+                    setSelected(
+                      ev.target.checked
+                        ? [...selected, p.problemId]
+                        : selected.filter((id) => id !== p.problemId),
+                    )
+                  }
+                />
+                <span className="grow">
+                  {p.problemId}. {p.title}
+                </span>
+                <Badge>Lv.{p.difficulty}</Badge>
+              </label>
+              {selected.includes(p.problemId) && (
+                <input
+                  className="input"
+                  style={{ width: "5rem" }}
+                  type="number"
+                  aria-label={`${p.title} 배점`}
+                  min={1}
+                  value={scores[p.problemId] ?? "100"}
+                  onChange={(ev) =>
+                    setScores((s) => ({ ...s, [p.problemId]: ev.target.value }))
+                  }
+                />
+              )}
+            </div>
           ))}
           {!selected.length && (
             <p className="error-text">문제를 1개 이상 선택해 주세요.</p>
           )}
         </fieldset>
         <div className="row">
-          <Go href="/exams">취소</Go>
-          <Button className="primary grow" disabled={busy || !selected.length}>
+          <Go href={studyId ? `/studies/${studyId}` : "/exams"}>취소</Go>
+          <Button
+            className="primary grow"
+            disabled={busy || !selected.length || !studyId}
+          >
             시험 생성
           </Button>
         </div>
