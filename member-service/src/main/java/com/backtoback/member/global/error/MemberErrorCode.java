@@ -28,7 +28,16 @@ public enum MemberErrorCode implements ErrorCode {
 
     // Level
     LEVEL_TAG_NOT_FOUND(HttpStatus.NOT_FOUND, "태그를 찾을 수 없습니다."),
-    LEVEL_ALREADY_ENTERED(HttpStatus.CONFLICT, "이미 시작한 태그입니다.");
+    LEVEL_ALREADY_ENTERED(HttpStatus.CONFLICT, "이미 시작한 태그입니다."),
+
+    // Diagnosis
+    DIAGNOSIS_NOT_FOUND(HttpStatus.NOT_FOUND, "진단을 찾을 수 없습니다."),
+    DIAGNOSIS_NOT_ELIGIBLE(HttpStatus.CONFLICT, "Lv.3 이상은 진단을 볼 수 없습니다."),
+    DIAGNOSIS_COOLDOWN(HttpStatus.CONFLICT, "직전 진단이 끝나고 3일이 지나야 다시 볼 수 있습니다."),
+    DIAGNOSIS_ALREADY_IN_PROGRESS(HttpStatus.CONFLICT, "이 태그의 진단이 이미 진행 중입니다."),
+    DIAGNOSIS_PROBLEMS_UNAVAILABLE(HttpStatus.CONFLICT, "이 태그는 진단 문제가 부족합니다. Lv.1로 시작해 주세요."),
+    DIAGNOSIS_CLOSED(HttpStatus.CONFLICT, "종료된 진단입니다."),
+    CODE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "코드는 64KB 이하로 작성해 주세요.");
 
     private final HttpStatus status;
     private final String message;

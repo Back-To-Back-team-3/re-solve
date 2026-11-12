@@ -16,8 +16,11 @@ import com.backtoback.member.member.service.LearningProfileService;
 import com.backtoback.member.member.service.MemberService;
 import com.backtoback.member.skill.client.ProblemTagClient;
 import com.backtoback.member.skill.config.SkillProperties;
+import com.backtoback.member.skill.domain.DiagnosisAttempt;
+import com.backtoback.member.skill.domain.DiagnosisStatus;
 import com.backtoback.member.skill.domain.MemberLevelHistory;
 import com.backtoback.member.skill.domain.MemberTagLevel;
+import com.backtoback.member.skill.repository.DiagnosisAttemptRepository;
 import com.backtoback.member.skill.repository.MemberLevelHistoryRepository;
 import com.backtoback.member.skill.repository.MemberTagLevelRepository;
 import com.backtoback.member.skill.store.PracticeResultStore;
@@ -35,6 +38,7 @@ public class TagLevelService {
     private final ProblemTagClient problemTagClient;
     private final SkillProperties properties;
     private final PracticeResultStore practiceResultStore;
+    private final DiagnosisAttemptRepository diagnosisAttemptRepository;
     private final Clock clock;
 
     /**
@@ -74,15 +78,22 @@ public class TagLevelService {
                 .findAchievements(memberId)
                 .stream()
                 .collect(Collectors.groupingBy(TagAchievement::tagId));
+        Map<Long, Long> inProgress
+            = diagnosisAttemptRepository
+                .findAllByMemberIdAndStatus(memberId, DiagnosisStatus.IN_PROGRESS)
+                .stream()
+                .collect(Collectors.toMap(DiagnosisAttempt::getTagId, DiagnosisAttempt::getId));
         return tagLevelRepository.findAllByMemberIdOrderByTagIdAsc(memberId).stream().map(tagLevel -> {
             LocalDateTime cooldownEndsAt = cooldownEndsAt(tagLevel, now);
-            // shortcut: 진행 중인 진단 확인 없음, 진단(1.5) 구현 시 같은 태그의 진행 중 진단이 있으면 응시 불가로 바꾼다.
-            boolean eligible = tagLevel.getLevel().isDiagnosable() && cooldownEndsAt == null;
+            Long inProgressDiagnosisId = inProgress.get(tagLevel.getTagId());
+            boolean eligible
+                = tagLevel.getLevel().isDiagnosable() && cooldownEndsAt == null && inProgressDiagnosisId == null;
             return new TagLevelSummary(
                 tagLevel,
                 eligible,
                 cooldownEndsAt,
                 properties.promotions().get(tagLevel.getLevel()),
+                inProgressDiagnosisId,
                 achievements.getOrDefault(tagLevel.getTagId(), List.of())
             );
         }).toList();

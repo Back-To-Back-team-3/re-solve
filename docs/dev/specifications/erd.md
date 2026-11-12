@@ -670,7 +670,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `problem_id` | BIGINT | Y | 문제 ID (외부 참조) |
 | `language` | VARCHAR(30) | Y | 언어 (공통 모듈 Enum) |
 | `source_code` | MEDIUMTEXT | Y | 작성 중 코드 |
-| `seq` | BIGINT | Y | 클라이언트 순번. `WHERE seq < :incomingSeq` 조건부 UPDATE |
+| `seq` | BIGINT | Y | 클라이언트 순번(문항 단위). 응시 행을 잠근 뒤 문항의 모든 언어 중 최대 `seq`보다 클 때만 저장 |
 | `saved_at` | DATETIME(6) | Y | 서버 저장 시각 |
 | `version` | BIGINT | Y | 낙관적 락 |
 | `created_at` | DATETIME(6) | Y |  |
@@ -2920,7 +2920,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 진단 응시 가능 조건 | `level IN (LV0, LV1, LV2)` AND `now >= last_diagnosis_ended_at + 3일` (첫 응시·`FAILED` 응시 제외) | `[진단]` |
 | 진단 종료 후 저장·제출 거절 | 서버 접수 시각 `<= ends_at` AND `status = IN_PROGRESS` | `[진단]` |
 | 진단 만료 자동 종료 | `WHERE status = 'IN_PROGRESS' AND ends_at <= now()` 조건부 UPDATE + ShedLock | `[진단]` |
-| 진단 Draft 역전 방지 | `WHERE seq < :incomingSeq` 조건부 UPDATE | `[Draft]` |
+| 진단 Draft 역전 방지 | 응시 행 `FOR UPDATE` 후 문항 최대 `seq`보다 클 때만 저장 | `[Draft]` |
 | 진단 자동 제출 중복 방지 | `uk_diagnosis_submissions_attempt_problem_seq` | — |
 | 재응시 하향 금지 | `level = max(현재 레벨, 진단 결과)` | `[태그 레벨]` |
 | 레벨 재계산 결정성 | 저장값 증감 없이 `practice_result_replicas`로 매번 재계산 | `[태그 레벨]` |
@@ -3141,8 +3141,8 @@ member-service/src/main/resources/db/migration/
   V16__replica_create_hint_usage_replicas.sql
 ```
 
-- V1~V11은 적용된 파일이다. V1은 이 규칙을 정하기 전에 만들어 DB에 적용됐으므로 이름을 바꾸지 않는다(Flyway 적용 기록과 어긋남).
-- V12 이후는 아직 만들지 않은 계획 순서다. 실제 생성 순서에 따라 번호를 다시 매긴다.
+- V1~V15는 적용된 파일이다. V1은 이 규칙을 정하기 전에 만들어 DB에 적용됐으므로 이름을 바꾸지 않는다(Flyway 적용 기록과 어긋남).
+- V16 이후는 아직 만들지 않은 계획 순서다. 실제 생성 순서에 따라 번호를 다시 매긴다.
 
 ### 7.2 Problem (`problem-service`)
 
