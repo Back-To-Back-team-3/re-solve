@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { api, labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
 import {
@@ -11,8 +12,32 @@ import {
 } from "@/components/ui";
 import { Pet } from "@/components/pet";
 import { useCatalog } from "@/services/catalog";
+import { ExamRanking } from "./exams-ranking";
 
 export function ExamResult({ id }: { id: string }) {
+  const [tab, setTab] = useState<"my" | "ranking">("my");
+  return (
+    <div className="container stack">
+      <div className="tab-bar row">
+        <button
+          className={tab === "my" ? "active" : ""}
+          onClick={() => setTab("my")}
+        >
+          내 성적
+        </button>
+        <button
+          className={tab === "ranking" ? "active" : ""}
+          onClick={() => setTab("ranking")}
+        >
+          전체 순위
+        </button>
+      </div>
+      {tab === "my" ? <MyResultTab id={id} /> : <ExamRanking id={id} />}
+    </div>
+  );
+}
+
+function MyResultTab({ id }: { id: string }) {
   const { problems } = useCatalog();
   const r = useResource(
     async () => ({
@@ -44,7 +69,7 @@ export function ExamResult({ id }: { id: string }) {
     })),
     correct = rows.filter((x) => x.submission?.verdict === "AC").length;
   return (
-    <div className="container stack">
+    <div className="stack">
       <Heading
         title="도전의 기록"
         eyebrow="CHALLENGE COMPLETE"
