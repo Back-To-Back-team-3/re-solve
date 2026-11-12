@@ -65,15 +65,15 @@ function NotificationDropdown({
   return (
     <Popover.Portal>
       <Popover.Content
-        className="notification-popover"
+        className="w-80 rounded bg-surface border-2 border-foreground shadow-lg"
         align="end"
         sideOffset={8}
       >
-        <div className="notification-header">
-          <span className="notification-title">알림</span>
+        <div className="flex items-center justify-between px-4 py-3 border-b-2 border-foreground">
+          <span className="text-sm font-semibold">알림</span>
           {unreadCount > 0 && (
             <button
-              className="notification-read-all"
+              className="text-xs text-muted hover:text-foreground transition-colors"
               onClick={handleMarkAllRead}
             >
               모두 읽음
@@ -81,25 +81,23 @@ function NotificationDropdown({
           )}
         </div>
         {!loaded ? (
-          <div className="notification-empty">불러오는 중...</div>
+          <div className="flex justify-center py-8 text-sm text-muted">불러오는 중...</div>
         ) : items.length === 0 ? (
-          <div className="notification-empty">
+          <div className="flex flex-col items-center gap-2 py-8 text-sm text-muted">
             <BellOff size={20} />
             <span>새 알림이 없습니다</span>
           </div>
         ) : (
-          <ul className="notification-list">
+          <ul className="max-h-80 overflow-y-auto">
             {items.map((item) => (
-              <li key={item.notificationId}>
+              <li key={item.notificationId} className="border-b-2 border-foreground last:border-b-0">
                 <button
-                  className={`notification-item${item.isRead ? "" : " notification-item--unread"}`}
+                  className={`w-full text-left px-4 py-3 flex flex-col gap-0.5 hover:bg-primary/10 transition-colors${item.isRead ? "" : " border-l-2 border-primary bg-primary/5"}`}
                   onClick={() => handleMarkRead(item)}
                 >
-                  <span className="notification-item-title">{item.title}</span>
-                  <span className="notification-item-content">{item.content}</span>
-                  <span className="notification-item-time">
-                    {formatRelativeTime(item.createdAt)}
-                  </span>
+                  <span className="text-sm font-medium line-clamp-1">{item.title}</span>
+                  <span className="text-xs text-muted line-clamp-1">{item.content}</span>
+                  <span className="text-xs text-muted">{formatRelativeTime(item.createdAt)}</span>
                 </button>
               </li>
             ))}
@@ -136,9 +134,13 @@ export function NotificationBell() {
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <button className="icon-btn notification-bell" aria-label="알림">
+        <button className="icon-btn relative" aria-label="알림">
           <Bell size={18} />
-          {badge && <span className="notification-badge">{badge}</span>}
+          {badge && (
+            <span className="absolute -top-1 -right-1 min-w-4 h-4 rounded-full bg-primary text-background text-[10px] font-bold leading-4 text-center px-0.5">
+              {badge}
+            </span>
+          )}
         </button>
       </Popover.Trigger>
       <NotificationDropdown
