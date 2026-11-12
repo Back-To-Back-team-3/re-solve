@@ -8755,6 +8755,24 @@
 - **에러:**
     - `HINT_REQUEST_NOT_FOUND`(404)
 
+### 6.2 내부 API — LLM 생성 상태 갱신
+
+#### 6.2.1 힌트 요청 GENERATING 전이
+
+- **Method / URI:** `PATCH /internal/v1/hint-requests/{hintRequestId}/generating`
+- **인증:** 내부 호출 (ai-service), `X-User-Id` 헤더 없음 (결정 기록 2026-10-14 내부 API 무인증)
+- **대응 테이블:** `hint_requests`
+- **설명:** ai-service가 LLM 생성을 시작하기 직전에 호출한다. `REQUESTED → GENERATING` 상태 전이를 시도한다. 허용되지 않는 현재 상태이면 오류를 반환하고 ai-service는 처리를 중단한다.
+- **경로 파라미터:** `hintRequestId` — 힌트 요청 ID
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": null, "data": null }
+    ```
+    
+- **에러:**
+    - `HINT_REQUEST_NOT_FOUND`(404), `HINT_INVALID_STATUS_TRANSITION`(409)
+
 ---
 
 ## 7. 알림 (notification)

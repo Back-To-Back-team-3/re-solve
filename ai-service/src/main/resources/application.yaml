@@ -14,12 +14,17 @@ spring:
     openai:
       api-key: ${OPENAI_API_KEY:}
       chat:
+        timeout: 15s
         options:
-          model: gpt-4o
+          model: gpt-4o-mini
 
 ai:
   sqs:
     queue-name: ${AI_SQS_QUEUE_NAME:ai-queue}
+  sns:
+    topic-arn: ${AI_SNS_TOPIC_ARN:}
+  study:
+    base-url: ${STUDY_SERVICE_URL:http://study-service}
 
 logging:
   pattern:

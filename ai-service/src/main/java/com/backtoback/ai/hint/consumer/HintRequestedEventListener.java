@@ -1,16 +1,11 @@
 package com.backtoback.ai.hint.consumer;
 
-import java.sql.Timestamp;
-import java.time.Clock;
-import java.time.LocalDateTime;
-
 import org.slf4j.MDC;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.ai.hint.dto.HintRequestedPayload;
+import com.backtoback.ai.hint.service.HintLlmService;
 
 import io.awspring.cloud.sqs.annotation.SqsListener;
 import lombok.RequiredArgsConstructor;
@@ -33,11 +28,10 @@ public class HintRequestedEventListener {
     private static final String MDC_EVENT_TYPE = "eventType";
 
     private final ObjectMapper objectMapper;
-    private final JdbcTemplate jdbcTemplate;
-    private final Clock clock;
+    private final ProcessedEventInserter processedEventInserter;
+    private final HintLlmService hintLlmService;
 
     @SqsListener("${ai.sqs.queue-name:ai-queue}")
-    @Transactional
     public void onMessage(String messageBody) {
         JsonNode payload = extractPayload(messageBody);
 
@@ -56,19 +50,9 @@ public class HintRequestedEventListener {
         }
 
         try {
-            // event-contract.md §1.4: processed_events INSERT를 업무 반영 첫 문장으로 실행한다.
-            // hintRequestId가 UUID라 EventMetadata 유효성 검사를 통과하지 못하므로 JdbcTemplate으로 직접 삽입한다.
-            LocalDateTime now = LocalDateTime.now(clock);
+            // event-contract.md §1.4: processed_events INSERT — REQUIRES_NEW 트랜잭션으로 외부 호출 전에 커밋한다.
             try {
-                jdbcTemplate
-                    .update(
-                        "INSERT INTO processed_events"
-                            + " (event_id, event_type, processed_at, created_at) VALUES (?, ?, ?, ?)",
-                        eventId,
-                        eventType,
-                        Timestamp.valueOf(now),
-                        Timestamp.valueOf(now)
-                    );
+                processedEventInserter.insert(eventId, eventType);
             } catch (DuplicateKeyException e) {
                 log.warn("중복 수신 무시 eventId={} eventType={}", eventId, eventType);
                 return;
@@ -81,7 +65,7 @@ public class HintRequestedEventListener {
 
             HintRequestedPayload event = objectMapper.treeToValue(payload, HintRequestedPayload.class);
             log.info("HintRequested 수신 hintRequestId={} level={}", event.hintRequestId(), event.level());
-            // TODO: 캐시 조회 후 미적중 시 LLM 힌트 생성 → HintReady 발행
+            hintLlmService.process(event);
         } finally {
             MDC.remove(MDC_EVENT_ID);
             MDC.remove(MDC_EVENT_TYPE);
