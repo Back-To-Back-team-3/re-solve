@@ -23,7 +23,7 @@ export function useResource<T>(
         if (!cancelled) { setError(e); setLoading(false); }
       });
     return () => { cancelled = true; };
-    // load는 렌더링마다 재생성되므로 key와 retryCount만 deps로 사용
+    // load는 렌더링마다 재생성되므로 key와 retryCount만 deps로 사용한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, retryCount]);
 
@@ -66,7 +66,7 @@ export function usePollUntil<T>(
     };
     tick();
     return () => { cancelled = true; };
-    // loadFn과 isDone은 렌더링마다 재생성될 수 있으므로 의도적으로 초기값만 사용
+    // loadFn과 isDone은 렌더링마다 재생성될 수 있으므로 의도적으로 초기값만 사용한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -86,7 +86,7 @@ export function useSSE(
   const onMessageRef = useRef(options?.onMessage);
   const onErrorRef = useRef(options?.onError);
 
-  // 매 렌더 후 최신 콜백을 ref에 반영해 스테일 클로저 방지 (useLayoutEffect: 렌더 직후, EventSource 핸들러보다 먼저)
+  // 매 렌더 후 최신 콜백을 ref에 반영해 스테일 클로저를 방지한다. useLayoutEffect는 렌더 직후 동기 실행되므로 EventSource 핸들러보다 먼저 반영된다.
   useLayoutEffect(() => {
     onMessageRef.current = options?.onMessage;
     onErrorRef.current = options?.onError;
@@ -110,7 +110,7 @@ export function useSSE(
       es.close();
       setConnected(false);
     };
-    // options 객체는 렌더링마다 재생성되므로 url과 enabled만 deps로 사용; 콜백은 ref로 최신값 참조
+    // options 객체는 렌더링마다 재생성되므로 url과 enabled만 deps로 사용한다. 콜백은 ref로 최신값을 참조한다.
   }, [url, options?.enabled]);
 
   return { connected, lastEventId };

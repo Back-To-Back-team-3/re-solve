@@ -26,7 +26,7 @@ export async function apiFetch<T>(
   try {
     json = await res.json();
   } catch {
-    // 게이트웨이 오류(502/504) 등 JSON이 아닌 응답 본문 처리
+    // 게이트웨이 오류(502/504) 등 JSON이 아닌 응답 본문을 처리한다.
     throw { code: "UNKNOWN", message: `HTTP ${res.status}` } satisfies ApiError;
   }
   if (!json.success) throw json.error;
