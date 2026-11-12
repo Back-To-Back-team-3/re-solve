@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/services/mock-api";
+import { authApi, memberApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import { useWorkspace } from "@/stores/workspace";
 import { Pet } from "@/components/pet";
@@ -17,6 +18,47 @@ import {
   useAction,
 } from "@/components/ui";
 import { SubmissionList } from "./problem-list";
+export function CallbackPage() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const setMember = useWorkspace((s) => s.setMember);
+  const setAccessToken = useWorkspace((s) => s.setAccessToken);
+  const setAuthReady = useWorkspace((s) => s.setAuthReady);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loginCode = params.get("loginCode");
+    const redirectPath = safeReturn(params.get("redirectPath"));
+    if (!loginCode) {
+      setError("유효하지 않은 접근입니다.");
+      return;
+    }
+    let isNew = false;
+    authApi
+      .exchangeToken(loginCode)
+      .then(({ accessToken, member }) => {
+        setAccessToken(accessToken);
+        isNew = member.isNewMember;
+        return memberApi.getMe();
+      })
+      .then((fullMember) => {
+        setMember(fullMember);
+        setAuthReady(true);
+        router.push(isNew ? "/dashboard?newMember=true" : redirectPath);
+      })
+      .catch(() => setError("로그인 처리 중 오류가 발생했습니다."));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (error)
+    return (
+      <div className="container stack">
+        <p>{error}</p>
+        <Go href="/login">로그인 페이지로</Go>
+      </div>
+    );
+  return <Loading />;
+}
+
 export function safeReturn(value: string | null) {
   return value?.startsWith("/") &&
     !value.startsWith("//") &&
