@@ -63,8 +63,10 @@ async function apiFetchInner<T>(
       });
       if (refreshRes.ok) {
         const refreshJson = await refreshRes.json();
-        const newToken: string = refreshJson.data?.accessToken;
-        if (newToken) accessTokenSetter?.(newToken);
+        const newToken: string | undefined = refreshJson.data?.accessToken;
+        if (!newToken)
+          throw { code: "UNAUTHORIZED", message: "토큰 갱신에 실패했습니다" } satisfies ApiError;
+        accessTokenSetter?.(newToken);
         return apiFetchInner<T>(path, init, true);
       }
     } catch {}
