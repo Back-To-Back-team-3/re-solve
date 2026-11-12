@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -12,7 +14,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,15 +35,14 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DelegatingDataSource;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
-import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
@@ -50,10 +50,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.localstack.LocalStackContainer;
 import org.testcontainers.mysql.MySQLContainer;
 
-import com.backtoback.common.event.service.EventConsumer;
-import com.backtoback.common.event.service.EventHandlerRegistry;
-import com.backtoback.common.event.service.EventMessageDecoder;
-import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.judge.judging.domain.ExecutionRuntime;
 import com.backtoback.judge.judging.domain.JudgeVerdict;
 import com.backtoback.judge.judging.dto.FunctionSpec;
@@ -129,12 +125,8 @@ class SubmissionMessageListenerTest {
     private ExternalSubmissionAcceptanceStore acceptance;
     @Autowired
     private InternalSubmissionQueryService internalQueries;
-    @Autowired
+    @MockitoSpyBean
     private DataSource dataSource;
-    @Autowired
-    private EventMessageDecoder decoder;
-    @Autowired
-    private Clock clock;
 
     /**
      * 리스너 시작 전에 Standard 큐·토픽·결과 구독을 준비한다.
@@ -418,60 +410,29 @@ class SubmissionMessageListenerTest {
         assertThat(count("judge_jobs")).isEqualTo(1);
     }
 
-    /** JDBC 커밋 호출 실패 후 같은 메시지를 다시 처리해 소비 원자성과 ACK 경계를 확인한다. */
+    /**
+     * 서비스가 구성한 소비 트랜잭션에서 JDBC 커밋 호출 실패와 재전달을 확인한다.
+     *
+     * @throws SQLException 테스트용 JDBC 연결 동작을 설정할 수 없는 경우
+     */
     @Test
     @DisplayName("접수 커밋 호출이 실패하면 ACK하지 않고 재전달 시 한 번만 저장한다")
-    void retriesAfterJdbcCommitFailure() {
-        // given: 업무 INSERT는 실제 DB에서 수행하고 첫 commit 호출에서만 연결 오류를 주입한다.
+    void retriesAfterJdbcCommitFailure() throws SQLException {
+        // given: 서비스의 트랜잭션 구성을 유지하고 테스트 스레드의 첫 커밋에만 예외를 주입한다.
         var failCommit = new AtomicBoolean(true);
-        var failingDataSource = new DelegatingDataSource(dataSource) {
-            /**
-             * 첫 커밋에만 실패하는 JDBC 연결을 제공한다.
-             *
-             * @return 나머지 호출을 실제 DB 연결로 전달하는 연결
-             * @throws SQLException 실제 연결을 얻지 못한 경우
-             */
-            @Override
-            public Connection getConnection() throws SQLException {
-                Connection connection = super.getConnection();
-                return (Connection)Proxy
-                    .newProxyInstance(
-                        Connection.class.getClassLoader(),
-                        new Class<?>[] {
-                            Connection.class
-                },
-                        (proxy, method, args) -> {
-                            if ("commit".equals(method.getName()) && failCommit.compareAndSet(true, false)) {
-                                throw new SQLException("simulated commit failure");
-                            }
-                            try {
-                                return method.invoke(connection, args);
-                            } catch (InvocationTargetException failure) {
-                                throw failure.getCause();
-                            }
-                        }
-                    );
+        var testThread = Thread.currentThread();
+        doAnswer(invocation -> {
+            var connection = (Connection)invocation.callRealMethod();
+            if (Thread.currentThread() != testThread || !failCommit.get()) {
+                return connection;
             }
-        };
-        var transactionManager = new JdbcTransactionManager(failingDataSource);
-        transactionManager.setRollbackOnCommitFailure(true);
-        var transactionalJdbc = new JdbcTemplate(failingDataSource);
-        var handler
-            = new ExamSubmissionRequestedHandler(new ExternalSubmissionAcceptanceStore(transactionalJdbc, clock));
-        var consumer
-            = new EventConsumer(
-                decoder,
-                new JdbcProcessedEventStore(transactionalJdbc),
-                new EventHandlerRegistry(List.of(handler)),
-                clock,
-                transactionManager
-            );
-        var listener = new SubmissionMessageListener(consumer, decoder, List.of(handler));
+            return connectionWithCommitFailure(connection, failCommit);
+        }).when(dataSource).getConnection();
         var acknowledgement = mock(Acknowledgement.class);
         var event = examMessage(UUID.randomUUID(), "ExamSubmissionRequested");
 
         // when & then: 커밋 호출 실패는 ACK 없이 제출·작업·소비 기록을 롤백한다.
-        assertThatThrownBy(() -> listener.receive(event, acknowledgement))
+        assertThatThrownBy(() -> submissions.receive(event, acknowledgement))
             .isInstanceOf(RuntimeException.class)
             .hasRootCauseInstanceOf(SQLException.class)
             .hasRootCauseMessage("simulated commit failure");
@@ -482,12 +443,39 @@ class SubmissionMessageListenerTest {
         assertThat(count("judge_jobs")).isZero();
 
         // when & then: 같은 이벤트를 다시 받으면 한 번만 저장하고 ACK한다.
-        listener.receive(event, acknowledgement);
-        listener.receive(event, acknowledgement);
-        verify(acknowledgement, org.mockito.Mockito.times(2)).acknowledge();
+        submissions.receive(event, acknowledgement);
+        submissions.receive(event, acknowledgement);
+        verify(acknowledgement, times(2)).acknowledge();
         assertThat(count("processed_events")).isEqualTo(1);
         assertThat(count("submissions")).isEqualTo(1);
         assertThat(count("judge_jobs")).isEqualTo(1);
+    }
+
+    /**
+     * 첫 커밋 호출이 실제 DB에 전달되기 전에 실패하도록 연결을 감싼다.
+     *
+     * @param connection 실제 MySQL 연결
+     * @param failCommit 같은 테스트의 연결에서 공유하는 커밋 실패 여부
+     * @return 커밋 실패 한 건을 제외한 호출을 실제 연결에 위임하는 연결
+     */
+    private Connection connectionWithCommitFailure(Connection connection, AtomicBoolean failCommit) {
+        return (Connection)Proxy
+            .newProxyInstance(
+                Connection.class.getClassLoader(),
+                new Class<?>[] {
+                    Connection.class
+                },
+                (proxy, method, args) -> {
+                    if ("commit".equals(method.getName()) && failCommit.compareAndSet(true, false)) {
+                        throw new SQLException("simulated commit failure");
+                    }
+                    try {
+                        return method.invoke(connection, args);
+                    } catch (InvocationTargetException failure) {
+                        throw failure.getCause();
+                    }
+                }
+            );
     }
 
     /** DLQ 이동 후 실제 SQS 재전달과 운영자 감사 저장을 검증한다. */
