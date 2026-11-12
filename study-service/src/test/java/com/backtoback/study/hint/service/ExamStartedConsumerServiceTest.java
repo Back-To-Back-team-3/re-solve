@@ -81,14 +81,22 @@ class ExamStartedConsumerServiceTest {
             hintRequestRepository
                 .findByMemberIdAndProblemIdAndStatus(MEMBER_ID, PROBLEM_ID, HintRequestStatus.GENERATING)
         ).willReturn(List.of(hintRequest));
-        given(hintRequestRepository.blockIfGeneratingById(eq(HINT_REQUEST_ID), eq("EXAM"), any(LocalDateTime.class)))
-            .willReturn(1);
+        given(
+            hintRequestRepository
+                .blockIfGeneratingById(
+                    eq(HINT_REQUEST_ID),
+                    eq("EXAM"),
+                    any(LocalDateTime.class),
+                    any(LocalDateTime.class)
+                )
+        ).willReturn(1);
 
         // when
         service.consume(payload);
 
         // then
-        verify(hintRequestRepository).blockIfGeneratingById(eq(HINT_REQUEST_ID), eq("EXAM"), any(LocalDateTime.class));
+        verify(hintRequestRepository)
+            .blockIfGeneratingById(eq(HINT_REQUEST_ID), eq("EXAM"), any(LocalDateTime.class), any(LocalDateTime.class));
         verify(outboxEventWriter)
             .append(anyString(), eq("HintReady"), anyString(), eq(String.valueOf(HINT_REQUEST_ID)), any(), any());
     }
@@ -111,7 +119,7 @@ class ExamStartedConsumerServiceTest {
         service.consume(payload);
 
         // then
-        verify(hintRequestRepository, never()).blockIfGeneratingById(any(), any(), any());
+        verify(hintRequestRepository, never()).blockIfGeneratingById(any(), any(), any(), any());
         verify(outboxEventWriter, never()).append(any(), any(), any(), any(), any(), any());
     }
 
@@ -129,8 +137,15 @@ class ExamStartedConsumerServiceTest {
             hintRequestRepository
                 .findByMemberIdAndProblemIdAndStatus(MEMBER_ID, PROBLEM_ID, HintRequestStatus.GENERATING)
         ).willReturn(List.of(hintRequest));
-        given(hintRequestRepository.blockIfGeneratingById(eq(HINT_REQUEST_ID), eq("EXAM"), any(LocalDateTime.class)))
-            .willReturn(0);
+        given(
+            hintRequestRepository
+                .blockIfGeneratingById(
+                    eq(HINT_REQUEST_ID),
+                    eq("EXAM"),
+                    any(LocalDateTime.class),
+                    any(LocalDateTime.class)
+                )
+        ).willReturn(0);
 
         // when
         service.consume(payload);

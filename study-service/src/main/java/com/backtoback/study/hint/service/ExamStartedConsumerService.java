@@ -58,6 +58,7 @@ public class ExamStartedConsumerService {
 
         Long examId = Long.parseLong(payload.examId());
         LocalDateTime completedAt = toLocalDateTime(payload.startsAt());
+        LocalDateTime updatedAt = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
         OffsetDateTime completedAtOffset = OffsetDateTime.parse(payload.startsAt());
         String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
 
@@ -74,7 +75,8 @@ public class ExamStartedConsumerService {
                     );
             for (HintRequest hintRequest : generatingList) {
                 int updated
-                    = hintRequestRepository.blockIfGeneratingById(hintRequest.getId(), BLOCKED_REASON, completedAt);
+                    = hintRequestRepository
+                        .blockIfGeneratingById(hintRequest.getId(), BLOCKED_REASON, completedAt, updatedAt);
                 if (updated == 0) {
                     log.info("BLOCKED 전이 대상 없음 (경쟁 처리 완료) hintRequestId={}", hintRequest.getId());
                     continue;
