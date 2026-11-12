@@ -329,7 +329,7 @@ function Buffer({
         try {
           localStorage.setItem(
             `re-solve:editor:draft:exam:${examId}:${problem.id}`,
-            JSON.stringify({ language, code: codeRef.current, seq: res.serverSeq }),
+            JSON.stringify({ language, code: codeRef.current, seq: seqRef.current }),
           );
         } catch {}
         setSaved("저장 완료");
