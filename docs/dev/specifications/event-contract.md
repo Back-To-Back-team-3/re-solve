@@ -918,7 +918,7 @@ flowchart LR
 | `problemRevisionId` | string | Y | 캐시 키 회차 (추가 제안) |
 | `level` | integer | Y | 1~3 |
 | `result` | string | Y | `READY` / `FALLBACK` / `BLOCKED` |
-| `isCached` | boolean | Y |  |
+| `isCached` | boolean | Y | 캐시 적중 시 `true`, LLM 생성 완료 또는 FALLBACK 시 `false` |
 | `completedAt` | string (date-time) | Y | member `hint_usage_replicas.first_used_at` 원천 (추가 제안) |
 
 | 소비자 | 처리 |
@@ -945,7 +945,7 @@ flowchart LR
 
 | 소비자 | 처리 |
 | --- | --- |
-| ai | LLM 비동기 힌트 생성 — 캐시 조회 후 미적중 시 생성 → `HintReady` 발행 |
+| ai | LLM 비동기 힌트 생성 — 캐시 적중 시 LLM 없이 즉시 `HintReady`(isCached=true) 발행, 미적중 시 LLM 생성 후 발행(isCached=false) |
 
 ### 4.6 integration (담당 A)
 
