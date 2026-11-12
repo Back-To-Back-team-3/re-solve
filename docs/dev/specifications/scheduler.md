@@ -271,7 +271,7 @@
 - `JudgeTokenRecoveryScheduler` — 30초, Judge0 token 응답 유실(`UNKNOWN`) 복구
 - `JudgeReconciliationScheduler` — 5분, `submissions` ↔ `judge_jobs` 상태 대사
 - `RunLockReconciliationScheduler` — 1분, 비정상 종료된 `run:{memberId}` 락 해제
-- `JudgeBacklogMonitorScheduler` — 1분, 적체·서킷 상태 지표
+- `JudgeQueueMetrics` — Prometheus 수집 주기에 현재 DB 적체·실패 지표 관측
 
 ### 3.0 상태 대응 (정책 §10)
 
@@ -395,15 +395,15 @@
 - 정상 경로 해제와 경합해도 소유 토큰 비교 삭제라 다른 실행의 락을 지우지 않는다.
 - Redis 조회 실패를 레지스트리 만료·실행 종료로 간주하지 않고 다음 정리에서 다시 확인한다. 소유권을 잃은 실행은 재개하거나 다른 실행의 제한을 해제하지 않는다.
 
-### 3.6 `JudgeBacklogMonitorScheduler` — 적체 지표
+### 3.6 `JudgeQueueMetrics` — 적체 지표
 
 | 항목 | 값 |
 | --- | --- |
-| 실행 방식 | `fixedDelay = 1분` (ShedLock, 1대) |
+| 실행 방식 | 기존 Prometheus 수집 주기마다 읽기 전용 쿼리로 관측한다. 관측 쿼리의 제한시간은 2초다. |
 | 처리 | 상태별 작업 수와 가장 오래된 `PENDING` 대기 시간을 집계한다. 인스턴스별 서킷 상태와 신규 실패 발생 건수를 함께 관측하며, 수집이 작업 상태를 변경하지 않는다. |
 | 알림 | 채점 대기 60초 초과 2분 지속, `FAILED` 신규 발생 (정책 §11) — Grafana 경보 규칙 |
 - 기존 `judge_jobs_pending_count`와 `scheduler_backlog_oldest_seconds`의 이름·`scheduler` 라벨과 경보 임계값을 유지한다. 대기 작업이 없으면 두 지표는 0이다.
-- 상태별 작업 수는 DB 현재 상태를 게이지로 집계한다. 신규 실패는 작업이 `FAILED`로 전이한 건수이며 같은 종결 상태를 재조회한 횟수를 세지 않는다. 서킷은 각 인스턴스의 현재 상태를 제공하고 회원·제출 ID를 지표 라벨로 사용하지 않는다.
+- 상태별 작업 수는 DB 현재 상태를 게이지로 집계한다. 실패 누적값은 종단 `FAILED` 작업 수를 사용해 같은 행의 반복 수집으로 증가하지 않는다. 인스턴스가 여러 개면 같은 DB 지표를 `max`로 집계한다. 서킷은 각 인스턴스의 현재 상태를 제공하고 회원·제출 ID를 지표 라벨로 사용하지 않는다.
 
 > SQS `exam-submission-queue` 소비는 스케줄러가 아니라 리스너다. 소비 Tx 규칙은 이벤트 계약서 C1·C2.
 > 

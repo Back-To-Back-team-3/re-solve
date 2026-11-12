@@ -15,6 +15,7 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
@@ -45,6 +46,7 @@ import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
     }
 )
 @AutoConfigureMockMvc
+@AutoConfigureMetrics
 @ActiveProfiles("local")
 @Testcontainers
 class JudgeServiceApplicationTests {
@@ -113,6 +115,24 @@ class JudgeServiceApplicationTests {
                 .isBetween(Duration.ofSeconds(1), Duration.ofSeconds(12));
             assertThat(called).isFalse();
         }
+    }
+
+    /**
+     * 내부 수집기가 인증 헤더 없이 Prometheus 지표를 읽을 수 있는지 확인한다.
+     *
+     * @throws Exception MVC 수집 요청에 실패한 경우
+     */
+    @Test
+    @DisplayName("Prometheus 수집 경로는 내부 요청에 대기열 지표를 제공한다")
+    void exposesJudgeMetrics() throws Exception {
+        mvc
+            .perform(get("/actuator/prometheus"))
+            .andExpect(status().isOk())
+            .andExpect(
+                org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                    .content()
+                    .string(org.hamcrest.Matchers.containsString("judge_jobs_pending_count"))
+            );
     }
 
     /** 기본 비활성 설정에서 원격 실행과 예약 작업이 시작되지 않는지 확인한다. */
