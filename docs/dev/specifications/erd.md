@@ -622,6 +622,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `applied_level` | VARCHAR(30) | N | NULL 허용: 채점 전. 반영 후 레벨 `max(이전 레벨, result_level)` (API 1.5.2 `appliedLevel`) |
 | `is_cooldown_exempt` | BOOLEAN | Y | 채점 장애(`FAILED`) 발생으로 쿨타임 미적용 |
 | `scored_at` | DATETIME(6) | N | NULL 허용: 채점 전 |
+| `cooldown_notified_at` | DATETIME(6) | N | NULL 허용: 쿨타임 해제 알림 미발송. 스케줄러 1.3이 조건부 UPDATE |
 | `created_at` | DATETIME(6) | Y |  |
 | `updated_at` | DATETIME(6) | Y |  |
 
@@ -3141,11 +3142,12 @@ member-service/src/main/resources/db/migration/
   V14__diagnosis_create_diagnosis_drafts.sql
   V15__diagnosis_create_diagnosis_submissions.sql
   V16__diagnosis_alter_diagnosis_attempts.sql
-  V17__replica_create_hint_usage_replicas.sql
+  V17__diagnosis_alter_diagnosis_attempts_cooldown.sql
+  V18__replica_create_hint_usage_replicas.sql
 ```
 
-- V1~V16은 적용된 파일이다. V1은 이 규칙을 정하기 전에 만들어 DB에 적용됐으므로 이름을 바꾸지 않는다(Flyway 적용 기록과 어긋남).
-- V17 이후는 아직 만들지 않은 계획 순서다. 실제 생성 순서에 따라 번호를 다시 매긴다.
+- V1~V17은 적용된 파일이다. V1은 이 규칙을 정하기 전에 만들어 DB에 적용됐으므로 이름을 바꾸지 않는다(Flyway 적용 기록과 어긋남).
+- V18 이후는 아직 만들지 않은 계획 순서다. 실제 생성 순서에 따라 번호를 다시 매긴다.
 
 ### 7.2 Problem (`problem-service`)
 
