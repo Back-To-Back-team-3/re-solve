@@ -96,6 +96,7 @@ test("이미지 형식 오류를 막고 업로드 실패 후 원래 파일·키�
     await route.fulfill({ contentType: "image/png", body: png });
   });
   await page.goto("/admin/problems/new");
+  await page.getByLabel("제목", { exact: true }).fill("이미지 작성 유지");
   await page.getByLabel("업로드 이미지").setInputFiles({ name: "bad.txt", mimeType: "text/plain", buffer: Buffer.from("bad") });
   await page.getByRole("button", { name: "이미지 업로드·재요청" }).click();
   await expect(page.getByText("PNG·JPEG·WebP, 5MiB 이하 이미지를 선택해 주세요.")).toBeVisible();
@@ -107,6 +108,7 @@ test("이미지 형식 오류를 막고 업로드 실패 후 원래 파일·키�
   await page.getByRole("button", { name: "이미지 업로드·재요청" }).click();
   await expect(page.getByRole("img", { name: "업로드 미리보기" })).toBeVisible();
   expect(keys[0]).toBeTruthy(); expect(keys[1]).toBe(keys[0]);
+  await expect(page.getByLabel("제목", { exact: true })).toHaveValue("이미지 작성 유지");
   await page.getByRole("button", { name: "설명에 이미지 삽입" }).click();
   await expect(page.getByLabel("문제 설명", { exact: true })).toHaveValue(/image:701/);
 });
