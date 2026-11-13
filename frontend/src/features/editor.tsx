@@ -23,7 +23,7 @@ import {
 } from "@/stores/workspace";
 import type { JudgeResult, Language, Problem, RunResponse } from "@/services/types";
 import { EditorSubmissionStatus } from "@/features/editor-submission-status";
-import { EXPIRED_PRACTICE_REQUEST_MESSAGE, isPracticeRequestExpired } from "@/services/practice-request";
+import { expiredPracticeRequestMessage, isPracticeRequestExpired } from "@/services/practice-request";
 const Monaco = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => <div className="skeleton pixel">LOADING EDITOR...</div>,
@@ -425,7 +425,7 @@ function Buffer({
       },
     };
     if (retry && isPracticeRequestExpired(request.createdAt, Date.now())) {
-      setRequestError(EXPIRED_PRACTICE_REQUEST_MESSAGE); return;
+      setRequestError(expiredPracticeRequestMessage); return;
     }
     sendingRef.current = true;
     setShowRun(false);
