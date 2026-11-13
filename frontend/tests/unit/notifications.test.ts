@@ -1,5 +1,19 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { formatRelativeTime } from "../../src/features/notifications";
+import { NOTIFICATION_PREFERENCE_ITEMS } from "../../src/features/account-notifications";
+
+describe("NOTIFICATION_PREFERENCE_ITEMS", () => {
+  it("명세 §7.1.6의 6개 수신 설정 필드를 순서대로 포함한다", () => {
+    expect(NOTIFICATION_PREFERENCE_ITEMS.map((item) => item.key)).toEqual([
+      "isExamContestEnabled",
+      "isStudyApplicationEnabled",
+      "isAssignmentEnabled",
+      "isLevelChangedEnabled",
+      "isHintReadyEnabled",
+      "isGithubSyncEnabled",
+    ]);
+  });
+});
 
 describe("formatRelativeTime", () => {
   beforeEach(() => {
