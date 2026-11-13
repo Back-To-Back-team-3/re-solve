@@ -46,10 +46,15 @@ export function Buffer({
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
     [showRun, setShowRun] = useState(false),
-    [useSamples, setUseSamples] = useState(true),
-    [customInputs, setCustomInputs] = useState<RunTestCase[]>([]),
     [judgeError, setJudgeError] = useState<string | null>(null),
     [requestError, setRequestError] = useState<string | null>(null);
+  const runInputKey = JSON.stringify([userId, examId ?? "practice", problem.id, problem.problemRevisionId]);
+  const runConfiguration = useWorkspace((state) => state.practiceRunInputs[runInputKey]);
+  const setRunInputs = useWorkspace((state) => state.setPracticeRunInputs);
+  const useSamples = runConfiguration?.useSamples ?? true;
+  const customInputs = runConfiguration?.customInputs ?? [];
+  const setUseSamples = (value: boolean) => setRunInputs(runInputKey, { useSamples: value });
+  const setCustomInputs = (value: RunTestCase[]) => setRunInputs(runInputKey, { customInputs: value });
   const submissionKey = JSON.stringify([key, problem.problemRevisionId]);
   const submissions = useWorkspace((state) => state.practiceSubmissions);
   const pending = useWorkspace((state) => state.practiceRequests[submissionKey]);
