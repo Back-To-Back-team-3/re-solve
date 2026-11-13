@@ -9,6 +9,7 @@ import {
   Empty,
   ErrorState,
   Heading,
+  Go,
   Loading,
   Modal,
 } from "@/components/ui";
@@ -28,7 +29,7 @@ function visibilityTone(v: ProblemVisibility): string {
 type ArchivePending = { item: AdminProblemListItem; reason: string };
 export function AdminProblemsPage() {
   const toast = useToast();
-  const [visibility, setVisibility] = useState("");
+  const [visibility, setVisibility] = useState<ProblemVisibility | "">("");
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState<AdminProblemListItem[]>([]);
   const [archive, setArchive] = useState<ArchivePending | null>(null);
@@ -106,13 +107,15 @@ export function AdminProblemsPage() {
   const totalElements = r.data?.totalElements ?? 0;
   return (
     <div className="container stack">
-      <Heading title="문제 관리" />
+      <Heading title="문제 관리" action={<Go href="/admin/problems/new">문제 등록</Go>} />
       <div className="row">
         <select
           aria-label="공개 상태 필터"
           className="input"
           value={visibility}
-          onChange={(e) => { setVisibility(e.target.value); setPage(0); setRows([]); }}
+          onChange={(e) => { const value = e.target.value;
+            if (value === "" || value === "PUBLIC" || value === "PRIVATE" || value === "ARCHIVED") setVisibility(value);
+            setPage(0); setRows([]); }}
         >
           <option value="">전체</option>
           <option value="PUBLIC">공개</option>
@@ -139,7 +142,7 @@ export function AdminProblemsPage() {
               {items.map((p) => (
                 <tr key={p.problemRevisionId}>
                   <td className="mono">{p.problemId}</td>
-                  <td>{p.title}</td>
+                  <td><Go href={`/admin/problems/${p.problemId}`}>{p.title}</Go></td>
                   <td>{p.scope === "GENERAL" ? "일반" : "시험전용"}</td>
                   <td>
                     <Badge tone={visibilityTone(p.visibility)}>
