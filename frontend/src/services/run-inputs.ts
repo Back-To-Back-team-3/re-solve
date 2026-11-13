@@ -27,6 +27,44 @@ export function runArrayItemType(type: ProblemFunctionParamType, index: number) 
     ?? (type.repeatTypes?.length ? type.repeatTypes[index % type.repeatTypes.length] : undefined);
 }
 
+/** 기존 JSON 텍스트를 정밀도 손실 없이 타입별 폼 값으로 복원한다. */
+export function readRunInput(type: ProblemFunctionParamType, text: string): RunInputValue {
+  const original: unknown = JSON.parse(text);
+  const preserved: unknown = JSON.parse(text.replace(
+    /"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+    (token) => token.startsWith('"') ? token : JSON.stringify(token),
+  ));
+  const object = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  function read(spec: ProblemFunctionParamType, value: unknown, raw: unknown): RunInputValue {
+    if (spec.kind === "ARRAY" && Array.isArray(value) && Array.isArray(raw)) {
+      if (spec.positionTypes && value.length !== spec.positionTypes.length
+        || spec.repeatTypes && value.length % spec.repeatTypes.length !== 0) throw new Error("배열 항목 수를 확인해 주세요.");
+      return { kind: "ARRAY", items: value.map((item, index) => {
+        const child = runArrayItemType(spec, index);
+        if (!child) throw new Error("배열 타입을 확인해 주세요.");
+        return read(child, item, raw[index]);
+      }) };
+    }
+    if (spec.kind === "OBJECT" && object(value) && object(raw)) {
+      const properties = Object.entries(spec.properties ?? {});
+      if (properties.length !== Object.keys(value).length) throw new Error("객체 필드를 확인해 주세요.");
+      return { kind: "OBJECT", fields: Object.fromEntries(properties.map(([key, child]) => [key, read(child, value[key], raw[key])])) };
+    }
+    if ((spec.kind === "STRING" && typeof value === "string") || (spec.kind === "BOOLEAN" && typeof value === "boolean")
+      || (["INT32", "INT64", "FLOAT32", "FLOAT64"].includes(spec.kind) && typeof value === "number")) {
+      return { kind: "SCALAR", text: String(raw) };
+    }
+    throw new Error("기존 테스트 값과 함수 명세의 타입이 다릅니다.");
+  }
+  return read(type, original, preserved);
+}
+
+/** 관리자 테스트 등 단일 값 입력도 실행 폼과 같은 규칙으로 직렬화한다. */
+export function runInputText(type: ProblemFunctionParamType, value: RunInputValue, name: string): string {
+  return encode(type, value, name);
+}
+
 /** 문자열은 이스케이프하고 숫자는 원문 정밀도를 보존해 API용 JSON으로 변환한다. */
 function encode(type: ProblemFunctionParamType, value: RunInputValue | undefined, path: string): string {
   const invalid = (message: string): never => { throw new Error(`${path}: ${message}`); };
