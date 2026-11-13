@@ -77,11 +77,12 @@ function Frame({ children }: { children: ReactNode }) {
             {member?.role === "ADMIN" && (
               <Link
                 href="/admin/problems"
-                className={path.startsWith("/admin") ? "active" : ""}
+                className={path.startsWith("/admin/problems") ? "active" : ""}
               >
                 문제 관리
               </Link>
             )}
+            {member?.role === "ADMIN" && <Link href="/admin/judge-jobs" className={path.startsWith("/admin/judge-jobs") ? "active" : ""}>채점 관리</Link>}
           </nav>
           <div className="header-actions">
             <Button
