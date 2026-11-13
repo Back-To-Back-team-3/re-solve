@@ -30,6 +30,7 @@ export async function mockPracticePage(page: Page, enabled = true) {
       githubLogin: "tester", profileImageUrl: null, email: null, hasLearningProfile: true,
       createdAt: "2026-11-13T00:00:00.000000+09:00",
     };
+    else if (path === "/api/v1/notifications/unread-count") data = { unreadCount: 0 };
     else if (path === "/api/v1/problems/1001") data = problemDetail;
     else if (path === "/api/v1/judge/languages") data = { content: [
       { language: "java", displayName: "Java 17", runtimeVersion: "17", enabled },
