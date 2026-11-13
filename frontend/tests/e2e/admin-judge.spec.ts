@@ -40,6 +40,11 @@ test("채점 목록 필터·페이지를 전달하고 회원 문맥과 상세 �
   await expect(page.getByText("connect timeout", { exact: true })).toBeVisible();
   await expect(page.getByText(/테스트 1: UNKNOWN/)).toBeVisible();
   await expect(page.getByText(/채점 2회차/)).toBeVisible();
+  await page.getByRole("link", { name: "작업 목록", exact: true }).click();
+  await expect(page.getByLabel("작업 상태")).toHaveValue("RUNNING");
+  await expect(page.getByLabel("제출 문맥")).toHaveValue("EXAM");
+  await expect(page.getByLabel("문맥 ID", { exact: true })).toHaveValue("401");
+  await expect.poll(() => queries.at(-1)?.get("page")).toBe("1");
 });
 
 test("복구 전송 실패는 같은 키·본문으로 재요청하고 완료 경합은 최신 상태로 갱신한다", async ({ page }) => {
@@ -83,4 +88,32 @@ test("없는 작업은 오류로 표시하고 일반 회원은 관리 화면을 
   await page.reload();
   await expect(page).toHaveURL("/");
   await expect(page.getByRole("heading", { name: "채점 작업 관리" })).toHaveCount(0);
+});
+
+test("복구 키 생성이 실패해도 잠금을 해제하고 같은 화면에서 다시 요청할 수 있다", async ({ page }) => {
+  await mockAdminPage(page);
+  await page.route("**/api/v1/admin/judge-jobs/9101", (route) => route.fulfill({ json: { success: true, data: detail } }));
+  let posts = 0;
+  await page.route("**/api/v1/admin/judge-jobs/9101/recoveries", (route) => {
+    posts++;
+    return route.fulfill({ status: 202, json: { success: true, data: { judgeJobId: "9101", status: "RETRY_WAITING" } } });
+  });
+  await page.goto("/admin/judge-jobs/9101");
+  await page.getByRole("textbox", { name: "복구 사유", exact: true }).fill("복구 사유 보존");
+  await page.evaluate(() => {
+    const original = crypto.randomUUID.bind(crypto);
+    let fail = true;
+    Object.defineProperty(crypto, "randomUUID", { configurable: true, value: () => {
+      if (fail) { fail = false; throw new Error("요청 키 생성 실패"); }
+      return original();
+    } });
+  });
+  await page.getByRole("button", { name: "복구 요청", exact: true }).click();
+  await expect(page.locator("main").getByRole("alert")).toHaveText("요청 키 생성 실패");
+  await expect(page.getByRole("button", { name: "복구 요청", exact: true })).toBeEnabled();
+  await expect(page.getByRole("textbox", { name: "복구 사유", exact: true })).toHaveValue("복구 사유 보존");
+  expect(posts).toBe(0);
+  await page.getByRole("button", { name: "복구 요청", exact: true }).click();
+  await expect(page.getByText(/복구 요청이 접수됐습니다/)).toBeVisible();
+  expect(posts).toBe(1);
 });

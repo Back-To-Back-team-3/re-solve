@@ -25,8 +25,8 @@ function JobDetail({ id }: { id: string }) {
     if (locked.current || !reason.trim()) return;
     locked.current = true; setBusy(true); setError(""); setMessage("");
     const normalized = reason.trim();
-    if (pending.current?.reason !== normalized) pending.current = { reason: normalized, key: crypto.randomUUID() };
     try {
+      if (pending.current?.reason !== normalized) pending.current = { reason: normalized, key: crypto.randomUUID() };
       await adminJudgeApi.recover(id, { reason: pending.current.reason }, pending.current.key);
       pending.current = null;
       setMessage("복구 요청이 접수됐습니다. 같은 채점 회차의 최신 상태를 확인해 주세요.");
