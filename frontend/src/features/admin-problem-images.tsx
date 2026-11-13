@@ -14,6 +14,7 @@ import { actionMessage } from "@/services/problem-authoring";
 function ProtectedImage({ id, alt }: { id: string; alt: string }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
     let alive = true;
     let objectUrl = "";
@@ -22,8 +23,9 @@ function ProtectedImage({ id, alt }: { id: string; alt: string }) {
       objectUrl = URL.createObjectURL(blob); setUrl(objectUrl);
     }).catch((failure: unknown) => { if (alive) setError(actionMessage(failure)); });
     return () => { alive = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [id]);
-  if (error) return <span className="error-text">이미지: {error}</span>;
+  }, [id, retry]);
+  if (error) return <span className="error-text" role="alert">이미지: {error} <button type="button" className="btn small"
+    onClick={() => { setError(""); setRetry((value) => value + 1); }}>이미지 다시 불러오기</button></span>;
   return url ? <Image unoptimized src={url} alt={alt} width={800} height={400} className="h-auto w-auto max-w-full" />
     : <span>이미지 조회 중…</span>;
 }
@@ -41,10 +43,15 @@ export function AdminMarkdown({ text }: { text: string }) {
 
 function ImagePreview({ id }: { id: string }) {
   const [open, setOpen] = useState(false);
+  const content = useRef<HTMLDivElement>(null);
   return <HoverCard.Root open={open} onOpenChange={setOpen} openDelay={200}>
     <HoverCard.Trigger asChild><button type="button" className="btn small mono" aria-label={`image:${id} 미리보기`}
-      onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>image:{id}</button></HoverCard.Trigger>
-    <HoverCard.Portal><HoverCard.Content role="tooltip" side="bottom" align="start" sideOffset={8} collisionPadding={12}
+      onFocus={() => setOpen(true)} onBlur={(event) => {
+        if (!(event.relatedTarget instanceof Node && content.current?.contains(event.relatedTarget))) setOpen(false);
+      }}>image:{id}</button></HoverCard.Trigger>
+    <HoverCard.Portal><HoverCard.Content ref={content} onBlur={(event) => {
+      if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setOpen(false);
+    }} role="tooltip" side="bottom" align="start" sideOffset={8} collisionPadding={12}
       className="z-50 w-64 max-w-[calc(100vw-24px)] border-2 bg-surface p-3">
       <p className="mono mb-2">image:{id}</p>
       <div className="max-h-64 overflow-auto"><ProtectedImage id={id} alt={`image:${id} 첨부 이미지`} /></div>

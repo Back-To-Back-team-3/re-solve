@@ -1,15 +1,19 @@
 "use client";
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Button, ErrorState, Go, Heading, Loading } from "@/components/ui";
 import { adminProblemApi } from "@/services/api";
+import { useWorkspace } from "@/stores/workspace";
 import { useResource } from "@/services/hooks";
 import { Pager } from "@/features/problem-list";
 import { AdminMarkdown } from "@/features/admin-problem-images";
 import { AdminProblemValidation } from "@/features/admin-problem-validation";
 
 function ProblemView({ id, revision }: { id: string; revision?: string }) {
-  const [page, setPage] = useState(0);
+  const pageKey = JSON.stringify(["admin-problem-history", id]);
+  const page = useWorkspace((state) => state.viewPages[pageKey] ?? 0);
+  const selectPage = useWorkspace((state) => state.setViewPage);
+  const setPage = (value: number) => selectPage(pageKey, value);
   const resource = useResource(() => adminProblemApi.getDetail(id, revision), `${id}:${revision}`);
   const history = useResource(() => adminProblemApi.getRevisions(id, page), `${id}:${page}`);
   const { retry: refreshDetail } = resource;
@@ -19,11 +23,12 @@ function ProblemView({ id, revision }: { id: string; revision?: string }) {
     refreshHistory();
   }, [refreshDetail, refreshHistory]);
   if (resource.loading && !resource.data) return <Loading />;
-  if (resource.error) return <ErrorState message={resource.error.message} retry={resource.retry} />;
+  if (resource.error && !resource.data) return <ErrorState message={resource.error.message} retry={resource.retry} />;
   if (!resource.data) return null;
   const detail = resource.data;
   return <div className="container stack">
     <Heading title={detail.title} action={<Go href="/admin/problems">공개·상태 관리</Go>} />
+    {resource.error && <ErrorState message={resource.error.message} retry={resource.retry} />}
     <div className="row wrap">
       <Go href={`/admin/problems/${id}/edit`}>최신 회차에서 수정</Go>
       <Button onClick={resource.retry}>상세 새로고침</Button>

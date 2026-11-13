@@ -5,7 +5,8 @@ import { Button, ErrorState, Loading } from "@/components/ui";
 import { adminProblemApi } from "@/services/api";
 import { actionMessage } from "@/services/problem-authoring";
 import { useResource } from "@/services/hooks";
-import type { AdminProblemDetail, Language } from "@/services/types";
+import { ProblemValidationProvider, useProblemValidation } from "@/stores/problem-validation";
+import type { AdminProblemDetail } from "@/services/types";
 
 function ValidationStatus({ id, onApplied }: { id: string; onApplied: () => void }) {
   const resource = useResource(() => adminProblemApi.getValidation(id), id);
@@ -28,14 +29,12 @@ function ValidationStatus({ id, onApplied }: { id: string; onApplied: () => void
   </section>;
 }
 
-export function AdminProblemValidation({ detail, onApplied }: { detail: AdminProblemDetail; onApplied: () => void }) {
+function ValidationForm({ detail, onApplied }: { detail: AdminProblemDetail; onApplied: () => void }) {
   const router = useRouter();
-  const [language, setLanguage] = useState<Language>("java");
-  const [sourceCode, setSourceCode] = useState(detail.referenceSolutions.find((code) => code.language === "java")?.sourceCode ?? "");
-  const [validationId, setValidationId] = useState(detail.languageResults[0]?.validationId ?? "");
+  const { language, selectLanguage, drafts, setCode, validationId, setValidationId, pending, setPending } = useProblemValidation();
+  const sourceCode = drafts[language] ?? "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const pending = useRef<{ json: string; key: string; body: { language: Language; sourceCode: string } } | null>(null);
   const lock = useRef(false);
   async function validate() {
     if (lock.current) return;
@@ -44,9 +43,10 @@ export function AdminProblemValidation({ detail, onApplied }: { detail: AdminPro
       setError("공백이 아닌 64KiB 이하 코드를 입력해 주세요."); return;
     }
     const body = { language, sourceCode }; const json = JSON.stringify(body);
-    const request = pending.current?.json === json ? pending.current : { body, json, key: crypto.randomUUID() };
-    pending.current = request; lock.current = true; setBusy(true);
+    lock.current = true; setBusy(true);
     try {
+      const request = pending[language]?.json === json ? pending[language] : { body, json, key: crypto.randomUUID() };
+      setPending(request);
       const result = await adminProblemApi.validate(detail.problemId, detail.problemRevisionId, request.body, request.key);
       setValidationId(result.validationId); router.refresh();
     } catch (failure) { setError(actionMessage(failure)); }
@@ -59,13 +59,13 @@ export function AdminProblemValidation({ detail, onApplied }: { detail: AdminPro
         onChange={(event) => {
           const next = event.target.value;
           if (next === "java" || next === "python3" || next === "cpp") {
-            setLanguage(next); setSourceCode(detail.referenceSolutions.find((code) => code.language === next)?.sourceCode ?? "");
+            selectLanguage(next);
           }
         }}>
         <option value="java">Java</option><option value="python3">Python</option><option value="cpp">C++</option>
       </select>
       <label className="field">검증 코드<textarea aria-label="검증 코드" className="input mono" rows={10} value={sourceCode} disabled={busy}
-        onChange={(event) => setSourceCode(event.target.value)} /></label>
+        onChange={(event) => setCode(event.target.value)} /></label>
       <Button disabled={busy} onClick={validate}>{busy ? "접수 중…" : "검증 접수·재요청"}</Button>
       {error && <p className="error-text" role="alert">{error}</p>}
       <p>같은 코드의 재요청은 원래 키를 유지합니다. 통과했어도 결과 반영이 완료되기 전에는 사용 회차가 바뀌지 않을 수 있습니다.</p>
@@ -75,4 +75,10 @@ export function AdminProblemValidation({ detail, onApplied }: { detail: AdminPro
     </div>
     {validationId && <ValidationStatus key={validationId} id={validationId} onApplied={onApplied} />}
   </section>;
+}
+
+export function AdminProblemValidation({ detail, onApplied }: { detail: AdminProblemDetail; onApplied: () => void }) {
+  return <ProblemValidationProvider key={`${detail.problemId}:${detail.problemRevisionId}`} detail={detail}>
+    <ValidationForm detail={detail} onApplied={onApplied} />
+  </ProblemValidationProvider>;
 }
