@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { getMember, whenAuthReady } from "@/services/api";
+import { actionErrorMessage, getMember, isApiError, whenAuthReady } from "@/services/api";
 export function Button({
   children,
   className = "",
@@ -267,11 +267,12 @@ export function useAction() {
       if (success) toast(success);
       return true;
     } catch (e) {
-      toast(
-        e instanceof Error
-          ? e.message
-          : "저장하지 못했습니다. 다시 시도해 주세요.",
-      );
+      // 토큰 갱신까지 실패한 세션 만료는 비로그인 클릭과 같게 원래 경로를 유지해 로그인으로 보낸다.
+      if (isApiError(e) && e.code === "UNAUTHORIZED") {
+        router.push(`/login?returnTo=${encodeURIComponent(path)}`);
+        return false;
+      }
+      toast(actionErrorMessage(e));
       return false;
     }
   };
