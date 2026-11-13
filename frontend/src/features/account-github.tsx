@@ -1,21 +1,9 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { integrationApi, type ApiError } from "@/services/api";
-import type {
-  GithubConnectionInfo,
-  GithubSyncJobItem,
-  GithubSyncJobStatus,
-} from "@/services/types";
-import {
-  Badge,
-  Button,
-  Empty,
-  ErrorState,
-  Loading,
-  Section,
-  useToast,
-} from "@/components/ui";
+import type { GithubConnectionInfo, GithubSyncJobItem, GithubSyncJobStatus } from "@/services/types";
+import { Badge, Button, Empty, ErrorState, Loading, Section, useToast } from "@/components/ui";
 
 export const SYNC_JOB_STATUS_FILTERS: ReadonlyArray<{
   value: GithubSyncJobStatus | "ALL";
@@ -60,18 +48,20 @@ export function getSyncJobBadgeTone(status: GithubSyncJobStatus): string {
 }
 
 function getErrorMessage(err: unknown, fallback: string): string {
-  const apiErr = err as Partial<ApiError> | undefined;
-  return apiErr?.message ?? fallback;
+  return (err as Partial<ApiError> | undefined)?.message ?? fallback;
 }
 
 export function GithubIntegrationSection() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
+  const requestSeqRef = useRef(0);
 
   const [connection, setConnection] = useState<GithubConnectionInfo | null>(null);
   const [jobs, setJobs] = useState<GithubSyncJobItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<GithubSyncJobStatus | "ALL">("ALL");
+  const [page, setPage] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,29 +71,35 @@ export function GithubIntegrationSection() {
   const [stateInput, setStateInput] = useState("");
 
   const loadData = useCallback(
-    async (filter: GithubSyncJobStatus | "ALL" = statusFilter) => {
+    async (filter: GithubSyncJobStatus | "ALL" = statusFilter, targetPage: number = page) => {
+      const seq = ++requestSeqRef.current;
       setLoading(true);
       setLoadError(null);
       try {
         const conn = await integrationApi.getGithubConnection();
+        if (seq !== requestSeqRef.current) return;
         setConnection(conn);
         if (conn.status === "CONNECTED") {
-          const page = await integrationApi.getSyncJobs({
+          const res = await integrationApi.getSyncJobs({
             status: filter === "ALL" ? undefined : filter,
-            page: 0,
+            page: targetPage,
             size: 20,
           });
-          setJobs(page.content);
+          if (seq !== requestSeqRef.current) return;
+          setJobs(res.content);
+          setHasNext(res.hasNext);
         } else {
           setJobs([]);
+          setHasNext(false);
         }
       } catch (e: unknown) {
+        if (seq !== requestSeqRef.current) return;
         setLoadError(getErrorMessage(e, "GitHub 연동 정보를 불러오지 못했습니다."));
       } finally {
-        setLoading(false);
+        if (seq === requestSeqRef.current) setLoading(false);
       }
     },
-    [statusFilter],
+    [statusFilter, page],
   );
 
   useEffect(() => {
@@ -113,8 +109,11 @@ export function GithubIntegrationSection() {
       setInstallationIdInput(instId);
       setStateInput(state);
     }
-    loadData();
-  }, [loadData, searchParams]);
+  }, [searchParams]);
+
+  useEffect(() => {
+    loadData(statusFilter, page);
+  }, [loadData, statusFilter, page]);
 
   async function runAction(fn: () => Promise<void>, fallbackMessage: string) {
     if (busy) return;
@@ -147,7 +146,8 @@ export function GithubIntegrationSection() {
       toast("GitHub 저장소 연동이 완료되었습니다.");
       setInstallationIdInput("");
       setStateInput("");
-      await loadData();
+      setPage(0);
+      await loadData(statusFilter, 0);
       router.refresh();
     }, "GitHub 저장소 연동 완료 처리에 실패했습니다.");
   }
@@ -168,8 +168,11 @@ export function GithubIntegrationSection() {
     if (!connection || connection.status !== "CONNECTED") return;
     await runAction(async () => {
       await integrationApi.disconnectGithub();
+      requestSeqRef.current += 1;
       setConnection({ status: "NOT_CONNECTED" });
       setJobs([]);
+      setHasNext(false);
+      setPage(0);
       toast("GitHub 저장소 연동을 해제했습니다.");
       router.refresh();
     }, "GitHub 연동 해제에 실패했습니다.");
@@ -181,35 +184,33 @@ export function GithubIntegrationSection() {
       await integrationApi.requestManualSync(submissionId.trim());
       toast("GitHub 커밋 작업을 등록했습니다.");
       setManualSubmissionId("");
-      await loadData();
+      setPage(0);
+      await loadData(statusFilter, 0);
       router.refresh();
     }, "수동 동기화 요청에 실패했습니다.");
   }
 
-  if (loading) return <Loading />;
+  if (loading && !connection) return <Loading />;
   if (loadError || !connection) {
     return (
       <ErrorState
         message={loadError ?? "GitHub 연동 정보를 불러오지 못했습니다."}
-        retry={() => loadData()}
+        retry={() => loadData(statusFilter, page)}
       />
     );
   }
 
   const isConnected = connection.status === "CONNECTED";
+  const repoLabel = connection.repositoryOwner
+    ? `${connection.repositoryOwner}/${connection.repositoryName}`
+    : connection.repositoryName;
 
   return (
     <div className="stack">
       <Section title="GitHub 저장소 연동">
         <div className="stack">
-          <p className="muted">
-            연습 문제 정답(AC) 코드를 선택한 GitHub 저장소에 자동으로 커밋합니다.
-          </p>
-          {error && (
-            <p className="text-sm text-danger" role="alert">
-              {error}
-            </p>
-          )}
+          <p className="muted">연습 문제 정답(AC) 코드를 선택한 GitHub 저장소에 자동으로 커밋합니다.</p>
+          {error && <p className="text-sm text-danger" role="alert">{error}</p>}
           {!isConnected ? (
             <div className="stack">
               <div className="card row between">
@@ -226,23 +227,11 @@ export function GithubIntegrationSection() {
                 <div className="form-grid">
                   <label className="field">
                     설치 ID (installationId)
-                    <input
-                      className="input"
-                      value={installationIdInput}
-                      onChange={(e) => setInstallationIdInput(e.target.value)}
-                      placeholder="예: 58291032"
-                      required
-                    />
+                    <input className="input" value={installationIdInput} onChange={(e) => setInstallationIdInput(e.target.value)} placeholder="예: 58291032" required />
                   </label>
                   <label className="field">
                     상태 토큰 (state)
-                    <input
-                      className="input"
-                      value={stateInput}
-                      onChange={(e) => setStateInput(e.target.value)}
-                      placeholder="설치 URL의 state 값"
-                      required
-                    />
+                    <input className="input" value={stateInput} onChange={(e) => setStateInput(e.target.value)} placeholder="설치 URL의 state 값" required />
                   </label>
                 </div>
                 <Button type="submit" disabled={busy}>연동 완료하기</Button>
@@ -252,11 +241,7 @@ export function GithubIntegrationSection() {
             <div className="card row between">
               <div>
                 <div className="row">
-                  <strong>
-                    {connection.repositoryOwner
-                      ? `${connection.repositoryOwner}/${connection.repositoryName}`
-                      : connection.repositoryName}
-                  </strong>
+                  <strong>{repoLabel}</strong>
                   <Badge tone="ok">연동됨</Badge>
                 </div>
                 {connection.githubLogin && <p className="muted">@{connection.githubLogin}</p>}
@@ -265,9 +250,7 @@ export function GithubIntegrationSection() {
                 <Button type="button" disabled={busy} onClick={handleToggleAutoCommit}>
                   {connection.isAutoCommitEnabled ? "자동 커밋 끄기" : "자동 커밋 켜기"}
                 </Button>
-                <Button type="button" disabled={busy} onClick={handleDisconnect}>
-                  연동 해제
-                </Button>
+                <Button type="button" disabled={busy} onClick={handleDisconnect}>연동 해제</Button>
               </div>
             </div>
           )}
@@ -277,45 +260,21 @@ export function GithubIntegrationSection() {
       {isConnected && (
         <Section title="GitHub 동기화 작업 (Sync Jobs)">
           <div className="stack">
-            <form
-              className="row"
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleManualSync(manualSubmissionId);
-              }}
-            >
-              <input
-                className="input"
-                value={manualSubmissionId}
-                onChange={(e) => setManualSubmissionId(e.target.value)}
-                placeholder="수동 커밋할 제출 번호(submissionId)"
-                required
-              />
-              <Button type="submit" className="primary" disabled={busy}>
-                수동 동기화 요청
-              </Button>
+            <form className="row" onSubmit={(e) => { e.preventDefault(); handleManualSync(manualSubmissionId); }}>
+              <input className="input" value={manualSubmissionId} onChange={(e) => setManualSubmissionId(e.target.value)} placeholder="수동 커밋할 제출 번호(submissionId)" required />
+              <Button type="submit" className="primary" disabled={busy}>수동 동기화 요청</Button>
             </form>
-            <label className="field">
-              상태 필터
-              <select
-                className="input"
-                value={statusFilter}
-                onChange={(e) => {
-                  const next = e.target.value as GithubSyncJobStatus | "ALL";
-                  setStatusFilter(next);
-                  loadData(next);
-                }}
-              >
-                {SYNC_JOB_STATUS_FILTERS.map((f) => (
-                  <option key={f.value} value={f.value}>{f.label}</option>
-                ))}
-              </select>
-            </label>
+            <div className="row between">
+              <label className="field">
+                상태 필터
+                <select className="input" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as GithubSyncJobStatus | "ALL"); setPage(0); }}>
+                  {SYNC_JOB_STATUS_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
+              </label>
+              <Button type="button" disabled={loading || busy} onClick={() => loadData(statusFilter, page)}>목록 새로고침</Button>
+            </div>
             {jobs.length === 0 ? (
-              <Empty
-                title="동기화 작업 내역이 없습니다"
-                description="연습 문제를 맞히거나 수동 동기화를 요청하면 여기에 표시됩니다."
-              />
+              <Empty title="동기화 작업 내역이 없습니다" description="연습 문제를 맞히거나 수동 동기화를 요청하면 여기에 표시됩니다." />
             ) : (
               <div className="stack">
                 {jobs.map((job) => (
@@ -323,9 +282,7 @@ export function GithubIntegrationSection() {
                     <div>
                       <div className="row">
                         <strong>문제 #{job.problemId} · 제출 #{job.submissionId}</strong>
-                        <Badge tone={getSyncJobBadgeTone(job.status)}>
-                          {formatSyncJobStatus(job.status)}
-                        </Badge>
+                        <Badge tone={getSyncJobBadgeTone(job.status)}>{formatSyncJobStatus(job.status)}</Badge>
                       </div>
                       <p className="muted">
                         재시도 {job.retryCount}회
@@ -334,12 +291,17 @@ export function GithubIntegrationSection() {
                       </p>
                     </div>
                     {job.status === "FAILED" && (
-                      <Button type="button" disabled={busy} onClick={() => handleManualSync(job.submissionId)}>
-                        다시 시도
-                      </Button>
+                      <Button type="button" disabled={busy} onClick={() => handleManualSync(job.submissionId)}>다시 시도</Button>
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+            {(page > 0 || hasNext) && (
+              <div className="row between">
+                <Button type="button" disabled={page === 0 || loading || busy} onClick={() => setPage((p) => Math.max(0, p - 1))}>이전</Button>
+                <span className="muted">{page + 1} 페이지</span>
+                <Button type="button" disabled={!hasNext || loading || busy} onClick={() => setPage((p) => p + 1)}>다음</Button>
               </div>
             )}
           </div>
