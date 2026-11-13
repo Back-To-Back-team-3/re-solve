@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Modal } from "@/components/ui";
 import { contestApi, judgeApi } from "@/services/api";
-import { runInputs } from "@/services/run-inputs";
+import { runInputs, runExpectedOutputs, type RunTestCase } from "@/services/run-inputs";
 import { draftKey, readDraft, saveDraft, useWorkspace, useWorkspaceApi } from "@/stores/workspace";
 import type { Language, Problem, RunResponse } from "@/services/types";
 import { JudgePoll, EditorResultPanel } from "@/features/editor-results";
@@ -42,11 +42,12 @@ export function Buffer({
     [paused, setPaused] = useState(false),
     [pollVersion, setPollVersion] = useState(0),
     [runResult, setRunResult] = useState<RunResponse | null>(null),
+    [runExpectations, setRunExpectations] = useState<(string | null)[]>([]),
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
     [showRun, setShowRun] = useState(false),
     [useSamples, setUseSamples] = useState(true),
-    [customInputs, setCustomInputs] = useState<Record<string, string>[]>([]),
+    [customInputs, setCustomInputs] = useState<RunTestCase[]>([]),
     [judgeError, setJudgeError] = useState<string | null>(null),
     [requestError, setRequestError] = useState<string | null>(null);
   const submissionKey = JSON.stringify([key, problem.problemRevisionId]);
@@ -148,8 +149,10 @@ export function Buffer({
     setBusyRun(true);
     setShowRun(true);
     setRunResult(null);
+    setRunExpectations([]);
     setRunError(null);
     try {
+      setRunExpectations(examId ? [] : runExpectedOutputs(problem.functionSpec.returnInputType, customInputs));
       setRunResult(
         await judgeApi.run({
           problemId: problem.id,
@@ -157,7 +160,7 @@ export function Buffer({
           language,
           sourceCode: codeRef.current,
           useSamples: examId ? true : useSamples,
-          customInputs: examId ? [] : runInputs(problem.functionSpec.parameters.map((param) => param.name), customInputs, useSamples),
+          customInputs: examId ? [] : runInputs(problem.functionSpec.parameters, customInputs.map((row) => row.arguments), useSamples),
         }),
       );
     } catch (e) {
@@ -242,7 +245,7 @@ export function Buffer({
             setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false);
           }} />
         <EditorResultPanel busy={busy} showRun={showRun} busyRun={busyRun} queryError={judgeError}
-          judgeResult={judgeResult} runError={runError} runResult={runResult} />
+          judgeResult={judgeResult} runError={runError} runResult={runResult} runExpectations={runExpectations} />
       </section>
       <EditorActions saved={saved} ready={ready} busy={busy} busyRun={busyRun}
         pendingSubmission={!!pending || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
@@ -250,7 +253,7 @@ export function Buffer({
         onRun={handleRun} onSubmit={() => handleSubmit()} />
       {!examId && <Modal open={testCasesOpen} onOpenChange={setTestCasesOpen}
         title="테스트 케이스" description="공개 예제와 직접 입력한 값으로 실행합니다. 제출 시에는 전체 테스트로 채점합니다.">
-        <EditorRunInputs names={problem.functionSpec.parameters.map((param) => param.name)}
+        <EditorRunInputs parameters={problem.functionSpec.parameters} returnType={problem.functionSpec.returnInputType}
           rows={customInputs} useSamples={useSamples} disabled={busy || busyRun}
           onRows={setCustomInputs} onSamples={setUseSamples} />
         <Button className="primary" onClick={() => setTestCasesOpen(false)}>적용</Button>
