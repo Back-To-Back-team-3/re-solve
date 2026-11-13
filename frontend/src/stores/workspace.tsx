@@ -17,7 +17,7 @@ import {
   setTokenGetter,
 } from "../services/api";
 import type { RunTestCase } from "@/services/run-inputs";
-import type { JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
+import type { JudgeJobFilter, JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
 import { Loading } from "../components/ui";
 export interface Draft {
   code: string;
@@ -63,6 +63,12 @@ export interface PracticeSubmissionAttempt {
 }
 
 interface Workspace {
+  judgeJobFilter: JudgeJobFilter;
+  setJudgeJobFilter: (filter: JudgeJobFilter) => void;
+  judgeRecoveryReasons: Record<string, string | undefined>;
+  setJudgeRecoveryReason: (key: string, reason: string) => void;
+  viewPages: Record<string, number | undefined>;
+  setViewPage: (key: string, page: number) => void;
   practiceRunInputs: Record<string, { useSamples: boolean; customInputs: RunTestCase[] } | undefined>;
   setPracticeRunInputs: (key: string, value: Partial<{ useSamples: boolean; customInputs: RunTestCase[] }>) => void;
   submissionAttempts: Record<string, number | undefined>;
@@ -96,6 +102,12 @@ const createWorkspace = () =>
     accessToken: null,
     authReady: false,
     drafts: {},
+    judgeJobFilter: { sort: "updatedAt,desc" },
+    setJudgeJobFilter: (judgeJobFilter) => set({ judgeJobFilter }),
+    judgeRecoveryReasons: {},
+    setJudgeRecoveryReason: (key, reason) => set((state) => ({ judgeRecoveryReasons: { ...state.judgeRecoveryReasons, [key]: reason } })),
+    viewPages: {},
+    setViewPage: (key, page) => set((state) => ({ viewPages: { ...state.viewPages, [key]: page } })),
     practiceRunInputs: {},
     setPracticeRunInputs: (key, value) => set((state) => ({ practiceRunInputs: { ...state.practiceRunInputs,
       [key]: { useSamples: true, customInputs: [], ...state.practiceRunInputs[key], ...value } } })),
@@ -135,7 +147,7 @@ const createWorkspace = () =>
     fontSize: 14,
     activeProblems: {},
     setMember: (member) => set({ member }),
-    clearMember: () => set({ practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, practiceRequests: {}, activePracticeSubmissions: {} }),
+    clearMember: () => set({ judgeJobFilter: { sort: "updatedAt,desc" }, judgeRecoveryReasons: {}, viewPages: {}, practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, practiceRequests: {}, activePracticeSubmissions: {} }),
     setAccessToken: (accessToken) => set({ accessToken }),
     setAuthReady: (authReady) => set({ authReady }),
     setDraft: (key, d) => set((s) => ({ drafts: { ...s.drafts, [key]: d } })),

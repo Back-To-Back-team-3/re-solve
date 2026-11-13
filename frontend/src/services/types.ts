@@ -891,3 +891,57 @@ export type SubmissionTestResult =
   | { testOrder: number; isSample: true; verdict: Verdict | null;
       timeMs: number | null; memoryKb: number | null; argumentTexts: Record<string, string>;
       expectedReturnText: string; actualReturnText: string | null };
+
+// API 명세서 §2.3 관리자 출제 계약
+export type ProblemWriteContent = {
+  title: string; description: string; constraints: string; examples: string;
+  difficulty: number; tagIds: string[]; functionSpec: ProblemDetail["functionSpec"];
+  executionLimits: ProblemDetail["executionLimits"] | null;
+  testCases: { isSample: boolean; argumentTexts: Record<string, string>; expectedReturnText: string }[];
+};
+export type ProblemWriteRequest = ProblemWriteContent & { scope?: "GENERAL" | "EXAM_ONLY"; rowVersion?: number };
+export type ProblemSaved = { problemId?: string; problemRevisionId: string; revisionNumber: number; rowVersion: number };
+export type ValidationVerdict = Verdict | "SYSTEM_ERROR";
+export type ProblemValidationRequest = { language: Language; sourceCode: string };
+export type ProblemValidationReceipt = { validationId: string };
+export type ProblemImageUploaded = { imageId: string };
+export type AdminProblemFilter = { visibility?: ProblemVisibility; page?: number; size?: number };
+export type ProblemVisibilityChanged = { visibility: ProblemVisibility; rowVersion: number };
+export type ValidationProgress = {
+  validationId: string; problemId: string; problemRevisionId: string; language: Language;
+  status: string; tests: { testOrder: number; verdict: ValidationVerdict | null; timeMs: number | null; memoryKb: number | null }[];
+  maxTimeMs: number | null; message: string | null; resultApplied: boolean;
+  supportedLanguages: Language[]; currentProblemRevisionId: string | null;
+};
+export type AdminProblemDetail = ProblemWriteContent & {
+  problemId: string; problemRevisionId: string; revisionNumber: number; rowVersion: number;
+  authorId: string; scope: "GENERAL" | "EXAM_ONLY"; visibility: ProblemVisibility;
+  currentProblemRevisionId: string | null; supportedLanguages: Language[];
+  referenceSolutions: { language: Language; sourceCode: string }[];
+  languageResults: Pick<ValidationProgress, "validationId" | "language" | "status" | "tests" | "maxTimeMs" | "message" | "resultApplied">[];
+};
+export type AdminRevision = {
+  problemRevisionId: string; revisionNumber: number; title: string; publishedAt: string;
+  currentProblemRevisionId: string | null; supportedLanguages: Language[];
+};
+
+
+export type JudgeJobStatus = "PENDING" | "RUNNING" | "RETRY_WAITING" | "SUCCEEDED" | "FAILED";
+export interface AdminJudgeJob {
+  judgeJobId: string; submissionId: string; judgeAttempt: number; status: JudgeJobStatus; tryCount: number;
+  failureCode: string | null; memberId: string; context: string; contextId: string | null;
+  problemRevisionId: string; deadlineAt: string; createdAt: string; updatedAt: string;
+}
+export interface JudgeJobFilter {
+  status?: string; context?: string; contextId?: string; failureCode?: string; sort?: string;
+}
+export interface AdminJudgeJobDetail {
+  judgeJobId: string; submissionId: string; judgeAttempt: number; status: JudgeJobStatus; tryCount: number;
+  leaseUntil: string | null; nextRunAt: string | null; deadlineAt: string; lastError: string | null;
+  runs: { tryCount: number; result: string; errorMessage: string | null; startedAt: string; finishedAt: string | null }[];
+  testResults: { testOrder: number; tokenStatus: string; judge0Token: string | null; verdict: string | null }[];
+}
+
+// API 명세서 §3.2.5 진행 중 채점 작업 복구
+export type JudgeJobRecoveryRequest = { reason: string };
+export type JudgeJobRecoveryResponse = { judgeJobId: string; status: "RETRY_WAITING" };
