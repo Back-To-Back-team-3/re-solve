@@ -39,7 +39,6 @@ import type {
   MyResultResponse,
   NotificationListResponse,
   NotificationPreferences,
-  Page,
   ProblemDetail,
   ProblemFilter,
   ProblemListItem,
@@ -477,9 +476,9 @@ export const studyApi = {
 
 // 모의 코테·시험 API (§4)
 export const contestApi = {
-  getExamList: (studyId: string, page = 0, size = 20) =>
-    apiFetch<Page<ExamSummary>>(
-      `/api/v1/studies/${studyId}/exams?page=${page}&size=${size}`,
+  getExamList: (studyId: string, page = 0, size = 20, status?: string) =>
+    apiFetch<ServerPage<ExamSummary>>(
+      `/api/v1/studies/${studyId}/exams?page=${page}&size=${size}${status && status !== "all" ? `&status=${status}` : ""}`,
     ),
 
   createExam: (studyId: string, body: CreateExamRequest) =>

@@ -48,8 +48,8 @@ export function ExamsPage({
   useEffect(() => { setPage(0); }, [status]);
 
   const r = useResource(
-    () => (studyId ? contestApi.getExamList(studyId, page) : Promise.resolve(null)),
-    `${studyId ?? "none"}-${page}`,
+    () => (studyId ? contestApi.getExamList(studyId, page, 20, status) : Promise.resolve(null)),
+    `${studyId ?? "none"}-${page}-${status}`,
   );
 
   if (contest) {
@@ -90,9 +90,7 @@ export function ExamsPage({
     router.push(`?${p.toString()}`);
   }
 
-  const items = (r.data?.items ?? []).filter(
-    (e) => status === "all" || e.status === status,
-  );
+  const items = r.data?.content ?? [];
 
   return (
     <div className="container stack">
