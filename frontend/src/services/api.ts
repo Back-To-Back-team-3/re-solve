@@ -50,7 +50,6 @@ import type {
   MyResultResponse,
   NotificationListResponse,
   NotificationPreferences,
-  Page,
   ProblemDetail,
   ProblemFilter,
   ProblemListItem,
@@ -275,6 +274,10 @@ export const judgeApi = {
   getSubmissions: (problemId: string, page = 0) =>
     apiFetch<ServerPage<SubmissionHistoryItem>>(
       `/api/v1/me/submissions?problemId=${encodeURIComponent(problemId)}&context=PRACTICE&page=${page}`,
+    ),
+  getMySubmissions: (page: number, size: number) =>
+    apiFetch<ServerPage<SubmissionHistoryItem>>(
+      `/api/v1/me/submissions?page=${page}&size=${size}`,
     ),
 };
 
@@ -501,8 +504,10 @@ export const studyApi = {
 export const contestApi = {
   getExamImage: (examId: string, problemId: string, imageId: string) =>
     apiFetchBlob(`/api/v1/exams/${examId}/problems/${problemId}/images/${imageId}`),
-  getExamList: (studyId: string) =>
-    apiFetch<Page<ExamSummary>>(`/api/v1/studies/${studyId}/exams`),
+  getExamList: (studyId: string, page = 0, size = 20, status?: string) =>
+    apiFetch<ServerPage<ExamSummary>>(
+      `/api/v1/studies/${studyId}/exams?page=${page}&size=${size}${status && status !== "all" ? `&status=${status}` : ""}`,
+    ),
 
   createExam: (studyId: string, body: CreateExamRequest) =>
     apiFetch<ExamCreated>(`/api/v1/studies/${studyId}/exams`, {

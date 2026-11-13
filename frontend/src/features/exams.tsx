@@ -1,14 +1,10 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Clock, Users, Plus, Flag } from "lucide-react";
-import { api, labels } from "@/services/mock-api";
+import { Users, Plus, Flag } from "lucide-react";
 import { useResource } from "@/services/hooks";
 import { contestApi, studyApi } from "@/services/api";
-import type {
-  ExamStatusServer,
-  ExamSummary,
-} from "@/services/types";
+import type { ExamStatusServer } from "@/services/types";
 import {
   Badge,
   Button,
@@ -24,7 +20,7 @@ import {
   useAction,
 } from "@/components/ui";
 import { Pet } from "@/components/pet";
-import { useQuery, pageSlice, Pager } from "./problem-list";
+import { Construction } from "lucide-react";
 
 const serverLabels: Record<ExamStatusServer, string> = {
   SCHEDULED: "예정",
@@ -44,214 +40,108 @@ export function ExamsPage({
   contest?: boolean;
   studyId?: string;
 }) {
-  const { params, change } = useQuery();
-  const appliedKeyword = params.get("keyword") || "";
-  const [search, setSearch] = useState(appliedKeyword);
-  useEffect(() => setSearch(appliedKeyword), [appliedKeyword]);
-  const status = params.get("status") || "all";
+  const searchParams = useSearchParams();
+  const status = searchParams.get("status") || "all";
+  const router = useRouter();
+  const [page, setPage] = useState(0);
 
-  const realR = useResource(
-    () =>
-      studyId
-        ? contestApi.getExamList(studyId)
-        : Promise.resolve({
-            items: [] as ExamSummary[],
-            page: 0,
-            size: 0,
-            totalElements: 0,
-            totalPages: 0,
-          }),
-    studyId ?? "none",
+  useEffect(() => { setPage(0); }, [status]);
+
+  const r = useResource(
+    () => (studyId ? contestApi.getExamList(studyId, page, 20, status) : Promise.resolve(null)),
+    `${studyId ?? "none"}-${page}-${status}`,
   );
 
-  const mockR = useResource(
-    () => api.exams(contest ? "contest" : "exam"),
-    String(contest),
-  );
-
-  if (studyId) {
-    const items = (realR.data?.items ?? []).filter(
-      (e) =>
-        (status === "all" || e.status === status) &&
-        e.title.includes(appliedKeyword),
-    );
+  if (contest) {
     return (
-      <div className="container stack">
+      <div className="container stack items-center py-16 text-center">
+        <Construction size={40} className="text-muted" />
         <Heading
-          title="모의 코딩테스트"
-          eyebrow="MOCK EXAM"
-          description="시간 안에 생각을 코드로. 꾸준한 연습을 실전 감각으로 바꿔 보세요."
-          action={
-            <Go className="primary" href={`/exams/new?studyId=${studyId}`}>
-              <Plus size={18} />
-              시험 만들기
-            </Go>
-          }
+          title="공개대회 준비 중"
+          eyebrow="OPEN CHALLENGE"
+          description="공개대회 기능은 순차적으로 오픈할 예정입니다."
         />
-        <Tabs
-          value={status}
-          onChange={(s) => change({ status: s })}
-          items={(
-            [
-              "all",
-              ...Object.keys(serverLabels),
-            ] as Array<"all" | ExamStatusServer>
-          ).map((s) => ({
-            id: s,
-            label: s === "all" ? "전체" : serverLabels[s as ExamStatusServer],
-          }))}
-        />
-        {realR.loading ? (
-          <Loading />
-        ) : realR.error ? (
-          <ErrorState message={realR.error.message} retry={realR.retry} />
-        ) : items.length ? (
-          <div className="grid-3">
-            {items.map((e) => (
-              <article key={e.examId} className="card exam-card">
-                <div className="row between">
-                  <Badge tone={serverTone(e.status)}>
-                    {serverLabels[e.status]}
-                  </Badge>
-                  <Flag size={24} />
-                </div>
-                <h3>{e.title}</h3>
-                <p>{date(new Date(e.startsAt).getTime())}</p>
-                <div className="row wrap">
-                  <span>{e.problemCount}문제</span>
-                  <span className="row">
-                    <Users size={16} />
-                    {e.participantCount}명
-                  </span>
-                </div>
-                <Go
-                  className={`actions ${
-                    e.status === "FINALIZED" || e.status === "CLOSED"
-                      ? ""
-                      : "primary"
-                  }`}
-                  href={`/exams/${e.examId}`}
-                >
-                  {e.status === "FINALIZED" || e.status === "CLOSED"
-                    ? "결과 살펴보기"
-                    : "자세히 보기"}
-                </Go>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <Empty
-            title="이 상태의 시험이 없어요"
-            description="다른 상태를 선택하거나 새로운 모의 코테를 만들어 보세요."
-          />
-        )}
       </div>
     );
   }
 
-  // mock path (unchanged)
-  const matching = (mockR.data || []).filter(
-    (e) =>
-      (status === "all" || e.status === status) &&
-      e.title.includes(appliedKeyword),
-  );
-  matching.sort((a, b) =>
-    params.get("sort") === "participants"
-      ? b.participants.length - a.participants.length
-      : a.startsAt - b.startsAt,
-  );
-  const paged = pageSlice(matching, params.get("page")),
-    items = paged.items;
+  if (!studyId) {
+    return (
+      <div className="container stack items-center py-16 text-center">
+        <Flag size={40} className="text-muted" />
+        <Heading
+          title="모의 코딩테스트"
+          eyebrow="MOCK EXAM"
+          description="시험은 스터디 화면에서 확인하세요."
+        />
+        <Go className="primary" href="/studies">
+          스터디 바로가기
+        </Go>
+      </div>
+    );
+  }
+
+  function changeParams(updates: Record<string, string>) {
+    const p = new URLSearchParams(searchParams.toString());
+    for (const [k, v] of Object.entries(updates)) {
+      if (v) p.set(k, v);
+      else p.delete(k);
+    }
+    router.push(`?${p.toString()}`);
+  }
+
+  const items = r.data?.content ?? [];
+
   return (
     <div className="container stack">
       <Heading
-        title={
-          contest ? "누구나 도전하는 공개대회" : "실전처럼, 모의 코딩테스트"
-        }
-        eyebrow={contest ? "OPEN CHALLENGE" : "MOCK EXAM"}
+        title="모의 코딩테스트"
+        eyebrow="MOCK EXAM"
         description="시간 안에 생각을 코드로. 꾸준한 연습을 실전 감각으로 바꿔 보세요."
         action={
-          !contest && (
-            <Go className="primary" href="/exams/new">
-              <Plus size={18} />
-              시험 만들기
-            </Go>
-          )
+          <Go className="primary" href={`/exams/new?studyId=${studyId}`}>
+            <Plus size={18} />
+            시험 만들기
+          </Go>
         }
       />
       <Tabs
         value={status}
-        onChange={(s) => change({ status: s, page: "0" })}
-        items={["all", "recruiting", "scheduled", "running", "ended"].map(
-          (s) => ({ id: s, label: s === "all" ? "전체" : labels[s] }),
+        onChange={(s) => changeParams({ status: s })}
+        items={(["all", ...Object.keys(serverLabels)] as Array<"all" | ExamStatusServer>).map(
+          (s) => ({ id: s, label: s === "all" ? "전체" : serverLabels[s as ExamStatusServer] }),
         )}
       />
-      <form
-        className="filters"
-        onSubmit={(e) => {
-          e.preventDefault();
-          change({ keyword: search, page: "0" });
-        }}
-      >
-        <input
-          className="input search"
-          aria-label="시험 검색"
-          value={search}
-          placeholder="시험 이름으로 검색하세요"
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <select
-          className="input"
-          aria-label="시험 정렬"
-          value={params.get("sort") || ""}
-          onChange={(e) => change({ sort: e.target.value, page: "0" })}
-        >
-          <option value="">일정순</option>
-          <option value="participants">참가 인원순</option>
-        </select>
-        <Button>검색</Button>
-      </form>
-      {mockR.loading ? (
+      {r.loading ? (
         <Loading />
-      ) : mockR.error ? (
-        <ErrorState message={mockR.error.message} retry={mockR.retry} />
+      ) : r.error ? (
+        <ErrorState message={r.error.message} retry={r.retry} />
       ) : items.length ? (
         <div className="grid-3">
           {items.map((e) => (
-            <article key={e.id} className="card exam-card">
+            <article key={e.examId} className="card exam-card">
               <div className="row between">
-                <Badge
-                  tone={
-                    e.status === "running"
-                      ? "success"
-                      : e.status === "ended"
-                        ? ""
-                        : "accent"
-                  }
-                >
-                  {labels[e.status]}
-                </Badge>
+                <Badge tone={serverTone(e.status)}>{serverLabels[e.status]}</Badge>
                 <Flag size={24} />
               </div>
               <h3>{e.title}</h3>
-              <p className="muted">{e.description}</p>
-              <p>{date(e.startsAt)}</p>
+              <p>{date(new Date(e.startsAt).getTime())}</p>
               <div className="row wrap">
-                <span className="row">
-                  <Clock size={16} />
-                  {e.duration}분
-                </span>
-                <span>{e.problemIds.length}문제</span>
+                <span>{e.problemCount}문제</span>
                 <span className="row">
                   <Users size={16} />
-                  {e.participants.length}명
+                  {e.participantCount}명
                 </span>
               </div>
               <Go
-                className={`actions ${e.status === "ended" ? "" : "primary"}`}
-                href={`/${contest ? "contests" : "exams"}/${e.id}`}
+                className={`actions ${
+                  e.status === "FINALIZED" || e.status === "CLOSED" ? "" : "primary"
+                }`}
+                href={`/exams/${e.examId}`}
               >
-                {e.status === "ended" ? "결과 살펴보기" : "자세히 보기"}
+                {e.status === "FINALIZED" || e.status === "CLOSED"
+                  ? "결과 살펴보기"
+                  : "자세히 보기"}
               </Go>
             </article>
           ))}
@@ -262,7 +152,22 @@ export function ExamsPage({
           description="다른 상태를 선택하거나 새로운 모의 코테를 만들어 보세요."
         />
       )}
-      <Pager {...paged} onChange={(page) => change({ page: String(page) })} />
+      {r.data && r.data.totalPages > 1 && (
+        <div className="row center gap-2">
+          <Button disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+            이전
+          </Button>
+          <span>
+            {page + 1} / {r.data.totalPages}
+          </span>
+          <Button
+            disabled={page >= r.data.totalPages - 1}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            다음
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
