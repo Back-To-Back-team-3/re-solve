@@ -1,8 +1,8 @@
 "use client";
-import { useState } from "react";
 import { useParams } from "next/navigation";
 import { Badge, Button, ErrorState, Go, Heading, Loading } from "@/components/ui";
 import { judgeApi } from "@/services/api";
+import { useWorkspace } from "@/stores/workspace";
 import { useResource } from "@/services/hooks";
 import type { SubmissionTestResult } from "@/services/types";
 
@@ -26,7 +26,10 @@ function TestResults({ id, attempt }: { id: string; attempt: number }) {
 
 export function SubmissionPage() {
   const { id } = useParams<{ id: string }>();
-  const [selected, setSelected] = useState<number | null>(null);
+  const memberId = useWorkspace((state) => state.member?.memberId);
+  const selectionKey = JSON.stringify([memberId, id]);
+  const selected = useWorkspace((state) => state.submissionAttempts[selectionKey]);
+  const selectAttempt = useWorkspace((state) => state.setSubmissionAttempt);
   const resource = useResource(async () => {
     const [status, source, attempts] = await Promise.all([
       judgeApi.getStatus(id), judgeApi.getSource(id), judgeApi.getAttempts(id),
@@ -52,7 +55,7 @@ export function SubmissionPage() {
     <section className="card stack-sm">
       <h2>채점 회차</h2>
       <select className="input" aria-label="채점 회차" value={attempt ?? ""}
-        onChange={(event) => setSelected(Number(event.target.value))}>
+        onChange={(event) => selectAttempt(selectionKey, Number(event.target.value))}>
         {attempts.map((item) => <option key={item.judgeAttempt} value={item.judgeAttempt}>
           {item.judgeAttempt}회차 · {item.trigger} · {item.status} · {item.verdict ?? "미확정"}
         </option>)}
