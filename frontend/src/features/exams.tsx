@@ -42,7 +42,6 @@ export function ExamsPage({
 }) {
   const searchParams = useSearchParams();
   const status = searchParams.get("status") || "all";
-  const appliedKeyword = searchParams.get("keyword") || "";
   const router = useRouter();
 
   const r = useResource(
@@ -89,9 +88,7 @@ export function ExamsPage({
   }
 
   const items = (r.data?.items ?? []).filter(
-    (e) =>
-      (status === "all" || e.status === status) &&
-      e.title.includes(appliedKeyword),
+    (e) => status === "all" || e.status === status,
   );
 
   return (
