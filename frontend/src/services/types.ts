@@ -924,3 +924,24 @@ export type AdminRevision = {
   problemRevisionId: string; revisionNumber: number; title: string; publishedAt: string;
   currentProblemRevisionId: string | null; supportedLanguages: Language[];
 };
+
+
+export type JudgeJobStatus = "PENDING" | "RUNNING" | "RETRY_WAITING" | "SUCCEEDED" | "FAILED";
+export interface AdminJudgeJob {
+  judgeJobId: string; submissionId: string; judgeAttempt: number; status: JudgeJobStatus; tryCount: number;
+  failureCode: string | null; memberId: string; context: string; contextId: string | null;
+  problemRevisionId: string; deadlineAt: string; createdAt: string; updatedAt: string;
+}
+export interface JudgeJobFilter {
+  status?: string; context?: string; contextId?: string; failureCode?: string; sort?: string;
+}
+export interface AdminJudgeJobDetail {
+  judgeJobId: string; submissionId: string; judgeAttempt: number; status: JudgeJobStatus; tryCount: number;
+  leaseUntil: string | null; nextRunAt: string | null; deadlineAt: string; lastError: string | null;
+  runs: { tryCount: number; result: string; errorMessage: string | null; startedAt: string; finishedAt: string | null }[];
+  testResults: { testOrder: number; tokenStatus: string; judge0Token: string | null; verdict: string | null }[];
+}
+
+// API 명세서 §3.2.5 진행 중 채점 작업 복구
+export type JudgeJobRecoveryRequest = { reason: string };
+export type JudgeJobRecoveryResponse = { judgeJobId: string; status: "RETRY_WAITING" };
