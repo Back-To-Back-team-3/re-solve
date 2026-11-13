@@ -79,6 +79,18 @@ export function getMember(): Member | null {
   return memberGetter?.() ?? null;
 }
 
+// 앱 시작 시 인증 복원이 끝나기 전에 useAction이 비로그인으로 오판하지 않도록 완료 시점을 공유한다.
+let resolveAuthReady: () => void = () => {};
+const authReady = new Promise<void>((resolve) => {
+  resolveAuthReady = resolve;
+});
+export function markAuthReady() {
+  resolveAuthReady();
+}
+export function whenAuthReady(): Promise<void> {
+  return authReady;
+}
+
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
