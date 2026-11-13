@@ -87,7 +87,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [store] = useState(createWorkspace);
   const router = useRouter();
   const pathname = usePathname();
-  const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+  const isPublicPath = PUBLIC_PATHS.some((p) =>
+    p === "/" ? pathname === "/" : pathname.startsWith(p),
+  );
 
   // 앱 시작 시 1회 — Refresh Token으로 인증 상태를 복원하고 회원 정보를 가져온다.
   useEffect(() => {
@@ -120,15 +122,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const authReady = useStore(store, (s) => s.authReady);
+
   // 비인증 가드 — authReady 이후 비로그인 상태에서 보호 경로에 접근하면 로그인 페이지로 이동한다.
   useEffect(() => {
-    const { authReady, member } = store.getState();
+    const { member } = store.getState();
     if (!authReady || member !== null || isPublicPath) return;
     const returnTo = window.location.pathname + window.location.search;
     router.push(`/login?returnTo=${encodeURIComponent(returnTo)}`);
-  });
-
-  const authReady = useStore(store, (s) => s.authReady);
+  }, [pathname, authReady]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!authReady && !isPublicPath) {
     return <Loading />;
   }
