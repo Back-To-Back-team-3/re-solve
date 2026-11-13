@@ -16,6 +16,7 @@ import {
   setMemberGetter,
   setTokenGetter,
 } from "../services/api";
+import type { RunTestCase } from "@/services/run-inputs";
 import type { JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
 import { Loading } from "../components/ui";
 export interface Draft {
@@ -62,6 +63,10 @@ export interface PracticeSubmissionAttempt {
 }
 
 interface Workspace {
+  practiceRunInputs: Record<string, { useSamples: boolean; customInputs: RunTestCase[] } | undefined>;
+  setPracticeRunInputs: (key: string, value: Partial<{ useSamples: boolean; customInputs: RunTestCase[] }>) => void;
+  submissionAttempts: Record<string, number | undefined>;
+  setSubmissionAttempt: (key: string, value: number) => void;
   member: Member | null;
   accessToken: string | null;
   authReady: boolean;
@@ -91,6 +96,11 @@ const createWorkspace = () =>
     accessToken: null,
     authReady: false,
     drafts: {},
+    practiceRunInputs: {},
+    setPracticeRunInputs: (key, value) => set((state) => ({ practiceRunInputs: { ...state.practiceRunInputs,
+      [key]: { useSamples: true, customInputs: [], ...state.practiceRunInputs[key], ...value } } })),
+    submissionAttempts: {},
+    setSubmissionAttempt: (key, value) => set((state) => ({ submissionAttempts: { ...state.submissionAttempts, [key]: value } })),
     practiceSubmissions: {},
     practiceRequests: {},
     activePracticeSubmissions: {},
@@ -125,7 +135,7 @@ const createWorkspace = () =>
     fontSize: 14,
     activeProblems: {},
     setMember: (member) => set({ member }),
-    clearMember: () => set({ member: null, accessToken: null, practiceSubmissions: {}, practiceRequests: {}, activePracticeSubmissions: {} }),
+    clearMember: () => set({ practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, practiceRequests: {}, activePracticeSubmissions: {} }),
     setAccessToken: (accessToken) => set({ accessToken }),
     setAuthReady: (authReady) => set({ authReady }),
     setDraft: (key, d) => set((s) => ({ drafts: { ...s.drafts, [key]: d } })),
