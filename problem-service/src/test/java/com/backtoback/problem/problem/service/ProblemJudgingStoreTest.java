@@ -105,7 +105,7 @@ class ProblemJudgingStoreTest {
         });
     }
 
-    /** 최신 작성 회차와 관계없이 검증 당시 고정 자료를 제공한다. */
+    /** 최신 작성 회차와 관계없이 고정 회차의 테스트 파일 버전과 검증 환경을 제공한다. */
     @Test
     @DisplayName("보관 문제의 이전 회차도 원래 제목과 전체 테스트 및 통과 환경을 반환한다")
     void fixedEnvironment() {
@@ -154,7 +154,9 @@ class ProblemJudgingStoreTest {
         var response = JudgingDataResponse.from(queries.read(id, revision));
         assertThat(response.problemTitle()).isEqualTo(input.title());
         assertThat(response.problemDifficulty()).isEqualTo(1);
-        assertThat(response.cases()).hasSize(2);
+        assertThat(response.cases()).hasSize(2).allSatisfy(test -> {
+            assertThat(test.asset().objectVersion()).isEqualTo("version-1");
+        });
         assertThat(response.cases().get(1).isSample()).isFalse();
         assertThat(response.executionProfiles().getFirst().runtimeKey()).isEqualTo("a".repeat(64));
         jdbc.update("UPDATE problem_validations SET runtime_key=NULL WHERE id=?", accepted.validationId());
