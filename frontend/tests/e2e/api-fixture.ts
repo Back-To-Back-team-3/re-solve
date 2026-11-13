@@ -12,7 +12,10 @@ import type {
   StudyDetail,
   StudyMeItem,
   StudySummary,
+  SubmissionAttemptsResponse,
   SubmissionHistoryItem,
+  SubmissionSource,
+  SubmissionTestsResponse,
 } from "../../src/services/types";
 import { fulfillCatalog } from "./catalog-fixture";
 import { problemDetail } from "./practice-fixture";
@@ -166,6 +169,26 @@ export async function mockApi(page: Page, options: ApiFixtureOptions = {}) {
         statusUrl: "/api/v1/submissions/5001" });
     }
     if (path === "/api/v1/submissions/5001") return ok(route, judgeResult("5001"));
+    // 제출 이력의 상세 화면(/submissions/5000)이 부르는 조회 경로. 채점이 끝난 정답 기록으로 고정한다.
+    const past = /^\/api\/v1\/submissions\/5000(\/.*)?$/.exec(path);
+    if (past) {
+      const rest = past[1] ?? "";
+      if (rest === "") return ok(route, {
+        submissionId: "5000", problemId: "1001", problemRevisionId: "2001", language: "java", context: "PRACTICE",
+        judgeAttempt: 1, submittedAt: at(-7200), failureCode: null, status: "COMPLETED", compileMessage: null,
+        effectiveResult: { verdict: "AC", passedCount: 5, totalCount: 5, maxTimeMs: 10, maxMemoryKb: 20480 },
+      } satisfies JudgeResult);
+      if (rest === "/source") return ok(route, { language: "java", sourceCode: "// past solution" } satisfies SubmissionSource);
+      if (rest === "/judge-attempts") return ok(route, { content: [{
+        judgeAttempt: 1, trigger: "INITIAL", status: "SUCCEEDED", verdict: "AC", passedCount: 5, totalCount: 5,
+        maxTimeMs: 10, maxMemoryKb: 20480, createdAt: at(-7200), finishedAt: at(-7190),
+      }] } satisfies SubmissionAttemptsResponse);
+      if (rest === "/judge-attempts/1/test-results") return ok(route, { content: [
+        { testOrder: 1, isSample: true, verdict: "AC", timeMs: 5, memoryKb: 10240, argumentTexts: { items: "[1,2]" },
+          expectedReturnText: "3", actualReturnText: "3" },
+        { testOrder: 2, passed: true },
+      ] } satisfies SubmissionTestsResponse);
+    }
     if (path === "/api/v1/me/submissions") return ok(route, pageOf(history));
 
     if (path === "/api/v1/studies" && method === "POST") {
