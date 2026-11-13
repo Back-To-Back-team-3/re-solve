@@ -274,7 +274,7 @@ class CppExecutionProcessTest {
         assertThat(result.stdout()).isEqualTo("7");
     }
 
-    /** 기본 코드의 Value 선언이 실행 템플릿과 중복되지 않게 한다. */
+    /** 기본 코드에서 참조하는 Value 선언을 실행 템플릿에서 제공한다. */
     @Test
     @DisplayName("생성한 C++ 기본 코드를 실행 템플릿에 다시 넣어도 컴파일된다")
     void compilesStarter() throws Exception {

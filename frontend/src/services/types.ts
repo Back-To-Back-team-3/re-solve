@@ -106,11 +106,12 @@ export interface Problem {
   examples: string;
   functionSpec: {
     name: "solution";
-    parameters: { name: string; type: string }[];
+    parameters: { name: string; type: string; inputType?: ProblemFunctionParamType }[];
     returnType: string;
+    returnInputType?: ProblemFunctionParamType;
   };
   starterCodes: Record<Language, string>;
-  samples: { input: string; expected: string }[];
+  samples: { input: string; expected: string; argumentTexts?: Record<string, string> }[];
 }
 export interface Submission {
   id: string;
@@ -410,6 +411,9 @@ export interface ProblemFilter {
 export type ProblemFunctionParamType = {
   kind: string;
   elementType?: ProblemFunctionParamType;
+  positionTypes?: ProblemFunctionParamType[];
+  repeatTypes?: ProblemFunctionParamType[];
+  properties?: Record<string, ProblemFunctionParamType>;
 };
 
 export interface ProblemDetail {
@@ -452,6 +456,14 @@ export interface Page<T> {
 }
 
 // --- api-spec §3.1 judge-service B 도메인 실서버 타입 ---
+
+// GET /api/v1/judge/languages §3.1.1
+export type JudgeLanguage = {
+  language: Language;
+  displayName: string;
+  runtimeVersion: string;
+  enabled: boolean;
+};
 
 // POST /api/v1/runs §3.1.8 테스트 항목
 export type RunTestResult = {
@@ -516,6 +528,14 @@ export type AdminProblemListItem = {
   rowVersion: number;
   currentProblemRevisionId: string | null;
   supportedLanguages: Language[];
+};
+
+// POST /api/v1/submissions §3.1.2 요청
+export type SubmissionCreateRequest = {
+  problemId: string;
+  problemRevisionId: string;
+  language: Language;
+  sourceCode: string;
 };
 
 // POST /api/v1/submissions §3.1.2 접수 응답 (202)
