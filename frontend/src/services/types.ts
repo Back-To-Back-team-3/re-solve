@@ -762,3 +762,17 @@ export interface SSENotificationEvent {
   linkUrl: string;
   createdAt: string;
 }
+
+// GET /api/v1/notifications/preferences 응답 (api-spec §7.1.6)
+export interface NotificationPreferences {
+  isExamContestEnabled: boolean;
+  isStudyApplicationEnabled: boolean;
+  isAssignmentEnabled: boolean;
+  isLevelChangedEnabled: boolean;
+  isHintReadyEnabled: boolean;
+  isGithubSyncEnabled: boolean;
+}
+
+// PATCH /api/v1/notifications/preferences 요청 (api-spec §7.1.6)
+export type UpdateNotificationPreferencesRequest =
+  Partial<NotificationPreferences>;
