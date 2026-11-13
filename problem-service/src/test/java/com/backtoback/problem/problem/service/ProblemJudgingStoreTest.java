@@ -5,8 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.Mockito.times;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -32,8 +36,10 @@ import com.backtoback.problem.global.exception.ProblemException;
 import com.backtoback.problem.problem.client.JudgeProgressClient;
 import com.backtoback.problem.problem.dto.request.ProblemRevisionRequest;
 import com.backtoback.problem.problem.dto.request.ProblemValidationRequest;
+import com.backtoback.problem.problem.dto.request.TestCaseRequest;
 import com.backtoback.problem.problem.dto.response.JudgingDataResponse;
 import com.backtoback.problem.problem.dto.response.JudgingValidationResponse;
+import com.backtoback.problem.problem.dto.response.TestCaseReferenceResponse;
 
 /** 실제 DB에서 고정 회차의 채점 자료와 문제 소속 검증을 확인한다. */
 @SpringBootTest(
@@ -92,7 +98,7 @@ class ProblemJudgingStoreTest {
             String key = call.getArgument(1);
             ProblemAssetContent content = call.getArgument(2);
             objects.put(key, content.bytes());
-            return "version-1";
+            return "version-" + key;
         });
         willAnswer(call -> {
             ProblemAssetContent expected = call.getArgument(3);
@@ -111,6 +117,11 @@ class ProblemJudgingStoreTest {
     void fixedEnvironment() {
         var input = ProblemCreateFixtures.request();
         var first = creates.create(9201, UUID.randomUUID().toString(), input, null);
+        var uploadedKeys = ArgumentCaptor.forClass(String.class);
+        then(writer).should(times(3)).put(anyString(), uploadedKeys.capture(), any());
+        var originalTestKeys
+            = uploadedKeys.getAllValues().stream().filter(key -> key.startsWith("test-cases/")).toList();
+        assertThat(originalTestKeys).hasSize(2);
         long id = Long.parseLong(first.problemId());
         long revision = Long.parseLong(first.problemRevisionId());
         var accepted
@@ -145,7 +156,11 @@ class ProblemJudgingStoreTest {
                     input.tagIds(),
                     input.functionSpec(),
                     input.executionLimits(),
-                    input.testCases()
+                    List
+                        .of(
+                            new TestCaseRequest(true, Map.of("value", "3"), "6"),
+                            new TestCaseRequest(false, Map.of("value", "4"), "8")
+                        )
                 ),
                 "query226",
                 null
@@ -154,8 +169,12 @@ class ProblemJudgingStoreTest {
         var response = JudgingDataResponse.from(queries.read(id, revision));
         assertThat(response.problemTitle()).isEqualTo(input.title());
         assertThat(response.problemDifficulty()).isEqualTo(1);
-        assertThat(response.cases()).hasSize(2).allSatisfy(test -> {
-            assertThat(test.asset().objectVersion()).isEqualTo("version-1");
+        assertThat(response.cases()).extracting(TestCaseReferenceResponse::asset).satisfiesExactly(asset -> {
+            assertThat(asset.objectKey()).isEqualTo(originalTestKeys.getFirst());
+            assertThat(asset.objectVersion()).isEqualTo("version-" + originalTestKeys.getFirst());
+        }, asset -> {
+            assertThat(asset.objectKey()).isEqualTo(originalTestKeys.getLast());
+            assertThat(asset.objectVersion()).isEqualTo("version-" + originalTestKeys.getLast());
         });
         assertThat(response.cases().get(1).isSample()).isFalse();
         assertThat(response.executionProfiles().getFirst().runtimeKey()).isEqualTo("a".repeat(64));
