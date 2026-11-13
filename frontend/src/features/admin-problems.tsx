@@ -29,7 +29,7 @@ function visibilityTone(v: ProblemVisibility): string {
 type ArchivePending = { item: AdminProblemListItem; reason: string };
 export function AdminProblemsPage() {
   const toast = useToast();
-  const [visibility, setVisibility] = useState("");
+  const [visibility, setVisibility] = useState<ProblemVisibility | "">("");
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState<AdminProblemListItem[]>([]);
   const [archive, setArchive] = useState<ArchivePending | null>(null);
@@ -113,7 +113,9 @@ export function AdminProblemsPage() {
           aria-label="공개 상태 필터"
           className="input"
           value={visibility}
-          onChange={(e) => { setVisibility(e.target.value); setPage(0); setRows([]); }}
+          onChange={(e) => { const value = e.target.value;
+            if (value === "" || value === "PUBLIC" || value === "PRIVATE" || value === "ARCHIVED") setVisibility(value);
+            setPage(0); setRows([]); }}
         >
           <option value="">전체</option>
           <option value="PUBLIC">공개</option>
