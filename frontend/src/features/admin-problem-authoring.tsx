@@ -4,9 +4,11 @@ import { useParams, useRouter } from "next/navigation";
 import { Button, ErrorState, Go, Heading, Loading } from "@/components/ui";
 import { adminProblemApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
-import { actionMessage, parseProblemContent } from "@/services/problem-authoring";
+import { actionMessage, parseProblemContent, parseProblemFunction } from "@/services/problem-authoring";
+import { readProblemTests, writeProblemTests } from "@/services/problem-test-inputs";
 import type { AdminProblemDetail, ProblemWriteRequest } from "@/services/types";
 import { AdminMarkdown, AdminProblemImages } from "@/features/admin-problem-images";
+import { AdminProblemTestInputs } from "@/features/admin-problem-test-inputs";
 
 function ProblemForm({ initial }: { initial: AdminProblemDetail | null }) {
   const router = useRouter();
@@ -15,10 +17,10 @@ function ProblemForm({ initial }: { initial: AdminProblemDetail | null }) {
     title: initial?.title ?? "", description: initial?.description ?? "", constraints: initial?.constraints ?? "",
     examples: initial?.examples ?? "", difficulty: initial?.difficulty ?? 1, tagIds: initial?.tagIds.join(",") ?? "",
     functionSpec: JSON.stringify(initial?.functionSpec ?? { name: "solution", parameters: [{ name: "a", type: { kind: "INT32" } }], returnType: { kind: "INT32" } }, null, 2),
-    testCases: JSON.stringify(initial?.testCases.map(({ isSample, argumentTexts, expectedReturnText }) => ({ isSample, argumentTexts, expectedReturnText }))
-      ?? [{ isSample: true, argumentTexts: { a: "1" }, expectedReturnText: "1" }, { isSample: false, argumentTexts: { a: "2" }, expectedReturnText: "2" }], null, 2),
     executionLimits: JSON.stringify(initial?.executionLimits ?? null, null, 2),
   });
+  const [tests, setTests] = useState(() => readProblemTests(parseProblemFunction(fields.functionSpec), initial?.testCases
+    ?? [{ isSample: true, argumentTexts: { a: "1" }, expectedReturnText: "1" }, { isSample: false, argumentTexts: { a: "2" }, expectedReturnText: "2" }]));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const pending = useRef<{ body: ProblemWriteRequest; json: string; key: string } | null>(null);
@@ -27,7 +29,8 @@ function ProblemForm({ initial }: { initial: AdminProblemDetail | null }) {
     event.preventDefault(); if (lock.current) return;
     setError("");
     try {
-      const content = parseProblemContent(fields);
+      const content = parseProblemContent({ ...fields,
+        testCases: JSON.stringify(writeProblemTests(parseProblemFunction(fields.functionSpec), tests)) });
       const body = initial ? { ...content, rowVersion: initial.rowVersion } : { ...content, scope };
       const json = JSON.stringify(body);
       if (new TextEncoder().encode(json).length > 8 * 1024 * 1024) throw new Error("등록 본문은 8MiB 이하여야 합니다.");
@@ -53,9 +56,10 @@ function ProblemForm({ initial }: { initial: AdminProblemDetail | null }) {
       <label className="field">태그 ID (쉼표 구분)<input className="input" value={fields.tagIds}
         onChange={(event) => setFields({ ...fields, tagIds: event.target.value })} /></label>
       {([['description', '문제 설명'], ['constraints', '제한 사항'], ['examples', '입출력 예시'],
-        ['functionSpec', '함수 명세 (JSON)'], ['executionLimits', '실행 제한 (JSON 또는 null)'], ['testCases', '공개·숨김 테스트 (JSON)']] as const).map(([key, label]) =>
+        ['functionSpec', '함수 명세 (JSON)'], ['executionLimits', '실행 제한 (JSON 또는 null)']] as const).map(([key, label]) =>
         <label className="field" key={key}>{label}<textarea aria-label={label} className="input mono" rows={6} value={fields[key]}
           onChange={(event) => setFields({ ...fields, [key]: event.target.value })} /></label>)}
+      <AdminProblemTestInputs functionSpec={fields.functionSpec} value={tests} onChange={setTests} />
       <p>기존 테스트의 파일 ID는 요청에 포함하지 않습니다. 같은 내용의 재요청은 기존 키를 유지하고, 내용을 변경하면 새 요청으로 접수합니다.</p>
       <Button type="submit" disabled={busy}>{busy ? "저장 중…" : initial ? "새 회차 저장·재요청" : "문제 등록·재요청"}</Button>
     </fieldset>

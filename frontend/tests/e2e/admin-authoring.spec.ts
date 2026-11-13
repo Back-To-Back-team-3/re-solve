@@ -80,6 +80,40 @@ test("비관리자는 출제 폼을 열 수 없다", async ({ page }) => {
   await expect(page.getByRole("button", { name: "문제 등록·재요청" })).toHaveCount(0);
 });
 
+test("공개·숨김 테스트를 항목별로 편집하고 추가·삭제하며 같은 본문으로 재요청한다", async ({ page }) => {
+  await mockAdminPage(page);
+  const writes: { key: string | undefined; body: unknown }[] = [];
+  await page.route("**/api/v1/admin/problems", async (route) => {
+    writes.push({ key: route.request().headers()["idempotency-key"], body: route.request().postDataJSON() });
+    await route.abort();
+  });
+  await page.goto("/admin/problems/new");
+  await page.getByLabel("제목", { exact: true }).fill("항목별 테스트");
+  await expect(page.getByLabel("공개·숨김 테스트 (JSON)", { exact: true })).toHaveCount(0);
+  await page.getByLabel("테스트 1 a", { exact: true }).fill("");
+  await page.getByLabel("테스트 1 a", { exact: true }).fill("3");
+  await page.getByLabel("테스트 1 기대 출력", { exact: true }).fill("6");
+  await page.getByRole("button", { name: "테스트 추가 (2/50)", exact: true }).click();
+  await page.getByLabel("테스트 3 a", { exact: true }).fill("9");
+  await page.getByLabel("테스트 3 기대 출력", { exact: true }).fill("18");
+  await page.getByRole("button", { name: "테스트 2 삭제", exact: true }).click();
+  await page.getByLabel("테스트 2 공개 여부", { exact: true }).selectOption("sample");
+  await page.getByRole("button", { name: "문제 등록·재요청" }).click();
+  await expect(page.locator("main").getByRole("alert")).toHaveText("공개·숨김 테스트가 각각 한 개 이상 필요합니다.");
+  expect(writes).toHaveLength(0);
+  await page.getByLabel("테스트 2 공개 여부", { exact: true }).selectOption("hidden");
+  await page.getByRole("button", { name: "문제 등록·재요청" }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  await expect(page.getByRole("button", { name: "문제 등록·재요청" })).toBeEnabled();
+  await page.getByRole("button", { name: "문제 등록·재요청" }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[0]).toEqual(writes[1]);
+  expect(writes[0].body).toMatchObject({ testCases: [
+    { isSample: true, argumentTexts: { a: "3" }, expectedReturnText: "6" },
+    { isSample: false, argumentTexts: { a: "9" }, expectedReturnText: "18" },
+  ] });
+});
+
 test("이미지 형식 오류를 막고 업로드 실패 후 원래 파일·키로 재요청해 인증 미리보기를 읽는다", async ({ page }) => {
   await mockAdminPage(page);
   const keys: (string | undefined)[] = [];
