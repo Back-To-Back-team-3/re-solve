@@ -72,8 +72,7 @@ test("좁은 PC 창에서도 시험에 입실해 문제를 오가며 코드를 �
   await expect(page.getByRole("heading", { name: "도전의 기록" })).toBeVisible();
 });
 
-// 결함: 자동 저장(500ms) 전에 다른 문제로 옮기면 전환 시 저장이 일반 Draft 키에만 쓰이고 시험 복원은 시험 Draft만 읽어 코드가 사라진다.
-test.fixme("시험 중 자동 저장 전에 다른 문제로 옮겼다 돌아와도 입력한 코드를 유지한다", async ({ page }) => {
+test("시험 중 자동 저장 전에 다른 문제로 옮겼다 돌아와도 입력한 코드를 유지한다", async ({ page }) => {
   await mockApi(page);
   await page.goto(`/exams/${EXAM_ID}`);
   await page.getByRole("button", { name: "참가 신청", exact: true }).click();

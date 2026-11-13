@@ -32,6 +32,7 @@ export function Buffer({
   const codeRef = useRef(""),
     readyRef = useRef(false),
     seqRef = useRef("1"),
+    examDirtyRef = useRef(false),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [code, setCode] = useState(""),
     [ready, setReady] = useState(false),
@@ -89,6 +90,11 @@ export function Buffer({
     const flush = () => {
       if (!readyRef.current) return;
       clearTimeout(timer.current);
+      // 문제 전환·이탈로 자동 저장 타이머가 취소되면 시험 복원(readExamDraft)이 읽는 키에 바로 남기고 서버에도 보낸다.
+      if (examId && examDirtyRef.current) {
+        writeExamDraft(examId, problem.id, language, codeRef.current, seqRef.current);
+        void persistExam();
+      }
       const d = {
         code: codeRef.current,
         revisionId: problem.problemRevisionId,
@@ -136,6 +142,7 @@ export function Buffer({
         language, sourceCode: codeRef.current, seq: seqRef.current,
       });
       if (res.applied) {
+        examDirtyRef.current = false;
         seqRef.current = String(parseInt(res.serverSeq) + 1);
         writeExamDraft(examId, problem.id, language, codeRef.current, seqRef.current);
         setSaved("저장 완료");
@@ -144,6 +151,7 @@ export function Buffer({
   }
   function edit(value: string) {
     codeRef.current = value;
+    examDirtyRef.current = true;
     setCode(value);
     setSaved("저장 중…");
     clearTimeout(timer.current);

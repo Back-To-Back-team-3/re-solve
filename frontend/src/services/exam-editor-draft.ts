@@ -11,7 +11,7 @@ export function readExamDraft(examId: string, problemId: string): { code: string
   } catch { return null; }
 }
 
-/** 서버 저장 성공 후 기존 시험 Draft 키에 코드와 다음 순번을 보관한다. */
+/** 서버 저장 성공 후, 또는 저장 전에 화면을 떠날 때 기존 시험 Draft 키에 코드와 다음 순번을 보관한다. */
 export function writeExamDraft(examId: string, problemId: string, language: Language, code: string, seq: string): void {
   try {
     localStorage.setItem(`re-solve:editor:draft:exam:${examId}:${problemId}`, JSON.stringify({ language, code, seq }));
