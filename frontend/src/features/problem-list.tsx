@@ -127,11 +127,15 @@ export function ProblemSubmissionList({ items }: { items: SubmissionHistoryItem[
           {items.map((s) => (
             <tr key={s.submissionId}>
               <td>
-                <Badge tone={submissionTone(s.verdict)}>
-                  {s.verdict
-                    ? (VERDICT_LABELS[s.verdict] ?? s.verdict)
-                    : labels[s.status]}
-                </Badge>
+                <Link href={`/submissions/${s.submissionId}`} className="inline-flex flex-col items-start gap-1"
+                  aria-label={`제출 ${s.submissionId} 코드 및 결과 보기`}>
+                  <Badge tone={submissionTone(s.verdict)}>
+                    {s.verdict
+                      ? (VERDICT_LABELS[s.verdict] ?? s.verdict)
+                      : labels[s.status]}
+                  </Badge>
+                  <small className="underline">코드 보기</small>
+                </Link>
               </td>
               <td>{labels[s.language]}</td>
               <td>{s.maxTimeMs != null ? `${s.maxTimeMs}ms` : "—"}</td>
