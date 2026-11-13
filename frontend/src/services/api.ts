@@ -1,7 +1,11 @@
 import type {
   RunCreateRequest, JudgeLanguagesResponse, SubmissionAttemptsResponse, SubmissionTestsResponse,
+  JudgeJobRecoveryRequest, JudgeJobRecoveryResponse,
   ProblemValidationRequest, ProblemValidationReceipt, ProblemImageUploaded, AdminProblemFilter, ProblemVisibilityChanged,
   ActiveTimeSlot,
+  AdminJudgeJob,
+  AdminJudgeJobDetail,
+  JudgeJobFilter,
   AdminMember,
   AdminProblemListItem,
   AdminProblemDetail,
@@ -630,5 +634,19 @@ export const notificationApi = {
     apiFetch<NotificationPreferences>("/api/v1/notifications/preferences", {
       method: "PATCH",
       body: JSON.stringify(body),
+    }),
+};
+
+
+export const adminJudgeApi = {
+  getList: (filter: JudgeJobFilter, page: number) => {
+    const query = new URLSearchParams({ page: String(page), size: "20" });
+    for (const [name, value] of Object.entries(filter)) if (value) query.set(name, value);
+    return apiFetch<ServerPage<AdminJudgeJob>>(`/api/v1/admin/judge-jobs?${query}`, { cache: "no-store" });
+  },
+  getDetail: (id: string) => apiFetch<AdminJudgeJobDetail>(`/api/v1/admin/judge-jobs/${id}`, { cache: "no-store" }),
+  recover: (id: string, body: JudgeJobRecoveryRequest, key: string) =>
+    apiFetch<JudgeJobRecoveryResponse>(`/api/v1/admin/judge-jobs/${id}/recoveries`, {
+      method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body),
     }),
 };
