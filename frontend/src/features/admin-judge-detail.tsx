@@ -4,12 +4,17 @@ import { useParams, useRouter } from "next/navigation";
 import { Button, ErrorState, Go, Heading, Loading } from "@/components/ui";
 import { adminJudgeApi } from "@/services/api";
 import { actionMessage } from "@/services/problem-authoring";
+import { useWorkspace } from "@/stores/workspace";
 import { useResource } from "@/services/hooks";
 
 function JobDetail({ id }: { id: string }) {
   const router = useRouter();
   const resource = useResource(() => adminJudgeApi.getDetail(id), id);
-  const [reason, setReason] = useState("");
+  const memberId = useWorkspace((state) => state.member?.memberId);
+  const reasonKey = JSON.stringify([memberId, id]);
+  const reason = useWorkspace((state) => state.judgeRecoveryReasons[reasonKey] ?? "");
+  const selectReason = useWorkspace((state) => state.setJudgeRecoveryReason);
+  const setReason = (value: string) => selectReason(reasonKey, value);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -22,7 +27,7 @@ function JobDetail({ id }: { id: string }) {
     const normalized = reason.trim();
     if (pending.current?.reason !== normalized) pending.current = { reason: normalized, key: crypto.randomUUID() };
     try {
-      await adminJudgeApi.recover(id, pending.current.reason, pending.current.key);
+      await adminJudgeApi.recover(id, { reason: pending.current.reason }, pending.current.key);
       pending.current = null;
       setMessage("복구 요청이 접수됐습니다. 같은 채점 회차의 최신 상태를 확인해 주세요.");
       resource.retry(); router.refresh();

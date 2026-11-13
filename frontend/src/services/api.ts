@@ -1,5 +1,6 @@
 import type {
   RunCreateRequest, JudgeLanguagesResponse, SubmissionAttemptsResponse, SubmissionTestsResponse,
+  JudgeJobRecoveryRequest, JudgeJobRecoveryResponse,
   ProblemValidationRequest, ProblemValidationReceipt, ProblemImageUploaded, AdminProblemFilter, ProblemVisibilityChanged,
   ActiveTimeSlot,
   AdminJudgeJob,
@@ -644,8 +645,8 @@ export const adminJudgeApi = {
     return apiFetch<ServerPage<AdminJudgeJob>>(`/api/v1/admin/judge-jobs?${query}`, { cache: "no-store" });
   },
   getDetail: (id: string) => apiFetch<AdminJudgeJobDetail>(`/api/v1/admin/judge-jobs/${id}`, { cache: "no-store" }),
-  recover: (id: string, reason: string, key: string) =>
-    apiFetch<{ judgeJobId: string; status: "RETRY_WAITING" }>(`/api/v1/admin/judge-jobs/${id}/recoveries`, {
-      method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ reason }),
+  recover: (id: string, body: JudgeJobRecoveryRequest, key: string) =>
+    apiFetch<JudgeJobRecoveryResponse>(`/api/v1/admin/judge-jobs/${id}/recoveries`, {
+      method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body),
     }),
 };

@@ -941,3 +941,7 @@ export interface AdminJudgeJobDetail {
   runs: { tryCount: number; result: string; errorMessage: string | null; startedAt: string; finishedAt: string | null }[];
   testResults: { testOrder: number; tokenStatus: string; judge0Token: string | null; verdict: string | null }[];
 }
+
+// API 명세서 §3.2.5 진행 중 채점 작업 복구
+export type JudgeJobRecoveryRequest = { reason: string };
+export type JudgeJobRecoveryResponse = { judgeJobId: string; status: "RETRY_WAITING" };
