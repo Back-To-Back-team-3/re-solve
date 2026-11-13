@@ -1,5 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { loader } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
@@ -18,8 +19,11 @@ import {
   readDraft,
   saveDraft,
   useWorkspace,
+  useWorkspaceApi,
 } from "@/stores/workspace";
 import type { JudgeResult, Language, Problem, RunResponse } from "@/services/types";
+import { EditorSubmissionStatus } from "@/features/editor-submission-status";
+import { expiredPracticeRequestMessage, isPracticeRequestExpired } from "@/services/practice-request";
 const Monaco = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => <div className="skeleton pixel">LOADING EDITOR...</div>,
@@ -29,10 +33,12 @@ export function CodeEditor({
   problem,
   userId,
   examId,
+  availableLanguages,
 }: {
   problem: Problem;
   userId: string;
   examId?: string;
+  availableLanguages?: Language[];
 }) {
   const language = useWorkspace((s) => s.language),
     setLanguage = useWorkspace((s) => s.setLanguage),
@@ -50,6 +56,9 @@ export function CodeEditor({
       }
     } catch {}
   }, [setLanguage, setFontSize]);
+  const languages = availableLanguages ?? (["python3", "java", "cpp"] as const)
+    .filter((value) => typeof problem.starterCodes[value] === "string");
+  const selectedLanguage = languages.includes(language) ? language : languages[0];
   function settings(lang: Language, size: number) {
     window.dispatchEvent(new Event("resolve:flush"));
     setLanguage(lang);
@@ -69,10 +78,11 @@ export function CodeEditor({
           <select
             aria-label="코드 언어"
             className="input"
-            value={language}
+            value={selectedLanguage ?? ""}
+            disabled={!selectedLanguage}
             onChange={(e) => settings(e.target.value as Language, fontSize)}
           >
-            {(["python3", "java", "cpp"] as const).map((l) => (
+            {languages.map((l) => (
               <option key={l} value={l}>
                 {labels[l]}
               </option>
@@ -83,7 +93,7 @@ export function CodeEditor({
           aria-label="글자 크기"
           className="input"
           value={fontSize}
-          onChange={(e) => settings(language, Number(e.target.value))}
+          onChange={(e) => settings(selectedLanguage ?? language, Number(e.target.value))}
         >
           {[12, 14, 16, 18, 20, 22].map((n) => (
             <option key={n} value={n}>
@@ -92,14 +102,14 @@ export function CodeEditor({
           ))}
         </select>
       </div>
-      <Buffer
-        key={draftKey(userId, problem.id, language, examId)}
+      {selectedLanguage ? <Buffer
+        key={JSON.stringify([draftKey(userId, problem.id, selectedLanguage, examId), problem.problemRevisionId])}
         problem={problem}
         userId={userId}
         examId={examId}
-        language={language}
+        language={selectedLanguage}
         fontSize={fontSize}
-      />
+      /> : <Empty title="실행 가능한 언어가 없어요" description="지원 실행 환경을 확인한 뒤 다시 시도해 주세요." />}
     </div>
   );
 }
@@ -115,9 +125,9 @@ function JudgePoll({
     onDoneRef.current = onDone;
   });
   const { data, loading, error, polling } = usePollUntil(
-    () => judgeApi.getStatus(submissionId),
+    (signal) => judgeApi.getStatus(submissionId, signal),
     (d) => d.status === "COMPLETED" || d.status === "FAILED",
-    { intervalMs: 2000, timeoutMs: 60000 },
+    { intervalMs: 2000, subsequentIntervalMs: 5000, timeoutMs: 60000 },
   );
   useEffect(() => {
     if (loading || polling) return;
@@ -205,6 +215,22 @@ function RunResult({ result }: { result: RunResponse }) {
     </div>
   );
 }
+function EditorResultPanel({ busy, showRun, busyRun, queryError, judgeResult, runError, runResult }: {
+  busy: boolean; showRun: boolean; busyRun: boolean; queryError: string | null;
+  judgeResult: JudgeResult | null; runError: string | null; runResult: RunResponse | null;
+}) {
+  if (busy) return <div className="row"><Badge tone="pending">채점 중…</Badge></div>;
+  if (showRun) {
+    if (busyRun) return <p className="muted">실행 중…</p>;
+    if (runError) return <p className="error-text">{runError}</p>;
+    if (runResult) return <RunResult result={runResult} />;
+  } else {
+    if (queryError) return <p className="error-text">{queryError}</p>;
+    if (judgeResult) return <JudgeResultView result={judgeResult} />;
+  }
+  return <Empty title="코드를 실행해 보세요" description="공개 예제 실행 또는 전체 제출을 선택할 수 있어요." />;
+}
+
 function Buffer({
   problem,
   userId,
@@ -229,13 +255,27 @@ function Buffer({
     [ready, setReady] = useState(false),
     [saved, setSaved] = useState("복원 중…"),
     [reset, setReset] = useState(false),
-    [busy, setBusy] = useState(false),
+    [sending, setSending] = useState(false),
+    [paused, setPaused] = useState(false),
+    [pollVersion, setPollVersion] = useState(0),
     [runResult, setRunResult] = useState<RunResponse | null>(null),
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
-    [judgeSubmissionId, setJudgeSubmissionId] = useState<string | null>(null),
-    [judgeResult, setJudgeResult] = useState<JudgeResult | null>(null),
-    [judgeError, setJudgeError] = useState<string | null>(null);
+    [showRun, setShowRun] = useState(false),
+    [judgeError, setJudgeError] = useState<string | null>(null),
+    [requestError, setRequestError] = useState<string | null>(null);
+  const submissionKey = JSON.stringify([key, problem.problemRevisionId]);
+  const submissions = useWorkspace((state) => state.practiceSubmissions);
+  const pending = useWorkspace((state) => state.practiceRequests[submissionKey]);
+  const activeId = useWorkspace((state) => state.activePracticeSubmissions[submissionKey]);
+  const attempt = activeId ? submissions[activeId] : undefined;
+  const accepted = Object.values(submissions).flatMap((item) => item?.contextKey === submissionKey ? [item] : []);
+  const workspace = useWorkspaceApi();
+  const sendingRef = useRef(false), router = useRouter();
+  const judgeSubmissionId = attempt?.submissionId ?? null;
+  const judgeResult = attempt?.result ?? null;
+  const polling = !!judgeSubmissionId && !judgeResult && !paused;
+  const busy = sending || polling;
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   useEffect(() => {
     if (examId) {
@@ -267,9 +307,9 @@ function Buffer({
       codeRef.current =
         initial?.revisionId === problem.problemRevisionId
           ? initial.code
-          : problem.starterCodes[language];
+          : (problem.starterCodes[language] ?? "");
       setCode(codeRef.current);
-      setSaved(initial ? "저장된 코드 복원 완료" : "초기 코드");
+      setSaved(initial?.revisionId === problem.problemRevisionId ? "저장된 코드 복원 완료" : "초기 코드");
     }
     readyRef.current = true;
     setReady(true);
@@ -349,10 +389,9 @@ function Buffer({
   async function handleRun() {
     persist();
     setBusyRun(true);
+    setShowRun(true);
     setRunResult(null);
     setRunError(null);
-    setJudgeResult(null);
-    setJudgeError(null);
     try {
       setRunResult(
         await judgeApi.run({
@@ -371,36 +410,50 @@ function Buffer({
       setBusyRun(false);
     }
   }
-  async function handleSubmit() {
+  async function handleSubmit(retry = false) {
+    if (sendingRef.current) return;
+    persist();
+    if (retry && !pending) return;
+    const request = retry && pending ? pending : {
+      idempotencyKey: crypto.randomUUID(),
+      createdAt: Date.now(),
+      body: {
+        problemId: problem.id,
+        problemRevisionId: problem.problemRevisionId,
+        language,
+        sourceCode: codeRef.current,
+      },
+    };
+    if (retry && isPracticeRequestExpired(request.createdAt, Date.now())) {
+      setRequestError(expiredPracticeRequestMessage); return;
+    }
+    sendingRef.current = true;
+    setShowRun(false);
+    if (!examId) workspace.getState().setPracticeRequest(submissionKey, request);
     setRunResult(null);
     setRunError(null);
-    setJudgeResult(null);
     setJudgeError(null);
-    persist();
-    setBusy(true);
+    setRequestError(null);
+    setPaused(true);
+    setSending(true);
     try {
       if (examId) {
-        await contestApi.submitExam(examId, {
-          problemId: problem.id,
-          language,
-          sourceCode: codeRef.current,
-          seq: seqRef.current,
-        });
-        setJudgeError(null);
+        await contestApi.submitExam(examId, { problemId: problem.id, language, sourceCode: codeRef.current, seq: seqRef.current });
         setSaved("제출 완료");
-        setBusy(false);
       } else {
-        const receipt = await judgeApi.submit({
-          problemRevisionId: problem.problemRevisionId,
-          language,
-          sourceCode: codeRef.current,
-        });
-        setJudgeSubmissionId(receipt.submissionId);
+        const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
+        if (!workspace.getState().acceptPracticeSubmission(submissionKey, request, receipt.submissionId)) return;
+        setPollVersion((value) => value + 1);
+        setPaused(false);
       }
-    } catch (e) {
-      const err = e as { message?: string };
-      setJudgeError(err.message ?? "제출에 실패했습니다.");
-      setBusy(false);
+      router.refresh();
+    } catch (failure) {
+      const message = typeof failure === "object" && failure !== null && "message" in failure
+        && typeof failure.message === "string" ? failure.message : "제출에 실패했습니다.";
+      setRequestError(message);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   }
   function theme(monaco: typeof import("monaco-editor")) {
@@ -421,14 +474,15 @@ function Buffer({
   }
   return (
     <>
-      {judgeSubmissionId && (
+      {judgeSubmissionId && polling && (
         <JudgePoll
+          key={`${judgeSubmissionId}:${pollVersion}`}
           submissionId={judgeSubmissionId}
           onDone={(result, err) => {
-            setJudgeSubmissionId(null);
-            setBusy(false);
+            if (workspace.getState().activePracticeSubmissions[submissionKey] !== judgeSubmissionId) return;
+            setPaused(true);
             if (err) setJudgeError(err);
-            else setJudgeResult(result);
+            else if (result) workspace.getState().setPracticeResult(judgeSubmissionId, result);
           }}
         />
       )}
@@ -485,7 +539,7 @@ function Buffer({
           </Button>
           <Button
             className="small"
-            disabled={busyRun || !ready}
+            disabled={busyRun || busy || !ready}
             onClick={handleRun}
           >
             <Play size={14} />
@@ -493,36 +547,25 @@ function Buffer({
           </Button>
           <Button
             className="small primary"
-            disabled={busy || !ready}
-            onClick={handleSubmit}
+            disabled={busy || busyRun || !ready}
+            onClick={() => handleSubmit()}
           >
             <Send size={14} />
-            {busy ? "채점 중…" : "제출"}
+            {busy ? "채점 중…" : (!!pending || (!!attempt && !attempt.result)) ? "현재 코드로 새 제출" : "제출"}
           </Button>
         </div>
       </div>
       <section className="results stack-sm">
         <h3>실행 결과</h3>
-        {busy ? (
-          <div className="row">
-            <Badge tone="pending">채점 중…</Badge>
-          </div>
-        ) : judgeError ? (
-          <p className="error-text">{judgeError}</p>
-        ) : judgeResult ? (
-          <JudgeResultView result={judgeResult} />
-        ) : busyRun ? (
-          <p className="muted">실행 중…</p>
-        ) : runError ? (
-          <p className="error-text">{runError}</p>
-        ) : runResult ? (
-          <RunResult result={runResult} />
-        ) : (
-          <Empty
-            title="코드를 실행해 보세요"
-            description="공개 예제 실행 또는 전체 제출을 선택할 수 있어요."
-          />
-        )}
+        <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} error={requestError}
+          disabled={busy || busyRun} paused={paused} onRetry={() => handleSubmit(true)}
+          onResume={() => { setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false); }}
+          onSelect={(id) => {
+            workspace.getState().selectPracticeSubmission(submissionKey, id);
+            setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false);
+          }} />
+        <EditorResultPanel busy={busy} showRun={showRun} busyRun={busyRun} queryError={judgeError}
+          judgeResult={judgeResult} runError={runError} runResult={runResult} />
       </section>
       <Modal
         open={reset}
@@ -533,7 +576,7 @@ function Buffer({
         <Button
           className="danger"
           onClick={() => {
-            edit(problem.starterCodes[language]);
+            edit(problem.starterCodes[language] ?? "");
             setReset(false);
           }}
         >
