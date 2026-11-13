@@ -487,6 +487,13 @@ export type RunResponse = {
 // GET /api/v1/submissions/{submissionId} §3.1.3 응답
 export type JudgeResult = {
   submissionId: string;
+  problemId: string;
+  problemRevisionId: string;
+  language: Language;
+  context: string;
+  judgeAttempt: number;
+  submittedAt: string;
+  failureCode: string | null;
   status: JudgeState;
   effectiveResult: {
     verdict: Verdict | null;
@@ -861,3 +868,17 @@ export interface NotificationPreferences {
 // PATCH /api/v1/notifications/preferences 요청 (api-spec §7.1.6)
 export type UpdateNotificationPreferencesRequest =
   Partial<NotificationPreferences>;
+
+// API 명세서 §3.1.5~§3.1.7
+export type SubmissionSource = { language: Language; sourceCode: string };
+export type SubmissionAttempt = {
+  judgeAttempt: number; trigger: string; status: string; verdict: Verdict | null;
+  passedCount: number | null; totalCount: number | null;
+  maxTimeMs: number | null; maxMemoryKb: number | null;
+  createdAt: string; finishedAt: string | null;
+};
+export type SubmissionTestResult =
+  | { testOrder: number; passed: boolean | null }
+  | { testOrder: number; isSample: true; verdict: Verdict | null;
+      timeMs: number | null; memoryKb: number | null; argumentTexts: Record<string, string>;
+      expectedReturnText: string; actualReturnText: string | null };

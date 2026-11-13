@@ -57,6 +57,9 @@ import type {
   SubmissionHistoryItem,
   SubmissionReceipt,
   SubmissionCreateRequest,
+  SubmissionSource,
+  SubmissionAttempt,
+  SubmissionTestResult,
   TagLevel,
   UnreadCountResponse,
   UpdateNotificationPreferencesRequest,
@@ -264,9 +267,14 @@ export const judgeApi = {
     }),
   getStatus: (submissionId: string, signal?: AbortSignal) =>
     apiFetch<JudgeResult>(`/api/v1/submissions/${submissionId}`, { signal }),
-  getSubmissions: (problemId: string) =>
+  getSource: (id: string) => apiFetch<SubmissionSource>(`/api/v1/submissions/${id}/source`, { cache: "no-store" }),
+  getAttempts: (id: string) => apiFetch<{ content: SubmissionAttempt[] }>(`/api/v1/submissions/${id}/judge-attempts`),
+  getTests: (id: string, attempt: number) => apiFetch<{ content: SubmissionTestResult[] }>(
+    `/api/v1/submissions/${id}/judge-attempts/${attempt}/test-results`,
+  ),
+  getSubmissions: (problemId: string, page = 0) =>
     apiFetch<ServerPage<SubmissionHistoryItem>>(
-      `/api/v1/me/submissions?problemId=${encodeURIComponent(problemId)}&context=PRACTICE`,
+      `/api/v1/me/submissions?problemId=${encodeURIComponent(problemId)}&context=PRACTICE&page=${page}`,
     ),
 };
 

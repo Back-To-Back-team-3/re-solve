@@ -46,7 +46,9 @@ test("새 접수가 실패해도 이전 제출을 재조회하고 새 요청의 
   await expect(page.getByText("WA 오답", { exact: true })).toBeVisible();
   expect(requests[2]).toEqual(requests[1]);
   expect(requests[2].body).toMatchObject({ sourceCode: "// B original" });
+  await expect(page.getByRole("link", { name: "제출 결과 상세", exact: true })).toHaveAttribute("href", "/submissions/2002");
   await page.getByLabel("접수된 제출", { exact: true }).selectOption("2001");
+  await expect(page.getByRole("link", { name: "제출 결과 상세", exact: true })).toHaveAttribute("href", "/submissions/2001");
   await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
   expect(requests).toHaveLength(3);
 });

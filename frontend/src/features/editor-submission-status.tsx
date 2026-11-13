@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui";
 import type { PracticeSubmissionAttempt, PracticeSubmissionRequest } from "@/stores/workspace";
 import { expiredPracticeRequestMessage, isPracticeRequestExpired, practiceRequestTtlMs } from "@/services/practice-request";
@@ -27,6 +28,7 @@ export function EditorSubmissionStatus({ accepted, selected, pending, error, dis
       {accepted.map((item) => <option key={item.submissionId} value={item.submissionId}>제출 #{item.submissionId}</option>)}
     </select></label>}
     {selected && <>
+      <Link href={`/submissions/${selected.submissionId}`}>제출 결과 상세</Link>
       <p className="muted">접수된 제출 #{selected.submissionId}</p>
       {!selected.result && paused && <Button className="small" disabled={disabled} onClick={onResume}>채점 상태 다시 조회</Button>}
     </>}

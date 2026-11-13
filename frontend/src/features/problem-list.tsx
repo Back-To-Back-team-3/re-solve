@@ -120,6 +120,7 @@ export function ProblemSubmissionList({ items }: { items: SubmissionHistoryItem[
             <th>실행 시간</th>
             <th>메모리</th>
             <th>제출 시각</th>
+            <th>상세</th>
           </tr>
         </thead>
         <tbody>
@@ -138,6 +139,7 @@ export function ProblemSubmissionList({ items }: { items: SubmissionHistoryItem[
               <td className="muted">
                 {new Date(s.submittedAt).toLocaleString("ko-KR")}
               </td>
+              <td><Link href={`/submissions/${s.submissionId}`}>결과 상세</Link></td>
             </tr>
           ))}
         </tbody>
