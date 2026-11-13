@@ -1,4 +1,5 @@
 import type {
+  RunCreateRequest, JudgeLanguagesResponse, SubmissionAttemptsResponse, SubmissionTestsResponse,
   ActiveTimeSlot,
   AdminMember,
   AdminProblemListItem,
@@ -28,7 +29,6 @@ import type {
   GoalType,
   JoinType,
   JudgeResult,
-  JudgeLanguage,
   Language,
   MarkAllReadResponse,
   MarkReadResponse,
@@ -58,8 +58,6 @@ import type {
   SubmissionReceipt,
   SubmissionCreateRequest,
   SubmissionSource,
-  SubmissionAttempt,
-  SubmissionTestResult,
   TagLevel,
   UnreadCountResponse,
   UpdateNotificationPreferencesRequest,
@@ -246,15 +244,8 @@ export const problemApi = {
 // 채점 API (§3.1)
 export const judgeApi = {
   getLanguages: () =>
-    apiFetch<{ content: JudgeLanguage[] }>("/api/v1/judge/languages"),
-  run: (body: {
-    problemId: string;
-    problemRevisionId: string;
-    language: Language;
-    sourceCode: string;
-    useSamples: boolean;
-    customInputs: { argumentTexts: Record<string, string> }[];
-  }) =>
+    apiFetch<JudgeLanguagesResponse>("/api/v1/judge/languages"),
+  run: (body: RunCreateRequest) =>
     apiFetch<RunResponse>("/api/v1/runs", {
       method: "POST",
       body: JSON.stringify(body),
@@ -268,8 +259,8 @@ export const judgeApi = {
   getStatus: (submissionId: string, signal?: AbortSignal) =>
     apiFetch<JudgeResult>(`/api/v1/submissions/${submissionId}`, { signal }),
   getSource: (id: string) => apiFetch<SubmissionSource>(`/api/v1/submissions/${id}/source`, { cache: "no-store" }),
-  getAttempts: (id: string) => apiFetch<{ content: SubmissionAttempt[] }>(`/api/v1/submissions/${id}/judge-attempts`),
-  getTests: (id: string, attempt: number) => apiFetch<{ content: SubmissionTestResult[] }>(
+  getAttempts: (id: string) => apiFetch<SubmissionAttemptsResponse>(`/api/v1/submissions/${id}/judge-attempts`),
+  getTests: (id: string, attempt: number) => apiFetch<SubmissionTestsResponse>(
     `/api/v1/submissions/${id}/judge-attempts/${attempt}/test-results`,
   ),
   getSubmissions: (problemId: string, page = 0) =>

@@ -479,6 +479,15 @@ export type RunTestResult = {
 };
 
 // POST /api/v1/runs §3.1.8 응답
+// API 명세서 §3.1 Run 요청·실행 환경 및 제출 상세 목록
+export type RunCreateRequest = {
+  problemId: string; problemRevisionId: string; language: Language; sourceCode: string;
+  useSamples: boolean; customInputs: { argumentTexts: Record<string, string> }[];
+};
+export type JudgeLanguagesResponse = { content: JudgeLanguage[] };
+export type SubmissionAttemptsResponse = { content: SubmissionAttempt[] };
+export type SubmissionTestsResponse = { content: SubmissionTestResult[] };
+
 export type RunResponse = {
   results: RunTestResult[];
   compileMessage: string | null;
