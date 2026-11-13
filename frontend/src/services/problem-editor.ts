@@ -34,8 +34,9 @@ export function toEditorProblem(detail: ProblemDetail): Problem {
     examples: detail.examples,
     functionSpec: {
       name: "solution",
-      parameters: detail.functionSpec.parameters.map((param) => ({ name: param.name, type: formatProblemType(param.type) })),
+      parameters: detail.functionSpec.parameters.map((param) => ({ name: param.name, type: formatProblemType(param.type), inputType: param.type })),
       returnType: formatProblemType(detail.functionSpec.returnType),
+      returnInputType: detail.functionSpec.returnType,
     },
     starterCodes: {
       java: detail.starterCodes.find((code) => code.language === "java")?.sourceCode ?? "",

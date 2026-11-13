@@ -106,8 +106,9 @@ export interface Problem {
   examples: string;
   functionSpec: {
     name: "solution";
-    parameters: { name: string; type: string }[];
+    parameters: { name: string; type: string; inputType?: ProblemFunctionParamType }[];
     returnType: string;
+    returnInputType?: ProblemFunctionParamType;
   };
   starterCodes: Record<Language, string>;
   samples: { input: string; expected: string; argumentTexts?: Record<string, string> }[];
