@@ -214,7 +214,8 @@ export function ProblemsPage() {
           {
             key: "difficulty",
             label: "모든 난이도",
-            options: [1, 2, 3, 4, 5].map((n) => [String(n), `Lv. ${n}`]),
+            // 난이도는 1~3 정수다 (API 명세서 0.2 식별자 규칙).
+            options: [1, 2, 3].map((n) => [String(n), `Lv. ${n}`]),
           },
           {
             key: "solvedStatus",

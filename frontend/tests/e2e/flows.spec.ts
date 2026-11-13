@@ -28,6 +28,8 @@ async function remock(page: Page, options: ApiFixtureOptions) {
 test("문제를 검색해 열고 언어별 코드를 분리·복원한 뒤 실행과 정답·오답·시스템 실패 제출 결과를 표시한다", async ({ page }) => {
   await mockApi(page);
   await page.goto("/problems");
+  const difficulty = page.locator("select").filter({ has: page.locator("option", { hasText: "모든 난이도" }) });
+  await expect(difficulty.locator("option")).toHaveText(["모든 난이도", "Lv. 1", "Lv. 2", "Lv. 3"]);
   await page.getByPlaceholder("문제 제목 또는 번호 검색").fill("배열 합");
   await page.getByRole("button", { name: "검색", exact: true }).click();
   await expect(page).toHaveURL(/keyword=/);
