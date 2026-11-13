@@ -155,8 +155,8 @@ export function Buffer({
           problemRevisionId: problem.problemRevisionId,
           language,
           sourceCode: codeRef.current,
-          useSamples,
-          customInputs: runInputs(problem.functionSpec.parameters.map((param) => param.name), customInputs, useSamples),
+          useSamples: examId ? true : useSamples,
+          customInputs: examId ? [] : runInputs(problem.functionSpec.parameters.map((param) => param.name), customInputs, useSamples),
         }),
       );
     } catch (e) {
@@ -235,9 +235,9 @@ export function Buffer({
         pendingSubmission={!!pending || (!!attempt && !attempt.result)} onSave={persist} onReset={() => setReset(true)}
         onRun={handleRun} onSubmit={() => handleSubmit()} />
       <section className="results stack-sm">
-        <EditorRunInputs names={problem.functionSpec.parameters.map((param) => param.name)}
+        {!examId && <EditorRunInputs names={problem.functionSpec.parameters.map((param) => param.name)}
           rows={customInputs} useSamples={useSamples} disabled={busy || busyRun}
-          onRows={setCustomInputs} onSamples={setUseSamples} />
+          onRows={setCustomInputs} onSamples={setUseSamples} />}
         <h3>실행 결과</h3>
         <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} error={requestError}
           disabled={busy || busyRun} paused={paused} onRetry={() => handleSubmit(true)}
