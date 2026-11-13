@@ -24,6 +24,7 @@ import type {
   MarkAllReadResponse,
   MarkReadResponse,
   Member,
+  MemberUpdateResponse,
   MembershipCreated,
   MembershipStatus,
   MyParticipation,
@@ -160,7 +161,7 @@ export const authApi = {
 export const memberApi = {
   getMe: () => apiFetch<Member>("/api/v1/members/me"),
   updateMe: (body: { nickname: string }) =>
-    apiFetch<Member>("/api/v1/members/me", {
+    apiFetch<MemberUpdateResponse>("/api/v1/members/me", {
       method: "PATCH",
       body: JSON.stringify(body),
     }),

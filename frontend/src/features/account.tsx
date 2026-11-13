@@ -154,7 +154,7 @@ export function MyPage() {
                 const updated = await memberApi.updateMe({
                   nickname: String(f.get("nickname")).trim(),
                 });
-                setMember(updated);
+                setMember({ ...member, nickname: updated.nickname });
               },
               "프로필을 저장했습니다.",
             );

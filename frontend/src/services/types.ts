@@ -16,6 +16,12 @@ export type Member = {
   createdAt: string;
 };
 
+// PATCH /api/v1/members/me §1.2.2 응답
+export type MemberUpdateResponse = {
+  memberId: string;
+  nickname: string;
+};
+
 // POST /api/v1/auth/token §1.1.3 응답
 export type AuthTokenResponse = {
   accessToken: string;
