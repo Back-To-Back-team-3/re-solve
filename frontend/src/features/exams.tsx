@@ -43,10 +43,13 @@ export function ExamsPage({
   const searchParams = useSearchParams();
   const status = searchParams.get("status") || "all";
   const router = useRouter();
+  const [page, setPage] = useState(0);
+
+  useEffect(() => { setPage(0); }, [status]);
 
   const r = useResource(
-    () => (studyId ? contestApi.getExamList(studyId) : Promise.resolve(null)),
-    studyId ?? "none",
+    () => (studyId ? contestApi.getExamList(studyId, page) : Promise.resolve(null)),
+    `${studyId ?? "none"}-${page}`,
   );
 
   if (contest) {
@@ -150,6 +153,22 @@ export function ExamsPage({
           title="이 상태의 시험이 없어요"
           description="다른 상태를 선택하거나 새로운 모의 코테를 만들어 보세요."
         />
+      )}
+      {r.data && r.data.totalPages > 1 && (
+        <div className="row center gap-2">
+          <Button disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+            이전
+          </Button>
+          <span>
+            {page + 1} / {r.data.totalPages}
+          </span>
+          <Button
+            disabled={page >= r.data.totalPages - 1}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            다음
+          </Button>
+        </div>
       )}
     </div>
   );

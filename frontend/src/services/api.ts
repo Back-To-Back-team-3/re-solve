@@ -477,8 +477,10 @@ export const studyApi = {
 
 // 모의 코테·시험 API (§4)
 export const contestApi = {
-  getExamList: (studyId: string) =>
-    apiFetch<Page<ExamSummary>>(`/api/v1/studies/${studyId}/exams`),
+  getExamList: (studyId: string, page = 0, size = 20) =>
+    apiFetch<Page<ExamSummary>>(
+      `/api/v1/studies/${studyId}/exams?page=${page}&size=${size}`,
+    ),
 
   createExam: (studyId: string, body: CreateExamRequest) =>
     apiFetch<ExamCreated>(`/api/v1/studies/${studyId}/exams`, {
