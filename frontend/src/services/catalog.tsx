@@ -54,7 +54,5 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   return <Context.Provider value={r.data!}>{children}</Context.Provider>;
 }
 export function useCatalog() {
-  const catalog = useContext(Context);
-  if (!catalog) throw new Error("CatalogProvider missing");
-  return catalog;
+  return useContext(Context) ?? { tags: [], problems: [] };
 }
