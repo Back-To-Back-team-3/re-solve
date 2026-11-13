@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { adminProblemApi, apiFetch, apiFetchBlob, setAccessTokenSetter, setTokenGetter } from "../../src/services/api";
+import { adminProblemApi, apiFetch, apiFetchBlob, setAccessTokenSetter, setTokenGetter } from "@/services/api";
 
 afterEach(() => { vi.unstubAllGlobals(); setTokenGetter(() => null); setAccessTokenSetter(() => {}); });
 it("이미지는 인증을 유지하고 multipart Content-Type을 브라우저에 맡긴다", async () => {

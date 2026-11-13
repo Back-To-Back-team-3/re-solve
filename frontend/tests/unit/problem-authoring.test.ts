@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { parseProblemContent } from "../../src/services/problem-authoring";
+import { parseProblemContent } from "@/services/problem-authoring";
 
 const fields = {
   title: "문제", description: "설명", constraints: "제한", examples: "예시", difficulty: 1, tagIds: "1,2",
