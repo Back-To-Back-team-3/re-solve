@@ -158,7 +158,7 @@ export function ExamRoom({ id }: { id: string }) {
           </Go>
         </aside>
         <div className="workspace">
-          <ProblemDescription key={problem.id} problem={problem} exam />
+          <ProblemDescription key={problem.id} problem={problem} exam examId={id} />
           <CodeEditor problem={problem} userId={userId} examId={id} />
         </div>
       </div>

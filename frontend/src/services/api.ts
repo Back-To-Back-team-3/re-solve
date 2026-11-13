@@ -226,6 +226,8 @@ export const problemTagApi = {
 
 // 문제 API (§2.1)
 export const problemApi = {
+  getImage: (problemId: string, revisionId: string, imageId: string) =>
+    apiFetchBlob(`/api/v1/problems/${problemId}/revisions/${revisionId}/images/${imageId}`),
   getDetail: (problemId: string) =>
     apiFetch<ProblemDetail>(`/api/v1/problems/${problemId}`),
   getList: (filter: ProblemFilter = {}) => {
@@ -493,6 +495,8 @@ export const studyApi = {
 
 // 모의 코테·시험 API (§4)
 export const contestApi = {
+  getExamImage: (examId: string, problemId: string, imageId: string) =>
+    apiFetchBlob(`/api/v1/exams/${examId}/problems/${problemId}/images/${imageId}`),
   getExamList: (studyId: string) =>
     apiFetch<Page<ExamSummary>>(`/api/v1/studies/${studyId}/exams`),
 
