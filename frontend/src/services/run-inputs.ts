@@ -1,4 +1,4 @@
-/** 공개 예제 또는 최대 다섯 직접 입력을 선택하고 JSON 원문을 보존한다. */
+/** 공개 예제 또는 최대 다섯 직접 입력을 선택하고 JSON 원문을 보존한다. (API 명세서 §3.1.8) */
 export function runInputs(names: string[], rows: Record<string, string>[], useSamples: boolean) {
   if (rows.length > 5 || (!useSamples && !rows.length)) {
     throw new Error("공개 예제 또는 직접 입력을 선택해 주세요. 직접 입력은 최대 5개입니다.");

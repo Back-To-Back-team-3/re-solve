@@ -6,7 +6,7 @@ import { judgeApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import type { SubmissionTestResult } from "@/services/types";
 
-/** 숨김 결과에는 명세에 허용된 번호·통과 여부만 렌더링한다. */
+/** 숨김 결과에는 번호·통과 여부만 렌더링한다. (API 명세서 §3.1.7) */
 function TestResults({ id, attempt }: { id: string; attempt: number }) {
   const resource = useResource(() => judgeApi.getTests(id, attempt), `${id}:${attempt}`);
   if (resource.loading) return <Loading />;
