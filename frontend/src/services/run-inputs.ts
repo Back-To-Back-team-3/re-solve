@@ -62,13 +62,36 @@ function encode(type: ProblemFunctionParamType, value: RunInputValue | undefined
     if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(number) || !Number.isFinite(Number(number))) {
       return invalid("유효한 숫자를 입력해 주세요.");
     }
-    const normalized = type.kind === "FLOAT32" ? Math.fround(Number(number)) : Number(number);
-    if (!Number.isFinite(normalized) || normalized === 0 && /[1-9]/.test(number.split(/[eE]/)[0])) {
+    const outsideRange = type.kind === "FLOAT32"
+      ? !isFloat32InRange(number)
+      : Number(number) === 0 && /[1-9]/.test(number.split(/[eE]/)[0]);
+    if (outsideRange) {
       return invalid("선언 타입의 표현 범위를 벗어났습니다.");
     }
     return number;
   }
   return invalid("입력 타입을 확인할 수 없습니다.");
+}
+
+/** 십진 원문과 정확한 반올림 경계를 비교해 binary64 경유 이중 반올림을 피한다. */
+function isFloat32InRange(text: string): boolean {
+  const [mantissa, power = "0"] = text.replace(/^-/, "").split(/[eE]/);
+  const [whole, fraction = ""] = mantissa.split(".");
+  const digits = `${whole}${fraction}`.replace(/^0+/, "");
+  if (!digits) return true;
+  const exponent = Number(power) - fraction.length;
+  const compare = (boundary: string, boundaryExponent: number) => {
+    const order = digits.length + exponent;
+    const boundaryOrder = boundary.length + boundaryExponent;
+    if (order !== boundaryOrder) return order < boundaryOrder ? -1 : 1;
+    const width = Math.max(digits.length, boundary.length);
+    const left = digits.padEnd(width, "0");
+    const right = boundary.padEnd(width, "0");
+    return left === right ? 0 : left < right ? -1 : 1;
+  };
+  // 두 경계의 정확한 중간값은 ties-to-even에서 각각 0과 무한대로 반올림된다.
+  return compare((5n ** 150n).toString(), -150) > 0
+    && compare(((1n << 128n) - (1n << 103n)).toString(), 0) < 0;
 }
 
 /** 사용자 입력을 선언 타입에 맞춰 직렬화해 최대 다섯 직접 입력을 전송한다. */
