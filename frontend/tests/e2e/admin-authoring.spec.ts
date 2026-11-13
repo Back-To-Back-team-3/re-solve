@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockAdminPage } from "./admin-authoring-fixture";
+import { adminDetail, mockAdminPage } from "./admin-authoring-fixture";
 import { mockPracticePage } from "./practice-fixture";
 
 test("등록·검증 응답 유실은 같은 키·본문으로 재요청하고 결과 반영을 구분한다", async ({ page }) => {
@@ -17,8 +17,15 @@ test("등록·검증 응답 유실은 같은 키·본문으로 재요청하고 �
     else await route.fulfill({ status: 202, json: { success: true, data: { validationId: validations.length > 2 ? "3002" : "3001" } } });
   });
   let applied = false;
+  let detailReads = 0;
+  await page.route("**/api/v1/admin/problems/1001", (route) => {
+    detailReads++;
+    return route.fulfill({ json: { success: true, data: { ...adminDetail,
+      currentProblemRevisionId: applied ? "2001" : null, supportedLanguages: applied ? ["java"] : [],
+    } } });
+  });
   await page.route("**/api/v1/admin/problems/validations/300*", (route) => route.fulfill({ json: { success: true, data: {
-    validationId: "3001", problemId: "1001", problemRevisionId: "2001", language: "java", status: route.request().url().endsWith("3001") ? "REJECTED" : "PASSED",
+    validationId: route.request().url().split("/").at(-1), problemId: "1001", problemRevisionId: "2001", language: "java", status: route.request().url().endsWith("3001") ? "REJECTED" : "PASSED",
     resultApplied: applied, tests: [{ testOrder: 1, verdict: "AC", timeMs: 2, memoryKb: 1024 }],
     maxTimeMs: 2, message: null, currentProblemRevisionId: applied ? "2001" : null, supportedLanguages: applied ? ["java"] : [],
   } } }));
@@ -39,9 +46,15 @@ test("등록·검증 응답 유실은 같은 키·본문으로 재요청하고 �
   await page.getByRole("button", { name: "검증 접수·재요청" }).click();
   await expect(page.getByText("java · PASSED · 결과 반영: 대기")).toBeVisible();
   expect(validations[2].key).not.toBe(validations[1].key);
+  const readsBeforeApplied = detailReads;
   applied = true;
   await page.getByRole("button", { name: "검증 상태 새로고침" }).click();
   await expect(page.getByText("java · PASSED · 결과 반영: 완료")).toBeVisible();
+  await expect(page.getByText("현재 사용 회차: 2001", { exact: true })).toBeVisible();
+  await expect(page.getByText("지원 언어: java", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "검증 #3002", exact: true })).toBeVisible();
+  await expect(page.getByLabel("검증 코드", { exact: true })).toHaveValue("class Solution { /* corrected */ }\n");
+  await expect.poll(() => detailReads).toBe(readsBeforeApplied + 1);
 });
 
 test("새 회차 요청은 조회 전용 파일 ID를 제외하고 버전 충돌을 안내한다", async ({ page }) => {
