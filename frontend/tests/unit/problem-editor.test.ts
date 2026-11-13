@@ -42,7 +42,7 @@ describe("문제 에디터 표시 계약", () => {
   it("회차·기본 코드를 보존하고 예제 인수를 함수 매개변수 순서로 표시한다", () => {
     expect(toEditorProblem(detail)).toMatchObject({
       problemRevisionId: "2", starterCodes: { java: "java-code", python3: "python-code" },
-      samples: [{ input: "1, 2", expected: "3" }],
+      samples: [{ input: "1, 2", expected: "3", argumentTexts: { a: "1", b: "2" } }],
     });
   });
 });

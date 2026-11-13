@@ -45,6 +45,7 @@ export function toEditorProblem(detail: ProblemDetail): Problem {
     samples: detail.samples.map((sample) => ({
       input: detail.functionSpec.parameters.map((param) => sample.argumentTexts[param.name]).join(", "),
       expected: sample.expectedReturnText,
+      argumentTexts: sample.argumentTexts,
     })),
   };
 }

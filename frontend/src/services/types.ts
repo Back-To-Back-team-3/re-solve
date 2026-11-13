@@ -110,7 +110,7 @@ export interface Problem {
     returnType: string;
   };
   starterCodes: Record<Language, string>;
-  samples: { input: string; expected: string }[];
+  samples: { input: string; expected: string; argumentTexts?: Record<string, string> }[];
 }
 export interface Submission {
   id: string;

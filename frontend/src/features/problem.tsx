@@ -26,6 +26,8 @@ export function ProblemDescription({
   exam?: boolean;
 }) {
   const [tab, setTab] = useState("description");
+  const parameterNames = problem.functionSpec.parameters.map((parameter) => parameter.name);
+  const structuredSamples = problem.samples.every((sample) => sample.argumentTexts !== undefined);
   const submissions = useWorkspace((state) => state.practiceSubmissions);
   const submissionVersion = JSON.stringify(Object.values(submissions).flatMap((attempt) =>
     attempt?.problemId === problem.id && attempt.submissionId
@@ -59,7 +61,26 @@ export function ProblemDescription({
           <Markdown
             remarkPlugins={[remarkGfm]}
             skipHtml
-          >{`${problem.description}\n\n## 제한 사항\n${problem.constraints}\n\n## 함수 명세\n\`solution(${problem.functionSpec.parameters.map((p) => `${p.name}: ${p.type}`).join(", ")}) → ${problem.functionSpec.returnType}\`\n\n## 입출력 예\n${problem.examples}`}</Markdown>
+          >{`${problem.description}\n\n## 제한 사항\n${problem.constraints}`}</Markdown>
+          <h2>입출력 예</h2>
+          {problem.samples.length > 0 ? (
+            <div className="table-wrap">
+              <table className="my-0!" aria-label="입출력 예">
+                <thead><tr>
+                  {(structuredSamples ? parameterNames : ["입력"]).map((name) => <th scope="col" key={name}>{name}</th>)}
+                  <th scope="col">result</th>
+                </tr></thead>
+                <tbody>{problem.samples.map((sample, index) => (
+                  <tr key={index}>
+                    {structuredSamples ? parameterNames.map((name) => (
+                      <td key={name}><code>{sample.argumentTexts?.[name] ?? "—"}</code></td>
+                    )) : <td><code>{sample.input}</code></td>}
+                    <td><code>{sample.expected}</code></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          ) : <Markdown remarkPlugins={[remarkGfm]} skipHtml>{problem.examples}</Markdown>}
         </div>
       )}
       {tab === "submissions" &&
