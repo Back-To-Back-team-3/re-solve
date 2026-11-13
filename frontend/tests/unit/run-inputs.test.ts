@@ -78,3 +78,15 @@ it.each([["FLOAT32", "1e-45"], ["FLOAT64", "5e-324"], ["FLOAT32", "-0.0"], ["FLO
     expect(runInputs([{ name: "a", inputType: { kind } }], [{ a: scalar(text) }], false)[0].argumentTexts.a).toBe(text);
   },
 );
+
+it("FLOAT32 반올림 경계를 십진 원문으로 판별해 유효한 경계 입력을 보존한다", () => {
+  const parameters = [{ name: "a", inputType: { kind: "FLOAT32" } }];
+  const lower = (5n ** 150n).toString();
+  const upper = (1n << 128n) - (1n << 103n);
+  for (const text of [`${BigInt(lower) + 1n}e-150`, (upper - 1n).toString(), "-7.0064923216240853546186479164496e-46"]) {
+    expect(runInputs(parameters, [{ a: scalar(text) }], false)[0].argumentTexts.a).toBe(text);
+  }
+  for (const text of [`${lower}e-150`, `${BigInt(lower) - 1n}e-150`, upper.toString(), (upper + 1n).toString()]) {
+    expect(() => runInputs(parameters, [{ a: scalar(text) }], false)).toThrow("표현 범위");
+  }
+});
