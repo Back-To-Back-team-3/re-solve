@@ -121,7 +121,7 @@ function MyResultTab({ id }: { id: string }) {
         </div>
         <div>
           <p className="score">
-            {rows.length ? Math.round((correct / rows.length) * 100) : 0}
+            {myResult?.score ?? "—"}
             <small>/100</small>
           </p>
           <p>
