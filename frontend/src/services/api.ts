@@ -17,6 +17,14 @@ import type {
   ExamSubmitRequest,
   ExamSubmitResponse,
   ExamSummary,
+  GithubConnectionInfo,
+  GithubInstallRequest,
+  GithubInstallResult,
+  GithubInstallUrlResponse,
+  GithubManualSyncResponse,
+  GithubSettingsResult,
+  GithubSyncJobItem,
+  GithubSyncJobStatus,
   GoalType,
   JoinType,
   JudgeResult,
@@ -30,6 +38,7 @@ import type {
   MyParticipation,
   MyResultResponse,
   NotificationListResponse,
+  NotificationPreferences,
   Page,
   ProblemDetail,
   ProblemFilter,
@@ -48,6 +57,7 @@ import type {
   SubmissionReceipt,
   TagLevel,
   UnreadCountResponse,
+  UpdateNotificationPreferencesRequest,
   UserRole,
   UserStatus,
 } from "./types";
@@ -152,6 +162,9 @@ async function apiFetchInner<T>(
     return apiFetchInner<T>(path, init, true);
   }
 
+  if (res.status === 204) {
+    return undefined as T;
+  }
 
   let json: ApiResponse<T>;
   try {
@@ -520,6 +533,54 @@ export const contestApi = {
   },
 };
 
+// GitHub 연동 API (§8)
+export const integrationApi = {
+  getGithubConnection: () =>
+    apiFetch<GithubConnectionInfo>("/api/v1/integrations/github"),
+
+  getGithubInstallUrl: () =>
+    apiFetch<GithubInstallUrlResponse>("/api/v1/integrations/github/install-url"),
+
+  installGithub: (body: GithubInstallRequest) =>
+    apiFetch<GithubInstallResult>("/api/v1/integrations/github/install", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateGithubSettings: (body: { isAutoCommitEnabled: boolean }) =>
+    apiFetch<GithubSettingsResult>("/api/v1/integrations/github", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  disconnectGithub: () =>
+    apiFetch<void>("/api/v1/integrations/github", {
+      method: "DELETE",
+    }),
+
+  getSyncJobs: (
+    params: { status?: GithubSyncJobStatus; page?: number; size?: number } = {},
+  ) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.page != null) q.set("page", String(params.page));
+    if (params.size != null) q.set("size", String(params.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<GithubSyncJobItem>>(
+      `/api/v1/integrations/github/sync-jobs${qs ? `?${qs}` : ""}`,
+    );
+  },
+
+  requestManualSync: (submissionId: string) =>
+    apiFetch<GithubManualSyncResponse>(
+      "/api/v1/integrations/github/sync-jobs",
+      {
+        method: "POST",
+        body: JSON.stringify({ submissionId }),
+      },
+    ),
+};
+
 // 알림 API (§7)
 export const notificationApi = {
   getList: (params: { page?: number; size?: number; unreadOnly?: boolean } = {}) => {
@@ -542,5 +603,12 @@ export const notificationApi = {
   markAllRead: () =>
     apiFetch<MarkAllReadResponse>("/api/v1/notifications/read-all", {
       method: "PATCH",
+    }),
+  getPreferences: () =>
+    apiFetch<NotificationPreferences>("/api/v1/notifications/preferences"),
+  updatePreferences: (body: UpdateNotificationPreferencesRequest) =>
+    apiFetch<NotificationPreferences>("/api/v1/notifications/preferences", {
+      method: "PATCH",
+      body: JSON.stringify(body),
     }),
 };

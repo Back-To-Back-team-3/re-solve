@@ -694,6 +694,71 @@ export type AssignmentDetail = {
   };
 };
 
+// --- api-spec §8 integration-service A 도메인 실서버 타입 ---
+
+export type GithubConnectionStatus = "CONNECTED" | "NOT_CONNECTED";
+
+// GET /api/v1/integrations/github 응답 (api-spec §8.1.1)
+export interface GithubConnectionInfo {
+  status: GithubConnectionStatus;
+  githubLogin?: string;
+  repositoryOwner?: string;
+  repositoryName?: string;
+  isAutoCommitEnabled?: boolean;
+  connectedAt?: string;
+}
+
+// GET /api/v1/integrations/github/install-url 응답 (api-spec §8.1.2)
+export interface GithubInstallUrlResponse {
+  installUrl: string;
+}
+
+// POST /api/v1/integrations/github/install 요청·응답 (api-spec §8.1.3)
+export interface GithubInstallRequest {
+  installationId: string;
+  state: string;
+}
+
+export interface GithubInstallResult {
+  status: GithubConnectionStatus;
+  repositoryName: string;
+  isAutoCommitEnabled: boolean;
+}
+
+// PATCH /api/v1/integrations/github 응답 (api-spec §8.1.4)
+export interface GithubSettingsResult {
+  isAutoCommitEnabled: boolean;
+}
+
+export type GithubSyncJobStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "RETRY_WAITING"
+  | "RATE_LIMITED"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "CANCELED";
+
+// GET /api/v1/integrations/github/sync-jobs 항목 (api-spec §8.1.6)
+export interface GithubSyncJobItem {
+  syncJobId: string;
+  submissionId: string;
+  problemId: string;
+  status: GithubSyncJobStatus;
+  retryCount: number;
+  commitSha: string | null;
+  errorMessage: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+// POST /api/v1/integrations/github/sync-jobs 응답 (api-spec §8.1.7)
+export interface GithubManualSyncResponse {
+  syncJobId: string;
+  submissionId: string;
+  status: GithubSyncJobStatus;
+}
+
 // --- api-spec §7 notification-service A 도메인 실서버 타입 ---
 
 export type NotificationType =
@@ -762,3 +827,17 @@ export interface SSENotificationEvent {
   linkUrl: string;
   createdAt: string;
 }
+
+// GET /api/v1/notifications/preferences 응답 (api-spec §7.1.6)
+export interface NotificationPreferences {
+  isExamContestEnabled: boolean;
+  isStudyApplicationEnabled: boolean;
+  isAssignmentEnabled: boolean;
+  isLevelChangedEnabled: boolean;
+  isHintReadyEnabled: boolean;
+  isGithubSyncEnabled: boolean;
+}
+
+// PATCH /api/v1/notifications/preferences 요청 (api-spec §7.1.6)
+export type UpdateNotificationPreferencesRequest =
+  Partial<NotificationPreferences>;
