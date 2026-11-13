@@ -28,7 +28,7 @@ export function ProblemDescription({
   const [tab, setTab] = useState("description");
   const submissions = useWorkspace((state) => state.practiceSubmissions);
   const submissionVersion = JSON.stringify(Object.values(submissions).flatMap((attempt) =>
-    attempt?.body.problemId === problem.id && attempt.submissionId
+    attempt?.problemId === problem.id && attempt.submissionId
       ? [[attempt.submissionId, attempt.result?.status]] : [],
   ));
   const r = useResource(() => judgeApi.getSubmissions(problem.id), `${problem.id}-subs-${submissionVersion}`);

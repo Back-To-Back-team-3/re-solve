@@ -22,6 +22,8 @@ import {
   useWorkspaceApi,
 } from "@/stores/workspace";
 import type { JudgeResult, Language, Problem, RunResponse } from "@/services/types";
+import { EditorSubmissionStatus } from "@/features/editor-submission-status";
+import { EXPIRED_PRACTICE_REQUEST_MESSAGE, isPracticeRequestExpired } from "@/services/practice-request";
 const Monaco = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => <div className="skeleton pixel">LOADING EDITOR...</div>,
@@ -213,6 +215,22 @@ function RunResult({ result }: { result: RunResponse }) {
     </div>
   );
 }
+function EditorResultPanel({ busy, showRun, busyRun, queryError, judgeResult, runError, runResult }: {
+  busy: boolean; showRun: boolean; busyRun: boolean; queryError: string | null;
+  judgeResult: JudgeResult | null; runError: string | null; runResult: RunResponse | null;
+}) {
+  if (busy) return <div className="row"><Badge tone="pending">채점 중…</Badge></div>;
+  if (showRun) {
+    if (busyRun) return <p className="muted">실행 중…</p>;
+    if (runError) return <p className="error-text">{runError}</p>;
+    if (runResult) return <RunResult result={runResult} />;
+  } else {
+    if (queryError) return <p className="error-text">{queryError}</p>;
+    if (judgeResult) return <JudgeResultView result={judgeResult} />;
+  }
+  return <Empty title="코드를 실행해 보세요" description="공개 예제 실행 또는 전체 제출을 선택할 수 있어요." />;
+}
+
 function Buffer({
   problem,
   userId,
@@ -244,13 +262,16 @@ function Buffer({
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
     [showRun, setShowRun] = useState(false),
-    [judgeError, setJudgeError] = useState<string | null>(null);
+    [judgeError, setJudgeError] = useState<string | null>(null),
+    [requestError, setRequestError] = useState<string | null>(null);
   const submissionKey = JSON.stringify([key, problem.problemRevisionId]);
-  const attempt = useWorkspace((state) => state.practiceSubmissions[submissionKey]);
-  const setAttempt = useWorkspace((state) => state.setPracticeSubmission);
+  const submissions = useWorkspace((state) => state.practiceSubmissions);
+  const pending = useWorkspace((state) => state.practiceRequests[submissionKey]);
+  const activeId = useWorkspace((state) => state.activePracticeSubmissions[submissionKey]);
+  const attempt = activeId ? submissions[activeId] : undefined;
+  const accepted = Object.values(submissions).flatMap((item) => item?.contextKey === submissionKey ? [item] : []);
   const workspace = useWorkspaceApi();
-  const sendingRef = useRef(false);
-  const router = useRouter();
+  const sendingRef = useRef(false), router = useRouter();
   const judgeSubmissionId = attempt?.submissionId ?? null;
   const judgeResult = attempt?.result ?? null;
   const polling = !!judgeSubmissionId && !judgeResult && !paused;
@@ -392,59 +413,44 @@ function Buffer({
   async function handleSubmit(retry = false) {
     if (sendingRef.current) return;
     persist();
-    if (examId) {
-      sendingRef.current = true;
-      setSending(true);
-      setShowRun(false);
-      setRunResult(null);
-      setRunError(null);
-      setJudgeError(null);
-      try {
-        await contestApi.submitExam(examId, {
-          problemId: problem.id, language, sourceCode: codeRef.current, seq: seqRef.current,
-        });
-        setSaved("제출 완료");
-      } catch (failure) {
-        const error = failure as { message?: string };
-        setJudgeError(error.message ?? "제출에 실패했습니다.");
-      } finally {
-        sendingRef.current = false;
-        setSending(false);
-      }
-      return;
-    }
-    const request = retry && attempt && !attempt.submissionId ? attempt : {
+    if (retry && !pending) return;
+    const request = retry && pending ? pending : {
       idempotencyKey: crypto.randomUUID(),
+      createdAt: Date.now(),
       body: {
         problemId: problem.id,
         problemRevisionId: problem.problemRevisionId,
         language,
         sourceCode: codeRef.current,
       },
-      submissionId: null,
-      result: null,
     };
+    if (retry && isPracticeRequestExpired(request.createdAt, Date.now())) {
+      setRequestError(EXPIRED_PRACTICE_REQUEST_MESSAGE); return;
+    }
     sendingRef.current = true;
     setShowRun(false);
-    setAttempt(submissionKey, request);
+    if (!examId) workspace.getState().setPracticeRequest(submissionKey, request);
     setRunResult(null);
     setRunError(null);
     setJudgeError(null);
+    setRequestError(null);
     setPaused(true);
     setSending(true);
     try {
-      const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
-      const current = workspace.getState().practiceSubmissions[submissionKey];
-      // 늦은 응답이 새 요청이나 같은 요청의 완료 결과를 덮지 않도록 한다.
-      if (current?.idempotencyKey !== request.idempotencyKey) return;
-      setAttempt(submissionKey, { ...current, submissionId: receipt.submissionId });
-      setPollVersion((value) => value + 1);
-      setPaused(false);
+      if (examId) {
+        await contestApi.submitExam(examId, { problemId: problem.id, language, sourceCode: codeRef.current, seq: seqRef.current });
+        setSaved("제출 완료");
+      } else {
+        const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
+        if (!workspace.getState().acceptPracticeSubmission(submissionKey, request, receipt.submissionId)) return;
+        setPollVersion((value) => value + 1);
+        setPaused(false);
+      }
       router.refresh();
     } catch (failure) {
       const message = typeof failure === "object" && failure !== null && "message" in failure
         && typeof failure.message === "string" ? failure.message : "제출에 실패했습니다.";
-      setJudgeError(message);
+      setRequestError(message);
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -473,10 +479,10 @@ function Buffer({
           key={`${judgeSubmissionId}:${pollVersion}`}
           submissionId={judgeSubmissionId}
           onDone={(result, err) => {
-            if (workspace.getState().practiceSubmissions[submissionKey]?.idempotencyKey !== attempt?.idempotencyKey) return;
+            if (workspace.getState().activePracticeSubmissions[submissionKey] !== judgeSubmissionId) return;
             setPaused(true);
             if (err) setJudgeError(err);
-            else if (attempt && result) setAttempt(submissionKey, { ...attempt, result });
+            else if (result) workspace.getState().setPracticeResult(judgeSubmissionId, result);
           }}
         />
       )}
@@ -545,52 +551,21 @@ function Buffer({
             onClick={() => handleSubmit()}
           >
             <Send size={14} />
-            {busy ? "채점 중…" : attempt && !attempt.result ? "현재 코드로 새 제출" : "제출"}
+            {busy ? "채점 중…" : (!!pending || (!!attempt && !attempt.result)) ? "현재 코드로 새 제출" : "제출"}
           </Button>
         </div>
       </div>
       <section className="results stack-sm">
         <h3>실행 결과</h3>
-        {busy ? (
-          <div className="row">
-            <Badge tone="pending">채점 중…</Badge>
-          </div>
-        ) : !showRun && judgeError ? (
-          <p className="error-text">{judgeError}</p>
-        ) : !showRun && judgeResult ? (
-          <JudgeResultView result={judgeResult} />
-        ) : busyRun ? (
-          <p className="muted">실행 중…</p>
-        ) : runError ? (
-          <p className="error-text">{runError}</p>
-        ) : runResult ? (
-          <RunResult result={runResult} />
-        ) : (
-          <Empty
-            title="코드를 실행해 보세요"
-            description="공개 예제 실행 또는 전체 제출을 선택할 수 있어요."
-          />
-        )}
-        {attempt && !attempt.result && (paused || !attempt.submissionId) && !busy && !busyRun && (
-          <div className="stack-sm">
-            {attempt.submissionId ? (
-              <>
-                <p className="muted">제출 #{attempt.submissionId}의 결과를 다시 확인할 수 있어요.</p>
-                <Button className="small" onClick={() => {
-                  setShowRun(false);
-                  setJudgeError(null);
-                  setPollVersion((value) => value + 1);
-                  setPaused(false);
-                }}>채점 상태 다시 조회</Button>
-              </>
-            ) : (
-              <>
-                <p className="muted">재요청은 원래 제출한 코드와 요청 키를 유지합니다.</p>
-                <Button className="small" onClick={() => handleSubmit(true)}>같은 제출 재요청</Button>
-              </>
-            )}
-          </div>
-        )}
+        <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} error={requestError}
+          disabled={busy || busyRun} paused={paused} onRetry={() => handleSubmit(true)}
+          onResume={() => { setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false); }}
+          onSelect={(id) => {
+            workspace.getState().selectPracticeSubmission(submissionKey, id);
+            setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false);
+          }} />
+        <EditorResultPanel busy={busy} showRun={showRun} busyRun={busyRun} queryError={judgeError}
+          judgeResult={judgeResult} runError={runError} runResult={runResult} />
       </section>
       <Modal
         open={reset}
