@@ -23,8 +23,8 @@ import { ProblemTable } from "./problem-list";
 import type { SubmissionHistoryItem } from "@/services/types";
 
 function relativeDate(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const toDay = (d: Date) => Math.floor(d.getTime() / (1000 * 60 * 60 * 24));
+  const days = toDay(new Date()) - toDay(new Date(iso));
   if (days === 0) return "오늘";
   if (days === 1) return "어제";
   return `${days}일 전`;
