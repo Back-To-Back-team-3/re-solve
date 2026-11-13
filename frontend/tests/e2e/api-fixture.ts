@@ -4,6 +4,7 @@ import type {
   ExamProblemsResponse,
   JudgeResult,
   Member,
+  MembershipRole,
   MembershipStatus,
   MyParticipation,
   ProblemDetail,
@@ -58,6 +59,10 @@ const studies = [
   studySummary(APPROVAL_STUDY_ID, "승인 가입 스터디", "APPROVAL"),
 ];
 
+/** POST /api/v1/studies 요청 본문 (api-spec §5.1). 화면이 보내는 필드를 그대로 받아 상세에 반영한다. */
+type StudyCreateBody = Pick<StudySummary, "name" | "goal" | "skillLevel" | "preferredLanguage" | "activeTimeSlot"
+  | "capacity" | "joinType"> & { description: string; isAutoReopen: boolean };
+
 export type ApiFixtureOptions = {
   /** false면 토큰 갱신이 401을 돌려 비로그인 상태로 시작한다. */
   loggedIn?: boolean;
@@ -77,20 +82,24 @@ export async function mockApi(page: Page, options: ApiFixtureOptions = {}) {
   const { loggedIn = true, verdict = "AC", examEndsInSeconds = 3600, handle } = options;
   const startedAt = Date.now();
   const serverNow = () => new Date(BASE_MS + (Date.now() - startedAt)).toISOString();
-  const memberships: Record<string, { membershipId: string; status: MembershipStatus } | null> = {
+  const memberships: Record<string, { membershipId: string; status: MembershipStatus; role: MembershipRole } | null> = {
     [INSTANT_STUDY_ID]: null, [APPROVAL_STUDY_ID]: null,
   };
+  // 생성한 스터디는 이 화면 흐름 안에서만 목록·상세에 나타나야 하므로 모듈 상수가 아닌 호출별 목록에 둔다.
+  const studyList: StudySummary[] = [...studies];
+  const descriptions: Record<string, string> = {};
   let submissionPolls = 0;
   let participation: MyParticipation | null = null;
   const examEndsAt = at(examEndsInSeconds);
 
   const studyDetail = (studyId: string): StudyDetail => {
-    const s = studies.find((x) => x.studyId === studyId)!;
+    const s = studyList.find((x) => x.studyId === studyId)!;
     const mine = memberships[studyId];
     return {
-      ...s, description: `${s.name} 소개`, isAutoReopen: false, version: 1,
-      leader: { memberId: "1", nickname: "스터디장" },
-      myMembership: mine ? { ...mine, role: "MEMBER" } : null,
+      ...s, description: descriptions[studyId] ?? `${s.name} 소개`, isAutoReopen: false, version: 1,
+      leader: mine?.role === "LEADER" ? { memberId: member.memberId, nickname: member.nickname }
+        : { memberId: "1", nickname: "스터디장" },
+      myMembership: mine,
     };
   };
   const examDetail = (): ExamDetail => ({
@@ -159,14 +168,24 @@ export async function mockApi(page: Page, options: ApiFixtureOptions = {}) {
     if (path === "/api/v1/submissions/5001") return ok(route, judgeResult("5001"));
     if (path === "/api/v1/me/submissions") return ok(route, pageOf(history));
 
-    if (path === "/api/v1/studies") return ok(route, pageOf(studies));
+    if (path === "/api/v1/studies" && method === "POST") {
+      const body = route.request().postDataJSON() as StudyCreateBody;
+      const studyId = String(13 + studyList.length - studies.length);
+      studyList.push({ ...studySummary(studyId, body.name, body.joinType), goal: body.goal,
+        skillLevel: body.skillLevel, preferredLanguage: body.preferredLanguage, activeTimeSlot: body.activeTimeSlot,
+        capacity: body.capacity, memberCount: 1, createdAt: serverNow(), lastActivityAt: serverNow() });
+      descriptions[studyId] = body.description;
+      memberships[studyId] = { membershipId: `m-${studyId}`, status: "APPROVED", role: "LEADER" };
+      return route.fulfill({ status: 201, json: { success: true, message: "스터디가 생성되었습니다.", data: { studyId } } });
+    }
+    if (path === "/api/v1/studies") return ok(route, pageOf(studyList));
     if (path === "/api/v1/studies/recommendations")
       return ok(route, { ...pageOf([]), mode: "POPULAR", isProfileRequired: false });
     if (path === "/api/v1/studies/me") return ok(route, pageOf<StudyMeItem>(
-      studies.flatMap((s) => {
+      studyList.flatMap((s) => {
         const mine = memberships[s.studyId];
         return mine ? [{ studyId: s.studyId, name: s.name, studyStatus: s.status, membershipId: mine.membershipId,
-          membershipStatus: mine.status, role: "MEMBER" as const, joinedAt: at(0) }] : [];
+          membershipStatus: mine.status, role: mine.role, joinedAt: at(0) }] : [];
       }),
     ));
     const study = /^\/api\/v1\/studies\/(\d+)(\/.*)?$/.exec(path);
@@ -175,7 +194,7 @@ export async function mockApi(page: Page, options: ApiFixtureOptions = {}) {
       if (rest === "") return ok(route, studyDetail(studyId));
       if (rest === "/memberships" && method === "POST") {
         const status: MembershipStatus = studyId === INSTANT_STUDY_ID ? "APPROVED" : "PENDING";
-        memberships[studyId] = { membershipId: `m-${studyId}`, status };
+        memberships[studyId] = { membershipId: `m-${studyId}`, status, role: "MEMBER" };
         return ok(route, { membershipId: `m-${studyId}`, status,
           expiresAt: status === "PENDING" ? at(7 * 86400) : null });
       }
