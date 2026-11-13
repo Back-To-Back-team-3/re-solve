@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, ErrorState, Loading } from "@/components/ui";
 import { adminProblemApi } from "@/services/api";
@@ -7,8 +7,11 @@ import { actionMessage } from "@/services/problem-authoring";
 import { useResource } from "@/services/hooks";
 import type { AdminProblemDetail, Language } from "@/services/types";
 
-function ValidationStatus({ id }: { id: string }) {
+function ValidationStatus({ id, onApplied }: { id: string; onApplied: () => void }) {
   const resource = useResource(() => adminProblemApi.getValidation(id), id);
+  useEffect(() => {
+    if (resource.data?.resultApplied) onApplied();
+  }, [resource.data?.resultApplied, onApplied]);
   if (resource.loading) return <Loading />;
   if (resource.error) return <ErrorState message={resource.error.message} retry={resource.retry} />;
   const result = resource.data;
@@ -25,7 +28,7 @@ function ValidationStatus({ id }: { id: string }) {
   </section>;
 }
 
-export function AdminProblemValidation({ detail }: { detail: AdminProblemDetail }) {
+export function AdminProblemValidation({ detail, onApplied }: { detail: AdminProblemDetail; onApplied: () => void }) {
   const router = useRouter();
   const [language, setLanguage] = useState<Language>("java");
   const [sourceCode, setSourceCode] = useState(detail.referenceSolutions.find((code) => code.language === "java")?.sourceCode ?? "");
@@ -70,6 +73,6 @@ export function AdminProblemValidation({ detail }: { detail: AdminProblemDetail 
         {result.language} 검증 #{result.validationId} · {result.status} · {result.resultApplied ? "반영 완료" : "반영 대기"}
       </Button>)}
     </div>
-    {validationId && <ValidationStatus key={validationId} id={validationId} />}
+    {validationId && <ValidationStatus key={validationId} id={validationId} onApplied={onApplied} />}
   </section>;
 }
