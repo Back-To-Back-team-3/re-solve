@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authApi, judgeApi, memberApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
+import { THEME_STORAGE_KEY } from "@/services/storage-keys";
 import { ProblemSubmissionList } from "@/features/problem-list";
 import { NotificationPreferencesSection } from "@/features/account-notifications";
 import { SkillPage } from "@/features/account-skill";
@@ -227,7 +228,7 @@ export function MyPage() {
                     setTheme(e.target.value);
                     document.documentElement.dataset.theme = e.target.value;
                     try {
-                      localStorage.setItem("re-solve:settings:theme", e.target.value);
+                      localStorage.setItem(THEME_STORAGE_KEY, e.target.value);
                     } catch {}
                   }}
                 >

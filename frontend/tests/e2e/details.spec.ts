@@ -36,6 +36,19 @@ test("마이페이지에서 닉네임을 저장하면 성공을 알리고 GitHub
   await expect(row.getByRole("cell", { name: "Java", exact: true })).toBeVisible();
 });
 
+test("마이페이지 설정에서 고른 테마는 새로고침 후에도 유지되고 헤더 토글과 같은 값을 쓴다", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/mypage");
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page.getByRole("combobox", { name: "테마" }).selectOption("dark");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "테마 전환", exact: true }).click();
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
 test("즉시 가입 스터디에 가입하면 소개·구성원·주간 문제집 탭을 오류 없이 보여 준다", async ({ page }) => {
   await mockApi(page);
   await page.goto(`/studies/${INSTANT_STUDY_ID}`);

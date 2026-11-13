@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { THEME_STORAGE_KEY } from "../../src/services/storage-keys";
 import { EXAM_ID, INSTANT_STUDY_ID, mockApi } from "./api-fixture";
 
 /**
@@ -33,11 +34,11 @@ for (const theme of ["light", "dark"])
     test.setTimeout(240000);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
-    await page.addInitScript((t) => {
+    await page.addInitScript(({ key, value }) => {
       try {
-        localStorage.setItem("resolve:theme", t);
+        localStorage.setItem(key, value);
       } catch {}
-    }, theme);
+    }, { key: THEME_STORAGE_KEY, value: theme });
     await mockApi(page);
     for (const { path, ready } of routes) {
       await page.goto(path);
