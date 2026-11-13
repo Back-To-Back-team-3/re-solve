@@ -66,3 +66,15 @@ it("선택 기대값은 미입력과 빈 문자열을 구분하고 실행 시점
     [{ arguments: {}, expectedOutput: array() }])).toEqual(["[]"]);
   expect(runExpectedOutputs(undefined, [{ arguments: {} }])).toEqual([null]);
 });
+
+
+it.each([
+  ["FLOAT32", "1e100"], ["FLOAT32", "1e-100"], ["FLOAT64", "1e-999"],
+])("%s의 범위 초과와 0으로 소실되는 %s를 거절한다", (kind, text) => {
+  expect(() => runInputs([{ name: "a", inputType: { kind } }], [{ a: scalar(text) }], false)).toThrow("표현 범위");
+});
+it.each([["FLOAT32", "1e-45"], ["FLOAT64", "5e-324"], ["FLOAT32", "-0.0"], ["FLOAT64", "0e-999"]])(
+  "%s의 유한한 비정규화 수·0 원문 %s를 보존한다", (kind, text) => {
+    expect(runInputs([{ name: "a", inputType: { kind } }], [{ a: scalar(text) }], false)[0].argumentTexts.a).toBe(text);
+  },
+);

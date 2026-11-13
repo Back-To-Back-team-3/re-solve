@@ -62,6 +62,10 @@ function encode(type: ProblemFunctionParamType, value: RunInputValue | undefined
     if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(number) || !Number.isFinite(Number(number))) {
       return invalid("유효한 숫자를 입력해 주세요.");
     }
+    const normalized = type.kind === "FLOAT32" ? Math.fround(Number(number)) : Number(number);
+    if (!Number.isFinite(normalized) || normalized === 0 && /[1-9]/.test(number.split(/[eE]/)[0])) {
+      return invalid("선언 타입의 표현 범위를 벗어났습니다.");
+    }
     return number;
   }
   return invalid("입력 타입을 확인할 수 없습니다.");
