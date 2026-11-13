@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { availableProblemLanguages, formatProblemType, toEditorProblem } from "../../src/services/problem-editor";
-import type { ProblemDetail } from "../../src/services/types";
+import { availableProblemLanguages, formatProblemType, toEditorProblem } from "@/services/problem-editor";
+import type { ProblemDetail } from "@/services/types";
 
 const detail: ProblemDetail = {
   problemId: "1", problemRevisionId: "2", revisionNumber: 1,
