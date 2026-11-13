@@ -28,6 +28,7 @@ import type {
   GoalType,
   JoinType,
   JudgeResult,
+  JudgeLanguage,
   Language,
   MarkAllReadResponse,
   MarkReadResponse,
@@ -54,6 +55,7 @@ import type {
   StudySummary,
   SubmissionHistoryItem,
   SubmissionReceipt,
+  SubmissionCreateRequest,
   TagLevel,
   UnreadCountResponse,
   UpdateNotificationPreferencesRequest,
@@ -239,6 +241,8 @@ export const problemApi = {
 
 // 채점 API (§3.1)
 export const judgeApi = {
+  getLanguages: () =>
+    apiFetch<{ content: JudgeLanguage[] }>("/api/v1/judge/languages"),
   run: (body: {
     problemId: string;
     problemRevisionId: string;
@@ -251,18 +255,14 @@ export const judgeApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  submit: (body: {
-    problemRevisionId: string;
-    language: Language;
-    sourceCode: string;
-  }) =>
+  submit: (body: SubmissionCreateRequest, idempotencyKey: string) =>
     apiFetch<SubmissionReceipt>("/api/v1/submissions", {
       method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
+      headers: { "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(body),
     }),
-  getStatus: (submissionId: string) =>
-    apiFetch<JudgeResult>(`/api/v1/submissions/${submissionId}`),
+  getStatus: (submissionId: string, signal?: AbortSignal) =>
+    apiFetch<JudgeResult>(`/api/v1/submissions/${submissionId}`, { signal }),
   getSubmissions: (problemId: string) =>
     apiFetch<ServerPage<SubmissionHistoryItem>>(
       `/api/v1/me/submissions?problemId=${encodeURIComponent(problemId)}&context=PRACTICE`,
