@@ -12,6 +12,7 @@
 | 개발·협업 가이드 | [채점 실행 코드 가이드](guides/judge-execution.md) | 생성기 연결·내부 입출력 변환·결과 매핑·검증 방법 |
 | 개발·협업 가이드 | [시험·대회 내부 HTTP Stub 사용 가이드](guides/contest-internal-http-stub.md) | 개발 실행 선택·고정 시나리오·내부 호출·실제 구현 교체 |
 | 개발·협업 가이드 | [Problem 내부 HTTP Stub 사용 가이드](guides/problem-internal-stub.md) | 병렬 연동용 Stub 실행·시나리오·개발 자료·실제 구현 교체 방법 |
+| 개발·협업 가이드 | [기존 시드 문제의 실풀이 자료 등록](guides/problem-seed-materialization.md) | 비공개 원본 자료 등록·정답 및 오답 검증·실패 시 재개 |
 | 개발·협업 가이드 | [AI 협업 안내](guides/ai/README.md) | AI 도구별 설정 파일·세션 시작·세 도구의 GitHub MCP 연결 |
 | 기획 | [기획서](dev/planning/planning.md) | 서비스 개요, 기능 목록, 마일스톤 |
 | 기획 | [정책 및 상태](dev/planning/policy-and-state.md) | 도메인 정책, 상태 전이, 불변식 |
