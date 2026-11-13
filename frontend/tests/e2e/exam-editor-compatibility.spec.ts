@@ -35,6 +35,9 @@ test("시험 에디터의 Draft 복원·자동 저장·제출은 일반 풀이 �
   const editor = page.getByRole("textbox", { name: "코드 편집기" });
   await expect(editor).toBeVisible();
   await expect(page.locator(".view-lines")).toContainText("// exam saved");
+  await expect(page.getByText("실행 입력 설정", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "직접 입력 추가", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "실행", exact: true })).toBeEnabled();
   await editor.press("ControlOrMeta+A");
   await editor.pressSequentially("// exam edited");
   await expect.poll(() => drafts.length).toBeGreaterThan(0);
