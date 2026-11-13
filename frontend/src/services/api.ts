@@ -255,6 +255,10 @@ export const judgeApi = {
     apiFetch<ServerPage<SubmissionHistoryItem>>(
       `/api/v1/me/submissions?problemId=${encodeURIComponent(problemId)}&context=PRACTICE`,
     ),
+  getMySubmissions: (page: number, size: number) =>
+    apiFetch<ServerPage<SubmissionHistoryItem>>(
+      `/api/v1/me/submissions?page=${page}&size=${size}`,
+    ),
 };
 
 // 관리자 문제 API (§2.3)

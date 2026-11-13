@@ -27,7 +27,7 @@ async function fetchCatalog(): Promise<Catalog> {
       problemRevisionId: p.problemRevisionId,
       title: p.title,
       difficulty: p.difficulty,
-      tags: [],
+      tags: p.tags,
       description: "",
       constraints: "",
       examples: "",

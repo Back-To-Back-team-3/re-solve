@@ -1,18 +1,12 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import {
-  ArrowRight,
-  Check,
-  Flame,
-  BookOpen,
-  Trophy,
-  CalendarDays,
-} from "lucide-react";
+import { ArrowRight, Flame, BookOpen, Trophy } from "lucide-react";
 import { Pet } from "@/components/pet";
 import {
   Badge,
   Button,
+  Empty,
   Go,
   Heading,
   Section,
@@ -22,46 +16,70 @@ import {
   Modal,
   useToast,
 } from "@/components/ui";
-import { api } from "@/services/mock-api";
+import { judgeApi, studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import { useCatalog } from "@/services/catalog";
-import { ProblemTable, SubmissionList } from "./problem-list";
+import { ProblemTable } from "./problem-list";
+import type { SubmissionHistoryItem } from "@/services/types";
+
+function relativeDate(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  if (days === 0) return "오늘";
+  if (days === 1) return "어제";
+  return `${days}일 전`;
+}
+
+const VERDICT_LABEL: Record<string, string> = {
+  AC: "맞았습니다",
+  WA: "틀렸습니다",
+  TLE: "시간 초과",
+  CE: "컴파일 오류",
+  MLE: "메모리 초과",
+  RE: "런타임 오류",
+};
+
+function RecentSubmissions({ items }: { items: SubmissionHistoryItem[] }) {
+  const { problems } = useCatalog();
+  if (!items.length) return <Empty title="아직 제출 내역이 없습니다." />;
+  return (
+    <div className="stack-sm">
+      {items.map((s) => {
+        const title = problems.find((p) => p.id === s.problemId)?.title ?? s.problemId;
+        return (
+          <Link key={s.submissionId} href={`/problems/${s.problemId}`} className="activity-row">
+            <BookOpen size={18} />
+            <div className="grow">
+              <b>{title}</b>
+              <p className="muted">
+                {VERDICT_LABEL[s.verdict ?? ""] ?? s.status} · {relativeDate(s.submittedAt)}
+              </p>
+            </div>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
 export function HomePage() {
   const { tags, problems } = useCatalog();
-  const r = useResource(api.snapshot),
-    toast = useToast();
-  const [hero, setHero] = useState("hash"),
+  const r = useResource(() => judgeApi.getMySubmissions(0, 5), "home-submissions");
+  const toast = useToast();
+  const [hero, setHero] = useState(tags[0]?.id ?? ""),
     [screen, setScreen] = useState("pet"),
     [modal, setModal] = useState(""),
     [levels, setLevels] = useState<Record<string, number>>({});
-  const current = tags.find((t) => t.id === hero)!;
-  const petLevel = levels[hero] ?? current.level;
+  const current = tags.find((t) => t.id === hero) ?? tags[0];
+  const petLevel = current ? levels[current.id] ?? current.level : 0;
   const stages = ["알", "아기", "어린이", "어른", "마스터"];
-  const needed = [0, 5, 6, 5, 0][petLevel];
-  const goal = [0, 60, 70, 65, 0][petLevel];
   const speech =
     petLevel === 0
       ? "톡톡… 알을 깨워 줄래요? 진단을 보거나 아기로 부화시켜 주세요."
       : petLevel === 4
         ? "왕관 어때요? 그래도 가끔 난이도 3 문제 하나씩은 주세요!"
-        : current.rate < goal
-          ? "배고파요… 힌트 없이 풀어 주면 더 든든해요."
-          : `냠냠! ${needed - current.ac}문제만 더 먹으면 ${stages[petLevel + 1]}(으)로 자라요!`;
-  if (r.loading)
-    return (
-      <div className="container">
-        <Loading />
-      </div>
-    );
-  if (r.error)
-    return (
-      <div className="container">
-        <ErrorState message={r.error.message} retry={r.retry} />
-      </div>
-    );
-  const submissions = r.data!.submissions.filter(
-    (s) => s.userId === r.data!.currentUserId && !s.examId,
-  );
+        : "조금씩, 꾸준히 잘하고 있어!";
+
   return (
     <div className="container stack">
       <div className="hero-grid">
@@ -76,97 +94,62 @@ export function HomePage() {
               태그마다 펫이 한 마리씩. 문제를 풀면 알에서 아기, 어린이, 어른으로
               자라고 마스터가 되면 왕관을 써요.
             </p>
-            <div className="speech">
-              <b>
-                {petLevel === 0
-                  ? "??? (알)"
-                  : `${current.pet} · ${stages[petLevel]}`}
-              </b>
-              <p>“{speech}”</p>
-            </div>
+            {current && (
+              <div className="speech">
+                <b>
+                  {petLevel === 0 ? "??? (알)" : `${current.pet} · ${stages[petLevel]}`}
+                </b>
+                <p>&ldquo;{speech}&rdquo;</p>
+              </div>
+            )}
             <div className="row wrap">
               <Go className="secondary" href={`/problems?tag=${hero}`}>
                 문제 풀러 가기 <ArrowRight size={16} />
               </Go>
-              <Button onClick={() => setModal("diagnosis")}>
-                내 실력 진단
-              </Button>
+              <Button onClick={() => setModal("diagnosis")}>내 실력 진단</Button>
             </div>
           </div>
-          <div className="device">
-            <span className="pixel">RE:GOTCHI</span>
-            <div className="lcd">
-              <div className="row between full">
-                <span className="pixel">{current.pet}</span>
-                <span>Lv.{levels[hero] ?? current.level}</span>
+          {current && (
+            <div className="device">
+              <span className="pixel">RE:GOTCHI</span>
+              <div className="lcd">
+                <div className="row between full">
+                  <span className="pixel">{current.pet}</span>
+                  <span>Lv.{petLevel}</span>
+                </div>
+                {screen === "pet" ? (
+                  <Pet level={petLevel} size={100} label={current.pet} />
+                ) : (
+                  <div className="stack-sm">
+                    <b>{screen === "status" ? "알고리즘 성장 상태" : "오늘의 응원"}</b>
+                    <span>
+                      {screen === "status" ? `${current.name} 태그` : "조금씩, 꾸준히 잘하고 있어!"}
+                    </span>
+                  </div>
+                )}
+                <span className="hearts">♥ ♥ ♥ ♡</span>
               </div>
-              {screen === "pet" ? (
-                <Pet
-                  level={levels[hero] ?? current.level}
-                  size={100}
-                  label={current.pet}
-                />
-              ) : (
-                <div className="stack-sm">
-                  <b>
-                    {screen === "status" ? "알고리즘 성장 상태" : "오늘의 응원"}
-                  </b>
-                  <span>
-                    {screen === "status"
-                      ? `정답률 ${current.rate}% · ${current.ac}회 해결`
-                      : "조금씩, 꾸준히 잘하고 있어!"}
-                  </span>
-                </div>
-              )}
-              <span className="hearts">♥ ♥ ♥ ♡</span>
+              <div className="device-controls">
+                {[
+                  ["A", "펫", "pet"],
+                  ["B", "상태", "status"],
+                  ["C", "응원", "cheer"],
+                ].map(([a, b, c], i) => (
+                  <div key={a}>
+                    <button
+                      className={`round ${i === 1 ? "pink" : i === 2 ? "white" : ""}`}
+                      aria-label={`${b} 화면`}
+                      onClick={() => setScreen(c)}
+                    >
+                      {a}
+                    </button>
+                    <small>{b}</small>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="device-controls">
-              {[
-                ["A", "펫", "pet"],
-                ["B", "상태", "status"],
-                ["C", "응원", "cheer"],
-              ].map(([a, b, c], i) => (
-                <div key={a}>
-                  <button
-                    className={`round ${i === 1 ? "pink" : i === 2 ? "white" : ""}`}
-                    aria-label={`${b} 화면`}
-                    onClick={() => setScreen(c)}
-                  >
-                    {a}
-                  </button>
-                  <small>{b}</small>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
         </section>
-        <Section title="오늘의 돌보기">
-          <div className="stack">
-            <Badge tone="accent">DAILY</Badge>
-            <p className="muted">작은 습관이 모여, 더 큰 실력이 돼요.</p>
-            {[
-              ["문제 한 개 풀기", "펫에게 맛있는 한 끼"],
-              ["틀린 문제 다시 보기", "약한 부분을 단단하게"],
-              ["풀이 노트 남기기", "오늘 배운 것을 기억해요"],
-            ].map(([a, b], i) => (
-              <Link
-                href={i === 0 ? "/problems" : "/problems/1002"}
-                className="quest"
-                key={a}
-              >
-                <span className="check-box">
-                  {i === 0 && <Check size={18} />}
-                </span>
-                <div>
-                  <b>{a}</b>
-                  <p className="muted">{b}</p>
-                </div>
-              </Link>
-            ))}
-            <Progress value={33} />
-            <small>1 / 3 완료</small>
-          </div>
-        </Section>
       </div>
       <section>
         <div className="section-heading">
@@ -186,11 +169,7 @@ export function HomePage() {
               >
                 <div className="row between">
                   <span className="pixel">
-                    {level === 0
-                      ? "EGG"
-                      : level === 4
-                        ? "MASTER"
-                        : `LEVEL ${level}`}
+                    {level === 0 ? "EGG" : level === 4 ? "MASTER" : `LEVEL ${level}`}
                   </span>
                   <Badge>{t.name}</Badge>
                 </div>
@@ -206,17 +185,12 @@ export function HomePage() {
                 </button>
                 <h3>{t.pet}</h3>
                 <p className="muted">
-                  {level === 0
-                    ? "새로운 가능성이 잠들어 있어요."
-                    : `${t.ac}문제 해결 · 정답률 ${t.rate}%`}
+                  {level === 0 ? "새로운 가능성이 잠들어 있어요." : `${t.name} 태그 학습 중`}
                 </p>
                 <Progress value={level === 0 ? 0 : level * 23} />
                 <div className="row actions">
                   {level === 0 ? (
-                    <Button
-                      className="primary full"
-                      onClick={() => setModal(t.id)}
-                    >
+                    <Button className="primary full" onClick={() => setModal(t.id)}>
                       알 부화하기
                     </Button>
                   ) : (
@@ -257,33 +231,20 @@ export function HomePage() {
             }))}
           />
         </Section>
-        <Section title="성장 일기">
-          {[
-            ["TODAY", "해시몽이 레벨 2가 되었어요!"],
-            ["YESTERDAY", "스택/큐의 첫 문제를 해결했어요."],
-            ["3 DAYS AGO", "연결이가 마스터로 성장했어요."],
-          ].map(([a, b]) => (
-            <div className="activity-row" key={a}>
-              <Pet level={2} size={34} />
-              <div>
-                <small className="pixel">{a}</small>
-                <p>{b}</p>
-              </div>
-            </div>
-          ))}
+        <Section title="최근 제출" href="/mypage">
+          {r.loading ? (
+            <Loading />
+          ) : r.error ? (
+            <ErrorState message={r.error.message} retry={r.retry} />
+          ) : (
+            <RecentSubmissions items={r.data?.content ?? []} />
+          )}
         </Section>
       </div>
-      <Section title="최근 제출" href="/mypage">
-        <SubmissionList
-          items={submissions.slice().sort((a, b) => b.createdAt - a.createdAt)}
-        />
-      </Section>
       <Modal
         open={!!modal}
         onOpenChange={() => setModal("")}
-        title={
-          modal === "diagnosis" ? "알고리즘 성장 진단" : "새 친구를 만나볼까요?"
-        }
+        title={modal === "diagnosis" ? "알고리즘 성장 진단" : "새 친구를 만나볼까요?"}
         description={
           modal === "diagnosis"
             ? "진단은 고정된 예시 결과입니다. 실제 풀이 분석은 진행하지 않습니다."
@@ -296,7 +257,7 @@ export function HomePage() {
             <div>
               <h3>
                 {modal === "diagnosis"
-                  ? `${current.pet}의 다음 목표`
+                  ? `${current?.pet ?? ""}의 다음 목표`
                   : tags.find((t) => t.id === modal)?.pet}
               </h3>
               <p>
@@ -316,7 +277,6 @@ export function HomePage() {
               setModal("");
             }}
           >
-            {" "}
             {modal === "diagnosis" ? "확인" : "부화시키기"}
           </Button>
         </div>
@@ -324,85 +284,73 @@ export function HomePage() {
     </div>
   );
 }
+
 export function DashboardPage() {
   const { problems } = useCatalog();
-  const r = useResource(api.snapshot);
-  if (r.loading)
-    return (
-      <div className="container">
-        <Loading />
-      </div>
-    );
-  if (r.error)
-    return (
-      <div className="container">
-        <ErrorState message={r.error.message} retry={r.retry} />
-      </div>
-    );
-  const db = r.data!,
-    mine = db.submissions.filter(
-      (s) => s.userId === db.currentUserId && s.kind === "submit" && !s.examId,
-    ),
-    solved = new Set(
-      mine.filter((s) => s.verdict === "AC").map((s) => s.problemId),
-    );
+  const rSubs = useResource(() => judgeApi.getMySubmissions(0, 20), "dashboard-submissions");
+  const rStudies = useResource(
+    () => studyApi.getMyStudies({ status: "APPROVED", size: 3 }),
+    "dashboard-studies",
+  );
+
+  const submissions = rSubs.data?.content ?? [];
+  const solvedIds = new Set(
+    submissions.filter((s) => s.verdict === "AC").map((s) => s.problemId),
+  );
+  const firstSub = submissions[0];
+
   return (
     <div className="container stack">
       <Heading
         title="오늘도 한 걸음, 더 성장해요"
         eyebrow="MY LEARNING"
-        description={`${db.users.find((u) => u.id === db.currentUserId)?.name || "방문자"}님의 학습 현황입니다.`}
+        description="나의 학습 현황입니다."
       />
-      <section className="card hero">
-        <Pet size={96} />
-        <div className="grow">
-          <Badge tone="accent">CONTINUE</Badge>
-          <h2 style={{ marginTop: 12 }}>멈췄던 곳에서 다시 시작해 볼까요?</h2>
-          <p>올바른 괄호 · 스택/큐 · Lv. 1</p>
-        </div>
-        <Go className="secondary" href="/problems/1002">
-          이어서 풀기 <ArrowRight size={18} />
-        </Go>
-      </section>
+      {firstSub ? (
+        <section className="card hero">
+          <Pet size={96} />
+          <div className="grow">
+            <Badge tone="accent">CONTINUE</Badge>
+            <h2 className="mt-3">멈췄던 곳에서 다시 시작해 볼까요?</h2>
+            <p>{problems.find((p) => p.id === firstSub.problemId)?.title ?? firstSub.problemId}</p>
+          </div>
+          <Go className="secondary" href={`/problems/${firstSub.problemId}`}>
+            이어서 풀기 <ArrowRight size={18} />
+          </Go>
+        </section>
+      ) : null}
       <div className="dashboard-cols">
         <div className="stack">
           <Section title="추천 문제" href="/problems">
             {problems
-              .filter((p) => !solved.has(p.id))
+              .filter((p) => !solvedIds.has(p.id))
               .slice(0, 4)
               .map((p) => (
-                <Link
-                  className="activity-row"
-                  key={p.id}
-                  href={`/problems/${p.id}`}
-                >
+                <Link className="activity-row" key={p.id} href={`/problems/${p.id}`}>
                   <BookOpen size={18} />
                   <div className="grow">
                     <b>{p.title}</b>
-                    <p className="muted">
-                      {p.tags[0]?.name}
-                    </p>
+                    <p className="muted">{p.tags[0]?.name}</p>
                   </div>
                   <Badge>Lv.{p.difficulty}</Badge>
                 </Link>
               ))}
+            {!problems.filter((p) => !solvedIds.has(p.id)).length && (
+              <Empty title="모든 문제를 풀었어요!" description="새로운 문제가 추가되면 알려드릴게요." />
+            )}
           </Section>
           <Section title="학습 통계">
             <div className="grid-2">
               <div>
                 <Flame />
-                <p className="stat-number">{solved.size}</p>
+                <p className="stat-number">{solvedIds.size}</p>
                 <small>해결한 문제</small>
               </div>
               <div>
                 <Trophy />
                 <p className="stat-number">
-                  {mine.length
-                    ? Math.round(
-                        (mine.filter((s) => s.verdict === "AC").length /
-                          mine.length) *
-                          100,
-                      )
+                  {submissions.length
+                    ? Math.round((solvedIds.size / submissions.length) * 100)
                     : 0}
                   %
                 </p>
@@ -413,47 +361,23 @@ export function DashboardPage() {
         </div>
         <div className="stack">
           <Section title="참여 중인 스터디" href="/studies">
-            {db.studies
-              .filter((s) => s.members.includes(db.currentUserId || ""))
-              .map((s) => (
-                <Link
-                  key={s.id}
-                  href={`/studies/${s.id}`}
-                  className="activity-row"
-                >
+            {rStudies.loading ? (
+              <Loading />
+            ) : rStudies.error ? (
+              <ErrorState message={rStudies.error.message} retry={rStudies.retry} />
+            ) : !rStudies.data?.content.length ? (
+              <Empty title="참여 중인 스터디가 없습니다." />
+            ) : (
+              rStudies.data.content.map((s) => (
+                <Link key={s.studyId} href={`/studies/${s.studyId}`} className="activity-row">
                   <Pet size={40} />
                   <div>
-                    <h3>{s.title}</h3>
-                    <p className="muted">
-                      {s.members.length}명 · {s.goal}
-                    </p>
+                    <h3>{s.name}</h3>
+                    <p className="muted">{s.role}</p>
                   </div>
                 </Link>
-              ))}
-          </Section>
-          <Section title="다가오는 모의 코테" href="/exams">
-            {db.exams
-              .filter(
-                (e) =>
-                  e.participants.includes(db.currentUserId || "") &&
-                  e.status !== "ended",
-              )
-              .slice(0, 3)
-              .map((e) => (
-                <Link
-                  key={e.id}
-                  href={`/exams/${e.id}`}
-                  className="activity-row"
-                >
-                  <CalendarDays />
-                  <div>
-                    <b>{e.title}</b>
-                    <p className="muted">
-                      {e.duration}분 · {e.problemIds.length}문제
-                    </p>
-                  </div>
-                </Link>
-              ))}
+              ))
+            )}
           </Section>
           <Section title="나의 성장">
             <div className="row">
@@ -461,21 +385,37 @@ export function DashboardPage() {
               <div className="grow">
                 <h3>실력이 차곡차곡 쌓이는 중!</h3>
                 <p className="muted">
-                  전체 문제 중 {solved.size} / {problems.length} 해결
+                  전체 문제 중 {solvedIds.size} / {problems.length} 해결
                 </p>
                 <Progress
-                  value={
-                    problems.length ? (solved.size / problems.length) * 100 : 0
-                  }
+                  value={problems.length ? (solvedIds.size / problems.length) * 100 : 0}
                 />
               </div>
             </div>
           </Section>
         </div>
         <Section title="최근 제출" href="/mypage">
-          <SubmissionList
-            items={mine.slice().sort((a, b) => b.createdAt - a.createdAt)}
-          />
+          {rSubs.loading ? (
+            <Loading />
+          ) : rSubs.error ? (
+            <ErrorState message={rSubs.error.message} retry={rSubs.retry} />
+          ) : !submissions.length ? (
+            <Empty title="아직 제출 내역이 없습니다." />
+          ) : (
+            <div className="stack-sm">
+              {submissions.slice(0, 5).map((s) => (
+                <Link key={s.submissionId} href={`/problems/${s.problemId}`} className="activity-row">
+                  <BookOpen size={18} />
+                  <div className="grow">
+                    <b>{problems.find((p) => p.id === s.problemId)?.title ?? s.problemId}</b>
+                    <p className="muted">
+                      {VERDICT_LABEL[s.verdict ?? ""] ?? s.status} · {relativeDate(s.submittedAt)}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </Section>
       </div>
     </div>
