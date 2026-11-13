@@ -37,6 +37,7 @@ export function Buffer({
     [ready, setReady] = useState(false),
     [saved, setSaved] = useState("복원 중…"),
     [reset, setReset] = useState(false),
+    [testCasesOpen, setTestCasesOpen] = useState(false),
     [sending, setSending] = useState(false),
     [paused, setPaused] = useState(false),
     [pollVersion, setPollVersion] = useState(0),
@@ -231,13 +232,7 @@ export function Buffer({
           <EditorMonaco code={code} language={language} fontSize={fontSize} onChange={edit} />
         )}
       </div>
-      <EditorActions saved={saved} ready={ready} busy={busy} busyRun={busyRun}
-        pendingSubmission={!!pending || (!!attempt && !attempt.result)} onSave={persist} onReset={() => setReset(true)}
-        onRun={handleRun} onSubmit={() => handleSubmit()} />
-      <section className="results stack-sm">
-        {!examId && <EditorRunInputs names={problem.functionSpec.parameters.map((param) => param.name)}
-          rows={customInputs} useSamples={useSamples} disabled={busy || busyRun}
-          onRows={setCustomInputs} onSamples={setUseSamples} />}
+      <section className="results stack-sm flex-1">
         <h3>실행 결과</h3>
         <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} error={requestError}
           disabled={busy || busyRun} paused={paused} onRetry={() => handleSubmit(true)}
@@ -249,6 +244,17 @@ export function Buffer({
         <EditorResultPanel busy={busy} showRun={showRun} busyRun={busyRun} queryError={judgeError}
           judgeResult={judgeResult} runError={runError} runResult={runResult} />
       </section>
+      <EditorActions saved={saved} ready={ready} busy={busy} busyRun={busyRun}
+        pendingSubmission={!!pending || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
+        onTestCases={examId ? undefined : () => setTestCasesOpen(true)}
+        onRun={handleRun} onSubmit={() => handleSubmit()} />
+      {!examId && <Modal open={testCasesOpen} onOpenChange={setTestCasesOpen}
+        title="테스트 케이스" description="공개 예제와 직접 입력한 값으로 실행합니다. 제출 시에는 전체 테스트로 채점합니다.">
+        <EditorRunInputs names={problem.functionSpec.parameters.map((param) => param.name)}
+          rows={customInputs} useSamples={useSamples} disabled={busy || busyRun}
+          onRows={setCustomInputs} onSamples={setUseSamples} />
+        <Button className="primary" onClick={() => setTestCasesOpen(false)}>적용</Button>
+      </Modal>}
       <Modal
         open={reset}
         onOpenChange={setReset}

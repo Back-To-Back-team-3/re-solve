@@ -71,44 +71,28 @@ export function RunResult({ result }: { result: RunResponse }) {
     return <pre className="error-text">{result.compileMessage}</pre>;
   }
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>결과</th>
-            <th>반환값·기대값</th>
-            <th>성능·디버그 출력</th>
-          </tr>
-        </thead>
-        <tbody>
-          {result.results.map((t, i) => (
-            <tr key={i}>
-              <td>{i + 1}</td>
-              <td>
-                <Badge
-                  tone={
-                    t.verdict === "AC"
-                      ? "success"
-                      : t.verdict
-                        ? "error"
-                        : ""
-                  }
-                >
-                  {t.verdict === "AC"
-                    ? "통과"
-                    : t.verdict
-                      ? labels[t.verdict]
-                      : "실행"}
-                </Badge>
-              </td>
-              <td><pre className="mono">반환값: {t.actualReturnText ?? "—"}</pre>
-                <pre className="mono">기대값: {t.expectedReturnText ?? "없음 (직접 입력)"}</pre></td>
-              <td><p>{t.timeMs ?? "—"}ms · {t.memoryKb ?? "—"}KiB</p><pre className="mono">{t.stdout}</pre></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="stack-sm" aria-label="테스트별 실행 결과">
+      {result.results.map((item, index) => (
+        <article className="card stack-sm min-w-0" key={index} aria-label={`테스트 ${index + 1}`}>
+          <div className="row between wrap">
+            <h4>테스트 {index + 1} <small className="muted">· {item.source === "SAMPLE" ? "공개 예제" : "직접 입력"}</small></h4>
+            <Badge tone={item.verdict === "AC" ? "success" : item.verdict ? "error" : ""}>
+              {item.verdict === "AC" ? "통과" : item.verdict ? labels[item.verdict] : "실행 완료"}
+            </Badge>
+          </div>
+          <pre className="mono whitespace-pre-wrap [overflow-wrap:anywhere]">기대값: {item.expectedReturnText ?? "없음 (직접 입력)"}</pre>
+          <pre className="mono whitespace-pre-wrap [overflow-wrap:anywhere]">반환값: {item.actualReturnText ?? "—"}</pre>
+          <p className={item.verdict && item.verdict !== "AC" ? "error-text" : ""}>
+            실행 결과: {item.verdict === "AC" ? "기대값과 일치합니다." : item.verdict === "WA"
+              ? "반환값이 기대값과 다릅니다." : item.verdict ? labels[item.verdict] : "직접 입력 실행을 완료했습니다."}
+          </p>
+          <p className="muted">실행 시간: {item.timeMs ?? "—"}ms · 메모리: {item.memoryKb ?? "—"}KiB</p>
+          {item.stdout && <div className="stack-sm">
+            <h5>디버그 출력</h5>
+            <pre className="mono whitespace-pre-wrap [overflow-wrap:anywhere]">{item.stdout}</pre>
+          </div>}
+        </article>
+      ))}
     </div>
   );
 }
