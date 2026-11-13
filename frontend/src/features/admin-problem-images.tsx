@@ -37,7 +37,9 @@ export function AdminMarkdown({ text }: { text: string }) {
     components={markdownComponents}>{text}</Markdown></div>;
 }
 
-export function AdminProblemImages({ insert }: { insert: (markdown: string) => void }) {
+export function AdminProblemImages({ insert, onBusyChange }: {
+  insert: (markdown: string) => void; onBusyChange: (busy: boolean) => void;
+}) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [imageId, setImageId] = useState("");
@@ -45,31 +47,33 @@ export function AdminProblemImages({ insert }: { insert: (markdown: string) => v
   const [busy, setBusy] = useState(false);
   const request = useRef<{ file: File; key: string } | null>(null);
   async function upload() {
-    if (!file || busy) return;
+    if (!file || busy || imageId) return;
     setError("");
     if (file.size > 5 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
       setError("PNG·JPEG·WebP, 5MiB 이하 이미지를 선택해 주세요."); return;
     }
     const original = request.current?.file === file ? request.current : { file, key: crypto.randomUUID() };
-    request.current = original; setBusy(true);
+    request.current = original; setBusy(true); onBusyChange(true);
     try {
       const result = await adminProblemApi.uploadImage(original.file, original.key);
       setImageId(result.imageId);
+      insert(`\n![이미지](image:${result.imageId})\n`);
       router.refresh();
     }
     catch (failure) { setError(actionMessage(failure)); }
-    finally { setBusy(false); }
+    finally { setBusy(false); onBusyChange(false); }
   }
-  return <section className="card stack-sm">
-    <h2>본문 이미지</h2>
-    <input aria-label="업로드 이미지" type="file" accept="image/png,image/jpeg,image/webp" disabled={busy}
-      onChange={(event) => { setFile(event.target.files?.[0] ?? null); setImageId(""); setError(""); }} />
-    <Button type="button" disabled={!file || busy} onClick={upload}>{busy ? "업로드 중…" : "이미지 업로드·재요청"}</Button>
+  return <div className="space-y-2 border-t-2 pt-3" aria-label="본문 이미지 첨부">
+    <div className="flex flex-wrap items-center gap-3">
+    <label className="field">이미지 첨부<input aria-label="업로드 이미지" type="file" accept="image/png,image/jpeg,image/webp" disabled={busy}
+      onChange={(event) => { setFile(event.target.files?.[0] ?? null); setImageId(""); setError(""); }} /></label>
+    <Button type="button" className="small" disabled={!file || busy || Boolean(imageId)} onClick={upload}>{busy ? "첨부 중…" : "이미지 첨부·재요청"}</Button>
+    </div>
+    <small className="muted">PNG·JPEG·WebP, 최대 5MiB. 첨부하면 본문의 커서 위치에 이미지가 삽입됩니다.</small>
     {error && <p className="error-text">{error}</p>}
     {imageId && <>
-      <p>참조: {`![이미지](image:${imageId})`}</p>
-      <Button type="button" onClick={() => insert(`\n![이미지](image:${imageId})\n`)}>설명에 이미지 삽입</Button>
-      <AdminMarkdown text={`![업로드 미리보기](image:${imageId})`} />
+      <p role="status">본문에 이미지를 첨부했습니다.</p>
+      <details><summary>첨부 이미지 미리보기</summary><div className="max-w-xs"><AdminMarkdown text={`![업로드 미리보기](image:${imageId})`} /></div></details>
     </>}
-  </section>;
+  </div>;
 }
