@@ -12,6 +12,7 @@ import {
   authApi,
   memberApi,
   setAccessTokenSetter,
+  setMemberGetter,
   setTokenGetter,
 } from "../services/api";
 import type { Language, Member } from "../services/types";
@@ -93,6 +94,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       store.getState();
 
     setTokenGetter(() => store.getState().accessToken);
+    setMemberGetter(() => store.getState().member);
     setAccessTokenSetter(setAccessToken);
 
     if (process.env.NEXT_PUBLIC_DEV_BYPASS_USER_ID) {

@@ -69,6 +69,15 @@ export function setAccessTokenSetter(fn: (token: string) => void) {
   accessTokenSetter = fn;
 }
 
+// useAction 등 훅 바깥에서 현재 로그인 회원을 읽기 위해 WorkspaceProvider가 등록한다.
+let memberGetter: (() => Member | null) | null = null;
+export function setMemberGetter(fn: () => Member | null) {
+  memberGetter = fn;
+}
+export function getMember(): Member | null {
+  return memberGetter?.() ?? null;
+}
+
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,

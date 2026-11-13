@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { api } from "@/services/mock-api";
+import { getMember } from "@/services/api";
 export function Button({
   children,
   className = "",
@@ -256,7 +256,7 @@ export function useAction() {
     toast = useToast();
   return async (fn: () => Promise<unknown>, success?: string, auth = true) => {
     try {
-      if (auth && !(await api.currentUser())) {
+      if (auth && !getMember()) {
         router.push(`/login?returnTo=${encodeURIComponent(path)}`);
         return false;
       }
