@@ -71,9 +71,10 @@ function ProblemForm({ initial }: { initial: AdminProblemDetail | null }) {
       <label className="field">태그 ID (쉼표 구분)<input className="input" value={fields.tagIds}
         onChange={(event) => setFields({ ...fields, tagIds: event.target.value })} /></label>
       <section className="stack-sm" aria-label="본문 편집">
-        <label className="field">문제 설명<textarea ref={description} aria-label="문제 설명" className="input mono" rows={10} value={fields.description}
-          onChange={(event) => setFields({ ...fields, description: event.target.value })} /></label>
-        <AdminProblemImages insert={insertImage} onBusyChange={setUploading} />
+        <label className="field" htmlFor="problem-description">문제 설명</label>
+        <AdminProblemImages text={fields.description} insert={insertImage} onBusyChange={setUploading} />
+        <textarea id="problem-description" ref={description} aria-label="문제 설명" className="input mono" rows={10} value={fields.description}
+          onChange={(event) => setFields({ ...fields, description: event.target.value })} />
       </section>
       {([['constraints', '제한 사항'], ['examples', '입출력 예시'],
         ['executionLimits', '실행 제한 (JSON 또는 null)']] as const).map(([key, label]) =>
