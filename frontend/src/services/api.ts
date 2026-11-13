@@ -105,7 +105,7 @@ export function rethrowWithMessage(err: unknown, messages: Record<string, string
   throw err;
 }
 
-/** 버튼 동작 실패 토스트 문구. 서버 오류 메시지(error-codes.md)를 그대로 보여 주고, 알 수 없는 예외만 기본 문구로 바꾼다. */
+/** 버튼 동작 실패 토스트 문구. 서버 오류 메시지(에러 코드 표)를 그대로 보여 주고, 알 수 없는 예외만 기본 문구로 바꾼다. */
 export function actionErrorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (isApiError(e)) return e.message;

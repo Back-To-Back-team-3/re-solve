@@ -23,7 +23,7 @@ export const judgeStatusLabel: Record<JudgeState, string> = {
   FAILED: "시스템 오류",
 };
 
-/** `UNSOLVED`는 시도했지만 풀지 못한 경우도 포함하므로 "미도전"이 아니라 "미해결"로 표시한다. */
+/** `UNSOLVED`는 시도했지만 풀지 못한 경우도 포함하므로 "미해결"로 표시한다. */
 export const solvedStatusLabel: Record<SolvedStatus, string> = {
   SOLVED: "해결",
   UNSOLVED: "미해결",

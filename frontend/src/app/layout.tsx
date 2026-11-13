@@ -5,7 +5,7 @@ import { THEME_STORAGE_KEY } from "@/services/storage-keys";
 import "@/styles/globals.css";
 export const metadata: Metadata = {
   title: "Re:Solve — 함께 자라는 코딩 실력",
-  description: "알고리즘 펫과 함께하는 코딩테스트 연습 목업",
+  description: "알고리즘 펫과 함께하는 코딩테스트 연습",
 };
 export default function RootLayout({
   children,

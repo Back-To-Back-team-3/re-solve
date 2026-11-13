@@ -62,7 +62,7 @@ const studies = [
   studySummary(APPROVAL_STUDY_ID, "승인 가입 스터디", "APPROVAL"),
 ];
 
-/** POST /api/v1/studies 요청 본문 (api-spec §5.1). 화면이 보내는 필드를 그대로 받아 상세에 반영한다. */
+/** POST /api/v1/studies 요청 본문 (API 명세서 5.2.1). 화면이 보내는 필드를 그대로 받아 상세에 반영한다. */
 type StudyCreateBody = Pick<StudySummary, "name" | "goal" | "skillLevel" | "preferredLanguage" | "activeTimeSlot"
   | "capacity" | "joinType"> & { description: string; isAutoReopen: boolean };
 
@@ -78,7 +78,7 @@ export type ApiFixtureOptions = {
 };
 
 /**
- * 실서버 API 계약(api-spec) 형식으로 화면 전체 흐름에 응답한다.
+ * 실서버 API 계약(API 명세서) 형식으로 화면 전체 흐름에 응답한다.
  * 처리하지 않는 경로는 404로 응답해, 화면이 계약에 없는 경로를 부르면 테스트가 바로 실패하게 한다.
  */
 export async function mockApi(page: Page, options: ApiFixtureOptions = {}) {

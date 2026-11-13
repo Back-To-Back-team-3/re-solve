@@ -14,7 +14,7 @@ export function Board() {
   return <ComingSoon title="커뮤니티 게시판" />;
 }
 
-// 풀이 노트는 API 명세에 없어 브라우저에만 저장되던 목업 기능이므로 준비 중으로 둔다.
+// 풀이 노트는 API 명세에 없어 서버에 저장할 수 없으므로 준비 중으로 둔다.
 export function Note() {
   return <ComingSoon title="풀이 노트" />;
 }
