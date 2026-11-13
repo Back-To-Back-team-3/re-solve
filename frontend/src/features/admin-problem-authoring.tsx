@@ -6,31 +6,46 @@ import { adminProblemApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import { actionMessage, parseProblemContent, parseProblemFunction } from "@/services/problem-authoring";
 import { readProblemTests, writeProblemTests } from "@/services/problem-test-inputs";
-import type { AdminProblemDetail, ProblemWriteRequest } from "@/services/types";
+import type { AdminProblemDetail, ProblemWriteContent, ProblemWriteRequest } from "@/services/types";
 import { AdminMarkdown, AdminProblemImages } from "@/features/admin-problem-images";
 import { AdminProblemTestInputs } from "@/features/admin-problem-test-inputs";
+import { AdminProblemFunction } from "@/features/admin-problem-function";
 
 function ProblemForm({ initial }: { initial: AdminProblemDetail | null }) {
   const router = useRouter();
   const [scope, setScope] = useState<"GENERAL" | "EXAM_ONLY">("GENERAL");
+  const [functionSpec, setFunctionSpec] = useState<ProblemWriteContent["functionSpec"]>(initial?.functionSpec
+    ?? { name: "solution", parameters: [{ name: "a", type: { kind: "INT32" } }], returnType: { kind: "INT32" } });
   const [fields, setFields] = useState({
     title: initial?.title ?? "", description: initial?.description ?? "", constraints: initial?.constraints ?? "",
     examples: initial?.examples ?? "", difficulty: initial?.difficulty ?? 1, tagIds: initial?.tagIds.join(",") ?? "",
-    functionSpec: JSON.stringify(initial?.functionSpec ?? { name: "solution", parameters: [{ name: "a", type: { kind: "INT32" } }], returnType: { kind: "INT32" } }, null, 2),
     executionLimits: JSON.stringify(initial?.executionLimits ?? null, null, 2),
   });
-  const [tests, setTests] = useState(() => readProblemTests(parseProblemFunction(fields.functionSpec), initial?.testCases
+  const [tests, setTests] = useState(() => readProblemTests(functionSpec, initial?.testCases
     ?? [{ isSample: true, argumentTexts: { a: "1" }, expectedReturnText: "1" }, { isSample: false, argumentTexts: { a: "2" }, expectedReturnText: "2" }]));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const description = useRef<HTMLTextAreaElement>(null);
   const pending = useRef<{ body: ProblemWriteRequest; json: string; key: string } | null>(null);
   const lock = useRef(false);
+  /** 첨부 대기 중 편집한 본문도 유지하며 현재 선택 범위에 이미지 참조를 삽입한다. */
+  function insertImage(markdown: string) {
+    const editor = description.current;
+    const text = editor?.value ?? fields.description;
+    const start = editor?.selectionStart ?? text.length;
+    const end = editor?.selectionEnd ?? start;
+    const next = text.slice(0, start) + markdown + text.slice(end);
+    setFields((current) => ({ ...current, description: next }));
+    requestAnimationFrame(() => { editor?.focus(); editor?.setSelectionRange(start + markdown.length, start + markdown.length); });
+  }
   async function save(event: React.FormEvent) {
-    event.preventDefault(); if (lock.current) return;
+    event.preventDefault(); if (lock.current || uploading) return;
     setError("");
     try {
       const content = parseProblemContent({ ...fields,
-        testCases: JSON.stringify(writeProblemTests(parseProblemFunction(fields.functionSpec), tests)) });
+        functionSpec: JSON.stringify(functionSpec),
+        testCases: JSON.stringify(writeProblemTests(parseProblemFunction(JSON.stringify(functionSpec)), tests)) });
       const body = initial ? { ...content, rowVersion: initial.rowVersion } : { ...content, scope };
       const json = JSON.stringify(body);
       if (new TextEncoder().encode(json).length > 8 * 1024 * 1024) throw new Error("등록 본문은 8MiB 이하여야 합니다.");
@@ -55,16 +70,21 @@ function ProblemForm({ initial }: { initial: AdminProblemDetail | null }) {
       </select></label>
       <label className="field">태그 ID (쉼표 구분)<input className="input" value={fields.tagIds}
         onChange={(event) => setFields({ ...fields, tagIds: event.target.value })} /></label>
-      {([['description', '문제 설명'], ['constraints', '제한 사항'], ['examples', '입출력 예시'],
-        ['functionSpec', '함수 명세 (JSON)'], ['executionLimits', '실행 제한 (JSON 또는 null)']] as const).map(([key, label]) =>
+      <section className="stack-sm" aria-label="본문 편집">
+        <label className="field">문제 설명<textarea ref={description} aria-label="문제 설명" className="input mono" rows={10} value={fields.description}
+          onChange={(event) => setFields({ ...fields, description: event.target.value })} /></label>
+        <AdminProblemImages insert={insertImage} onBusyChange={setUploading} />
+      </section>
+      {([['constraints', '제한 사항'], ['examples', '입출력 예시'],
+        ['executionLimits', '실행 제한 (JSON 또는 null)']] as const).map(([key, label]) =>
         <label className="field" key={key}>{label}<textarea aria-label={label} className="input mono" rows={6} value={fields[key]}
           onChange={(event) => setFields({ ...fields, [key]: event.target.value })} /></label>)}
-      <AdminProblemTestInputs functionSpec={fields.functionSpec} value={tests} onChange={setTests} />
+      <AdminProblemFunction value={functionSpec} onChange={setFunctionSpec} />
+      <AdminProblemTestInputs functionSpec={JSON.stringify(functionSpec)} value={tests} onChange={setTests} />
       <p>기존 테스트의 파일 ID는 요청에 포함하지 않습니다. 같은 내용의 재요청은 기존 키를 유지하고, 내용을 변경하면 새 요청으로 접수합니다.</p>
-      <Button type="submit" disabled={busy}>{busy ? "저장 중…" : initial ? "새 회차 저장·재요청" : "문제 등록·재요청"}</Button>
+      <Button type="submit" disabled={busy || uploading}>{busy ? "저장 중…" : initial ? "새 회차 저장·재요청" : "문제 등록·재요청"}</Button>
     </fieldset>
     {error && <p className="error-text" role="alert">{error}</p>}
-    {!busy && <AdminProblemImages insert={(markdown) => setFields((current) => ({ ...current, description: current.description + markdown }))} />}
     <details className="card"><summary>Markdown 미리보기</summary><AdminMarkdown text={`${fields.description}\n\n## 제한 사항\n${fields.constraints}\n\n## 예시\n${fields.examples}`} /></details>
   </form>;
 }
