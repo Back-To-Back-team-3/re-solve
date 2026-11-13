@@ -91,6 +91,15 @@ export function httpErrorMessage(status: number): string {
   return status >= 500 ? SERVER_ERROR_MESSAGE : `HTTP ${status}`;
 }
 
+/**
+ * 화면별로 다듬은 오류 문구가 있는 코드만 바꿔 던지고, 그 밖의 오류는 그대로 던진다.
+ * 세션 만료(`UNAUTHORIZED`)가 일반 오류로 바뀌면 useAction이 로그인 이동을 하지 못하기 때문이다.
+ */
+export function rethrowWithMessage(err: unknown, messages: Record<string, string>): never {
+  if (isApiError(err) && messages[err.code]) throw new Error(messages[err.code]);
+  throw err;
+}
+
 /** 버튼 동작 실패 토스트 문구. 서버 오류 메시지(error-codes.md)를 그대로 보여 주고, 알 수 없는 예외만 기본 문구로 바꾼다. */
 export function actionErrorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;

@@ -7,6 +7,7 @@ import {
   apiFetch,
   httpErrorMessage,
   isApiError,
+  rethrowWithMessage,
 } from "../../src/services/api";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -43,6 +44,24 @@ describe("isApiError", () => {
     expect(isApiError({ code: "UNAUTHORIZED", message: "로그인이 필요합니다" })).toBe(true);
     expect(isApiError({ code: 401 })).toBe(false);
     expect(isApiError(undefined)).toBe(false);
+  });
+});
+
+describe("rethrowWithMessage", () => {
+  it("화면 문구가 정해진 오류 코드이면 그 문구의 Error로 바꿔 던진다", () => {
+    expect(() => rethrowWithMessage({ code: "STUDY_FULL", message: "server" }, { STUDY_FULL: "정원이 가득 찼습니다." }))
+      .toThrow(new Error("정원이 가득 찼습니다."));
+  });
+
+  it("세션 만료처럼 문구가 없는 오류는 코드를 유지한 채 그대로 던진다", () => {
+    const expired = { code: "UNAUTHORIZED", message: "로그인이 필요합니다" };
+    let thrown: unknown;
+    try {
+      rethrowWithMessage(expired, { STUDY_FULL: "정원이 가득 찼습니다." });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBe(expired);
   });
 });
 

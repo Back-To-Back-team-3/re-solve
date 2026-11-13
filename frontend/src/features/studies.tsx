@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Users, ArrowRight, Plus } from "lucide-react";
-import { studyApi } from "@/services/api";
+import { rethrowWithMessage, studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import type {
   GoalType,
@@ -329,24 +329,17 @@ export function StudyPage({ id }: { id: string }) {
           await studyApi.join(id);
           refresh();
         } catch (err) {
-          const code = (err as { code?: string }).code;
-          throw new Error(
-            code === "STUDY_FULL"
-              ? "정원이 가득 찼습니다."
-              : code === "STUDY_JOIN_LIMIT_EXCEEDED"
-                ? "최대 5개 스터디에 참여할 수 있습니다."
-                : code === "STUDY_ALREADY_APPLIED"
-                  ? "이미 신청하셨습니다."
-                  : code === "STUDY_NOT_RECRUITING"
-                    ? "현재 모집 중이 아닙니다."
-                    : ((err as { message?: string }).message ?? "오류가 발생했습니다."),
-          );
+          rethrowWithMessage(err, {
+            STUDY_FULL: "정원이 가득 찼습니다.",
+            STUDY_JOIN_LIMIT_EXCEEDED: "최대 5개 스터디에 참여할 수 있습니다.",
+            STUDY_ALREADY_APPLIED: "이미 신청하셨습니다.",
+            STUDY_NOT_RECRUITING: "현재 모집 중이 아닙니다.",
+          });
         }
       },
       study.joinType === "INSTANT"
         ? "가입이 완료됐습니다."
         : "신청이 완료됐습니다. 7일 내 승인되지 않으면 자동으로 취소됩니다.",
-      false,
     );
   }
 
@@ -364,7 +357,6 @@ export function StudyPage({ id }: { id: string }) {
         refresh();
       },
       isPending ? "신청을 취소했습니다." : "탈퇴했습니다.",
-      false,
     );
   }
 
@@ -506,19 +498,14 @@ export function StudyCreate() {
                 });
                 studyId = res.studyId;
               } catch (err) {
-                const code = (err as { code?: string }).code;
-                throw new Error(
-                  code === "STUDY_JOIN_LIMIT_EXCEEDED"
-                    ? "최대 5개 스터디에 참여할 수 있습니다."
-                    : code === "MEMBER_SUSPENDED"
-                      ? "계정이 정지되어 스터디를 만들 수 없습니다."
-                      : ((err as { message?: string }).message ?? "오류가 발생했습니다."),
-                );
+                rethrowWithMessage(err, {
+                  STUDY_JOIN_LIMIT_EXCEEDED: "최대 5개 스터디에 참여할 수 있습니다.",
+                  MEMBER_SUSPENDED: "계정이 정지되어 스터디를 만들 수 없습니다.",
+                });
               }
               router.push(`/studies/${studyId}`);
             },
             "스터디를 만들었습니다.",
-            false,
           );
           setBusy(false);
         }}

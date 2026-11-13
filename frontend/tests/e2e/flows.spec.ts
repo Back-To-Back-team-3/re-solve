@@ -241,6 +241,25 @@ test("로그인 상태에서 토큰 갱신까지 401이면 버튼 동작 후 원
   await expect(page).toHaveURL(new RegExp(`/login\\?returnTo=%2Fexams%2F${EXAM_ID}$`));
 });
 
+test("스터디 가입 중 토큰 갱신까지 401이면 원래 스터디 경로를 들고 로그인으로 이동한다", async ({ page }) => {
+  let expired = false;
+  await mockApi(page, {
+    handle: async (route, path) => {
+      if (!expired) return false;
+      if (path === "/api/v1/auth/token/refresh" || path === `/api/v1/studies/${INSTANT_STUDY_ID}/memberships`) {
+        await route.fulfill({ status: 401, json: { success: false, error: { code: "UNAUTHORIZED", message: "로그인이 필요합니다" } } });
+        return true;
+      }
+      return false;
+    },
+  });
+  await page.goto(`/studies/${INSTANT_STUDY_ID}`);
+  await expect(page.getByRole("button", { name: "가입", exact: true })).toBeVisible();
+  expired = true;
+  await page.getByRole("button", { name: "가입", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/login\\?returnTo=%2Fstudies%2F${INSTANT_STUDY_ID}$`));
+});
+
 // 결함: 연습 제출은 useAction을 거치지 않아 세션 만료(UNAUTHORIZED)를 로그인 이동 대신 결과 영역 오류 문구로만 보여 준다.
 test.fixme("연습 제출 중 토큰 갱신까지 401이면 원래 문제 경로를 들고 로그인으로 이동한다", async ({ page }) => {
   let expired = false;
