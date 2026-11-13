@@ -5,8 +5,7 @@ export function EditorRunInputs({ names, useSamples, rows, disabled, onSamples, 
   names: string[]; useSamples: boolean; rows: Record<string, string>[]; disabled: boolean;
   onSamples: (value: boolean) => void; onRows: (value: Record<string, string>[]) => void;
 }) {
-  return <details className="card">
-    <summary>실행 입력 설정</summary>
+  return <div className="max-h-[55vh] overflow-y-auto">
     <div className="stack-sm">
       <label><input type="checkbox" checked={useSamples} disabled={disabled}
         onChange={(event) => onSamples(event.target.checked)} /> 공개 예제 실행</label>
@@ -23,5 +22,5 @@ export function EditorRunInputs({ names, useSamples, rows, disabled, onSamples, 
       <Button type="button" disabled={disabled || rows.length >= 5}
         onClick={() => onRows([...rows, Object.fromEntries(names.map((name) => [name, ""]))])}>직접 입력 추가</Button>
     </div>
-  </details>;
+  </div>;
 }

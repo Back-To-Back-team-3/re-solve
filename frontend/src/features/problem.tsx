@@ -26,9 +26,9 @@ export function ProblemDescription({
   exam?: boolean;
 }) {
   const [tab, setTab] = useState("description");
+  const [page, setPage] = useState(0);
   const parameterNames = problem.functionSpec.parameters.map((parameter) => parameter.name);
   const structuredSamples = problem.samples.every((sample) => sample.argumentTexts !== undefined);
-  const [page, setPage] = useState(0);
   const submissions = useWorkspace((state) => state.practiceSubmissions);
   const submissionVersion = JSON.stringify(Object.values(submissions).flatMap((attempt) =>
     attempt?.problemId === problem.id && attempt.submissionId
