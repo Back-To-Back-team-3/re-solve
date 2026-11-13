@@ -102,7 +102,7 @@ export function Buffer({
       window.removeEventListener("resolve:flush", flush);
       window.removeEventListener("pagehide", flush);
     };
-    // Buffer is keyed by user, exam, problem and language; hydrate exactly once before autosave.
+    // 회원·시험·문제 회차·언어별 Buffer에서 자동 저장 전에 코드를 한 번 복원한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   function persist() {
