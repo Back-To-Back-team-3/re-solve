@@ -3,10 +3,10 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Search } from "lucide-react";
-import { labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
 import { problemApi } from "@/services/api";
-import type { ProblemListItem, Submission, SubmissionHistoryItem, Verdict } from "@/services/types";
+import type { ProblemListItem, SubmissionHistoryItem, Verdict } from "@/services/types";
+import { judgeStatusLabel, labelOf, languageLabel, solvedStatusLabel, verdictLabel } from "@/services/labels";
 import { useCatalog } from "@/services/catalog";
 import {
   Badge,
@@ -15,7 +15,6 @@ import {
   ErrorState,
   Heading,
   Loading,
-  date,
 } from "@/components/ui";
 export function ProblemTable({ items }: { items: ProblemListItem[] }) {
   return (
@@ -35,7 +34,7 @@ export function ProblemTable({ items }: { items: ProblemListItem[] }) {
             <tr key={p.problemId}>
               <td>
                 <Badge tone={p.solvedStatus === "SOLVED" ? "success" : ""}>
-                  {labels[p.solvedStatus]}
+                  {labelOf(solvedStatusLabel, p.solvedStatus)}
                 </Badge>
               </td>
               <td className="mono">{p.problemId}</td>
@@ -53,49 +52,6 @@ export function ProblemTable({ items }: { items: ProblemListItem[] }) {
     </div>
   );
 }
-export function SubmissionList({ items }: { items: Submission[] }) {
-  const { problems } = useCatalog();
-  if (!items.length)
-    return (
-      <Empty
-        title="제출 기록이 없어요"
-        description="문제를 제출하면 여기에 결과가 남아요."
-      />
-    );
-  return (
-    <div>
-      {items.slice(0, 8).map((s) => (
-        <div className="activity-row" key={s.id}>
-          <Badge
-            tone={
-              s.verdict === "AC"
-                ? "success"
-                : s.state === "FAILED" || s.verdict
-                  ? "error"
-                  : "pending"
-            }
-          >
-            {labels[s.verdict || s.state]}
-          </Badge>
-          <div className="grow">
-            <Link href={`/problems/${s.problemId}`}>
-              <b>{problems.find((p) => p.id === s.problemId)?.title}</b>
-            </Link>
-            <p className="muted">
-              {labels[s.language]} · {s.kind === "run" ? "예제 실행" : "제출"} ·{" "}
-              {date(s.createdAt)}
-            </p>
-          </div>
-          <span className="badge">모의</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-const VERDICT_LABELS: Record<string, string> = {
-  AC: "정답", WA: "오답", TLE: "시간 초과",
-  MLE: "메모리 초과", RE: "런타임 에러", CE: "컴파일 에러",
-};
 function submissionTone(verdict: Verdict | null): string {
   if (!verdict) return "pending";
   if (verdict === "AC") return "success";
@@ -131,13 +87,13 @@ export function ProblemSubmissionList({ items }: { items: SubmissionHistoryItem[
                   aria-label={`제출 ${s.submissionId} 코드 및 결과 보기`}>
                   <Badge tone={submissionTone(s.verdict)}>
                     {s.verdict
-                      ? (VERDICT_LABELS[s.verdict] ?? s.verdict)
-                      : labels[s.status]}
+                      ? labelOf(verdictLabel, s.verdict)
+                      : labelOf(judgeStatusLabel, s.status)}
                   </Badge>
                   <small className="underline">코드 보기</small>
                 </Link>
               </td>
-              <td>{labels[s.language]}</td>
+              <td>{labelOf(languageLabel, s.language)}</td>
               <td>{s.maxTimeMs != null ? `${s.maxTimeMs}ms` : "—"}</td>
               <td>{s.maxMemoryKb != null ? `${Math.round(s.maxMemoryKb / 1024)}MB` : "—"}</td>
               <td className="muted">
@@ -263,7 +219,7 @@ export function ProblemsPage() {
           {
             key: "solvedStatus",
             label: "모든 상태",
-            options: ["UNSOLVED", "SOLVED"].map((s) => [s, labels[s]]),
+            options: ["UNSOLVED", "SOLVED"].map((s) => [s, labelOf(solvedStatusLabel, s)]),
           },
           {
             key: "sort",

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { Badge, Empty } from "@/components/ui";
-import { labels } from "@/services/mock-api";
+import { judgeStatusLabel, labelOf, verdictLabel } from "@/services/labels";
 import { judgeApi } from "@/services/api";
 import { usePollUntil } from "@/services/hooks";
 import type { JudgeResult, RunResponse } from "@/services/types";
@@ -29,10 +29,6 @@ export function JudgePoll({
   }, [loading, polling, data, error]);
   return null;
 }
-const VERDICT_LABELS: Record<string, string> = {
-  AC: "정답", WA: "오답", TLE: "시간 초과",
-  MLE: "메모리 초과", RE: "런타임 에러", CE: "컴파일 에러",
-};
 function verdictTone(verdict: string | null): string {
   if (!verdict) return "pending";
   if (verdict === "AC") return "success";
@@ -47,8 +43,8 @@ export function JudgeResultView({ result }: { result: JudgeResult }) {
       <div className="row">
         <Badge tone={verdictTone(v)}>
           {v
-            ? `${v} ${VERDICT_LABELS[v] ?? v}`
-            : labels[result.status]}
+            ? `${v} ${labelOf(verdictLabel, v)}`
+            : labelOf(judgeStatusLabel, result.status)}
         </Badge>
         {r && (
           <span>
@@ -79,7 +75,7 @@ export function RunResult({ result, expectations = [] }: { result: RunResponse; 
             <div className="row between wrap">
               <h4>테스트 {index + 1} <small className="muted">· {item.source === "SAMPLE" ? "공개 예제" : "직접 입력"}</small></h4>
               <Badge tone={item.verdict === "AC" ? "success" : item.verdict ? "error" : ""}>
-                {item.verdict === "AC" ? "통과" : item.verdict ? labels[item.verdict] : "실행 완료"}
+                {item.verdict === "AC" ? "통과" : item.verdict ? labelOf(verdictLabel, item.verdict) : "실행 완료"}
               </Badge>
             </div>
             <pre className="mono whitespace-pre-wrap [overflow-wrap:anywhere]">{expected != null
@@ -88,7 +84,7 @@ export function RunResult({ result, expectations = [] }: { result: RunResponse; 
             {expected != null && <small className="muted">사용자 기대값은 참고용이며 자동 판정하지 않습니다.</small>}
             <p className={item.verdict && item.verdict !== "AC" ? "error-text" : ""}>
               실행 결과: {item.verdict === "AC" ? "기대값과 일치합니다." : item.verdict === "WA"
-                ? "반환값이 기대값과 다릅니다." : item.verdict ? labels[item.verdict] : "직접 입력 실행을 완료했습니다."}
+                ? "반환값이 기대값과 다릅니다." : item.verdict ? labelOf(verdictLabel, item.verdict) : "직접 입력 실행을 완료했습니다."}
             </p>
             <p className="muted">실행 시간: {item.timeMs ?? "—"}ms · 메모리: {item.memoryKb ?? "—"}KiB</p>
             {item.stdout && <div className="stack-sm">
