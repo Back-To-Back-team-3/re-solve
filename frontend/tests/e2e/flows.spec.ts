@@ -272,11 +272,12 @@ test("연습 제출 중 토큰 갱신까지 401이면 원래 문제 경로를 �
       return false;
     },
   });
-  await page.goto("/problems/1001");
+  // 돌아갈 주소에 쿼리까지 유지되는지 보려고 화면이 쓰지 않는 쿼리를 붙인다.
+  await page.goto("/problems/1001?from=search");
   await expect(editor(page)).toBeVisible();
   expired = true;
   await page.getByRole("button", { name: "제출", exact: true }).click();
-  await expect(page).toHaveURL(/\/login\?returnTo=%2Fproblems%2F1001$/);
+  await expect(page).toHaveURL(/\/login\?returnTo=%2Fproblems%2F1001%3Ffrom%3Dsearch$/);
 });
 
 test("Draft 저장소 쓰기가 실패해도 편집 중인 코드를 유지하고 복사 보관 안내를 알린다", async ({ page }) => {

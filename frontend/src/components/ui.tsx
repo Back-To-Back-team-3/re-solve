@@ -9,7 +9,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { actionErrorMessage, getMember, isUnauthorized, whenAuthReady } from "@/services/api";
 export function Button({
   children,
@@ -252,9 +252,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 export const useToast = () => useContext(ToastContext);
 /** 현재 화면으로 돌아오도록 경로를 실어 로그인 화면으로 보낸다. */
 export function useLoginRedirect() {
-  const router = useRouter(),
-    path = usePathname();
-  return () => router.push(`/login?returnTo=${encodeURIComponent(path)}`);
+  const router = useRouter();
+  // 보호 경로 가드(workspace.tsx)와 같게 호출 시점의 경로와 쿼리를 함께 넘겨 돌아왔을 때 화면 상태를 잃지 않게 한다.
+  return () => router.push(`/login?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`);
 }
 export function useAction() {
   const toLogin = useLoginRedirect(),
