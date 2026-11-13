@@ -1,5 +1,6 @@
 import type {
   RunCreateRequest, JudgeLanguagesResponse, SubmissionAttemptsResponse, SubmissionTestsResponse,
+  ProblemValidationRequest, ProblemValidationReceipt, ProblemImageUploaded, AdminProblemFilter, ProblemVisibilityChanged,
   ActiveTimeSlot,
   AdminMember,
   AdminProblemListItem,
@@ -49,7 +50,6 @@ import type {
   ProblemDetail,
   ProblemFilter,
   ProblemListItem,
-  ProblemVisibility,
   RankingResponse,
   RunResponse,
   ServerPage,
@@ -284,17 +284,17 @@ export const adminProblemApi = {
     id ? `/api/v1/admin/problems/${id}/revisions` : "/api/v1/admin/problems",
     { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) },
   ),
-  validate: (id: string, revision: string, body: { language: Language; sourceCode: string }, key: string) =>
-    apiFetch<{ validationId: string }>(`/api/v1/admin/problems/${id}/revisions/${revision}/validations`,
+  validate: (id: string, revision: string, body: ProblemValidationRequest, key: string) =>
+    apiFetch<ProblemValidationReceipt>(`/api/v1/admin/problems/${id}/revisions/${revision}/validations`,
       { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) }),
   getValidation: (id: string) => apiFetch<ValidationProgress>(`/api/v1/admin/problems/validations/${id}`),
   uploadImage: (file: File, key: string) => {
     const body = new FormData(); body.append("file", file);
-    return apiFetch<{ imageId: string }>("/api/v1/admin/problems/images", { method: "POST", body, headers: { "Idempotency-Key": key } });
+    return apiFetch<ProblemImageUploaded>("/api/v1/admin/problems/images", { method: "POST", body, headers: { "Idempotency-Key": key } });
   },
   getImage: (id: string) => apiFetchBlob(`/api/v1/admin/problems/images/${id}/content`),
 
-  getList: (filter: { visibility?: string; page?: number; size?: number } = {}) => {
+  getList: (filter: AdminProblemFilter = {}) => {
     const q = new URLSearchParams();
     if (filter.visibility) q.set("visibility", filter.visibility);
     if (filter.page != null) q.set("page", String(filter.page));
@@ -305,7 +305,7 @@ export const adminProblemApi = {
     );
   },
   publish: (problemId: string, rowVersion: number) =>
-    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+    apiFetch<ProblemVisibilityChanged>(
       `/api/v1/admin/problems/${problemId}/publication`,
       {
         method: "POST",
@@ -314,7 +314,7 @@ export const adminProblemApi = {
       },
     ),
   unpublish: (problemId: string, rowVersion: number) =>
-    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+    apiFetch<ProblemVisibilityChanged>(
       `/api/v1/admin/problems/${problemId}/unpublication`,
       {
         method: "POST",
@@ -323,7 +323,7 @@ export const adminProblemApi = {
       },
     ),
   archive: (problemId: string, rowVersion: number, reason: string) =>
-    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+    apiFetch<ProblemVisibilityChanged>(
       `/api/v1/admin/problems/${problemId}/archive`,
       {
         method: "POST",
