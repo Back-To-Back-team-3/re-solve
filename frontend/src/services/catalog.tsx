@@ -7,7 +7,6 @@ import type { Problem, Tag } from "./types";
 type Catalog = { tags: Tag[]; problems: Problem[] };
 const Context = createContext<Catalog | null>(null);
 // 태그 목록(§2.5.1)과 문제 목록(§2.1.1, size 100)을 병렬로 조회해 카탈로그를 구성한다.
-// home.tsx가 커밋 3에서 교체되기 전까지 mock Tag 타입 호환을 위해 pet·level·ac·rate를 임시로 채운다.
 async function fetchCatalog(): Promise<Catalog> {
   const [tagsRes, problemsRes] = await Promise.all([
     problemTagApi.getTags(),
