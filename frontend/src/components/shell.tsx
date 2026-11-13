@@ -130,7 +130,11 @@ function Frame({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main id="main" data-ready={authReady}>
-        <CatalogProvider>{children}</CatalogProvider>
+        {authReady && member !== null ? (
+          <CatalogProvider>{children}</CatalogProvider>
+        ) : (
+          children
+        )}
       </main>
       <footer className="footer">
         <span className="pixel">Re:Solve · GROW WITH CODE</span>
