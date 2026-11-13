@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { actionErrorMessage, getMember, isApiError, whenAuthReady } from "@/services/api";
+import { actionErrorMessage, getMember, isUnauthorized, whenAuthReady } from "@/services/api";
 export function Button({
   children,
   className = "",
@@ -250,16 +250,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 export const useToast = () => useContext(ToastContext);
-export function useAction() {
+/** 현재 화면으로 돌아오도록 경로를 실어 로그인 화면으로 보낸다. */
+export function useLoginRedirect() {
   const router = useRouter(),
-    path = usePathname(),
+    path = usePathname();
+  return () => router.push(`/login?returnTo=${encodeURIComponent(path)}`);
+}
+export function useAction() {
+  const toLogin = useLoginRedirect(),
     toast = useToast();
   return async (fn: () => Promise<unknown>, success?: string, auth = true) => {
     try {
       if (auth) {
         await whenAuthReady();
         if (!getMember()) {
-          router.push(`/login?returnTo=${encodeURIComponent(path)}`);
+          toLogin();
           return false;
         }
       }
@@ -268,8 +273,8 @@ export function useAction() {
       return true;
     } catch (e) {
       // 토큰 갱신까지 실패한 세션 만료는 비로그인 클릭과 같게 원래 경로를 유지해 로그인으로 보낸다.
-      if (isApiError(e) && e.code === "UNAUTHORIZED") {
-        router.push(`/login?returnTo=${encodeURIComponent(path)}`);
+      if (isUnauthorized(e)) {
+        toLogin();
         return false;
       }
       toast(actionErrorMessage(e));

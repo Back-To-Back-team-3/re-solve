@@ -86,6 +86,11 @@ export function isApiError(e: unknown): e is ApiError {
   );
 }
 
+/** 토큰 갱신까지 실패해 다시 로그인해야 하는 오류인지 판정한다. */
+export function isUnauthorized(e: unknown): boolean {
+  return isApiError(e) && e.code === "UNAUTHORIZED";
+}
+
 /** 응답 본문이 명세 형식이 아닐 때의 메시지. 5xx는 브라우저·프록시 원문 대신 사용자용 문구로 바꾼다. */
 export function httpErrorMessage(status: number): string {
   return status >= 500 ? SERVER_ERROR_MESSAGE : `HTTP ${status}`;

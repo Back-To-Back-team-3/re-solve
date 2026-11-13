@@ -260,8 +260,7 @@ test("스터디 가입 중 토큰 갱신까지 401이면 원래 스터디 경로
   await expect(page).toHaveURL(new RegExp(`/login\\?returnTo=%2Fstudies%2F${INSTANT_STUDY_ID}$`));
 });
 
-// 결함: 연습 제출은 useAction을 거치지 않아 세션 만료(UNAUTHORIZED)를 로그인 이동 대신 결과 영역 오류 문구로만 보여 준다.
-test.fixme("연습 제출 중 토큰 갱신까지 401이면 원래 문제 경로를 들고 로그인으로 이동한다", async ({ page }) => {
+test("연습 제출 중 토큰 갱신까지 401이면 원래 문제 경로를 들고 로그인으로 이동한다", async ({ page }) => {
   let expired = false;
   await mockApi(page, {
     handle: async (route, path) => {

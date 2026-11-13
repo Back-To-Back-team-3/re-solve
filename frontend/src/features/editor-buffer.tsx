@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Modal } from "@/components/ui";
-import { contestApi, judgeApi } from "@/services/api";
+import { Button, Modal, useLoginRedirect } from "@/components/ui";
+import { contestApi, isUnauthorized, judgeApi } from "@/services/api";
 import { runInputs, runExpectedOutputs, type RunTestCase } from "@/services/run-inputs";
 import { draftKey, readDraft, saveDraft, useWorkspace, useWorkspaceApi } from "@/stores/workspace";
 import type { Language, Problem, RunResponse } from "@/services/types";
@@ -62,7 +62,7 @@ export function Buffer({
   const attempt = activeId ? submissions[activeId] : undefined;
   const accepted = Object.values(submissions).flatMap((item) => item?.contextKey === submissionKey ? [item] : []);
   const workspace = useWorkspaceApi();
-  const sendingRef = useRef(false), router = useRouter();
+  const sendingRef = useRef(false), router = useRouter(), toLogin = useLoginRedirect();
   const judgeSubmissionId = attempt?.submissionId ?? null;
   const judgeResult = attempt?.result ?? null;
   const polling = !!judgeSubmissionId && !judgeResult && !paused;
@@ -169,6 +169,8 @@ export function Buffer({
         }),
       );
     } catch (e) {
+      // 세션 만료는 결과 영역 문구가 아니라 버튼 동작(useAction)과 같게 로그인으로 보낸다.
+      if (isUnauthorized(e)) return toLogin();
       const err = e as { message?: string };
       setRunError(err.message ?? "실행에 실패했습니다.");
     } finally {
@@ -213,6 +215,7 @@ export function Buffer({
       }
       router.refresh();
     } catch (failure) {
+      if (isUnauthorized(failure)) return toLogin();
       const message = typeof failure === "object" && failure !== null && "message" in failure
         && typeof failure.message === "string" ? failure.message : "제출에 실패했습니다.";
       setRequestError(message);
