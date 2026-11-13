@@ -120,17 +120,22 @@ export function ProblemSubmissionList({ items }: { items: SubmissionHistoryItem[
             <th>실행 시간</th>
             <th>메모리</th>
             <th>제출 시각</th>
+            <th>상세</th>
           </tr>
         </thead>
         <tbody>
           {items.map((s) => (
             <tr key={s.submissionId}>
               <td>
-                <Badge tone={submissionTone(s.verdict)}>
-                  {s.verdict
-                    ? (VERDICT_LABELS[s.verdict] ?? s.verdict)
-                    : labels[s.status]}
-                </Badge>
+                <Link href={`/submissions/${s.submissionId}`} className="inline-flex flex-col items-start gap-1"
+                  aria-label={`제출 ${s.submissionId} 코드 및 결과 보기`}>
+                  <Badge tone={submissionTone(s.verdict)}>
+                    {s.verdict
+                      ? (VERDICT_LABELS[s.verdict] ?? s.verdict)
+                      : labels[s.status]}
+                  </Badge>
+                  <small className="underline">코드 보기</small>
+                </Link>
               </td>
               <td>{labels[s.language]}</td>
               <td>{s.maxTimeMs != null ? `${s.maxTimeMs}ms` : "—"}</td>
@@ -138,6 +143,7 @@ export function ProblemSubmissionList({ items }: { items: SubmissionHistoryItem[
               <td className="muted">
                 {new Date(s.submittedAt).toLocaleString("ko-KR")}
               </td>
+              <td><Link href={`/submissions/${s.submissionId}`}>결과 상세</Link></td>
             </tr>
           ))}
         </tbody>

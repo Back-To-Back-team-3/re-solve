@@ -150,6 +150,9 @@ for (const retry of [false, true]) {
     await page.getByLabel("코드 언어").selectOption("java");
     await expect(page.locator(".view-lines")).toContainText("// java starter");
     await page.getByRole("button", { name: retry ? "같은 제출 재요청" : "현재 코드로 새 제출", exact: true }).click();
+    const expectedId = retry ? "2101" : "2102";
+    const detail = page.getByRole("link", { name: "제출 결과 상세", exact: true });
+    await expect(detail).toHaveAttribute("href", `/submissions/${expectedId}`);
     await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
     expect(requests).toHaveLength(2);
     expect(requests[0].key).toBeTruthy();
@@ -159,6 +162,7 @@ for (const retry of [false, true]) {
     releaseFirst();
     await (await lateResponse).finished();
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(detail).toHaveAttribute("href", `/submissions/${expectedId}`);
     await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
     expect(requests).toHaveLength(2);
   });
