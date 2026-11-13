@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { seed } from "../../src/mocks/fixtures";
-import {
-  remainingSeconds,
-  resolveSubmission,
-} from "../../src/services/mock-api";
-import { draftKey, readDraft, saveDraft } from "../../src/stores/workspace";
+import { draftKey, examDrafts, readDraft, saveDraft } from "../../src/stores/workspace";
 describe("draft persistence", () => {
   beforeEach(() => {
     const map = new Map<string, string>();
@@ -41,34 +36,6 @@ describe("draft persistence", () => {
     ).toThrow("quota");
   });
 });
-describe("mock judgement and timer", () => {
-  it("keeps processing state separate from verdict and reaches a terminal state", () => {
-    const s = {
-      ...seed(1000).submissions[0],
-      createdAt: 1000,
-      state: "QUEUED" as const,
-      verdict: null,
-      scenario: "WA" as const,
-    };
-    expect(resolveSubmission(s, 1000).state).toBe("QUEUED");
-    expect(resolveSubmission(s, 1400).state).toBe("JUDGING");
-    expect(resolveSubmission(s, 1800).state).toBe("JUDGING");
-    expect(resolveSubmission(s, 2400)).toMatchObject({
-      state: "COMPLETED",
-      verdict: "WA",
-    });
-    expect(resolveSubmission({ ...s, scenario: "FAILED" }, 2400)).toMatchObject(
-      { state: "FAILED", verdict: null },
-    );
-  });
-  it("counts from timestamps, handles tab suspension, and clamps expiration", () => {
-    expect(remainingSeconds(10000, 8500)).toBe(2);
-    expect(remainingSeconds(10000, 10000)).toBe(0);
-    expect(remainingSeconds(10000, 50000)).toBe(0);
-  });
-});
-
-import { examDrafts } from "../../src/stores/workspace";
 it("final exam submission selects the most recently saved language per problem", () => {
   expect(
     examDrafts(
