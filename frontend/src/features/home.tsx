@@ -294,9 +294,11 @@ export function DashboardPage() {
   );
 
   const submissions = rSubs.data?.content ?? [];
+  const practiceSubs = submissions.filter((s) => s.context === "PRACTICE");
   const solvedIds = new Set(
     submissions.filter((s) => s.verdict === "AC").map((s) => s.problemId),
   );
+  const acCount = practiceSubs.filter((s) => s.verdict === "AC").length;
   const firstSub = submissions[0];
 
   return (
@@ -349,8 +351,8 @@ export function DashboardPage() {
               <div>
                 <Trophy />
                 <p className="stat-number">
-                  {submissions.length
-                    ? Math.round((solvedIds.size / submissions.length) * 100)
+                  {practiceSubs.length
+                    ? Math.round((acCount / practiceSubs.length) * 100)
                     : 0}
                   %
                 </p>
