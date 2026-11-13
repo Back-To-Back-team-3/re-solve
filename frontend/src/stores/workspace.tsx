@@ -63,6 +63,8 @@ export interface PracticeSubmissionAttempt {
 }
 
 interface Workspace {
+  viewPages: Record<string, number | undefined>;
+  setViewPage: (key: string, page: number) => void;
   practiceRunInputs: Record<string, { useSamples: boolean; customInputs: RunTestCase[] } | undefined>;
   setPracticeRunInputs: (key: string, value: Partial<{ useSamples: boolean; customInputs: RunTestCase[] }>) => void;
   submissionAttempts: Record<string, number | undefined>;
@@ -96,6 +98,8 @@ const createWorkspace = () =>
     accessToken: null,
     authReady: false,
     drafts: {},
+    viewPages: {},
+    setViewPage: (key, page) => set((state) => ({ viewPages: { ...state.viewPages, [key]: page } })),
     practiceRunInputs: {},
     setPracticeRunInputs: (key, value) => set((state) => ({ practiceRunInputs: { ...state.practiceRunInputs,
       [key]: { useSamples: true, customInputs: [], ...state.practiceRunInputs[key], ...value } } })),
@@ -135,7 +139,7 @@ const createWorkspace = () =>
     fontSize: 14,
     activeProblems: {},
     setMember: (member) => set({ member }),
-    clearMember: () => set({ practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, practiceRequests: {}, activePracticeSubmissions: {} }),
+    clearMember: () => set({ viewPages: {}, practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, practiceRequests: {}, activePracticeSubmissions: {} }),
     setAccessToken: (accessToken) => set({ accessToken }),
     setAuthReady: (authReady) => set({ authReady }),
     setDraft: (key, d) => set((s) => ({ drafts: { ...s.drafts, [key]: d } })),
