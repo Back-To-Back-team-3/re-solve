@@ -25,8 +25,13 @@ export function ProblemDescription({
   problem: Problem;
   exam?: boolean;
 }) {
-  const [tab, setTab] = useState("description"),
-    r = useResource(() => judgeApi.getSubmissions(problem.id), problem.id + "-subs");
+  const [tab, setTab] = useState("description");
+  const submissions = useWorkspace((state) => state.practiceSubmissions);
+  const submissionVersion = JSON.stringify(Object.values(submissions).flatMap((attempt) =>
+    attempt?.body.problemId === problem.id && attempt.submissionId
+      ? [[attempt.submissionId, attempt.result?.status]] : [],
+  ));
+  const r = useResource(() => judgeApi.getSubmissions(problem.id), `${problem.id}-subs-${submissionVersion}`);
   return (
     <section className="problem-panel stack">
       <div className="row wrap">

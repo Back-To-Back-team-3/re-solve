@@ -1,5 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { loader } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
@@ -247,6 +248,7 @@ function Buffer({
   const attempt = useWorkspace((state) => state.practiceSubmissions[submissionKey]);
   const setAttempt = useWorkspace((state) => state.setPracticeSubmission);
   const sendingRef = useRef(false);
+  const router = useRouter();
   const judgeSubmissionId = attempt?.submissionId ?? null;
   const judgeResult = attempt?.result ?? null;
   const polling = !!judgeSubmissionId && !judgeResult && !paused;
@@ -433,6 +435,7 @@ function Buffer({
       setAttempt(submissionKey, { ...request, submissionId: receipt.submissionId });
       setPollVersion((value) => value + 1);
       setPaused(false);
+      router.refresh();
     } catch (failure) {
       const message = typeof failure === "object" && failure !== null && "message" in failure
         && typeof failure.message === "string" ? failure.message : "제출에 실패했습니다.";

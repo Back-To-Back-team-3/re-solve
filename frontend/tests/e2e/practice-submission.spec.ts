@@ -77,3 +77,43 @@ test("조회 대기 종료·조회 장애 후 같은 제출만 재조회하고 �
   await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
   expect(posts).toBe(1);
 });
+
+test("같은 화면에서 제출 접수와 채점 완료를 제출 목록에 반영한다", async ({ page }) => {
+  await mockPracticePage(page);
+  let accepted = false;
+  let done = false;
+  let listReads = 0;
+  await page.route("**/api/v1/me/submissions?**", (route) => {
+    listReads++;
+    return route.fulfill({ json: { success: true, data: {
+      content: accepted ? [{ submissionId: "2001", problemId: "1001", problemRevisionId: "2001",
+        language: "java", context: "PRACTICE", contextId: null, submittedAt: receipt.submittedAt,
+        status: done ? "COMPLETED" : "QUEUED", verdict: done ? "AC" : null,
+        maxTimeMs: done ? 1 : null, maxMemoryKb: done ? 1024 : null }] : [],
+      page: 0, size: 20, totalElements: accepted ? 1 : 0, totalPages: accepted ? 1 : 0, hasNext: false,
+    } } });
+  });
+  await page.route("**/api/v1/submissions", (route) => {
+    accepted = true;
+    return route.fulfill({ status: 202, json: { success: true, data: receipt } });
+  });
+  await page.route("**/api/v1/submissions/2001", (route) => route.fulfill({ json: { success: true,
+    data: done ? completed : { ...completed, status: "QUEUED", effectiveResult: null },
+  } }));
+  await page.goto("/problems/1001");
+  await expect(page.getByRole("textbox", { name: "코드 편집기" })).toBeVisible();
+  await page.getByRole("button", { name: "제출 내역", exact: true }).click();
+  await expect(page.getByText("제출 기록이 없어요", { exact: true })).toBeVisible();
+  const beforeSubmit = listReads;
+  await page.clock.install();
+  await page.getByRole("button", { name: "제출", exact: true }).click();
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "Java", exact: true }) });
+  await expect(row).toBeVisible();
+  await expect.poll(() => listReads).toBeGreaterThan(beforeSubmit);
+  const beforeDone = listReads;
+  done = true;
+  await page.clock.fastForward(2100);
+  await expect(row).toContainText("정답");
+  await expect(row).toContainText("1ms");
+  await expect.poll(() => listReads).toBeGreaterThan(beforeDone);
+});
