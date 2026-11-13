@@ -106,7 +106,12 @@ export function MyPage() {
     router = useRouter(),
     [tab, setTab] = useState("profile"),
     fontSize = useWorkspace((s) => s.fontSize),
-    setFontSize = useWorkspace((s) => s.setFontSize);
+    setFontSize = useWorkspace((s) => s.setFontSize),
+    [theme, setTheme] = useState("light");
+
+  useEffect(() => {
+    setTheme(document.documentElement.dataset.theme ?? "light");
+  }, []);
 
   if (!member)
     return (
@@ -202,12 +207,9 @@ export function MyPage() {
               테마
               <select
                 className="input"
-                defaultValue={
-                  typeof document !== "undefined"
-                    ? (document.documentElement.dataset.theme ?? "light")
-                    : "light"
-                }
+                value={theme}
                 onChange={(e) => {
+                  setTheme(e.target.value);
                   document.documentElement.dataset.theme = e.target.value;
                   try {
                     localStorage.setItem("re-solve:settings:theme", e.target.value);

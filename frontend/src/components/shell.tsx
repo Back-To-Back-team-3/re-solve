@@ -2,13 +2,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Moon, Sun, Settings, UserRound, LogOut } from "lucide-react";
+import { Moon, Sun, UserRound, LogOut } from "lucide-react";
 import { CatalogProvider } from "@/services/catalog";
 import { WorkspaceProvider, useWorkspace } from "@/stores/workspace";
-import { api, labels } from "@/services/mock-api";
 import { authApi } from "@/services/api";
-import type { Verdict } from "@/services/types";
-import { Button, Modal, ToastProvider, useAction, useToast } from "./ui";
+import { Button, ToastProvider, useToast } from "./ui";
 import { NotificationBell } from "@/features/notifications";
 const nav = [
   ["/", "연습하기"],
@@ -20,15 +18,12 @@ const nav = [
 ];
 function Frame({ children }: { children: ReactNode }) {
   const path = usePathname(),
-    action = useAction(),
     toast = useToast(),
     member = useWorkspace((s) => s.member);
   const router = useRouter();
   const authReady = useWorkspace((s) => s.authReady);
   const clearMember = useWorkspace((s) => s.clearMember);
-  const [theme, setTheme] = useState("light"),
-    [demo, setDemo] = useState(false),
-    [scenario, setScenario] = useState<Verdict | "FAILED">("AC");
+  const [theme, setTheme] = useState("light");
   useEffect(() => {
     const sync = () =>
       setTheme(document.documentElement.dataset.theme || "light");
@@ -91,15 +86,6 @@ function Frame({ children }: { children: ReactNode }) {
             >
               {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
             </Button>
-            {process.env.NEXT_PUBLIC_DEMO === "true" && (
-              <Button
-                className="icon-btn"
-                aria-label="데모 설정"
-                onClick={() => setDemo(true)}
-              >
-                <Settings size={18} />
-              </Button>
-            )}
             <Link className="btn" href={member ? "/mypage" : "/login"}>
               <UserRound size={16} />
               <span className="profile-label">{member?.nickname || "로그인"}</span>
@@ -140,89 +126,6 @@ function Frame({ children }: { children: ReactNode }) {
         <span className="pixel">Re:Solve · GROW WITH CODE</span>
         <span>하루 한 문제, 함께 자라는 실력.</span>
       </footer>
-      {process.env.NEXT_PUBLIC_DEMO === "true" && <Modal
-        open={demo}
-        onOpenChange={setDemo}
-        title="데모 설정"
-        description="실제 코드를 실행하지 않습니다. 다음 모의 채점의 결과를 선택할 수 있어요."
-      >
-        <div className="stack">
-          <label className="field">
-            다음 채점 시나리오
-            <select
-              className="input"
-              value={scenario}
-              onChange={(e) => setScenario(e.target.value as Verdict | "FAILED")}
-            >
-              {["AC", "WA", "TLE", "CE", "MLE", "RE", "FAILED"].map((s) => (
-                <option key={s} value={s}>
-                  {labels[s]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button
-            className="primary"
-            onClick={() =>
-              action(
-                () => api.configure({ scenario }),
-                `${labels[scenario]} 시나리오를 적용했습니다.`,
-                false,
-              )
-            }
-          >
-            시나리오 적용
-          </Button>
-          <div className="row wrap">
-            <Button
-              onClick={() =>
-                action(
-                  () => api.configure({ simulateReadError: true }),
-                  "조회 오류 재현 켜짐",
-                  false,
-                )
-              }
-            >
-              조회 오류 재현
-            </Button>
-            <Button
-              onClick={() =>
-                action(
-                  () => api.configure({ simulateReadError: false }),
-                  "조회 오류 재현 꺼짐",
-                  false,
-                )
-              }
-            >
-              조회 오류 해제
-            </Button>
-          </div>
-          <details>
-            <summary>목업 데이터 초기화</summary>
-            <p className="muted">
-              생성한 데이터와 코드 초안이 삭제되고 데모 사용자로 돌아갑니다.
-            </p>
-            <Button
-              className="danger"
-              onClick={() =>
-                action(
-                  async () => {
-                    await api.reset();
-                    for (const k of Object.keys(localStorage))
-                      if (k.startsWith("resolve:draft:"))
-                        localStorage.removeItem(k);
-                    location.reload();
-                  },
-                  undefined,
-                  false,
-                )
-              }
-            >
-              전체 초기화
-            </Button>
-          </details>
-        </div>
-      </Modal>}
     </>
   );
 }
