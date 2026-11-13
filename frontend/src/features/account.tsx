@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authApi, memberApi } from "@/services/api";
+import { NotificationPreferencesSection } from "@/features/account-notifications";
 import { SkillPage } from "@/features/account-skill";
 import { useWorkspace } from "@/stores/workspace";
 import { Pet } from "@/components/pet";
@@ -196,56 +197,59 @@ export function MyPage() {
         </Section>
       )}
       {tab === "settings" && (
-        <Section title="화면과 에디터 설정">
-          <div className="form-grid">
-            <label className="field">
-              테마
-              <select
-                className="input"
-                defaultValue={
-                  typeof document !== "undefined"
-                    ? (document.documentElement.dataset.theme ?? "light")
-                    : "light"
-                }
-                onChange={(e) => {
-                  document.documentElement.dataset.theme = e.target.value;
-                  try {
-                    localStorage.setItem("re-solve:settings:theme", e.target.value);
-                  } catch {}
-                }}
-              >
-                <option value="light">라이트</option>
-                <option value="dark">다크</option>
-              </select>
-            </label>
-            <label className="field">
-              에디터 글자 크기
-              <select
-                className="input"
-                value={fontSize}
-                onChange={(e) => {
-                  const size = Number(e.target.value);
-                  setFontSize(size);
-                  try {
-                    const prev = JSON.parse(
-                      localStorage.getItem("re-solve:settings:editor") ?? "{}",
-                    );
-                    localStorage.setItem(
-                      "re-solve:settings:editor",
-                      JSON.stringify({ ...prev, fontSize: size }),
-                    );
-                  } catch {}
-                }}
-              >
-                {[12, 14, 16, 18, 20, 22].map((n) => (
-                  <option key={n} value={n}>
-                    {n}px
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </Section>
+        <div className="stack">
+          <Section title="화면과 에디터 설정">
+            <div className="form-grid">
+              <label className="field">
+                테마
+                <select
+                  className="input"
+                  defaultValue={
+                    typeof document !== "undefined"
+                      ? (document.documentElement.dataset.theme ?? "light")
+                      : "light"
+                  }
+                  onChange={(e) => {
+                    document.documentElement.dataset.theme = e.target.value;
+                    try {
+                      localStorage.setItem("re-solve:settings:theme", e.target.value);
+                    } catch {}
+                  }}
+                >
+                  <option value="light">라이트</option>
+                  <option value="dark">다크</option>
+                </select>
+              </label>
+              <label className="field">
+                에디터 글자 크기
+                <select
+                  className="input"
+                  value={fontSize}
+                  onChange={(e) => {
+                    const size = Number(e.target.value);
+                    setFontSize(size);
+                    try {
+                      const prev = JSON.parse(
+                        localStorage.getItem("re-solve:settings:editor") ?? "{}",
+                      );
+                      localStorage.setItem(
+                        "re-solve:settings:editor",
+                        JSON.stringify({ ...prev, fontSize: size }),
+                      );
+                    } catch {}
+                  }}
+                >
+                  {[12, 14, 16, 18, 20, 22].map((n) => (
+                    <option key={n} value={n}>
+                      {n}px
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </Section>
+          <NotificationPreferencesSection />
+        </div>
       )}
     </div>
   );

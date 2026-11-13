@@ -30,6 +30,7 @@ import type {
   MyParticipation,
   MyResultResponse,
   NotificationListResponse,
+  NotificationPreferences,
   Page,
   ProblemDetail,
   ProblemFilter,
@@ -48,6 +49,7 @@ import type {
   SubmissionReceipt,
   TagLevel,
   UnreadCountResponse,
+  UpdateNotificationPreferencesRequest,
   UserRole,
   UserStatus,
 } from "./types";
@@ -538,5 +540,12 @@ export const notificationApi = {
   markAllRead: () =>
     apiFetch<MarkAllReadResponse>("/api/v1/notifications/read-all", {
       method: "PATCH",
+    }),
+  getPreferences: () =>
+    apiFetch<NotificationPreferences>("/api/v1/notifications/preferences"),
+  updatePreferences: (body: UpdateNotificationPreferencesRequest) =>
+    apiFetch<NotificationPreferences>("/api/v1/notifications/preferences", {
+      method: "PATCH",
+      body: JSON.stringify(body),
     }),
 };
