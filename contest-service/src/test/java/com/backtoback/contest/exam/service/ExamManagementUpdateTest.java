@@ -33,6 +33,7 @@ import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.backtoback.common.event.service.OutboxEventWriter;
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.contest.exam.client.ExamDependencyClient;
 import com.backtoback.contest.exam.client.ExamDependencyClient.ProblemSummaries;
 import com.backtoback.contest.exam.client.ExamDependencyClient.ProblemSummary;
@@ -146,6 +147,22 @@ class ExamManagementUpdateTest {
             TransactionCallback<?> callback = invocation.getArgument(0);
             return callback.doInTransaction(null);
         });
+    }
+
+    /** 현재 탈퇴한 회원은 설정 변경을 시작하지 않는다. */
+    @Test
+    @DisplayName("현재 회원이 탈퇴 상태이면 시험 설정 변경을 거절한다")
+    void rejectsWithdrawnManager() {
+        // given
+        given(members.refresh(7)).willReturn("WITHDRAWN");
+
+        // when & then
+        assertThatThrownBy(() -> service.update("55", "7", request("0")))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
+            );
     }
 
     @Test

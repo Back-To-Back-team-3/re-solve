@@ -130,6 +130,37 @@ class ExamContextValidationServiceTest {
             );
     }
 
+    /** Judge가 요청한 Run은 활성 복제본과 고정 회차가 있어야 허용한다. */
+    @Test
+    @DisplayName("활성 복제본의 고정 회차 Run 문맥을 허용한다")
+    void allowsActiveRun() {
+        // given
+        given(participants.findByExamIdAndMemberIdAndStatusNot(55L, 7L, ExamParticipantStatus.CANCELED))
+            .willReturn(Optional.of(participant));
+        given(members.findStatus(7L)).willReturn(Optional.of("ACTIVE"));
+
+        // when & then
+        assertThat(service.validate(request("RUN", "1001")).allowed()).isTrue();
+    }
+
+    /** 회원 복제본이 아직 없으면 내부 Run 문맥을 허용하지 않는다. */
+    @Test
+    @DisplayName("회원 복제본이 없으면 Judge Run 문맥을 차단한다")
+    void rejectsRunWithoutReplica() {
+        // given
+        given(participants.findByExamIdAndMemberIdAndStatusNot(55L, 7L, ExamParticipantStatus.CANCELED))
+            .willReturn(Optional.of(participant));
+        given(members.findStatus(7L)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> service.validate(request("RUN", "1001")))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(ContestErrorCode.CONTEXT_ACCESS_DENIED)
+            );
+    }
+
     /** 접수 ID와 참가·문제 연결이 모두 일치할 때만 열람을 허용한다. */
     @Test
     @DisplayName("본인 접수만 시험 제출 열람을 허용한다")

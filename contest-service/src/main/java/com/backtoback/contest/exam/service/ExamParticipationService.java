@@ -73,7 +73,7 @@ public class ExamParticipationService {
     public Registration register(String examId, String memberId) {
         long exam = id(examId);
         long member = id(memberId);
-        memberRefresh.refresh(member);
+        requireActiveState(memberRefresh.refresh(member));
         return transactions.execute(status -> registerLocked(exam, member));
     }
 
@@ -150,7 +150,7 @@ public class ExamParticipationService {
         if (existing != null) {
             return existing;
         }
-        memberRefresh.refresh(member);
+        String currentStatus = memberRefresh.refresh(member);
         return transactions.execute(status -> {
             var parent = lockExam(exam);
             var rows = participants.findForUpdate(exam, member);
@@ -168,6 +168,7 @@ public class ExamParticipationService {
             if (participant.getStatus() == ExamParticipantStatus.CANCELED) {
                 return ExamCancellationResponse.from(participant);
             }
+            requireNotSuspendedState(currentStatus);
             requireNotSuspended(member);
             var now = now();
             if (!now.isBefore(parent.getStartsAt()) || participant.getStatus() != ExamParticipantStatus.REGISTERED) {
@@ -240,7 +241,7 @@ public class ExamParticipationService {
     public ExamEntryResponse enter(String examId, String memberId) {
         long exam = id(examId);
         long member = id(memberId);
-        memberRefresh.refresh(member);
+        requireActiveState(memberRefresh.refresh(member));
         return transactions.execute(status -> {
             guards.lockForEnrollment(List.of(new Resource("MEMBER", member)));
             requireActive(member);
@@ -282,11 +283,21 @@ public class ExamParticipationService {
             = members
                 .findStatus(member)
                 .orElseThrow(() -> new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE));
-        if ("SUSPENDED".equals(state)) {
-            throw new ContestException(ContestErrorCode.MEMBER_SUSPENDED);
-        }
+        requireActiveState(state);
+    }
+
+    /** 회원 상태로 정지와 탈퇴를 구분해 신규 참가를 차단한다. */
+    private void requireActiveState(String state) {
+        requireNotSuspendedState(state);
         if (!"ACTIVE".equals(state)) {
             throw new ContestException(ContestErrorCode.CONTEST_OPERATION_BLOCKED);
+        }
+    }
+
+    /** 정지된 회원의 참가 취소를 차단한다. */
+    private void requireNotSuspendedState(String state) {
+        if ("SUSPENDED".equals(state)) {
+            throw new ContestException(ContestErrorCode.MEMBER_SUSPENDED);
         }
     }
 

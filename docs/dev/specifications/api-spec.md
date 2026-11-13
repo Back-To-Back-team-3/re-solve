@@ -7618,7 +7618,7 @@
     - 이미 완료된 작업은 취소 불가(409 OPERATION_ALREADY_COMPLETED). 스터디 준비로 취소된 시험을 자동 복원하지 않는다.
     - **응답 조건:** 반복 완료·취소는 같은 결과 반환. 오래된 작업 ID는 409 OPERATION_NOT_CURRENT.
     - **종결 이력:** 직접 호출·대사·이벤트의 확인 경로를 가드 변경과 함께 저장한다. 사유는 직접 호출에서 받은 경우만 저장한다.
-    - **복구:** C는 PREPARED 1분 초과 건을 5분 주기로 소유 서비스 operation 상태 API로 대사한다.
+    - **복구:** C는 PROBLEM PREPARED 1분 초과 건을 5분 주기로 소유 서비스 operation 상태 API로 대사한다. MEMBER·STUDY 작업 상태 조회를 이용한 자동 복구는 이번 배포에서 비활성화한다. 직접 complete/cancel과 소유 상태 이벤트 처리는 유지한다.
     - COMMITTED는 complete, ABORTED는 cancel, PENDING/조회 실패는 유지·운영 알림. TTL 자동 해제 없음. PROBLEM의 GENERAL 재공개는 현재 작업을 덮어쓰지 않는 더 큰 PUBLIC 이벤트에만 OPEN이며 ARCHIVED는 해제하지 않는다. 미해결 PREPARED의 다른 작업을 PUBLIC 스냅샷만으로 취소하지 않는다. 완료 버전과 전체 스냅샷 버전을 분리한다. 더 최신 전체 스냅샷은 보존하되 완료 버전보다 오래된 공개 스냅샷은 차단을 해제하지 않는다. ARCHIVED는 후속 해제하지 않는다.
 - **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
 
@@ -7932,6 +7932,9 @@
 
 - **Method / URI:** `GET /internal/v1/members/{memberId}/status`
 - **비고:** 신규 등록·입장·Draft·제출·Run 전 `ACTIVE` 확인. 이미 접수한 동일 요청 반환·자동 제출·채점 반영·읽기는 소급 취소 안 함.
+- 현재 상태 응답의 `memberId`·`status`·`role`을 확인한다. `sourceVersion`과 `nickname`이 없는 응답으로 회원 복제본을 생성하거나 갱신하지 않는다. 버전과 표시 정보가 함께 제공되면 원천 버전을 비교해 반영한다.
+- `MemberSuspended`는 기존 복제본의 표시 정보를 유지하고 이벤트의 원천 버전이 더 클 때 정지·해제 상태를 갱신한다. 탈퇴한 복제본은 복원하지 않는다. 복제본이 없으면 소비 기록과 ACK를 남기지 않아 최초 회원 정보 반영 뒤 재수신할 수 있다.
+- 시험 생성·설정 변경과 참가·Draft·직접 제출·Run은 기존 회원 복제본도 확인한다. 복제본이 없거나 비활성이면 신규 쓰기·Run을 허용하지 않는다. Judge의 §4.7.1 Run 문맥 검증도 활성 복제본을 요구한다.
 
 #### 4.8.9 외부 작업 상태 대사 (member·study·problem)
 
@@ -7939,7 +7942,7 @@
 
 - **Method / URI:** `GET /internal/v1/members/{memberId}/operations/{operationId}`, `GET /internal/v1/studies/{studyId}/operations/{operationId}`, `GET /internal/v1/problems/{problemId}/operations/{operationId}`
 - **응답 필드:** `operationId`, `state`(`PENDING`/`COMMITTED`/`ABORTED`), `sourceVersion`, `resourceStatus`
-- **비고:** `COMMITTED` 확인 후 4.7.4 complete, `ABORTED` 확인 후 cancel로 복구. `PENDING`·404·조회 실패는 차단 유지. 없는 작업 404를 자동 취소 근거로 사용하지 않음.
+- **비고:** 이번 배포에서는 Problem만 자동 조회한다. Member·Study는 작업 상태 조회를 이용한 자동 복구를 비활성화하고 직접 complete/cancel을 유지한다. `COMMITTED` 확인 후 4.7.4 complete, `ABORTED` 확인 후 cancel로 복구. `PENDING`·404·조회 실패는 차단 유지. 없는 작업 404를 자동 취소 근거로 사용하지 않음.
 
 ---
 

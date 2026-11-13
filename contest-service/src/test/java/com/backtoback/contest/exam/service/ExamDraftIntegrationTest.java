@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doAnswer;
 
 import java.time.LocalDateTime;
@@ -30,6 +31,22 @@ import com.backtoback.contest.global.error.ContestException;
 class ExamDraftIntegrationTest extends ExamIntegrationTestSupport {
     @MockitoSpyBean
     private StringRedisTemplate draftRedis;
+
+    /** 원격 상태가 정지면 이전 활성 복제본이 있어도 버퍼에 넣지 않는다. */
+    @Test
+    @DisplayName("현재 정지된 회원은 활성 복제본이 있어도 Draft 저장을 준비하지 않는다")
+    void currentSuspensionBlocksDraft() {
+        // given
+        given(refresh.refresh(7)).willReturn("SUSPENDED");
+
+        // when & then
+        assertThatThrownBy(() -> store.prepare(examId, "7", "101", new SaveRequest("java", "코드", "1")))
+            .isInstanceOf(ContestException.class)
+            .satisfies(
+                error -> assertThat(((ContestException)error).getErrorCode())
+                    .isEqualTo(ContestErrorCode.MEMBER_SUSPENDED)
+            );
+    }
 
     @Test
     @DisplayName("언어를 바꿔도 작은 순번을 무시하고 빈 최신 코드를 복구한다")
