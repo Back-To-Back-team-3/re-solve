@@ -110,6 +110,7 @@ function Frame({ children }: { children: ReactNode }) {
                 className="icon-btn"
                 aria-label="로그아웃"
                 onClick={async () => {
+                  // 로그아웃 API 실패 시에도 클라이언트 세션은 항상 종료한다 (fail-open).
                   try { await authApi.logout() } catch {}
                   clearMember()
                   router.push("/login")
