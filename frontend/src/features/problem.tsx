@@ -14,7 +14,7 @@ import {
   Tabs,
 } from "@/components/ui";
 import { CodeEditor } from "./editor";
-import { ProblemSubmissionList } from "./problem-list";
+import { ProblemSubmissionList, Pager } from "@/features/problem-list";
 import { Board, Note } from "./board";
 import { useWorkspace } from "@/stores/workspace";
 import { availableProblemLanguages, toEditorProblem } from "@/services/problem-editor";
@@ -26,6 +26,7 @@ export function ProblemDescription({
   exam?: boolean;
 }) {
   const [tab, setTab] = useState("description");
+  const [page, setPage] = useState(0);
   const parameterNames = problem.functionSpec.parameters.map((parameter) => parameter.name);
   const structuredSamples = problem.samples.every((sample) => sample.argumentTexts !== undefined);
   const submissions = useWorkspace((state) => state.practiceSubmissions);
@@ -33,7 +34,7 @@ export function ProblemDescription({
     attempt?.problemId === problem.id && attempt.submissionId
       ? [[attempt.submissionId, attempt.result?.status]] : [],
   ));
-  const r = useResource(() => judgeApi.getSubmissions(problem.id), `${problem.id}-subs-${submissionVersion}`);
+  const r = useResource(() => judgeApi.getSubmissions(problem.id, page), `${problem.id}-subs-${page}-${submissionVersion}`);
   return (
     <section className="problem-panel stack">
       <div className="row wrap">
@@ -88,7 +89,10 @@ export function ProblemDescription({
         (r.error ? (
           <ErrorState message={r.error.message} retry={r.retry} />
         ) : (
-          <ProblemSubmissionList items={r.data?.content || []} />
+          <>
+            <ProblemSubmissionList items={r.data?.content || []} />
+            <Pager page={page} totalPages={r.data?.totalPages ?? 0} onChange={setPage} />
+          </>
         ))}
       {tab === "questions" && (
         <Board scope={`problem:${problem.id}`} title="질문 작성" />

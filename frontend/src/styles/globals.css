@@ -729,6 +729,8 @@ td a:hover {
   font-size: 30px;
 }
 .code-panel {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 .editor-toolbar {
@@ -756,7 +758,18 @@ td a:hover {
   height: 390px;
   background: var(--editor-bg);
 }
+body:has(.workspace) .footer {
+  display: none;
+}
+body:has(.editor-actions) {
+  @apply pb-32 sm:pb-18;
+}
 .editor-actions {
+  @apply min-h-32 sm:min-h-18;
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 20;
   padding: 12px 16px;
   display: flex;
   flex-wrap: wrap;
