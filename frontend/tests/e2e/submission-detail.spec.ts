@@ -76,12 +76,19 @@ test("제출 목록 페이지 이동과 상세 조회에서 숨김 원문을 렌
   await expect(page.getByRole("button", { name: "이전", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "다음", exact: true }).click();
   await expect(page.getByRole("button", { name: "다음", exact: true })).toBeDisabled();
-  await page.getByRole("link", { name: "결과 상세", exact: true }).click();
+  const editor = page.getByRole("textbox", { name: "코드 편집기" });
+  await expect(editor).toBeVisible();
+  await editor.press("ControlOrMeta+A");
+  await editor.pressSequentially("// ongoing draft");
+  await page.getByRole("link", { name: "제출 2001 코드 및 결과 보기", exact: true }).click();
   await expect(page.getByText("// my source", { exact: true })).toBeVisible();
   await expect(page.getByText("숨김 · 통과", { exact: true })).toBeVisible();
   await expect(page.getByText("채점 시스템 실패: DEADLINE_EXCEEDED")).toBeVisible();
   await expect(page.locator("main")).not.toContainText("hidden-secret");
   await expect(page.locator("main")).not.toContainText("99999");
+  await expect(page.locator("main")).not.toContainText("// ongoing draft");
+  await page.goBack();
+  await expect(page.locator(".view-lines")).toContainText("// ongoing draft");
 });
 
 test("타인 제출 조회 거절 시 코드·결과를 표시하지 않는다", async ({ page }) => {
