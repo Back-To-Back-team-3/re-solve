@@ -134,7 +134,7 @@ public class CppExecutionCodeGenerator implements ExecutionCodeGenerator {
     }
 
     /**
-     * 표준 타입과 혼합 값 지원 선언을 포함한 전역 함수의 기본 코드를 생성한다.
+     * 사용자가 풀이를 작성할 전역 함수의 기본 코드를 생성한다.
      *
      * @param spec 고정 회차의 함수 명세
      * @return 사용자가 함수 본문을 작성할 코드
@@ -149,9 +149,9 @@ public class CppExecutionCodeGenerator implements ExecutionCodeGenerator {
                 .stream()
                 .map(parameter -> types.sourceType(parameter.type()) + " " + parameter.name())
                 .collect(Collectors.joining(", "));
-        // 제출 코드 자체에서 표준 타입과 Value를 사용할 수 있도록 공통 선언을 제공한다.
-        return template.substring(0, template.indexOf("// EXECUTION_RUNTIME")) + types.sourceType(spec.returnType())
-            + " solution(" + parameters + ") {\n" + "    throw std::logic_error(\"Not implemented\");\n}\n";
+        // 표준 헤더·Value 선언·비트폭 검사는 실행 코드에서 주입한다.
+        return types.sourceType(spec.returnType()) + " solution(" + parameters + ") {\n"
+            + "    throw std::logic_error(\"Not implemented\");\n}\n";
     }
 
     /**
@@ -195,7 +195,7 @@ public class CppExecutionCodeGenerator implements ExecutionCodeGenerator {
                 .replace("${DECLARATIONS}", declarations)
                 .replace("${ARGUMENTS}", arguments)
                 .replace("${SIGNATURE}", signature);
-        // 기본 코드가 포함한 공통 선언은 헤더 가드로 보호한다. 사용자 소스는 마지막에 삽입한다.
+        // 이전 기본 코드가 포함한 공통 선언도 헤더 가드로 보호한다. 사용자 소스는 마지막에 삽입한다.
         return new ExecutionSource(
             language(),
             runner.replace("${USER_SOURCE}", sourceCode),

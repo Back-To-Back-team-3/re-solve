@@ -26,6 +26,21 @@ class CppExecutionCodeGeneratorTest {
     private final CppExecutionCodeGenerator generator = new CppExecutionCodeGenerator();
 
     /**
+     * 에디터에는 풀이 함수만 제공하고 실행에 필요한 공통 선언은 실행 코드에서 주입한다.
+     */
+    @Test
+    @DisplayName("기본 코드에는 풀이 함수만 포함하고 실행 코드에는 타입 선언과 비트폭 검사를 유지한다")
+    void separatesStarterFromRuntimeDeclarations() {
+        var function = spec(scalar(Kind.INT32));
+        String starter = generator.starterCode(function);
+        assertThat(starter)
+            .startsWith("int solution(int value)")
+            .doesNotContain("#include", "static_assert", "struct Value", "RE_SOLVE_EXECUTION_TYPES");
+        assertThat(generator.generate(function, starter, Map.of("value", "1")).sourceCode())
+            .contains("#include <vector>", "static_assert(sizeof(int)", "struct Value", starter);
+    }
+
+    /**
      * 긴 숫자 표기도 선언 정밀도로 변환하고 중첩 구조에서 같은 입력 스트림을 만든다.
      *
      * @param kind 선언 부동소수 타입
