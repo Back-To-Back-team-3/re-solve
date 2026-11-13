@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
-import { api, labels } from "@/services/mock-api";
 import { useResource } from "@/services/hooks";
+import { contestApi } from "@/services/api";
 import {
   Badge,
   ErrorState,
@@ -13,6 +13,28 @@ import {
 import { Pet } from "@/components/pet";
 import { useCatalog } from "@/services/catalog";
 import { ExamRanking } from "./exams-ranking";
+import type { ResultStatus } from "@/services/types";
+
+const VERDICT_LABELS: Record<string, string> = {
+  AC: "맞았습니다",
+  WA: "틀렸습니다",
+  TLE: "시간 초과",
+  CE: "컴파일 오류",
+  MLE: "메모리 초과",
+  RE: "런타임 오류",
+};
+
+const RESULT_STATUS_LABEL: Record<ResultStatus, string> = {
+  HIDDEN: "결과 집계 중",
+  PROVISIONAL: "잠정 결과",
+  FINALIZED: "최종 결과",
+};
+
+const RESULT_STATUS_TONE: Record<ResultStatus, string> = {
+  HIDDEN: "",
+  PROVISIONAL: "accent",
+  FINALIZED: "success",
+};
 
 export function ExamResult({ id }: { id: string }) {
   const [tab, setTab] = useState<"my" | "ranking">("my");
@@ -39,56 +61,67 @@ export function ExamResult({ id }: { id: string }) {
 
 function MyResultTab({ id }: { id: string }) {
   const { problems } = useCatalog();
-  const r = useResource(
-    async () => ({
-      exam: await api.exam(id),
-      session: await api.session(id),
-      submissions: await api.submissions(undefined, id),
-    }),
-    id,
-  );
-  if (r.loading)
+  const rDetail = useResource(() => contestApi.getExamDetail(id), `detail-${id}`);
+  const rResult = useResource(() => contestApi.getMyResult(id), `result-${id}`);
+
+  if (rDetail.loading || rResult.loading)
     return (
       <div className="container">
         <Loading />
       </div>
     );
-  if (r.error)
+  if (rDetail.error)
     return (
       <div className="container">
-        <ErrorState message={r.error.message} retry={r.retry} />
+        <ErrorState message={rDetail.error.message} retry={rDetail.retry} />
       </div>
     );
-  const e = r.data?.exam;
-  if (!e) return <NotFound what="시험" />;
-  const rows = e.problemIds.map((pid) => ({
-      problem: problems.find((p) => p.id === pid)!,
-      submission: r.data!.submissions.find(
-        (s) => s.problemId === pid && s.kind === "submit",
-      ),
-    })),
-    correct = rows.filter((x) => x.submission?.verdict === "AC").length;
+  if (rResult.error)
+    return (
+      <div className="container">
+        <ErrorState message={rResult.error.message} retry={rResult.retry} />
+      </div>
+    );
+
+  const exam = rDetail.data;
+  if (!exam) return <NotFound what="시험" />;
+
+  const myResult = rResult.data;
+  const rows = (myResult?.problems ?? []).map((mp) => ({
+    problemId: mp.problemId,
+    title: problems.find((p) => p.id === mp.problemId)?.title ?? mp.problemId,
+    verdict: mp.verdict,
+    passedCount: mp.passedCount,
+    totalCount: mp.totalCount,
+  }));
+  const correct = rows.filter((r) => r.verdict === "AC").length;
+  const resultStatus = myResult?.resultStatus ?? "HIDDEN";
+
   return (
     <div className="stack">
       <Heading
         title="도전의 기록"
         eyebrow="CHALLENGE COMPLETE"
-        description={e.title}
-        action={<Badge tone="warning">모의 결과</Badge>}
+        description={exam.title}
+        action={
+          <Badge tone={RESULT_STATUS_TONE[resultStatus]}>
+            {RESULT_STATUS_LABEL[resultStatus]}
+          </Badge>
+        }
       />
       <div className="card hero">
         <Pet level={correct ? 3 : 1} size={120} />
         <div className="grow">
           <h2>한 번의 도전이, 다음 성장의 시작!</h2>
           <p>
-            {r.data?.session
+            {myResult
               ? "응시 기록을 확인하고 다시 연습해 보세요."
               : "아직 이 사용자의 응시 기록이 없습니다."}
           </p>
         </div>
         <div>
           <p className="score">
-            {Math.round((correct / rows.length) * 100)}
+            {rows.length ? Math.round((correct / rows.length) * 100) : 0}
             <small>/100</small>
           </p>
           <p>
@@ -103,27 +136,25 @@ function MyResultTab({ id }: { id: string }) {
               <th>문제</th>
               <th>결과</th>
               <th>통과 테스트</th>
-              <th>실행 시간</th>
-              <th>언어</th>
               <th>복습</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ problem: p, submission: s }) => (
-              <tr key={p.id}>
-                <td>{p.title}</td>
+            {rows.map((r) => (
+              <tr key={r.problemId}>
+                <td>{r.title}</td>
                 <td>
-                  <Badge
-                    tone={s?.verdict === "AC" ? "success" : s ? "error" : ""}
-                  >
-                    {s ? labels[s.verdict || s.state] : "미제출"}
+                  <Badge tone={r.verdict === "AC" ? "success" : r.verdict ? "error" : ""}>
+                    {r.verdict ? (VERDICT_LABELS[r.verdict] ?? r.verdict) : "미제출"}
                   </Badge>
                 </td>
-                <td>{s ? `${s.passedCount} / ${s.totalCount}` : "—"}</td>
-                <td>{s ? `${s.cpuTimeMs}ms` : "—"}</td>
-                <td>{s ? labels[s.language] : "—"}</td>
                 <td>
-                  <Go className="small" href={`/problems/${p.id}`}>
+                  {r.passedCount != null && r.totalCount != null
+                    ? `${r.passedCount} / ${r.totalCount}`
+                    : "—"}
+                </td>
+                <td>
+                  <Go className="small" href={`/problems/${r.problemId}`}>
                     다시 풀기
                   </Go>
                 </td>
