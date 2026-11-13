@@ -9,6 +9,7 @@ import {
   Empty,
   ErrorState,
   Heading,
+  Go,
   Loading,
   Modal,
 } from "@/components/ui";
@@ -106,7 +107,7 @@ export function AdminProblemsPage() {
   const totalElements = r.data?.totalElements ?? 0;
   return (
     <div className="container stack">
-      <Heading title="문제 관리" />
+      <Heading title="문제 관리" action={<Go href="/admin/problems/new">문제 등록</Go>} />
       <div className="row">
         <select
           aria-label="공개 상태 필터"
@@ -139,7 +140,7 @@ export function AdminProblemsPage() {
               {items.map((p) => (
                 <tr key={p.problemRevisionId}>
                   <td className="mono">{p.problemId}</td>
-                  <td>{p.title}</td>
+                  <td><Go href={`/admin/problems/${p.problemId}`}>{p.title}</Go></td>
                   <td>{p.scope === "GENERAL" ? "일반" : "시험전용"}</td>
                   <td>
                     <Badge tone={visibilityTone(p.visibility)}>
