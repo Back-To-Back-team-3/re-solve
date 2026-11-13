@@ -5,6 +5,7 @@ import { authApi, memberApi } from "@/services/api";
 import { SkillPage } from "@/features/account-skill";
 import { useWorkspace } from "@/stores/workspace";
 import { Pet } from "@/components/pet";
+import { GithubIntegrationSection } from "@/features/account-github";
 import {
   Button,
   Empty,
@@ -140,6 +141,7 @@ export function MyPage() {
           { id: "profile", label: "프로필" },
           { id: "skill", label: "스킬" },
           { id: "submissions", label: "제출 기록" },
+          { id: "github", label: "GitHub 연동" },
           { id: "settings", label: "설정" },
         ]}
       />
@@ -195,6 +197,7 @@ export function MyPage() {
           <Empty title="제출 기록을 불러오는 중입니다." />
         </Section>
       )}
+      {tab === "github" && <GithubIntegrationSection />}
       {tab === "settings" && (
         <Section title="화면과 에디터 설정">
           <div className="form-grid">
