@@ -1,16 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { mockPracticePage } from "./practice-fixture";
+import { seedBrowserStorage } from "./storage-fixture";
 
 test("통과 언어와 활성 실행 환경의 교집합을 선택하고 중첩 타입·회차별 Draft를 보존한다", async ({ page }) => {
   await mockPracticePage(page);
-  await page.addInitScript(() => {
-    if (!sessionStorage.getItem("draft-seeded")) {
-      localStorage.setItem('resolve:draft:["7","practice","1001","java"]', JSON.stringify({
-        code: "// old revision", revisionId: "1999", savedAt: 1,
-      }));
-      sessionStorage.setItem("draft-seeded", "true");
-    }
-  });
+  await seedBrowserStorage(page, {
+    'resolve:draft:["7","practice","1001","java"]': JSON.stringify({ code: "// old revision", revisionId: "1999", savedAt: 1 }),
+  }, { "draft-seeded": "true" });
   await page.goto("/problems/1001");
   const language = page.getByLabel("코드 언어");
   await expect(language).toHaveValue("java");

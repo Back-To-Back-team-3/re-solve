@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { mockPracticePage } from "./practice-fixture";
+import { seedBrowserStorage } from "./storage-fixture";
 
 const receipt = {
   submissionId: "2001", judgeAttempt: 1, status: "QUEUED",
@@ -121,7 +122,7 @@ test("같은 화면에서 제출 접수와 채점 완료를 제출 목록에 반
 for (const retry of [false, true]) {
   test(`언어 전환 후 ${retry ? "같은 요청을 재시도해도" : "새 제출을 보내도"} 늦은 원래 응답이 완료 결과를 덮지 않는다`, async ({ page }) => {
     await mockPracticePage(page);
-    await page.addInitScript(() => localStorage.setItem("resolve:editor", JSON.stringify({ language: "java", fontSize: 14 })));
+    await seedBrowserStorage(page, { "resolve:editor": JSON.stringify({ language: "java", fontSize: 14 }) });
     await page.route("**/api/v1/judge/languages", (route) => route.fulfill({ json: { success: true, data: {
       content: [{ language: "java", enabled: true }, { language: "python3", enabled: true }],
     } } }));

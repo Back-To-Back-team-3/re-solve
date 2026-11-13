@@ -1,11 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { mockPracticePage } from "./practice-fixture";
+import { readBrowserStorage, seedBrowserStorage } from "./storage-fixture";
 
 test("시험 에디터의 Draft 복원·자동 저장·제출은 일반 풀이 경로와 분리한다", async ({ page }) => {
   await mockPracticePage(page);
-  await page.addInitScript(() => {
-    localStorage.setItem("resolve:editor", JSON.stringify({ language: "java", fontSize: 14 }));
-    localStorage.setItem("re-solve:editor:draft:exam:42:1001", JSON.stringify({ language: "java", code: "// exam saved", seq: "7" }));
+  await seedBrowserStorage(page, {
+    "resolve:editor": JSON.stringify({ language: "java", fontSize: 14 }),
+    "re-solve:editor:draft:exam:42:1001": JSON.stringify({ language: "java", code: "// exam saved", seq: "7" }),
   });
   const now = new Date().toISOString();
   const endsAt = new Date(Date.now() + 3600000).toISOString();
@@ -38,7 +39,7 @@ test("시험 에디터의 Draft 복원·자동 저장·제출은 일반 풀이 �
   await editor.pressSequentially("// exam edited");
   await expect.poll(() => drafts.length).toBeGreaterThan(0);
   expect(drafts.at(-1)).toEqual({ language: "java", sourceCode: "// exam edited", seq: "7" });
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("re-solve:editor:draft:exam:42:1001") ?? "{}").seq)).toBe("8");
+  await expect.poll(async () => JSON.parse(await readBrowserStorage(page, "re-solve:editor:draft:exam:42:1001") ?? "{}").seq).toBe("8");
   await page.getByRole("button", { name: "제출", exact: true }).click();
   await expect(page.getByText("제출 완료", { exact: true })).toBeVisible();
   expect(submissions).toEqual([{ problemId: "1001", language: "java", sourceCode: "// exam edited", seq: "8" }]);
