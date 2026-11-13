@@ -22,9 +22,12 @@ import { useCatalog } from "@/services/catalog";
 import { ProblemTable } from "./problem-list";
 import type { SubmissionHistoryItem } from "@/services/types";
 
-function relativeDate(iso: string): string {
-  const toDay = (d: Date) => Math.floor(d.getTime() / (1000 * 60 * 60 * 24));
-  const days = toDay(new Date()) - toDay(new Date(iso));
+export function relativeDate(iso: string): string {
+  const startOfLocalDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round(
+    (startOfLocalDay(new Date()) - startOfLocalDay(new Date(iso))) / 86400000,
+  );
   if (days === 0) return "오늘";
   if (days === 1) return "어제";
   return `${days}일 전`;

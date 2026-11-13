@@ -1,12 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-
-function relativeDate(iso: string): string {
-  const toDay = (d: Date) => Math.floor(d.getTime() / (1000 * 60 * 60 * 24));
-  const days = toDay(new Date()) - toDay(new Date(iso));
-  if (days === 0) return "오늘";
-  if (days === 1) return "어제";
-  return `${days}일 전`;
-}
+import { relativeDate } from "@/features/home";
 
 describe("relativeDate", () => {
   afterEach(() => vi.useRealTimers());
