@@ -10,8 +10,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { createStore, useStore } from "zustand";
 import {
   authApi,
+  markAuthReady,
   memberApi,
   setAccessTokenSetter,
+  setMemberGetter,
   setTokenGetter,
 } from "../services/api";
 import type { Language, Member } from "../services/types";
@@ -89,10 +91,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   // 앱 시작 시 1회 — Refresh Token으로 인증 상태를 복원하고 회원 정보를 가져온다.
   useEffect(() => {
-    const { setAccessToken, setMember, clearMember, setAuthReady } =
-      store.getState();
+    const { setAccessToken, setMember, clearMember } = store.getState();
+    const setAuthReady = (ready: boolean) => {
+      store.getState().setAuthReady(ready);
+      if (ready) markAuthReady();
+    };
 
     setTokenGetter(() => store.getState().accessToken);
+    setMemberGetter(() => store.getState().member);
     setAccessTokenSetter(setAccessToken);
 
     if (process.env.NEXT_PUBLIC_DEV_BYPASS_USER_ID) {

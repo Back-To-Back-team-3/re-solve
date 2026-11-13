@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Moon, Sun, Settings, UserRound, LogOut } from "lucide-react";
 import { CatalogProvider } from "@/services/catalog";
 import { WorkspaceProvider, useWorkspace } from "@/stores/workspace";
 import { api, labels } from "@/services/mock-api";
-import { useResource } from "@/services/hooks";
+import { authApi } from "@/services/api";
 import type { Verdict } from "@/services/types";
 import { Button, Modal, ToastProvider, useAction, useToast } from "./ui";
 import { NotificationBell } from "@/features/notifications";
@@ -20,10 +20,12 @@ const nav = [
 ];
 function Frame({ children }: { children: ReactNode }) {
   const path = usePathname(),
-    { data: user, loading: authLoading } = useResource(api.currentUser),
     action = useAction(),
     toast = useToast(),
     member = useWorkspace((s) => s.member);
+  const router = useRouter();
+  const authReady = useWorkspace((s) => s.authReady);
+  const clearMember = useWorkspace((s) => s.clearMember);
   const [theme, setTheme] = useState("light"),
     [demo, setDemo] = useState(false),
     [scenario, setScenario] = useState<Verdict | "FAILED">("AC");
@@ -98,16 +100,28 @@ function Frame({ children }: { children: ReactNode }) {
                 <Settings size={18} />
               </Button>
             )}
-            <Link className="btn" href={user ? "/mypage" : "/login"}>
+            <Link className="btn" href={member ? "/mypage" : "/login"}>
               <UserRound size={16} />
-              <span className="profile-label">{user?.name || "로그인"}</span>
+              <span className="profile-label">{member?.nickname || "로그인"}</span>
             </Link>
-            {user && <NotificationBell />}
-            {user && (
+            {member && <NotificationBell />}
+            {member && (
               <Button
                 className="icon-btn"
                 aria-label="로그아웃"
-                onClick={() => action(api.logout, "로그아웃했습니다.", false)}
+                onClick={async () => {
+                  try {
+                    await authApi.logout();
+                  } catch (e) {
+                    // UNAUTHORIZED는 서버 세션이 이미 무효라 로컬만 정리한다. 그 외 실패는 세션이 남아 있을 수 있어 유지한다.
+                    if ((e as { code?: string }).code !== "UNAUTHORIZED") {
+                      toast("로그아웃하지 못했습니다. 다시 시도해 주세요.");
+                      return;
+                    }
+                  }
+                  clearMember();
+                  router.push("/login");
+                }}
               >
                 <LogOut size={16} />
               </Button>
@@ -115,7 +129,7 @@ function Frame({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main id="main" data-ready={!authLoading}>
+      <main id="main" data-ready={authReady}>
         <CatalogProvider>{children}</CatalogProvider>
       </main>
       <footer className="footer">
