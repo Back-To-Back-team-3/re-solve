@@ -901,9 +901,15 @@ export type ProblemWriteContent = {
 };
 export type ProblemWriteRequest = ProblemWriteContent & { scope?: "GENERAL" | "EXAM_ONLY"; rowVersion?: number };
 export type ProblemSaved = { problemId?: string; problemRevisionId: string; revisionNumber: number; rowVersion: number };
+export type ValidationVerdict = Verdict | "SYSTEM_ERROR";
+export type ProblemValidationRequest = { language: Language; sourceCode: string };
+export type ProblemValidationReceipt = { validationId: string };
+export type ProblemImageUploaded = { imageId: string };
+export type AdminProblemFilter = { visibility?: ProblemVisibility; page?: number; size?: number };
+export type ProblemVisibilityChanged = { visibility: ProblemVisibility; rowVersion: number };
 export type ValidationProgress = {
   validationId: string; problemId: string; problemRevisionId: string; language: Language;
-  status: string; tests: { testOrder: number; verdict: Verdict | null; timeMs: number | null; memoryKb: number | null }[];
+  status: string; tests: { testOrder: number; verdict: ValidationVerdict | null; timeMs: number | null; memoryKb: number | null }[];
   maxTimeMs: number | null; message: string | null; resultApplied: boolean;
   supportedLanguages: Language[]; currentProblemRevisionId: string | null;
 };
