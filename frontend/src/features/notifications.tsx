@@ -32,14 +32,17 @@ function NotificationDropdown({
   const router = useRouter();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setLoaded(false);
-    notificationApi.getList({ page: 0, size: 20 }).then((res) => {
-      setItems(res.content);
-      setLoaded(true);
-    });
+    setFailed(false);
+    notificationApi
+      .getList({ page: 0, size: 20 })
+      .then((res) => setItems(res.content))
+      .catch(() => setFailed(true))
+      .finally(() => setLoaded(true));
   }, [open, reloadKey]);
 
   const handleMarkRead = useCallback(
@@ -85,6 +88,10 @@ function NotificationDropdown({
         </div>
         {!loaded ? (
           <div className="flex justify-center py-8 text-sm text-muted">불러오는 중...</div>
+        ) : failed ? (
+          <div className="flex justify-center py-8 text-sm text-muted" role="alert">
+            알림을 불러오지 못했습니다
+          </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-8 text-sm text-muted">
             <BellOff size={20} />
@@ -117,9 +124,11 @@ export function NotificationBell() {
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    notificationApi.getUnreadCount().then((res) => {
-      setUnreadCount(res.unreadCount);
-    });
+    // 배지는 보조 정보라 조회 실패 시 0으로 두고 화면을 막지 않는다.
+    notificationApi
+      .getUnreadCount()
+      .then((res) => setUnreadCount(res.unreadCount))
+      .catch(() => {});
   }, []);
 
   const handleSSEEvent = useCallback(() => {
