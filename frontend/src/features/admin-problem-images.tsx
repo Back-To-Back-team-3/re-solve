@@ -1,5 +1,6 @@
 "use client";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import type { Components } from "react-markdown";
@@ -37,6 +38,7 @@ export function AdminMarkdown({ text }: { text: string }) {
 }
 
 export function AdminProblemImages({ insert }: { insert: (markdown: string) => void }) {
+  const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [imageId, setImageId] = useState("");
   const [error, setError] = useState("");
@@ -50,7 +52,11 @@ export function AdminProblemImages({ insert }: { insert: (markdown: string) => v
     }
     const original = request.current?.file === file ? request.current : { file, key: crypto.randomUUID() };
     request.current = original; setBusy(true);
-    try { const result = await adminProblemApi.uploadImage(original.file, original.key); setImageId(result.imageId); }
+    try {
+      const result = await adminProblemApi.uploadImage(original.file, original.key);
+      setImageId(result.imageId);
+      router.refresh();
+    }
     catch (failure) { setError(actionMessage(failure)); }
     finally { setBusy(false); }
   }
