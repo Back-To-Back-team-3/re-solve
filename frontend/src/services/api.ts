@@ -1,8 +1,14 @@
 import type {
   RunCreateRequest, JudgeLanguagesResponse, SubmissionAttemptsResponse, SubmissionTestsResponse,
+  ProblemValidationRequest, ProblemValidationReceipt, ProblemImageUploaded, AdminProblemFilter, ProblemVisibilityChanged,
   ActiveTimeSlot,
   AdminMember,
   AdminProblemListItem,
+  AdminProblemDetail,
+  AdminRevision,
+  ProblemWriteRequest,
+  ProblemSaved,
+  ValidationProgress,
   AssignmentDetail,
   AssignmentStatus,
   AssignmentSummary,
@@ -44,7 +50,6 @@ import type {
   ProblemDetail,
   ProblemFilter,
   ProblemListItem,
-  ProblemVisibility,
   RankingResponse,
   RunResponse,
   ServerPage,
@@ -104,21 +109,31 @@ export function whenAuthReady(): Promise<void> {
   return authReady;
 }
 
-export async function apiFetch<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  return apiFetchInner<T>(path, init, false);
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  return readApiResponse<T>(await apiRequest(path, init, false));
 }
 
-async function apiFetchInner<T>(
-  path: string,
-  init: RequestInit | undefined,
-  isRetry: boolean,
-): Promise<T> {
+async function readApiResponse<T>(res: Response): Promise<T> {
+  if (res.status === 204) return undefined as T;
+  let json: ApiResponse<T>;
+  try { json = await res.json(); }
+  catch { throw { code: "UNKNOWN", message: `HTTP ${res.status}` } satisfies ApiError; }
+  if (!json.success) throw json.error;
+  if (!res.ok) throw { code: "UNKNOWN", message: `HTTP ${res.status}` } satisfies ApiError;
+  return json.data;
+}
+
+/** 이미지 미리보기도 JSON API와 같은 인증·갱신 경로를 사용한다. */
+export async function apiFetchBlob(path: string): Promise<Blob> {
+  const res = await apiRequest(path, { cache: "no-store" }, false);
+  if (!res.ok) await readApiResponse<never>(res);
+  return res.blob();
+}
+
+async function apiRequest(path: string, init: RequestInit | undefined, isRetry: boolean): Promise<Response> {
   const token = tokenGetter?.();
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
     ...(init?.headers as Record<string, string> | undefined),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -162,22 +177,10 @@ async function apiFetchInner<T>(
         message: "토큰 갱신 응답을 확인하지 못했습니다",
       } satisfies ApiError;
     accessTokenSetter?.(newToken);
-    return apiFetchInner<T>(path, init, true);
+    return apiRequest(path, init, true);
   }
 
-  if (res.status === 204) {
-    return undefined as T;
-  }
-
-  let json: ApiResponse<T>;
-  try {
-    json = await res.json();
-  } catch {
-    // 게이트웨이 오류(502/504) 등 JSON이 아닌 응답 본문을 처리한다.
-    throw { code: "UNKNOWN", message: `HTTP ${res.status}` } satisfies ApiError;
-  }
-  if (!json.success) throw json.error;
-  return json.data;
+  return res;
 }
 
 // 인증 API (§1.1)
@@ -223,6 +226,8 @@ export const problemTagApi = {
 
 // 문제 API (§2.1)
 export const problemApi = {
+  getImage: (problemId: string, revisionId: string, imageId: string) =>
+    apiFetchBlob(`/api/v1/problems/${problemId}/revisions/${revisionId}/images/${imageId}`),
   getDetail: (problemId: string) =>
     apiFetch<ProblemDetail>(`/api/v1/problems/${problemId}`),
   getList: (filter: ProblemFilter = {}) => {
@@ -271,7 +276,25 @@ export const judgeApi = {
 
 // 관리자 문제 API (§2.3)
 export const adminProblemApi = {
-  getList: (filter: { visibility?: string; page?: number; size?: number } = {}) => {
+  getDetail: (id: string, revision?: string) => apiFetch<AdminProblemDetail>(
+    revision ? `/api/v1/admin/problems/${id}/revisions/${revision}` : `/api/v1/admin/problems/${id}`,
+  ),
+  getRevisions: (id: string, page = 0) => apiFetch<ServerPage<AdminRevision>>(`/api/v1/admin/problems/${id}/revisions?page=${page}`),
+  save: (id: string | null, body: ProblemWriteRequest, key: string) => apiFetch<ProblemSaved>(
+    id ? `/api/v1/admin/problems/${id}/revisions` : "/api/v1/admin/problems",
+    { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) },
+  ),
+  validate: (id: string, revision: string, body: ProblemValidationRequest, key: string) =>
+    apiFetch<ProblemValidationReceipt>(`/api/v1/admin/problems/${id}/revisions/${revision}/validations`,
+      { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) }),
+  getValidation: (id: string) => apiFetch<ValidationProgress>(`/api/v1/admin/problems/validations/${id}`),
+  uploadImage: (file: File, key: string) => {
+    const body = new FormData(); body.append("file", file);
+    return apiFetch<ProblemImageUploaded>("/api/v1/admin/problems/images", { method: "POST", body, headers: { "Idempotency-Key": key } });
+  },
+  getImage: (id: string) => apiFetchBlob(`/api/v1/admin/problems/images/${id}/content`),
+
+  getList: (filter: AdminProblemFilter = {}) => {
     const q = new URLSearchParams();
     if (filter.visibility) q.set("visibility", filter.visibility);
     if (filter.page != null) q.set("page", String(filter.page));
@@ -282,7 +305,7 @@ export const adminProblemApi = {
     );
   },
   publish: (problemId: string, rowVersion: number) =>
-    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+    apiFetch<ProblemVisibilityChanged>(
       `/api/v1/admin/problems/${problemId}/publication`,
       {
         method: "POST",
@@ -291,7 +314,7 @@ export const adminProblemApi = {
       },
     ),
   unpublish: (problemId: string, rowVersion: number) =>
-    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+    apiFetch<ProblemVisibilityChanged>(
       `/api/v1/admin/problems/${problemId}/unpublication`,
       {
         method: "POST",
@@ -300,7 +323,7 @@ export const adminProblemApi = {
       },
     ),
   archive: (problemId: string, rowVersion: number, reason: string) =>
-    apiFetch<{ visibility: ProblemVisibility; rowVersion: number }>(
+    apiFetch<ProblemVisibilityChanged>(
       `/api/v1/admin/problems/${problemId}/archive`,
       {
         method: "POST",
@@ -472,6 +495,8 @@ export const studyApi = {
 
 // 모의 코테·시험 API (§4)
 export const contestApi = {
+  getExamImage: (examId: string, problemId: string, imageId: string) =>
+    apiFetchBlob(`/api/v1/exams/${examId}/problems/${problemId}/images/${imageId}`),
   getExamList: (studyId: string) =>
     apiFetch<Page<ExamSummary>>(`/api/v1/studies/${studyId}/exams`),
 
