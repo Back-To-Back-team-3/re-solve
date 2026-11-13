@@ -18,6 +18,8 @@ import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
+import tools.jackson.databind.json.JsonMapper;
+
 /** Judge 내부 Run에 고정 회차를 전달하며 전체 호출 시간을 30초로 제한한다. */
 @Component
 public class ExamRunClient {
@@ -62,6 +64,9 @@ public class ExamRunClient {
             } catch (RestClientResponseException failure) {
                 String body = failure.getResponseBodyAsString();
                 int status = failure.getStatusCode().value();
+                if (status == 400 && isInvalidRequest(body)) {
+                    throw new ContestException(CommonErrorCode.COMMON_INVALID_REQUEST, failure);
+                }
                 if (status == 504 && body.contains("RUN_TIMEOUT")) {
                     throw new ContestException(ContestErrorCode.RUN_TIMEOUT, failure);
                 }
@@ -97,6 +102,16 @@ public class ExamRunClient {
                 Thread.currentThread().interrupt();
                 throw new ContestException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE, interrupted);
             }
+        }
+    }
+
+    /** Judge 오류 응답의 코드가 입력 오류와 정확히 일치하는지 확인한다. */
+    private boolean isInvalidRequest(String body) {
+        try {
+            var error = JsonMapper.builder().build().readTree(body).path("error").path("code");
+            return error.isString() && "COMMON_INVALID_REQUEST".equals(error.asString());
+        } catch (RuntimeException ignored) {
+            return false;
         }
     }
 

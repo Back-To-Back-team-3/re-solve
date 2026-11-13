@@ -15,7 +15,7 @@ import com.backtoback.contest.global.error.ContestException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 
 /**
- * 회원 내부 API에서 최신 상태와 표시 정보 스냅샷을 조회한다 (API 명세서 1.7.1).
+ * 회원 내부 API에서 현재 상태와 선택적인 표시 정보 스냅샷을 조회한다 (API 명세서 1.7.1).
  */
 @Component
 public class MemberClient {
@@ -55,6 +55,9 @@ public class MemberClient {
                     throw new IllegalArgumentException("Empty member response");
                 }
                 response.validate(memberId);
+                if (response.hasSnapshotFields()) {
+                    response.validateSnapshot(memberId);
+                }
                 return response;
             });
         } catch (RuntimeException failure) {

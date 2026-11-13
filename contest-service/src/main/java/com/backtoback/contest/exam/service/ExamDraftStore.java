@@ -58,7 +58,7 @@ public class ExamDraftStore {
             throw new ContestException(ContestErrorCode.CODE_TOO_LARGE);
         }
         long seq = id(input.seq());
-        refresh.refresh(member);
+        MemberReplicaService.requireActiveStatus(refresh.refresh(member));
         var parent = exams.findById(exam).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
         var participant
             = participants

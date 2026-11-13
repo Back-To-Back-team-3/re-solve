@@ -10,7 +10,6 @@ import org.springframework.context.annotation.Configuration;
 import com.backtoback.common.event.dto.ReceivedEvent;
 import com.backtoback.common.event.service.EventHandler;
 import com.backtoback.common.time.ClockConfiguration;
-import com.backtoback.contest.exam.client.MemberStatusResponse;
 import com.backtoback.contest.exam.repository.MemberReplicaRepository;
 import com.backtoback.contest.exam.repository.StudyMembershipReplicaRepository;
 import com.backtoback.contest.operation.service.MemberGuardTransitions;
@@ -22,17 +21,6 @@ import tools.jackson.databind.JsonNode;
  */
 @Configuration(proxyBeanMethods = false)
 public class ReplicaEventHandlers {
-    private static final ThreadLocal<MemberStatusResponse> SNAPSHOT = new ThreadLocal<>();
-
-    static void withSnapshot(MemberStatusResponse snapshot, Runnable action) {
-        SNAPSHOT.set(snapshot);
-        try {
-            action.run();
-        } finally {
-            SNAPSHOT.remove();
-        }
-    }
-
     @Bean
     ReplicaHandlers replicaHandlers(
         MemberReplicaRepository members,
@@ -62,25 +50,7 @@ public class ReplicaEventHandlers {
             if (suspended == null || !suspended.isBoolean()) {
                 throw new IllegalArgumentException("suspended must be boolean");
             }
-            var snapshot = SNAPSHOT.get();
-            if (snapshot == null) {
-                throw new IllegalStateException("Member snapshot is required");
-            }
-            snapshot.validate(memberId);
-            String expected = suspended.asBoolean() ? "SUSPENDED" : "ACTIVE";
-            if (snapshot.sourceVersion() < eventVersion
-                || (snapshot.sourceVersion() == eventVersion && !expected.equals(snapshot.status()))) {
-                throw new IllegalStateException("Member snapshot precedes or contradicts event");
-            }
-            members
-                .sync(
-                    memberId,
-                    snapshot.nickname(),
-                    snapshot.profileImageUrl(),
-                    snapshot.status(),
-                    snapshot.sourceVersion(),
-                    now(clock)
-                );
+            members.syncSuspension(memberId, suspended.asBoolean(), eventVersion, now(clock));
         }), handler("MemberWithdrawn", event -> {
             var data = event.payload();
             long memberId = id(data, "memberId");

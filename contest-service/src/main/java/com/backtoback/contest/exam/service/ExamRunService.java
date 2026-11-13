@@ -54,7 +54,7 @@ public class ExamRunService {
         if (request.sourceCode().getBytes(StandardCharsets.UTF_8).length > 65536) {
             throw new ContestException(ContestErrorCode.CODE_TOO_LARGE);
         }
-        refresh.refresh(member);
+        MemberReplicaService.requireActiveStatus(refresh.refresh(member));
         long revision = transactions.execute(status -> validate(exam, member, problem));
         return judge
             .run(

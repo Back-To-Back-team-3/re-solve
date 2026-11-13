@@ -80,7 +80,7 @@ public class ExamSubmissionService {
             throw new ContestException(CommonErrorCode.COMMON_INVALID_REQUEST);
         }
         messageSize.validate(request.sourceCode());
-        refresh.refresh(member);
+        String currentStatus = refresh.refresh(member);
         var pinned
             = problems
                 .findByExamIdAndProblemId(exam, problem)
@@ -89,7 +89,8 @@ public class ExamSubmissionService {
         if (!content.supportedLanguages(exam, problem, revision).contains(request.language())) {
             throw new ContestException(ContestErrorCode.UNSUPPORTED_LANGUAGE);
         }
-        return transactions.execute(status -> accept(exam, member, problem, revision, seq, language, request));
+        return transactions
+            .execute(status -> accept(exam, member, problem, revision, seq, language, request, currentStatus));
     }
 
     private Response existingLocked(long exam, long member, long problem, long seq, ExamSubmissionRequest request) {
@@ -106,7 +107,8 @@ public class ExamSubmissionService {
         long revision,
         long seq,
         String language,
-        ExamSubmissionRequest request
+        ExamSubmissionRequest request,
+        String currentStatus
     ) {
         var exam = exams.findForUpdate(examId).orElseThrow(() -> new ContestException(ContestErrorCode.EXAM_NOT_FOUND));
         var participant = participant(examId, member);
@@ -119,6 +121,7 @@ public class ExamSubmissionService {
         if (old != null) {
             return old;
         }
+        MemberReplicaService.requireActiveStatus(currentStatus);
         if (exam.getStatus() == ExamStatus.CANCELED) {
             throw new ContestException(ContestErrorCode.EXAM_CANCELED);
         }

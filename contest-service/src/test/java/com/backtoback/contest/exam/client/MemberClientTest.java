@@ -37,8 +37,8 @@ class MemberClientTest {
     }
 
     @Test
-    @DisplayName("원천 버전이 빠진 기존 응답은 의존 서비스 실패로 거절한다")
-    void rejectsIncompleteResponse() {
+    @DisplayName("현재 회원 상태 응답은 복제본 필드 없이 읽는다")
+    void readsCurrentStatus() {
         var builder = RestClient.builder().baseUrl("http://member-test");
         var server = MockRestServiceServer.bindTo(builder).build();
         server
@@ -46,6 +46,29 @@ class MemberClientTest {
             .andRespond(
                 withSuccess("{\"memberId\":\"7\",\"status\":\"ACTIVE\",\"role\":\"USER\"}", MediaType.APPLICATION_JSON)
             );
+        var response = new MemberClient(builder.build()).fetch(7L);
+        assertThat(response.status()).isEqualTo("ACTIVE");
+        assertThat(response.sourceVersion()).isNull();
+        server.verify();
+    }
+
+    /** 일부 표시 정보만 있으면 불완전한 스냅샷으로 처리한다. */
+    @Test
+    @DisplayName("닉네임만 포함한 응답은 불완전한 스냅샷으로 거절한다")
+    void rejectsPartialSnapshot() {
+        // given
+        var builder = RestClient.builder().baseUrl("http://member-test");
+        var server = MockRestServiceServer.bindTo(builder).build();
+        server
+            .expect(requestTo("http://member-test/internal/v1/members/7/status"))
+            .andRespond(
+                withSuccess(
+                    "{\"memberId\":\"7\",\"status\":\"ACTIVE\",\"role\":\"USER\",\"nickname\":\"이름\"}",
+                    MediaType.APPLICATION_JSON
+                )
+            );
+
+        // when & then
         assertThatThrownBy(() -> new MemberClient(builder.build()).fetch(7L))
             .isInstanceOf(ContestException.class)
             .extracting("errorCode")

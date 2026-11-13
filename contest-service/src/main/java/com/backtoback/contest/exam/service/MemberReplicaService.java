@@ -11,12 +11,13 @@ import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.contest.exam.client.MemberClient;
 import com.backtoback.contest.exam.client.MemberStatusResponse;
 import com.backtoback.contest.exam.repository.MemberReplicaRepository;
+import com.backtoback.contest.global.error.ContestErrorCode;
 import com.backtoback.contest.global.error.ContestException;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * 회원 조회 결과를 복제본과 동기화한다 (ERD 4.4.17).
+ * 회원 상태를 확인하고 버전이 있는 표시 정보만 복제본에 동기화한다 (ERD 4.4.17).
  */
 @Service
 @RequiredArgsConstructor
@@ -27,11 +28,31 @@ public class MemberReplicaService {
     private final TransactionTemplate transactions;
 
     /**
-     * HTTP 호출을 저장 트랜잭션 밖에서 수행한 뒤 저장된 최신 상태를 반환한다.
+     * HTTP 호출을 트랜잭션 밖에서 수행하고 버전이 있는 스냅샷만 저장한다.
      */
     public String refresh(long memberId) {
         var response = memberClient.fetch(memberId);
-        return transactions.execute(status -> saveSnapshot(memberId, response));
+        response.validate(memberId);
+        return transactions.execute(status -> {
+            if (response.hasSnapshotFields()) {
+                saveSnapshot(memberId, response);
+                return members.findStatus(memberId).orElseThrow();
+            }
+            if (!"ACTIVE".equals(response.status())) {
+                return response.status();
+            }
+            return members.findStatus(memberId).orElse(response.status());
+        });
+    }
+
+    /** 현재 회원 상태가 정지 또는 탈퇴라면 신규 시험 작업을 차단한다. */
+    public static void requireActiveStatus(String status) {
+        if ("SUSPENDED".equals(status)) {
+            throw new ContestException(ContestErrorCode.MEMBER_SUSPENDED);
+        }
+        if (!"ACTIVE".equals(status)) {
+            throw new ContestException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
     }
 
     /**
@@ -46,10 +67,10 @@ public class MemberReplicaService {
     }
 
     /**
-     * 버전 비교 저장과 최신 상태 조회를 한 트랜잭션에 수행한다.
+     * 원천 버전을 비교해 표시 정보를 저장한다.
      */
-    private String saveSnapshot(long memberId, MemberStatusResponse response) {
-        response.validate(memberId);
+    private void saveSnapshot(long memberId, MemberStatusResponse response) {
+        response.validateSnapshot(memberId);
         members
             .sync(
                 memberId,
@@ -59,6 +80,5 @@ public class MemberReplicaService {
                 response.sourceVersion(),
                 LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE)
             );
-        return members.findStatus(memberId).orElseThrow();
     }
 }
