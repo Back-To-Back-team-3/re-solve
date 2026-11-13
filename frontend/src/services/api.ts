@@ -124,21 +124,32 @@ async function apiFetchInner<T>(
 
   // /auth/token/refresh 자체는 인터셉터에서 제외해 무한 루프를 방지한다.
   if (res.status === 401 && !isRetry && !path.includes("/auth/token/refresh")) {
+    let refreshRes: Response;
     try {
-      const refreshRes = await fetch("/api/v1/auth/token/refresh", {
+      refreshRes = await fetch("/api/v1/auth/token/refresh", {
         method: "POST",
         credentials: "include",
       });
-      if (refreshRes.ok) {
-        const refreshJson = await refreshRes.json();
-        const newToken: string | undefined = refreshJson.data?.accessToken;
-        if (!newToken)
-          throw { code: "UNAUTHORIZED", message: "토큰 갱신에 실패했습니다" } satisfies ApiError;
-        accessTokenSetter?.(newToken);
-        return apiFetchInner<T>(path, init, true);
-      }
-    } catch {}
-    throw { code: "UNAUTHORIZED", message: "로그인이 필요합니다" } satisfies ApiError;
+    } catch (e) {
+      throw {
+        code: "UNKNOWN",
+        message: e instanceof Error ? e.message : "네트워크 오류",
+      } satisfies ApiError;
+    }
+    // 명세상 갱신 인증 실패는 401뿐이다. 그 외 실패는 세션이 남아 있을 수 있어 UNAUTHORIZED로 바꾸지 않는다.
+    if (refreshRes.status === 401)
+      throw { code: "UNAUTHORIZED", message: "로그인이 필요합니다" } satisfies ApiError;
+    if (!refreshRes.ok)
+      throw { code: "UNKNOWN", message: `HTTP ${refreshRes.status}` } satisfies ApiError;
+    const refreshJson = await refreshRes.json().catch(() => null);
+    const newToken: string | undefined = refreshJson?.data?.accessToken;
+    if (!newToken)
+      throw {
+        code: "UNKNOWN",
+        message: "토큰 갱신 응답을 확인하지 못했습니다",
+      } satisfies ApiError;
+    accessTokenSetter?.(newToken);
+    return apiFetchInner<T>(path, init, true);
   }
 
 
