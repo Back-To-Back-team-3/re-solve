@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ImagePlus } from "lucide-react";
+import { HoverCard } from "radix-ui";
 import { Button } from "@/components/ui";
 import { adminProblemApi } from "@/services/api";
 import { actionMessage } from "@/services/problem-authoring";
@@ -37,43 +39,70 @@ export function AdminMarkdown({ text }: { text: string }) {
     components={markdownComponents}>{text}</Markdown></div>;
 }
 
-export function AdminProblemImages({ insert, onBusyChange }: {
-  insert: (markdown: string) => void; onBusyChange: (busy: boolean) => void;
+function ImagePreview({ id }: { id: string }) {
+  const [open, setOpen] = useState(false);
+  return <HoverCard.Root open={open} onOpenChange={setOpen} openDelay={200}>
+    <HoverCard.Trigger asChild><button type="button" className="btn small mono" aria-label={`image:${id} 미리보기`}
+      onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>image:{id}</button></HoverCard.Trigger>
+    <HoverCard.Portal><HoverCard.Content role="tooltip" side="bottom" align="start" sideOffset={8} collisionPadding={12}
+      className="z-50 w-64 max-w-[calc(100vw-24px)] border-2 bg-surface p-3">
+      <p className="mono mb-2">image:{id}</p>
+      <div className="max-h-64 overflow-auto"><ProtectedImage id={id} alt={`image:${id} 첨부 이미지`} /></div>
+      <HoverCard.Arrow className="fill-current" />
+    </HoverCard.Content></HoverCard.Portal>
+  </HoverCard.Root>;
+}
+
+export function AdminProblemImages({ text, insert, onBusyChange }: {
+  text: string; insert: (markdown: string) => void; onBusyChange: (busy: boolean) => void;
 }) {
   const router = useRouter();
-  const [file, setFile] = useState<File | null>(null);
+  const imageIds = [...new Set([...text.matchAll(/!\[[^\]]*\]\(image:([1-9][0-9]*)\)/g)].map((match) => match[1]))];
   const [imageId, setImageId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const lock = useRef(false);
   const request = useRef<{ file: File; key: string } | null>(null);
-  async function upload() {
-    if (!file || busy || imageId) return;
-    setError("");
-    if (file.size > 5 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      setError("PNG·JPEG·WebP, 5MiB 이하 이미지를 선택해 주세요."); return;
-    }
-    const original = request.current?.file === file ? request.current : { file, key: crypto.randomUUID() };
-    request.current = original; setBusy(true); onBusyChange(true);
+  async function upload(original: { file: File; key: string }) {
+    if (lock.current) return;
+    lock.current = true; setError(""); setFailed(false); setBusy(true); onBusyChange(true);
     try {
       const result = await adminProblemApi.uploadImage(original.file, original.key);
       setImageId(result.imageId);
       insert(`\n![이미지](image:${result.imageId})\n`);
       router.refresh();
     }
-    catch (failure) { setError(actionMessage(failure)); }
-    finally { setBusy(false); onBusyChange(false); }
+    catch (failure) { setError(actionMessage(failure)); setFailed(true); }
+    finally { lock.current = false; setBusy(false); onBusyChange(false); }
   }
-  return <div className="space-y-2 border-t-2 pt-3" aria-label="본문 이미지 첨부">
-    <div className="flex flex-wrap items-center gap-3">
-    <label className="field">이미지 첨부<input aria-label="업로드 이미지" type="file" accept="image/png,image/jpeg,image/webp" disabled={busy}
-      onChange={(event) => { setFile(event.target.files?.[0] ?? null); setImageId(""); setError(""); }} /></label>
-    <Button type="button" className="small" disabled={!file || busy || Boolean(imageId)} onClick={upload}>{busy ? "첨부 중…" : "이미지 첨부·재요청"}</Button>
+  return <div className="space-y-2 border-2 p-3" aria-label="본문 이미지 첨부">
+    <div role="toolbar" aria-label="본문 도구 모음" className="flex flex-wrap items-center gap-3">
+      <Button type="button" className="small" aria-label="이미지 첨부" disabled={busy} onClick={() => picker.current?.click()}>
+        <ImagePlus size={16} aria-hidden="true" /> 이미지
+      </Button>
+      <input ref={picker} hidden aria-label="업로드 이미지" type="file" accept="image/png,image/jpeg,image/webp" disabled={busy}
+        onChange={(event) => {
+          const file = event.target.files?.[0]; event.target.value = "";
+          if (!file || lock.current) return;
+          setImageId(""); setError(""); setFailed(false); request.current = null;
+          if (file.size > 5 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+            setError("PNG·JPEG·WebP, 5MiB 이하 이미지를 선택해 주세요."); return;
+          }
+          const original = { file, key: crypto.randomUUID() };
+          request.current = original; void upload(original);
+        }} />
+      {failed && <Button type="button" className="small" onClick={() => { if (request.current) void upload(request.current); }}>이미지 다시 시도</Button>}
+      {busy && <span role="status">이미지 첨부 중…</span>}
     </div>
     <small className="muted">PNG·JPEG·WebP, 최대 5MiB. 첨부하면 본문의 커서 위치에 이미지가 삽입됩니다.</small>
-    {error && <p className="error-text">{error}</p>}
+    {error && <p className="error-text" role="alert">{error}</p>}
     {imageId && <>
       <p role="status">본문에 이미지를 첨부했습니다.</p>
-      <details><summary>첨부 이미지 미리보기</summary><div className="max-w-xs"><AdminMarkdown text={`![업로드 미리보기](image:${imageId})`} /></div></details>
     </>}
+    {imageIds.length > 0 && <ul aria-label="첨부 이미지 목록" className="flex flex-wrap gap-2">
+      {imageIds.map((id) => <li key={id}><ImagePreview id={id} /></li>)}
+    </ul>}
   </div>;
 }
