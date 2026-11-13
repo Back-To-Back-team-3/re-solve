@@ -14,7 +14,7 @@ import {
   Tabs,
 } from "@/components/ui";
 import { CodeEditor } from "./editor";
-import { ProblemSubmissionList, Pager } from "./problem-list";
+import { ProblemSubmissionList, Pager } from "@/features/problem-list";
 import { Board, Note } from "./board";
 import { useWorkspace } from "@/stores/workspace";
 import { availableProblemLanguages, toEditorProblem } from "@/services/problem-editor";
