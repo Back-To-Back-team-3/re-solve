@@ -16,7 +16,7 @@ import {
   setMemberGetter,
   setTokenGetter,
 } from "../services/api";
-import type { Language, Member } from "../services/types";
+import type { JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
 import { Loading } from "../components/ui";
 export interface Draft {
   code: string;
@@ -44,11 +44,35 @@ export function saveDraft(key: string, draft: Draft) {
 }
 const PUBLIC_PATHS = ["/", "/login", "/auth/callback"];
 
+/** 응답 유실 시 재전송할 원본과 최초 요청 시각을 보관한다. (API 명세서 §3.1.2) */
+export interface PracticeSubmissionRequest {
+  idempotencyKey: string;
+  body: SubmissionCreateRequest;
+  createdAt: number;
+}
+
+/** 접수된 제출의 조회 정보를 미접수 요청과 분리해 보존한다. */
+export interface PracticeSubmissionAttempt {
+  contextKey: string;
+  idempotencyKey: string;
+  createdAt: number;
+  problemId: string;
+  submissionId: string;
+  result: JudgeResult | null;
+}
+
 interface Workspace {
   member: Member | null;
   accessToken: string | null;
   authReady: boolean;
   drafts: Record<string, Draft>;
+  practiceSubmissions: Record<string, PracticeSubmissionAttempt | undefined>;
+  practiceRequests: Record<string, PracticeSubmissionRequest | undefined>;
+  activePracticeSubmissions: Record<string, string | undefined>;
+  setPracticeRequest: (key: string, request: PracticeSubmissionRequest) => void;
+  acceptPracticeSubmission: (key: string, request: PracticeSubmissionRequest, submissionId: string) => boolean;
+  selectPracticeSubmission: (key: string, submissionId: string) => void;
+  setPracticeResult: (submissionId: string, result: JudgeResult) => void;
   language: Language;
   fontSize: number;
   activeProblems: Record<string, string>;
@@ -67,11 +91,41 @@ const createWorkspace = () =>
     accessToken: null,
     authReady: false,
     drafts: {},
+    practiceSubmissions: {},
+    practiceRequests: {},
+    activePracticeSubmissions: {},
+    setPracticeRequest: (key, request) => set((state) => ({
+      practiceRequests: { ...state.practiceRequests, [key]: request },
+    })),
+    acceptPracticeSubmission: (key, request, submissionId) => {
+      let accepted = false;
+      set((state) => {
+        // 새 요청을 시작한 뒤 도착한 이전 응답은 현재 접수로 반영하지 않는다.
+        if (state.practiceRequests[key]?.idempotencyKey !== request.idempotencyKey) return state;
+        accepted = true;
+        return {
+          practiceRequests: { ...state.practiceRequests, [key]: undefined },
+          activePracticeSubmissions: { ...state.activePracticeSubmissions, [key]: submissionId },
+          practiceSubmissions: { ...state.practiceSubmissions, [submissionId]: {
+            contextKey: key, idempotencyKey: request.idempotencyKey, createdAt: request.createdAt,
+            problemId: request.body.problemId, submissionId, result: state.practiceSubmissions[submissionId]?.result ?? null,
+          } },
+        };
+      });
+      return accepted;
+    },
+    selectPracticeSubmission: (key, submissionId) => set((state) =>
+      state.practiceSubmissions[submissionId]?.contextKey === key
+        ? { activePracticeSubmissions: { ...state.activePracticeSubmissions, [key]: submissionId } } : state),
+    setPracticeResult: (submissionId, result) => set((state) => {
+      const accepted = state.practiceSubmissions[submissionId];
+      return accepted ? { practiceSubmissions: { ...state.practiceSubmissions, [submissionId]: { ...accepted, result } } } : state;
+    }),
     language: "python3",
     fontSize: 14,
     activeProblems: {},
     setMember: (member) => set({ member }),
-    clearMember: () => set({ member: null, accessToken: null }),
+    clearMember: () => set({ member: null, accessToken: null, practiceSubmissions: {}, practiceRequests: {}, activePracticeSubmissions: {} }),
     setAccessToken: (accessToken) => set({ accessToken }),
     setAuthReady: (authReady) => set({ authReady }),
     setDraft: (key, d) => set((s) => ({ drafts: { ...s.drafts, [key]: d } })),

@@ -32,41 +32,60 @@ export function useResource<T>(
 }
 
 export function usePollUntil<T>(
-  loadFn: () => Promise<T>,
+  loadFn: (signal: AbortSignal) => Promise<T>,
   isDone: (data: T) => boolean,
-  options?: { intervalMs?: number; timeoutMs?: number },
+  options?: { intervalMs?: number; subsequentIntervalMs?: number; timeoutMs?: number },
 ): { data: T | undefined; loading: boolean; error: ApiError | null; polling: boolean } {
-  const { intervalMs = 1500, timeoutMs = 30000 } = options ?? {};
+  const { intervalMs = 1500, subsequentIntervalMs = intervalMs, timeoutMs = 30000 } = options ?? {};
   const [data, setData] = useState<T | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
   const [polling, setPolling] = useState(false);
-  const startedAt = useRef(0);
 
   useEffect(() => {
-    startedAt.current = Date.now();
-    let cancelled = false;
+    let stopped = false;
+    let delay = intervalMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    // 조회 대기는 채점 기한과 별개이며, 응답이 멈춘 경우에도 화면에서 재조회를 선택할 수 있다.
+    const deadline = setTimeout(() => {
+      stopped = true;
+      clearTimeout(timer);
+      controller.abort();
+      setLoading(false);
+      setPolling(false);
+      setError({ code: "TIMEOUT", message: "상태 조회를 잠시 멈췄습니다. 서버 채점은 계속될 수 있습니다." });
+    }, timeoutMs);
     const tick = async () => {
       try {
-        const result = await loadFn();
-        if (cancelled) return;
+        const result = await loadFn(controller.signal);
+        if (stopped) return;
         setData(result);
         setLoading(false);
-        if (isDone(result)) { setPolling(false); return; }
-        if (Date.now() - startedAt.current >= timeoutMs) {
-          setError({ code: "TIMEOUT", message: "채점 시간이 초과됐습니다" });
+        if (isDone(result)) {
+          clearTimeout(deadline);
           setPolling(false);
           return;
         }
         setPolling(true);
-        setTimeout(tick, intervalMs);
-      } catch (e) {
-        if (!cancelled) { setError(e as ApiError); setLoading(false); setPolling(false); }
+        timer = setTimeout(tick, delay);
+        delay = subsequentIntervalMs;
+      } catch (failure) {
+        if (stopped) return;
+        clearTimeout(deadline);
+        setError(failure as ApiError);
+        setLoading(false);
+        setPolling(false);
       }
     };
     tick();
-    return () => { cancelled = true; };
-    // loadFn과 isDone은 렌더링마다 재생성될 수 있으므로 의도적으로 초기값만 사용한다.
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      clearTimeout(deadline);
+      controller.abort();
+    };
+    // 같은 제출의 재조회는 호출 컴포넌트의 key를 바꿔 새 조회 주기로 시작한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
