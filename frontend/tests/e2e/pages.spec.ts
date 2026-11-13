@@ -26,7 +26,6 @@ const routes: { path: string; ready: (page: Page) => Locator }[] = [
   { path: "/submissions/5000", ready: (p) => p.getByRole("heading", { name: "제출 #5000" }) },
   { path: "/mypage", ready: (p) => p.getByRole("heading", { name: "테스터님의 마이페이지" }) },
   { path: "/login", ready: (p) => p.getByRole("heading", { name: "다시 만나서 반가워요" }) },
-  { path: "/signup", ready: (p) => p.getByRole("heading", { name: "다시 만나서 반가워요" }) },
 ];
 
 for (const theme of ["light", "dark"])

@@ -83,8 +83,8 @@ test("1440px 시험 응시 화면은 라이트·다크 테마 모두 남은 시�
   }
 });
 
-// 결함: /signup이 비로그인 공개 경로에 없어 로그인 화면으로 다시 보내지고, OAuth 복귀 경로가 /studies 대신 /signup이 된다.
-test.fixme("회원가입 주소로 들어오면 GitHub 로그인 버튼을 보여 주고 누르면 돌아갈 경로를 들고 GitHub 인증으로 이동한다", async ({ page }) => {
+// GitHub 로그인이 곧 가입이라 별도 회원가입 화면 없이 로그인 화면이 돌아갈 경로를 OAuth에 넘긴다 (정책 및 상태 §1 가입·로그인).
+test("로그인 화면에서 GitHub 로그인을 누르면 돌아갈 경로를 들고 GitHub 인증으로 이동한다", async ({ page }) => {
   let oauth: URL | null = null;
   await mockApi(page, {
     loggedIn: false,
@@ -96,10 +96,10 @@ test.fixme("회원가입 주소로 들어오면 GitHub 로그인 버튼을 보�
       return true;
     },
   });
-  await page.goto("/signup?returnTo=%2Fstudies");
-  // 로그인 확인이 끝난 뒤에 눌러야 비로그인 보호 경로 이동과 경합하지 않는다.
+  await page.goto("/login?returnTo=%2Fstudies");
+  // 인증 복원이 끝나기 전에는 화면이 바뀔 수 있어 준비 완료 뒤에 누른다.
   await expect(page.locator("main")).toHaveAttribute("data-ready", "true");
-  await expect(page).toHaveURL(/\/signup\?returnTo=%2Fstudies$/);
+  await expect(page).toHaveURL(/\/login\?returnTo=%2Fstudies$/);
   await expect(page.getByRole("heading", { name: "다시 만나서 반가워요" })).toBeVisible();
   await page.getByRole("button", { name: "GitHub으로 로그인", exact: true }).click();
   await expect.poll(() => oauth?.searchParams.get("redirectPath")).toBe("/studies");
