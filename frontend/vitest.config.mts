@@ -7,6 +7,6 @@ export default defineConfig({
   test: {
     include: ["tests/unit/**/*.test.ts"],
     environment: "node",
-    fakeTimers: { timezone: "Asia/Seoul" },
+    env: { TZ: "Asia/Seoul" },
   },
 });
