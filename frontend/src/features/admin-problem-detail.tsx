@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Button, ErrorState, Go, Heading, Loading } from "@/components/ui";
 import { adminProblemApi } from "@/services/api";
@@ -12,7 +12,13 @@ function ProblemView({ id, revision }: { id: string; revision?: string }) {
   const [page, setPage] = useState(0);
   const resource = useResource(() => adminProblemApi.getDetail(id, revision), `${id}:${revision}`);
   const history = useResource(() => adminProblemApi.getRevisions(id, page), `${id}:${page}`);
-  if (resource.loading) return <Loading />;
+  const { retry: refreshDetail } = resource;
+  const { retry: refreshHistory } = history;
+  const refreshApplied = useCallback(() => {
+    refreshDetail();
+    refreshHistory();
+  }, [refreshDetail, refreshHistory]);
+  if (resource.loading && !resource.data) return <Loading />;
   if (resource.error) return <ErrorState message={resource.error.message} retry={resource.retry} />;
   if (!resource.data) return null;
   const detail = resource.data;
@@ -41,7 +47,7 @@ function ProblemView({ id, revision }: { id: string; revision?: string }) {
         <Pager page={page} totalPages={history.data?.totalPages ?? 0} onChange={setPage} />
       </>}
     </section>
-    <AdminProblemValidation detail={detail} />
+    <AdminProblemValidation detail={detail} onApplied={refreshApplied} />
   </div>;
 }
 
