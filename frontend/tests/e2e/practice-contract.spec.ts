@@ -53,3 +53,15 @@ test("실행 가능한 언어가 없으면 에디터·실행·제출을 제공�
   await expect(page.getByRole("button", { name: "제출", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "실행", exact: true })).toHaveCount(0);
 });
+
+
+test("공개 예제 표가 있어도 별도로 작성한 예시 해설 Markdown을 표시한다", async ({ page }) => {
+  await mockPracticePage(page);
+  await page.route("**/api/v1/problems/1001", (route) => route.fulfill({ json: { success: true, data: {
+    ...problemDetail, examples: "### 예제 풀이 과정\n\n첫 번째 원소와 두 번째 원소를 더합니다.",
+  } } }));
+  await page.goto("/problems/1001");
+  await expect(page.getByRole("table", { name: "입출력 예", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "예제 풀이 과정", exact: true })).toBeVisible();
+  await expect(page.getByText("첫 번째 원소와 두 번째 원소를 더합니다.", { exact: true })).toBeVisible();
+});

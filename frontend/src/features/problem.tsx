@@ -80,7 +80,8 @@ export function ProblemDescription({
                 ))}</tbody>
               </table>
             </div>
-          ) : <Markdown remarkPlugins={[remarkGfm]} skipHtml>{problem.examples}</Markdown>}
+          ) : null}
+          <Markdown remarkPlugins={[remarkGfm]} skipHtml>{problem.examples}</Markdown>
         </div>
       )}
       {tab === "submissions" &&
