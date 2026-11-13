@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { runInputs } from "../../src/services/run-inputs";
+import { runInputs } from "@/services/run-inputs";
 
 it("직접 입력의 JSON 원문과 함수 인수 이름을 보존한다", () => {
   expect(runInputs(["a"], [{ a: " [1, 2] " }], false))
