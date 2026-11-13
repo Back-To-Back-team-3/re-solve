@@ -110,10 +110,17 @@ function Frame({ children }: { children: ReactNode }) {
                 className="icon-btn"
                 aria-label="로그아웃"
                 onClick={async () => {
-                  // 로그아웃 API 실패 시에도 클라이언트 세션은 항상 종료한다 (fail-open).
-                  try { await authApi.logout() } catch {}
-                  clearMember()
-                  router.push("/login")
+                  try {
+                    await authApi.logout();
+                  } catch (e) {
+                    // UNAUTHORIZED는 서버 세션이 이미 무효라 로컬만 정리한다. 그 외 실패는 세션이 남아 있을 수 있어 유지한다.
+                    if ((e as { code?: string }).code !== "UNAUTHORIZED") {
+                      toast("로그아웃하지 못했습니다. 다시 시도해 주세요.");
+                      return;
+                    }
+                  }
+                  clearMember();
+                  router.push("/login");
                 }}
               >
                 <LogOut size={16} />
