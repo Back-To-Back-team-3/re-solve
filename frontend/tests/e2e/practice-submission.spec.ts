@@ -117,3 +117,48 @@ test("같은 화면에서 제출 접수와 채점 완료를 제출 목록에 반
   await expect(row).toContainText("1ms");
   await expect.poll(() => listReads).toBeGreaterThan(beforeDone);
 });
+
+for (const retry of [false, true]) {
+  test(`언어 전환 후 ${retry ? "같은 요청을 재시도해도" : "새 제출을 보내도"} 늦은 원래 응답이 완료 결과를 덮지 않는다`, async ({ page }) => {
+    await mockPracticePage(page);
+    await page.addInitScript(() => localStorage.setItem("resolve:editor", JSON.stringify({ language: "java", fontSize: 14 })));
+    await page.route("**/api/v1/judge/languages", (route) => route.fulfill({ json: { success: true, data: {
+      content: [{ language: "java", enabled: true }, { language: "python3", enabled: true }],
+    } } }));
+    let releaseFirst = () => {};
+    const pendingFirst = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const requests: { key: string | undefined; body: unknown }[] = [];
+    await page.route("**/api/v1/submissions", async (route) => {
+      requests.push({ key: route.request().headers()["idempotency-key"], body: route.request().postDataJSON() });
+      const first = requests.length === 1;
+      const id = first || retry ? "2101" : "2102";
+      if (first) await pendingFirst;
+      await route.fulfill({ status: 202, json: { success: true, data: {
+        ...receipt, submissionId: id, statusUrl: `/api/v1/submissions/${id}`,
+      } } });
+    });
+    await page.route("**/api/v1/submissions/210*", (route) => route.fulfill({ json: { success: true, data: {
+      ...completed, submissionId: route.request().url().split("/").at(-1),
+    } } }));
+    await page.goto("/problems/1001");
+    await expect(page.locator(".view-lines")).toContainText("// java starter");
+    await page.getByRole("button", { name: "제출", exact: true }).click();
+    await expect(page.getByRole("button", { name: "채점 중…", exact: true })).toBeDisabled();
+    await page.getByLabel("코드 언어").selectOption("python3");
+    await expect(page.locator(".view-lines")).toContainText("# python starter");
+    await page.getByLabel("코드 언어").selectOption("java");
+    await expect(page.locator(".view-lines")).toContainText("// java starter");
+    await page.getByRole("button", { name: retry ? "같은 제출 재요청" : "현재 코드로 새 제출", exact: true }).click();
+    await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
+    expect(requests).toHaveLength(2);
+    expect(requests[0].key).toBeTruthy();
+    if (retry) expect(requests[1]).toEqual(requests[0]);
+    else expect(requests[1].key).not.toBe(requests[0].key);
+    const lateResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/submissions" && response.request().method() === "POST");
+    releaseFirst();
+    await (await lateResponse).finished();
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
+    expect(requests).toHaveLength(2);
+  });
+}

@@ -19,6 +19,7 @@ import {
   readDraft,
   saveDraft,
   useWorkspace,
+  useWorkspaceApi,
 } from "@/stores/workspace";
 import type { JudgeResult, Language, Problem, RunResponse } from "@/services/types";
 const Monaco = dynamic(() => import("@monaco-editor/react"), {
@@ -247,6 +248,7 @@ function Buffer({
   const submissionKey = JSON.stringify([key, problem.problemRevisionId]);
   const attempt = useWorkspace((state) => state.practiceSubmissions[submissionKey]);
   const setAttempt = useWorkspace((state) => state.setPracticeSubmission);
+  const workspace = useWorkspaceApi();
   const sendingRef = useRef(false);
   const router = useRouter();
   const judgeSubmissionId = attempt?.submissionId ?? null;
@@ -432,7 +434,10 @@ function Buffer({
     setSending(true);
     try {
       const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
-      setAttempt(submissionKey, { ...request, submissionId: receipt.submissionId });
+      const current = workspace.getState().practiceSubmissions[submissionKey];
+      // 늦은 응답이 새 요청이나 같은 요청의 완료 결과를 덮지 않도록 한다.
+      if (current?.idempotencyKey !== request.idempotencyKey) return;
+      setAttempt(submissionKey, { ...current, submissionId: receipt.submissionId });
       setPollVersion((value) => value + 1);
       setPaused(false);
       router.refresh();
@@ -468,6 +473,7 @@ function Buffer({
           key={`${judgeSubmissionId}:${pollVersion}`}
           submissionId={judgeSubmissionId}
           onDone={(result, err) => {
+            if (workspace.getState().practiceSubmissions[submissionKey]?.idempotencyKey !== attempt?.idempotencyKey) return;
             setPaused(true);
             if (err) setJudgeError(err);
             else if (attempt && result) setAttempt(submissionKey, { ...attempt, result });
