@@ -145,7 +145,7 @@ export function Pager({
 }) {
   if (totalPages < 2) return null;
   return (
-    <div className="row" style={{ justifyContent: "center" }}>
+    <div className="row justify-center">
       <Button disabled={page === 0} onClick={() => onChange(page - 1)}>
         이전
       </Button>
