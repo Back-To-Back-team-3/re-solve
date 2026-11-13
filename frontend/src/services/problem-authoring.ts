@@ -16,12 +16,9 @@ function typeSpec(value: unknown): value is ProblemFunctionParamType {
   return typeof value.kind === "string" && ["INT32", "INT64", "FLOAT32", "FLOAT64", "STRING", "BOOLEAN"].includes(value.kind);
 }
 
-/** JSON 입력을 검증하고 전송 계약의 필드만 구성한다. */
-export function parseProblemContent(fields: {
-  title: string; description: string; constraints: string; examples: string; difficulty: number;
-  tagIds: string; functionSpec: string; testCases: string; executionLimits: string;
-}): ProblemWriteContent {
-  const fn: unknown = JSON.parse(fields.functionSpec);
+/** 출제 폼과 테스트 입력에서 같은 함수 명세를 사용한다. */
+export function parseProblemFunction(text: string): ProblemWriteContent["functionSpec"] {
+  const fn: unknown = JSON.parse(text);
   if (!objectValue(fn) || fn.name !== "solution" || !Array.isArray(fn.parameters) || !typeSpec(fn.returnType)) {
     throw new Error("함수 명세는 solution 이름·매개변수·반환 TypeSpec이 필요합니다.");
   }
@@ -32,6 +29,16 @@ export function parseProblemContent(fields: {
     return { name: param.name, type: param.type };
   });
   if (new Set(parameters.map((param) => param.name)).size !== parameters.length) throw new Error("매개변수 이름이 중복됩니다.");
+  return { name: "solution", parameters, returnType: fn.returnType };
+}
+
+/** 입력을 검증하고 전송 계약의 필드만 구성한다. */
+export function parseProblemContent(fields: {
+  title: string; description: string; constraints: string; examples: string; difficulty: number;
+  tagIds: string; functionSpec: string; testCases: string; executionLimits: string;
+}): ProblemWriteContent {
+  const fn = parseProblemFunction(fields.functionSpec);
+  const parameters = fn.parameters;
   const tests: unknown = JSON.parse(fields.testCases);
   if (!Array.isArray(tests) || !tests.length || tests.length > 50) throw new Error("테스트는 1~50개가 필요합니다.");
   const testCases = tests.map((test: unknown) => {
