@@ -74,8 +74,8 @@ export type AdminMember = {
   createdAt: string;
 };
 
-// --- 기존 mock 타입 (다른 도메인 화면에서 사용 중) ---
-// 주의: 아래 User는 mock-api 전용이다. 실서버 회원 타입은 위의 Member를 사용한다.
+// --- 공통 값 타입과 화면 카탈로그 타입 ---
+// Tag·Problem은 실서버 응답을 화면용으로 변환한 카탈로그 형태다(catalog.tsx).
 
 export type Language = "java" | "python3" | "cpp";
 export type Verdict = "AC" | "WA" | "CE" | "TLE" | "MLE" | "RE";
@@ -112,94 +112,6 @@ export interface Problem {
   };
   starterCodes: Record<Language, string>;
   samples: { input: string; expected: string; argumentTexts?: Record<string, string> }[];
-}
-export interface Submission {
-  id: string;
-  userId: string;
-  problemId: string;
-  problemRevisionId: string;
-  examId?: string;
-  language: Language;
-  sourceCode: string;
-  kind: "run" | "submit";
-  state: JudgeState;
-  verdict: Verdict | null;
-  createdAt: number;
-  finishedAt?: number;
-  passedCount: number;
-  totalCount: number;
-  cpuTimeMs: number;
-  memoryKiB: number;
-}
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  goal: string;
-}
-export interface Message {
-  id: string;
-  scope: string;
-  userId: string;
-  author: string;
-  body: string;
-  createdAt: number;
-  parentId?: string;
-}
-export interface Study {
-  id: string;
-  title: string;
-  description: string;
-  goal: string;
-  level: string;
-  time: string;
-  capacity: number;
-  visibility: "public" | "private";
-  condition: string;
-  tagIds: string[];
-  problemIds: string[];
-  members: string[];
-  applicants: string[];
-  ownerId: string;
-  deadline: number;
-  reason: string;
-}
-export type ExamStatus = "recruiting" | "scheduled" | "running" | "ended";
-export interface Exam {
-  id: string;
-  kind: "exam" | "contest";
-  title: string;
-  description: string;
-  duration: number;
-  status: ExamStatus;
-  startsAt: number;
-  problemIds: string[];
-  participants: string[];
-  visibility: "public" | "private";
-  condition: string;
-  ownerId: string;
-}
-export interface ExamSession {
-  id: string;
-  examId: string;
-  userId: string;
-  startedAt: number;
-  endsAt: number;
-  finishedAt?: number;
-}
-export interface Database {
-  version: 1;
-  seededAt: number;
-  currentUserId: string | null;
-  users: User[];
-  studies: Study[];
-  exams: Exam[];
-  sessions: ExamSession[];
-  submissions: Submission[];
-  messages: Message[];
-  notes: Record<string, string>;
-  scenario: Verdict | "FAILED";
-  simulateReadError: boolean;
 }
 // --- api-spec §2.1 problem-service B 도메인 실서버 타입 ---
 

@@ -6,6 +6,7 @@ import { Moon, Sun, UserRound, LogOut } from "lucide-react";
 import { CatalogProvider } from "@/services/catalog";
 import { WorkspaceProvider, useWorkspace } from "@/stores/workspace";
 import { authApi } from "@/services/api";
+import { THEME_STORAGE_KEY } from "@/services/storage-keys";
 import { Button, ToastProvider, useToast } from "./ui";
 import { NotificationBell } from "@/features/notifications";
 const nav = [
@@ -40,7 +41,7 @@ function Frame({ children }: { children: ReactNode }) {
     setTheme(next);
     document.documentElement.dataset.theme = next;
     try {
-      localStorage.setItem("resolve:theme", next);
+      localStorage.setItem(THEME_STORAGE_KEY, next);
     } catch {
       toast("테마를 저장하지 못했습니다.");
     }

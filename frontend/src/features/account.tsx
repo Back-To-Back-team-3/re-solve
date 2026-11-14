@@ -1,7 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { authApi, memberApi } from "@/services/api";
+import { authApi, judgeApi, memberApi } from "@/services/api";
+import { useResource } from "@/services/hooks";
+import { THEME_STORAGE_KEY } from "@/services/storage-keys";
+import { ProblemSubmissionList } from "@/features/problem-list";
 import { NotificationPreferencesSection } from "@/features/account-notifications";
 import { SkillPage } from "@/features/account-skill";
 import { useWorkspace } from "@/stores/workspace";
@@ -10,6 +13,7 @@ import { GithubIntegrationSection } from "@/features/account-github";
 import {
   Button,
   Empty,
+  ErrorState,
   Go,
   Heading,
   Loading,
@@ -100,6 +104,13 @@ export function AuthPage() {
     </div>
   );
 }
+function MySubmissions() {
+  const r = useResource(() => judgeApi.getMySubmissions(0, 20), "mypage-submissions");
+  if (r.loading && !r.data) return <Loading />;
+  if (r.error && !r.data) return <ErrorState message={r.error.message} retry={r.retry} />;
+  return <ProblemSubmissionList items={r.data?.content ?? []} />;
+}
+
 export function MyPage() {
   const member = useWorkspace((s) => s.member),
     setMember = useWorkspace((s) => s.setMember),
@@ -200,7 +211,7 @@ export function MyPage() {
       {tab === "skill" && <SkillPage />}
       {tab === "submissions" && (
         <Section title="최근 제출">
-          <Empty title="제출 기록을 불러오는 중입니다." />
+          <MySubmissions />
         </Section>
       )}
       {tab === "github" && <GithubIntegrationSection />}
@@ -217,7 +228,7 @@ export function MyPage() {
                     setTheme(e.target.value);
                     document.documentElement.dataset.theme = e.target.value;
                     try {
-                      localStorage.setItem("re-solve:settings:theme", e.target.value);
+                      localStorage.setItem(THEME_STORAGE_KEY, e.target.value);
                     } catch {}
                   }}
                 >

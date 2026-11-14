@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Modal } from "@/components/ui";
-import { contestApi, judgeApi } from "@/services/api";
+import { Button, Modal, useLoginRedirect } from "@/components/ui";
+import { contestApi, isUnauthorized, judgeApi } from "@/services/api";
 import { runInputs, runExpectedOutputs, type RunTestCase } from "@/services/run-inputs";
 import { draftKey, readDraft, saveDraft, useWorkspace, useWorkspaceApi } from "@/stores/workspace";
 import type { Language, Problem, RunResponse } from "@/services/types";
@@ -32,6 +32,7 @@ export function Buffer({
   const codeRef = useRef(""),
     readyRef = useRef(false),
     seqRef = useRef("1"),
+    examDirtyRef = useRef(false),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [code, setCode] = useState(""),
     [ready, setReady] = useState(false),
@@ -62,7 +63,7 @@ export function Buffer({
   const attempt = activeId ? submissions[activeId] : undefined;
   const accepted = Object.values(submissions).flatMap((item) => item?.contextKey === submissionKey ? [item] : []);
   const workspace = useWorkspaceApi();
-  const sendingRef = useRef(false), router = useRouter();
+  const sendingRef = useRef(false), router = useRouter(), toLogin = useLoginRedirect();
   const judgeSubmissionId = attempt?.submissionId ?? null;
   const judgeResult = attempt?.result ?? null;
   const polling = !!judgeSubmissionId && !judgeResult && !paused;
@@ -89,6 +90,11 @@ export function Buffer({
     const flush = () => {
       if (!readyRef.current) return;
       clearTimeout(timer.current);
+      // 문제 전환·이탈로 자동 저장 타이머가 취소되면 시험 복원(readExamDraft)이 읽는 키에 바로 남기고 서버에도 보낸다.
+      if (examId && examDirtyRef.current) {
+        writeExamDraft(examId, problem.id, language, codeRef.current, seqRef.current);
+        void persistExam();
+      }
       const d = {
         code: codeRef.current,
         revisionId: problem.problemRevisionId,
@@ -136,6 +142,7 @@ export function Buffer({
         language, sourceCode: codeRef.current, seq: seqRef.current,
       });
       if (res.applied) {
+        examDirtyRef.current = false;
         seqRef.current = String(parseInt(res.serverSeq) + 1);
         writeExamDraft(examId, problem.id, language, codeRef.current, seqRef.current);
         setSaved("저장 완료");
@@ -144,6 +151,7 @@ export function Buffer({
   }
   function edit(value: string) {
     codeRef.current = value;
+    examDirtyRef.current = true;
     setCode(value);
     setSaved("저장 중…");
     clearTimeout(timer.current);
@@ -169,6 +177,8 @@ export function Buffer({
         }),
       );
     } catch (e) {
+      // 세션 만료는 결과 영역 문구가 아니라 버튼 동작(useAction)과 같게 로그인으로 보낸다.
+      if (isUnauthorized(e)) return toLogin();
       const err = e as { message?: string };
       setRunError(err.message ?? "실행에 실패했습니다.");
     } finally {
@@ -213,6 +223,7 @@ export function Buffer({
       }
       router.refresh();
     } catch (failure) {
+      if (isUnauthorized(failure)) return toLogin();
       const message = typeof failure === "object" && failure !== null && "message" in failure
         && typeof failure.message === "string" ? failure.message : "제출에 실패했습니다.";
       setRequestError(message);

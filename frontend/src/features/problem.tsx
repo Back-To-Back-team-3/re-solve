@@ -137,9 +137,9 @@ export function ProblemDescription({
           </>
         ))}
       {tab === "questions" && (
-        <Board scope={`problem:${problem.id}`} title="질문 작성" />
+        <Board />
       )}
-      {tab === "notes" && <Note problemId={problem.id} />}
+      {tab === "notes" && <Note />}
     </section>
   );
 }

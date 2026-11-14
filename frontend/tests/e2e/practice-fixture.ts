@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { fulfillCatalog } from "./catalog-fixture";
 
 export const problemDetail = {
   problemId: "1001", problemRevisionId: "2001", revisionNumber: 1,
@@ -23,6 +24,7 @@ export const problemDetail = {
 export async function mockPracticePage(page: Page, enabled = true) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (await fulfillCatalog(route, path)) return;
     let data: unknown;
     if (path === "/api/v1/auth/token/refresh") data = { accessToken: "test-access", expiresIn: 3600 };
     else if (path === "/api/v1/members/me") data = {

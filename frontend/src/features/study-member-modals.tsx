@@ -21,17 +21,12 @@ export function DelegateModal({
   async function doDelegate() {
     await action(
       async () => {
-        try {
-          await studyApi.delegateLeader(studyId, target.membershipId);
-          onClose();
-          onRefresh();
-          router.refresh();
-        } catch (err) {
-          throw new Error(((err as { message?: string }).message ?? "오류가 발생했습니다."));
-        }
+        await studyApi.delegateLeader(studyId, target.membershipId);
+        onClose();
+        onRefresh();
+        router.refresh();
       },
       "스터디장을 위임했습니다.",
-      false,
     );
   }
 
@@ -74,17 +69,12 @@ export function RemoveModal({
   async function doRemove() {
     await action(
       async () => {
-        try {
-          await studyApi.removeMember(studyId, target.membershipId, reason);
-          onClose();
-          onRefresh();
-          router.refresh();
-        } catch (err) {
-          throw new Error(((err as { message?: string }).message ?? "오류가 발생했습니다."));
-        }
+        await studyApi.removeMember(studyId, target.membershipId, reason);
+        onClose();
+        onRefresh();
+        router.refresh();
       },
       "강제 탈퇴 처리했습니다.",
-      false,
     );
   }
 
