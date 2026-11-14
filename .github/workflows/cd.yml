@@ -62,6 +62,9 @@ jobs:
             ${{ runner.os }}-gradle-
 
       # 1. 전체 서비스 Jar 빌드
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
       - name: Build Spring Boot Jars
         run: ./gradlew bootJar -x test
 
