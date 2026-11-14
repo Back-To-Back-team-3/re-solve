@@ -30,12 +30,21 @@ repositories {
 }
 
 dependencies {
+    implementation project(':common-core')
+    implementation project(':common-web')
+    implementation project(':common-jpa')
+    implementation project(':common-event')
+    implementation project(':common-scheduling')
+
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
 
     // Database
     runtimeOnly 'com.mysql:mysql-connector-j'
@@ -48,6 +57,7 @@ dependencies {
     implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-sns'
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-s3'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok'
@@ -63,6 +73,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-flyway-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
 
     // Testcontainers
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
@@ -79,7 +90,46 @@ dependencies {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'judge0-live', 'run-live'
+    }
+}
+
+// 명시적으로 실행할 때만 실제 Judge0에 요청한다. 일반 test/check/build에는 연결하지 않는다.
+tasks.register('judge0LiveTest', Test) {
+    group = 'verification'
+    description = '지정한 실제 Judge0에 코드를 제출하고 실행 결과를 확인한다.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'judge0-live'
+    }
+    systemProperty 'judge0.live', 'true'
+    systemProperty 'judge0.live.language', providers.gradleProperty('judge0Language').getOrElse('python3')
+    // 외부 서버의 현재 상태를 확인하는 테스트이므로 이전 성공 결과를 재사용하지 않는다.
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        showStandardStreams = true
+    }
+}
+
+// Gateway와 실제 Judge0가 준비된 로컬 환경에서만 명시적으로 실행한다.
+tasks.register('runLiveTest', Test) {
+    group = 'verification'
+    description = '일반·시험 Run의 실제 서비스 연동을 검증한다.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'run-live'
+    }
+    systemProperty 'judge.run.live', 'true'
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {

@@ -1,0 +1,130 @@
+name: Environment Control
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '제어 대상 환경'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      action:
+        description: '수행할 동작'
+        required: true
+        default: 'status'
+        type: choice
+        options:
+          - status
+          - start
+          - stop
+          - restart
+      services:
+        description: '대상 서비스 (공백으로 구분, 미입력 시 all)'
+        required: false
+        default: 'all'
+        type: string
+      force:
+        description: '강제 중단 여부 (stop/restart 시 진행 중 작업 확인 건너뜀)'
+        required: false
+        default: false
+        type: boolean
+      include_infra:
+        description: '공통 인프라(DB, Redis 등) 포함 여부 (stop 시)'
+        required: false
+        default: false
+        type: boolean
+
+  # 스테이징 환경 비용 절감을 위한 야간 자동 중단 (매일 KST 00:00 = UTC 15:00)
+  # docs/dev/planning/planning.md > 3.2 요구사항 명세 > T1-09
+  schedule:
+    - cron: '0 15 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  control:
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: env-control-${{ github.event.inputs.environment || 'staging' }}
+      cancel-in-progress: false
+    steps:
+      - name: 제어 파라미터 결정
+        id: params
+        env:
+          INPUT_EVENT: ${{ github.event_name }}
+          INPUT_ENV: ${{ github.event.inputs.environment }}
+          INPUT_ACTION: ${{ github.event.inputs.action }}
+          INPUT_SERVICES: ${{ github.event.inputs.services }}
+          INPUT_FORCE: ${{ github.event.inputs.force }}
+          INPUT_INCLUDE_INFRA: ${{ github.event.inputs.include_infra }}
+        run: |
+          if [ "$INPUT_EVENT" = "schedule" ]; then
+            TARGET_ENV="staging"
+            TARGET_ACTION="stop"
+            TARGET_SERVICES="all"
+            EXTRA_OPTS=""
+            echo "⏰ [Schedule] 야간 스테이징 자동 중단 스케줄 트리거 실행"
+          else
+            TARGET_ENV="$INPUT_ENV"
+            TARGET_ACTION="$INPUT_ACTION"
+            TARGET_SERVICES="${INPUT_SERVICES:-all}"
+            EXTRA_OPTS=""
+            if [ "$INPUT_FORCE" = "true" ]; then
+              EXTRA_OPTS="$EXTRA_OPTS --force"
+            fi
+            if [ "$INPUT_INCLUDE_INFRA" = "true" ]; then
+              EXTRA_OPTS="$EXTRA_OPTS --include-infra"
+            fi
+          fi
+
+          echo "target_env=$TARGET_ENV" >> $GITHUB_OUTPUT
+          echo "target_action=$TARGET_ACTION" >> $GITHUB_OUTPUT
+          echo "target_services=$TARGET_SERVICES" >> $GITHUB_OUTPUT
+          echo "extra_opts=$EXTRA_OPTS" >> $GITHUB_OUTPUT
+
+          echo "=========================================================="
+          echo "🛠️ 환경 제어 실행 설정"
+          echo "  - 환경: $TARGET_ENV"
+          echo "  - 동작: $TARGET_ACTION"
+          echo "  - 대상 서비스: $TARGET_SERVICES"
+          echo "  - 추가 옵션: $EXTRA_OPTS"
+          echo "=========================================================="
+
+      - name: EC2 원격 제어 스크립트 실행 (SSH)
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          SSH_ACTION: ${{ steps.params.outputs.target_action }}
+          SSH_EXTRA_OPTS: ${{ steps.params.outputs.extra_opts }}
+          SSH_SERVICES: ${{ steps.params.outputs.target_services }}
+          TARGET_ENV: ${{ steps.params.outputs.target_env }}
+          PROD_APP_DIR: ${{ secrets.PROD_APP_DIR }}
+          STAGING_APP_DIR: ${{ secrets.STAGING_APP_DIR }}
+        with:
+          host: ${{ steps.params.outputs.target_env == 'production' && secrets.PROD_EC2_HOST || secrets.STAGING_EC2_HOST }}
+          username: ${{ steps.params.outputs.target_env == 'production' && secrets.PROD_EC2_USER || secrets.STAGING_EC2_USER }}
+          key: ${{ steps.params.outputs.target_env == 'production' && secrets.PROD_EC2_SSH_KEY || secrets.STAGING_EC2_SSH_KEY }}
+          port: 22
+          envs: SSH_ACTION,SSH_EXTRA_OPTS,SSH_SERVICES,TARGET_ENV,PROD_APP_DIR,STAGING_APP_DIR
+          script: |
+            set -eo pipefail
+            if [ "$TARGET_ENV" = "production" ]; then
+              APP_DIR="${PROD_APP_DIR:-/home/ubuntu/re-solve}"
+              BRANCH="main"
+            else
+              APP_DIR="${STAGING_APP_DIR:-/home/ubuntu/re-solve}"
+              BRANCH="develop"
+            fi
+            cd "$APP_DIR"
+
+            echo "📥 저장소 코드 최신화 확인 ($BRANCH)..."
+            git fetch origin
+            git checkout "$BRANCH"
+            git pull origin "$BRANCH"
+
+            echo "🚀 서비스 제어 스크립트 실행..."
+            chmod +x ./scripts/deploy/*.sh
+            ./scripts/deploy/service-control.sh "$SSH_ACTION" $SSH_EXTRA_OPTS $SSH_SERVICES

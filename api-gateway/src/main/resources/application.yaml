@@ -1,3 +1,59 @@
+server:
+  port: 8080
+
 spring:
   application:
     name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  cloud:
+    gateway:
+      server:
+        webflux:
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowed-origin-patterns:
+                  - ${FRONTEND_ORIGIN:http://localhost:8080}
+                  - http://localhost:3000
+                  - http://localhost:8080
+                  - https://*.netlify.app
+                allowed-methods:
+                  - GET
+                  - POST
+                  - PUT
+                  - PATCH
+                  - DELETE
+                  - OPTIONS
+                allowed-headers:
+                  - "*"
+                exposed-headers:
+                  - Authorization
+                  - X-Correlation-Id
+                allow-credentials: true
+                max-age: 3600
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus, metrics, loggers, gateway
+  endpoint:
+    health:
+      show-details: when_authorized
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
+resolve:
+  auth:
+    jwt-secret: ${JWT_SECRET:}
+    bypass-enabled: ${AUTH_BYPASS_ENABLED:false}

@@ -5,6 +5,8 @@ x-db-environment: &db-environment
   SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
   SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
   SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+  SERVER_SHUTDOWN: ${SERVER_SHUTDOWN:-graceful}
+  SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:-25s}
 
 x-db-redis-environment: &db-redis-environment
   <<: *db-environment
@@ -39,13 +41,14 @@ services:
     image: ${MYSQL_IMAGE:-mysql:8.4}
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
-      MYSQL_DATABASE: ${MEMBER_DB_NAME:-member_db}
+      MYSQL_DATABASE: member_db
       MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
       MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     ports:
       - "127.0.0.1:${MYSQL_HOST_PORT:-3308}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+      - ./init-scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
       interval: 10s
@@ -53,38 +56,6 @@ services:
       retries: 10
       start_period: 30s
 
-  # 첫 실행 때 서비스별 DB를 만들고 공통 개발 계정에 권한을 부여한다.
-  mysql-init:
-    image: ${MYSQL_IMAGE:-mysql:8.4}
-    environment:
-      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
-      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
-      MEMBER_DB_NAME: ${MEMBER_DB_NAME:-member_db}
-      PROBLEM_DB_NAME: ${PROBLEM_DB_NAME:-problem_db}
-      JUDGE_DB_NAME: ${JUDGE_DB_NAME:-judge_db}
-      CONTEST_DB_NAME: ${CONTEST_DB_NAME:-contest_db}
-      STUDY_DB_NAME: ${STUDY_DB_NAME:-study_db}
-      NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME:-notification_db}
-      INTEGRATION_DB_NAME: ${INTEGRATION_DB_NAME:-integration_db}
-      AI_DB_NAME: ${AI_DB_NAME:-ai_db}
-      ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME:-analytics_db}
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        case "$$DB_USERNAME" in
-          ''|*[!a-zA-Z0-9_]*) echo 'DB_USERNAME must contain only letters, numbers, or underscores' >&2; exit 1 ;;
-        esac
-        for db in "$$MEMBER_DB_NAME" "$$PROBLEM_DB_NAME" "$$JUDGE_DB_NAME" "$$CONTEST_DB_NAME" "$$STUDY_DB_NAME" "$$NOTIFICATION_DB_NAME" "$$INTEGRATION_DB_NAME" "$$AI_DB_NAME" "$$ANALYTICS_DB_NAME"; do
-          case "$$db" in
-            ''|*[!a-zA-Z0-9_]*) echo 'DB name must contain only letters, numbers, or underscores' >&2; exit 1 ;;
-          esac
-          mysql -h mysql -u root -e "CREATE DATABASE IF NOT EXISTS \`$$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON \`$$db\`.* TO '$$DB_USERNAME'@'%';"
-        done
-    depends_on:
-      mysql:
-        condition: service_healthy
-    restart: "no"
 
   redis:
     image: ${REDIS_IMAGE:-redis:7.4-alpine}
@@ -106,7 +77,25 @@ services:
       timeout: 3s
       retries: 10
 
+  localstack:
+    image: ${LOCALSTACK_IMAGE:-localstack/localstack:3.8}
+    ports:
+      - "127.0.0.1:${LOCALSTACK_HOST_PORT:-4566}:4566"
+    environment:
+      SERVICES: "s3,sqs,sns"
+      AWS_DEFAULT_REGION: ${AWS_REGION:-ap-northeast-2}
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./init-aws/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "awslocal sqs list-queues > /dev/null 2>&1 && curl -sf http://127.0.0.1:4566/_localstack/init/ready | grep -q '\"state\": \"SUCCESSFUL\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   api-gateway:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-api-gateway:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
@@ -122,128 +111,286 @@ services:
       INTEGRATION_SERVICE_URL: ${INTEGRATION_SERVICE_URL:-http://integration-service:8080}
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8080}
       ANALYTICS_SERVICE_URL: ${ANALYTICS_SERVICE_URL:-http://analytics-service:8080}
+      SPRING_DATA_REDIS_HOST: ${REDIS_HOST:-redis}
+      SPRING_DATA_REDIS_PORT: ${REDIS_PORT:-6379}
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:-}
+      AUTH_BYPASS_ENABLED: ${AUTH_BYPASS_ENABLED:-false}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+      SERVER_SHUTDOWN: ${SERVER_SHUTDOWN:-graceful}
+      SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:-25s}
+    depends_on:
+      redis:
+        condition: service_healthy
 
   member-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-member-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
       context: ./member-service
     environment:
       <<: *db-redis-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${MEMBER_DB_NAME:-member_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/member_db
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?GITHUB_CLIENT_ID is required}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?GITHUB_CLIENT_SECRET is required}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8080/api/v1/auth/github/callback}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
+      DEV_LOGIN_ENABLED: ${DEV_LOGIN_ENABLED:-false}
+      PROBLEM_SERVICE_URL: ${PROBLEM_SERVICE_URL:-http://problem-service:8080}
+      CONTEST_SERVICE_URL: ${CONTEST_SERVICE_URL:-http://contest-service:8080}
+      STUDY_SERVICE_URL: ${STUDY_SERVICE_URL:-http://study-service:8080}
+      MEMBER_DIAGNOSIS_ENABLED: ${MEMBER_DIAGNOSIS_ENABLED:-false}
+      MEMBER_MESSAGING_ENABLED: ${MEMBER_MESSAGING_ENABLED:-false}
+      MEMBER_EVENTS_TOPIC_ARN: ${MEMBER_EVENTS_TOPIC_ARN:-}
+      EXAM_SUBMISSION_QUEUE_URL: ${EXAM_SUBMISSION_QUEUE_URL:-}
+      MEMBER_EVENTS_CONSUMER_ENABLED: ${MEMBER_EVENTS_CONSUMER_ENABLED:-false}
+      MEMBER_QUEUE_URL: ${MEMBER_QUEUE_URL:-}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
   problem-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-problem-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
       context: ./problem-service
     environment:
-      <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${PROBLEM_DB_NAME:-problem_db}
+      <<: *db-redis-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/problem_db
+      PROBLEM_VALIDATION_QUEUE_URL: ${PROBLEM_VALIDATION_QUEUE_URL:-}
+      PROBLEM_QUEUE_URL: ${PROBLEM_QUEUE_URL:-}
+      PROBLEM_EVENTS_TOPIC_ARN: ${PROBLEM_EVENTS_TOPIC_ARN:-}
+      JUDGE_SERVICE_URL: ${JUDGE_SERVICE_URL:-http://judge-service:8080}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   judge-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-judge-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
       context: ./judge-service
     environment:
       <<: *db-redis-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${JUDGE_DB_NAME:-judge_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/judge_db
+      PROBLEM_VALIDATION_QUEUE_URL: ${PROBLEM_VALIDATION_QUEUE_URL:-}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
-      JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-}
+      LOCALSTACK_ENDPOINT: ${LOCALSTACK_ENDPOINT:-http://localstack:4566}
+      JUDGE0_BASE_URL: ${JUDGE0_BASE_URL:-http://judge0-server:2358}
+      JUDGE0_AUTH_HEADER: ${JUDGE0_AUTH_HEADER:-X-Auth-Token}
+      JUDGE0_AUTH_TOKEN: ${JUDGE0_AUTH_TOKEN:-}
+      JUDGE0_CONNECT_TIMEOUT: ${JUDGE0_CONNECT_TIMEOUT:-2s}
+      JUDGE0_READ_TIMEOUT: ${JUDGE0_READ_TIMEOUT:-5s}
+      JUDGE0_JAVA_ENABLED: ${JUDGE0_JAVA_ENABLED:-false}
+      JUDGE0_PYTHON3_ENABLED: ${JUDGE0_PYTHON3_ENABLED:-false}
+      JUDGE0_CPP_ENABLED: ${JUDGE0_CPP_ENABLED:-false}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
   contest-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-contest-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
       context: ./contest-service
     environment:
       <<: *db-redis-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${CONTEST_DB_NAME:-contest_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/contest_db
+      CONTEST_EVENTS_PUBLISH_ENABLED: ${CONTEST_EVENTS_PUBLISH_ENABLED:-false}
+      CONTEST_EVENTS_TOPIC_ARN: ${CONTEST_EVENTS_TOPIC_ARN:-}
+      JUDGE_SUBMISSION_QUEUE_URL: ${JUDGE_SUBMISSION_QUEUE_URL:-}
+      CONTEST_EVENTS_ENABLED: ${CONTEST_EVENTS_ENABLED:-false}
+      CONTEST_QUEUE_URL: ${CONTEST_QUEUE_URL:-}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
   study-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-study-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
       context: ./study-service
     environment:
       <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${STUDY_DB_NAME:-study_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/study_db
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
 
   notification-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-notification-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
       context: ./notification-service
     environment:
       <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${NOTIFICATION_DB_NAME:-notification_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/notification_db
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
 
   integration-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-integration-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
       context: ./integration-service
     environment:
-      <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${INTEGRATION_DB_NAME:-integration_db}
+      <<: *db-redis-environment
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/integration_db
+      INTEGRATION_CRYPTO_SECRET_KEY: ${INTEGRATION_CRYPTO_SECRET_KEY:?INTEGRATION_CRYPTO_SECRET_KEY is required}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-resolve-sync}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   ai-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-ai-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
       context: ./ai-service
     environment:
       <<: *db-redis-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${AI_DB_NAME:-ai_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/ai_db
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
   analytics-service:
+    stop_grace_period: 30s
     image: ${DOCKERHUB_USERNAME:-local-re-solve}/re-solve-analytics-service:${IMAGE_TAG:-local}
     build:
       <<: *backend-build
       context: ./analytics-service
     environment:
       <<: *db-environment
-      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/${ANALYTICS_DB_NAME:-analytics_db}
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:-mysql}:${DB_PORT:-3306}/analytics_db
     depends_on:
-      mysql-init:
-        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+
+  judge0-server:
+    image: ${JUDGE0_SERVER_IMAGE:-${JUDGE0_IMAGE:-judge0/judge0:1.13.1-extra}}
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    ports:
+      - "127.0.0.1:${JUDGE0_SERVER_PORT:-2358}:2358"
+    privileged: true
+    profiles: [judge0]
+    restart: unless-stopped
+    depends_on:
+      judge0-db:
+        condition: service_healthy
+      judge0-redis:
+        condition: service_healthy
+
+  judge0-worker:
+    image: ${JUDGE0_WORKER_IMAGE:-${JUDGE0_IMAGE:-judge0/judge0:1.13.1-extra}}
+    command: ["./scripts/workers"]
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    privileged: true
+    profiles: [judge0]
+    restart: unless-stopped
+    depends_on:
+      judge0-db:
+        condition: service_healthy
+      judge0-redis:
+        condition: service_healthy
+
+  judge0-db:
+    image: ${JUDGE0_DB_IMAGE:-postgres:13.0}
+    env_file: judge0.conf
+    volumes:
+      - judge0-db-data:/var/lib/postgresql/data
+    profiles: [judge0]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U judge0 -d judge0"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  judge0-redis:
+    image: ${JUDGE0_REDIS_IMAGE:-redis:6.0-alpine}
+    command: ["sh", "-c", "docker-entrypoint.sh --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    env_file: judge0.conf
+    volumes:
+      - judge0-redis-data:/data
+    profiles: [judge0]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v2.53.0}
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    ports:
+      - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:11.1.0}
+    ports:
+      - "127.0.0.1:${GRAFANA_HOST_PORT:-3001}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
 
 volumes:
   mysql-data:
   redis-data:
+  localstack-data:
+  judge0-db-data:
+  judge0-redis-data:
+  prometheus-data:
+  grafana-data:

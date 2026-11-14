@@ -1,0 +1,23 @@
+CREATE TABLE judge_test_results (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    judge_job_id BIGINT NOT NULL,
+    test_asset_id BIGINT NOT NULL COMMENT 'problem.problem_test_assets.id',
+    test_order INT NOT NULL,
+    is_sample BOOLEAN NOT NULL,
+    judge0_token VARCHAR(64) NULL,
+    token_status VARCHAR(30) NOT NULL,
+    created_try_count INT NULL,
+    verdict VARCHAR(30) NULL,
+    time_ms INT NULL,
+    memory_kb INT NULL,
+    actual_output MEDIUMTEXT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_judge_test_results_job FOREIGN KEY (judge_job_id) REFERENCES judge_jobs(id),
+    CONSTRAINT uk_judge_test_results_job_order UNIQUE (judge_job_id, test_order),
+    CONSTRAINT chk_judge_test_results_order CHECK (test_order >= 1),
+    CONSTRAINT chk_judge_test_results_token_status CHECK (token_status IN ('NOT_CREATED', 'CREATED', 'UNKNOWN', 'DONE')),
+    CONSTRAINT chk_judge_test_results_verdict CHECK (verdict IS NULL OR verdict IN ('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'SYSTEM_ERROR')),
+    CONSTRAINT chk_judge_test_results_hidden CHECK (is_sample OR actual_output IS NULL),
+    INDEX idx_judge_test_results_token_status (token_status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

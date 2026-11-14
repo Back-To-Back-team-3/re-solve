@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+ARG JUDGE0_RUNTIME_IMAGE=local-re-solve/judge0:ce-parity
+FROM debian:bookworm-slim AS isolate-build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc make libc6-dev libcap-dev libseccomp-dev \
+    && rm -rf /var/lib/apt/lists/*
+ADD --checksum=sha256:00ffa7006e79dac51d1bd1899224cac55c9875445f4926ee083eee938eaefbb9 https://codeload.github.com/ioi/isolate/tar.gz/8f185bb37f3f23e29b33b0c7727c91c13429abe3 /tmp/isolate.tar.gz
+# 정적 링크로 기존 Judge0 이미지의 시스템 라이브러리 버전에 영향을 받지 않게 한다.
+RUN mkdir /tmp/isolate \
+    && tar -xzf /tmp/isolate.tar.gz --strip-components=1 -C /tmp/isolate \
+    && make -C /tmp/isolate -j2 isolate SYSTEMD_CFLAGS= SYSTEMD_LIBS= \
+        LDFLAGS='-static -Wl,-z,noexecstack,-z,relro,-z,now'
+
+FROM $JUDGE0_RUNTIME_IMAGE
+USER root
+COPY --from=isolate-build /tmp/isolate/isolate /tmp/isolate
+COPY cgroup-v2/isolate.conf /usr/local/etc/isolate
+COPY --chmod=0755 cgroup-v2/start-worker.sh /usr/local/bin/start-cgroup-v2-worker
+COPY cgroup-v2/update-worker.rb /tmp/update-worker.rb
+RUN install -o root -g root -m 4755 /tmp/isolate /usr/local/bin/isolate \
+    && rm /tmp/isolate \
+    && ruby /tmp/update-worker.rb /api/app/jobs/isolate_job.rb > /tmp/isolate_job.rb \
+    && ruby -c /tmp/isolate_job.rb \
+    && install -m 0644 /tmp/isolate_job.rb /api/app/jobs/isolate_job.rb \
+    && rm /tmp/update-worker.rb /tmp/isolate_job.rb \
+    && isolate --check-config \
+    && sh -n /usr/local/bin/start-cgroup-v2-worker
+ENTRYPOINT ["/usr/local/bin/start-cgroup-v2-worker"]
+CMD ["./scripts/workers"]

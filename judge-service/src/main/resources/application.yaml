@@ -1,3 +1,69 @@
 spring:
   application:
     name: judge-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      connection-timeout: 2000
+      validation-timeout: 1000
+  jpa:
+    open-in-view: false
+    show-sql: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    clean-disabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:ap-northeast-2}
+  mvc:
+    log-request-details: false
+
+judge0:
+  base-url: ${JUDGE0_BASE_URL:}
+  auth-header: ${JUDGE0_AUTH_HEADER:X-Auth-Token}
+  auth-token: ${JUDGE0_AUTH_TOKEN:}
+  connect-timeout: ${JUDGE0_CONNECT_TIMEOUT:2s}
+  read-timeout: ${JUDGE0_READ_TIMEOUT:5s}
+  languages:
+    java:
+      enabled: ${JUDGE0_JAVA_ENABLED:false}
+    python3:
+      enabled: ${JUDGE0_PYTHON3_ENABLED:false}
+    cpp:
+      enabled: ${JUDGE0_CPP_ENABLED:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  pattern:
+    level: "%5p [correlationId=%X{correlationId:-}]"
+  level:
+    org.springframework.web: INFO
+    org.springframework.security: INFO
+    org.hibernate.SQL: INFO
+    org.hibernate.orm.jdbc.bind: INFO
+
+judge:
+  messaging:
+    enabled: ${JUDGE_MESSAGING_ENABLED:false}
+    topic-arn: ${JUDGE_EVENTS_TOPIC_ARN:}
+    validation-queue-url: ${PROBLEM_VALIDATION_QUEUE_URL:}
+    submission-queue-url: ${JUDGE_SUBMISSION_QUEUE_URL:}

@@ -1,0 +1,23 @@
+CREATE TABLE problem_validations (
+ id BIGINT NOT NULL AUTO_INCREMENT,
+ problem_revision_id BIGINT NOT NULL,
+ requested_by BIGINT NOT NULL,
+ language VARCHAR(30) NOT NULL,
+ code_asset_id BIGINT NOT NULL,
+ trigger_type VARCHAR(20) NOT NULL,
+ idempotency_key VARCHAR(100) COLLATE utf8mb4_bin NULL,
+ request_hash CHAR(64) COLLATE utf8mb4_bin NOT NULL,
+ result_status VARCHAR(30) NULL,
+ runtime_key VARCHAR(100) NULL,
+ runner_version VARCHAR(100) NULL,
+ finished_at DATETIME(6) NULL,
+ created_at DATETIME(6) NOT NULL,
+ updated_at DATETIME(6) NOT NULL,
+ PRIMARY KEY (id),
+ CONSTRAINT fk_problem_validations_revision FOREIGN KEY (problem_revision_id) REFERENCES problem_revisions(id),
+ CONSTRAINT fk_problem_validations_code_asset FOREIGN KEY (code_asset_id) REFERENCES problem_code_assets(id),
+ CONSTRAINT uk_problem_validations_requester_key UNIQUE (requested_by, idempotency_key),
+ INDEX idx_problem_validations_revision_language (problem_revision_id, language, id),
+ INDEX idx_problem_validations_revision_result (problem_revision_id, result_status),
+ INDEX idx_problem_validations_code_asset (code_asset_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

@@ -1,0 +1,8 @@
+{
+  "name": "solution",
+  "parameters": [
+    {"name": "a", "type": {"kind": "INT32"}},
+    {"name": "b", "type": {"kind": "INT32"}}
+  ],
+  "returnType": {"kind": "INT32"}
+}

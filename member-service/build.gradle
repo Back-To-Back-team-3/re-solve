@@ -30,6 +30,18 @@ repositories {
 }
 
 dependencies {
+    // 공통 응답·예외 (common-core 포함)
+    implementation project(':common-web')
+    // 생성·수정 시각 감사, Clock
+    implementation project(':common-jpa')
+    // Outbox 저장·SNS 발행
+    implementation project(':common-event')
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sns'
+    // member-queue 수신
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
+    // 발행 완료 Outbox 정리·ShedLock
+    implementation project(':common-scheduling')
+
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'

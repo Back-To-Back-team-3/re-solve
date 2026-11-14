@@ -1,0 +1,21 @@
+CREATE TABLE contest_resource_guards (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    resource_type VARCHAR(30) NOT NULL,
+    resource_id BIGINT NOT NULL,
+    operation_id VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
+    operation_type VARCHAR(30) NULL,
+    expected_source_version BIGINT NULL,
+    request_hash CHAR(64) NULL,
+    state VARCHAR(30) NOT NULL,
+    prepared_from_state VARCHAR(30) NULL,
+    operation_result VARCHAR(30) NULL,
+    source_status VARCHAR(30) NULL,
+    source_scope VARCHAR(30) NULL,
+    source_version BIGINT NOT NULL DEFAULT 0,
+    prepared_at DATETIME(6) NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT uk_contest_resource_guards_type_id UNIQUE (resource_type, resource_id),
+    INDEX idx_contest_resource_guards_state_prepared_at (state, prepared_at)
+);

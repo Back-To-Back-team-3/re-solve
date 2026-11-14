@@ -1,0 +1,23 @@
+CREATE TABLE exams (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    study_id BIGINT NOT NULL,
+    creator_id BIGINT NOT NULL COMMENT 'members.id',
+    title VARCHAR(200) NOT NULL,
+    mode VARCHAR(30) NOT NULL,
+    starts_at DATETIME(6) NOT NULL,
+    ends_at DATETIME(6) NOT NULL,
+    duration_minutes INT NULL,
+    status VARCHAR(30) NOT NULL,
+    exam_revision INT NOT NULL,
+    total_score DECIMAL(6, 2) NOT NULL,
+    closed_at DATETIME(6) NULL,
+    result_revision BIGINT NOT NULL,
+    finalized_at DATETIME(6) NULL,
+    canceled_at DATETIME(6) NULL,
+    version BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    INDEX idx_exams_study_starts_at (study_id, starts_at),
+    INDEX idx_exams_status_starts_at (status, starts_at),
+    INDEX idx_exams_status_ends_at (status, ends_at)
+);

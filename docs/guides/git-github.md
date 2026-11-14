@@ -1,0 +1,450 @@
+# Git/GitHub 메뉴얼
+
+## 0. 필수 사항
+
+### 절대 원칙
+
+1. 일반 작업 브랜치는 최신 `develop`에서 만든다. 배포 버전의 긴급 수정인 `hotfix/*`만 `main`에서 만든다.
+2. `main`·`develop`에는 직접 push하지 않는다. 변경은 PR로 반영한다.
+3. 모든 PR은 필수 승인 수를 두지 않는다. push 전 AI 리뷰·보완과 Draft PR 검토는 아래 작업 흐름을 따른다.
+    - Draft 해제, CI 성공, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음이 병합 조건이다.
+4. 직접 실행하지 않은 테스트·빌드는 PR에서 완료로 표시하지 않는다.(현재 CI는 테스트를 실행하지 않는다.)
+
+### 작업 사이클
+
+| 순서 | 할 일 | 확인할 내용 |
+| --- | --- | --- |
+| 1 | Issue 생성 | 작업 목적과 범위를 정한다. |
+| 2 | `develop` 최신화·브랜치 생성 | Issue 번호와 담당 도메인을 브랜치명에 넣는다. |
+| 3 | 작업·AI 리뷰·보완·커밋 | push 전에 AI로 변경을 검토·보완하고 변경 파일과 staging 내용을 확인한다. |
+| 4 | 브랜치 push·Draft PR 생성 | base가 `develop`인지 확인한다. |
+| 5 | Draft PR 검토·보완과 CI 확인 | CodeRabbit 리뷰는 1.5 병합 정책을 따르고, 실제로 수행한 검증만 PR에 적는다. |
+| 6 | 작성자의 Ready for review 전환 | 변경 요청과 미해결 대화를 확인한다. |
+| 7 | Mergify Queue 병합 | 병합 결과와 작업 브랜치 삭제를 확인한다. |
+| 8 | `develop` 최신화 | 다음 Issue를 시작하기 전에 pull한다. |
+
+---
+
+## 1. Git 및 협업 규칙
+
+### 1.1 브랜치 전략
+
+일반 작업 브랜치는 최신 `develop`에서 분기해 PR로 `develop`에 반영한다. 배포 버전의 긴급 수정인 `hotfix/*`만 `main`에서 분기한다.
+
+| 브랜치 | 용도 | 규칙 |
+| --- | --- | --- |
+| `main` | 배포 기준 | 직접 push 금지, `develop`의 릴리즈 PR과 `hotfix/*` PR을 받는다. |
+| `develop` | 개발 통합 | 직접 push 금지, 일반 작업 PR을 받는다. |
+| `feat/*` | 기능 추가 | 새로운 API, 도메인 기능, 화면 흐름 구현 |
+| `fix/*` | 버그 수정 | 기존 기능의 오류·예외·정합성 문제 수정 |
+| `docs/*` | 문서 수정 | README, API 명세, 기획 문서 수정 |
+| `chore/*` | 설정·기타 작업 | 빌드·의존성·CI·환경 설정 변경 |
+| `test/*` | 테스트 추가 | 단위·통합 테스트 작성 또는 수정 |
+| `refactor/*` | 코드 개선 | 기능 변경 없이 구조 개선 |
+| `style/*` | 코드 형식 수정 | 포맷·들여쓰기·공백·import 정리 |
+| `hotfix/*` | 배포 버전 긴급 수정 | `main`에 병합한 뒤 `develop`에도 동일 변경 반영 |
+- 브랜치명은 다음 형식을 사용한다.
+
+```
+<type>/<issue-number>-<domain>-<summary>
+
+feat/12-contest-exam
+fix/35-judge-submission
+docs/53-contest-api-spec
+```
+
+- 브랜치명과 커밋 제목의 `domain`은 작업 대상에 맞춰 아래 값을 사용한다.
+
+| 작업 대상 | `domain` |
+| --- | --- |
+| `member-service` | `member` |
+| `analytics-service` | `analytics` |
+| `problem-service` | `problem` |
+| `judge-service` | `judge` |
+| `contest-service` | `contest` |
+| `study-service` | `study` |
+| `ai-service` | `ai` |
+| `notification-service` | `notification` |
+| `integration-service` | `integration` |
+| `api-gateway` | `api-gateway` |
+| `frontend` | `frontend` |
+| 공통 인프라·설정 | `infra` |
+| 그 밖의 문서 | `docs` |
+
+### 1.2 커밋·Issue·PR 제목
+
+```
+<type>(<domain>): <subject>
+
+feat(contest): 모의 코딩테스트 생성 기능 추가
+fix(judge): 중복 제출 방지
+docs(contest): 시험 API 명세 반영
+```
+
+| `type` | 의미 |
+| --- | --- |
+| `feat` | 기능 추가 |
+| `fix` | 버그 수정 |
+| `docs` | 문서 수정 |
+| `chore` | 설정·빌드·기타 작업 |
+| `test` | 테스트 추가·수정 |
+| `refactor` | 동작을 바꾸지 않는 코드 개선 |
+| `style` | 코드 형식 수정 |
+| `hotfix` | 배포 버전 긴급 수정 |
+- 한 커밋에는 하나의 작업 목적을 담고, 제목은 실제 변경을 설명하도록 적는다.
+- 같은 Issue의 브랜치·커밋·Issue·PR 제목에는 같은 `type`과 `domain`을 사용한다.
+
+### 1.3 Issue 관리
+
+- Issue는 Bug·Feature·Task 템플릿 중 작업 성격에 맞는 것을 선택한다.
+- 목적, 작업 내용, 중요도, 예상 규모, 완료 기한, 담당자를 확인하고 해당 Milestone에 넣는다.
+- 작업 범위를 추적할 수 있도록 기본적으로 하나의 Issue에 하나의 작업 브랜치를 사용한다. 범위가 커지면 Issue를 나눈다.
+- 완료 조건이나 범위가 바뀌면 Issue에도 반영한다.
+- Issue 하나의 크기는 구현 `300~800줄`(테스트 제외, 테스트 포함 최대 `1,500줄`), 엔드포인트 `1~2개`를 기준으로 한다. 파일 개수 제한은 없다.
+    - 넘을 것으로 예상되면 착수 전에 Issue를 나눈다.
+    - 테스트가 별도 Issue로 분리되는 경우 구현 줄 수만으로 판단한다.
+- Issue를 게시하기 전에 HTML 안내 주석과 예시·자리표시자를 삭제한다. 저장소의 템플릿 원본 주석은 유지한다.
+
+### 1.4 PR 작성
+
+| PR 종류 | base | compare |
+| --- | --- | --- |
+| 일반 작업 | `develop` | 작업 브랜치 |
+| 릴리즈 | `main` | `develop` |
+| 긴급 수정 | `main` | `hotfix/*` |
+| 긴급 수정 역반영 | `develop` | `main` |
+| Stack 후속 PR | 바로 아래 작업 브랜치 | 후속 작업 브랜치 |
+- PR은 Draft로 열고 `.github/pull_request_template.md`의 개요·구현 내용·테스트·관련 이슈·리뷰어 안내·체크리스트를 작성한다.
+- 리뷰 피드백을 반영한 커밋이 있으면 구현·작업 내용 또는 테스트 상세에 `**피드백:** 반영한 내용` 형식으로 추가한다.
+- 테스트 항목은 실제 수행한 것만 체크한다. 실행하지 않았다면 `테스트 미진행`과 이유를 적는다.
+- Issue 자동 종료를 지정하려면 `Closes #번호`, 참조만 하려면 `Related to #번호`를 적는다. `Closes` 자동 종료는 저장소의 기본 브랜치(현재 `develop`)를 대상으로 병합할 때 적용된다.
+- GitHub Stack 후속 PR은 선행 PR 병합 후 base가 `develop`로 변경된 뒤 병합하면 자동 종료가 적용된다.
+- `main` 대상 PR은 병합만으로 Issue가 자동 종료되지 않는다. 완료된 Issue를 직접 닫거나 `develop` 역반영 PR에 `Closes #번호`를 적는다.
+- Stack의 2번째 이상 PR에만 `🧱 stack` 라벨을 붙인다. type 라벨은 그대로 유지하고 추가로 붙인다. 선행 PR이 병합되면 후속 PR의 base와 diff를 다시 확인한다.
+- PR 본문을 게시하기 전에 HTML 안내 주석과 예시·자리표시자를 삭제한다. 저장소의 템플릿 원본 주석은 유지한다.
+- 글머리 기호 한 항목이 한 문장을 넘길 것 같으면 하위 목록으로 내린다.
+
+### 1.5 병합 정책
+
+| PR | 병합 방식 |
+| --- | --- |
+| 일반 작업·Stack·`hotfix/* → main` | Mergify Queue, squash |
+| `develop → main`·`main → develop` | Mergify Queue, merge commit |
+- 모든 PR에 필수 승인 수를 두지 않으며, 새 push에 따른 승인 무효화·재승인을 요구하지 않는다. GitHub Ruleset의 필수 승인 수와 stale 승인 무효화를 해제하고 Mergify의 `dismiss_reviews`는 사용하지 않는다.
+- 로컬에서 코드 작성 후 push 전에 AI 리뷰를 수행하고 발견한 문제를 보완한다.
+- Draft PR에서는 CodeRabbit 리뷰를 받을 수 있으면 확인하고, 발견한 문제를 검토·처리한다. CodeRabbit은 한도·장애가 있을 수 있으므로 필수 병합 체크로 두지 않는다. 리뷰를 받지 못한 사유를 PR마다 의무 작성하거나 예외 승인을 받을 필요는 없다.
+- 검토·보완 후 PR 작성자가 `Ready for review`로 전환한다. 팀원 리뷰에서 발견한 문제도 검토·처리한다.
+- Draft 해제, 충돌 없음, 변경 요청 없음, 미해결 리뷰 대화 없음이 필요하다. `quality-check`는 Queue 진입과 병합 전 모두 성공해야 한다. 갱신 후에는 이 병합 조건을 다시 확인한다.
+- `quality-check`는 `checkstyleMain`, `checkstyleTest`, `compileTestJava`를 실행한다. 현재 `spotlessCheck`와 테스트 실행은 포함하지 않는다.
+- GitHub Ruleset은 사람의 직접 병합을 제한하고 Mergify에 예외를 부여한다. 병합 후 작업 브랜치 자동 삭제가 설정돼 있다.
+
+### 1.6 AI로 Issue·PR을 작성할 때
+
+- 이 메뉴얼과 저장소의 해당 템플릿을 읽고 작성한다. 이전 대화나 개인 AI 설정이 없어도 같은 기준을 사용한다.
+- Issue는 작업 성격에 맞는 `.github/ISSUE_TEMPLATE/` 파일을 사용하고, PR은 `.github/pull_request_template.md`를 사용한다.
+- Issue 작성 전에는 작업 목적·범위·작성자·완료 기한을 확인한다. 중요도·예상 규모는 확인한 범위를 기준으로 판단한다.
+- PR 작성 전에는 관련 Issue·현재 diff·실제로 수행한 검증과 결과를 확인한다. 계획만 있는 내용을 구현 완료로 작성하지 않는다.
+- 이슈 확인 체크박스는 등록 후 작성자 본인만 체크한다. AI가 대신 체크하지 않는다.
+- PR 리뷰어는 작성자를 제외한 팀원 전원을 지정한다. 파트별 확인이 필요한 경우 PR 본문 "리뷰어에게" 섹션에 구체적으로 명시한다.
+- 필요한 정보나 자료에 접근할 수 없으면 누락된 부분을 확인한다. 날짜·담당자·링크·검증 결과를 추측하지 않는다.
+- 항목별 문장 형식은 템플릿을 따른다. 예시는 실제 작업의 사실로 복사하지 않는다.
+- 게시 전 제목 형식, 작업 범위, 링크·Issue 번호, 체크 여부를 확인한다. 본문에는 안내 주석·예시·자리표시자를 남기지 않는다.
+- 저장소의 템플릿 원본에는 안내 주석을 유지한다.
+- 글머리 기호 한 항목이 한 문장을 넘길 것 같으면 하위 목록으로 내린다.
+
+
+### 1.7 문서 기준과 결정 기록
+
+- 작업 기준은 저장소 문서다. Notion·회의·대화에서 정한 내용은 `docs/records/decisions/`의 결정 기록이나 해당 기준 문서에 반영된 뒤에 기준이 된다.
+- API·이벤트·ERD·에러 코드·정책 같은 계약을 바꾸면 문서 PR을 먼저 병합하고, 그 뒤에 구현 PR을 연다.
+- 결정 기록에는 결정·근거·기각한 대안·재검토 조건처럼 병합 후에도 바뀌지 않는 내용만 적는다. 후속 작업·확인 필요 사항은 Issue로 만든다.
+- 결정 기록과 기준 문서가 충돌하면 최신 결정 기록을 따르고, 충돌한 기준 문서를 고치는 Issue를 만든다.
+- 같은 규칙을 여러 문서에 옮겨 적지 않는다. 규칙은 원본 문서 한 곳에 두고 다른 문서에서는 위치만 가리킨다.
+- 문서 위치는 행 번호가 아니라 `문서 > 섹션 > 찾을 문구`로 전달한다.
+- 구현 중 설계가 명세서와 달라지면 마지막 커밋으로 명세서도 함께 수정한다.
+
+### 1.8 스택 브랜치 작업 규칙
+
+스택 브랜치란 `develop`이 아닌 다른 작업 브랜치 위에 쌓는 브랜치를 말한다. GitHub Stack 기능으로 PR을 연결하면 `Rebase stack` 버튼으로 변경을 반영하고, 선행 PR 병합 후 자동으로 base가 `develop`으로 변경된다.
+
+**브랜치 생성 및 Stack 등록**
+
+선행 브랜치가 `develop`에 머지되지 않은 상태에서 그 위에 작업 브랜치를 쌓을 때 사용한다.
+
+```bash
+git switch <선행-브랜치>
+git switch -c <새-브랜치>
+git push -u origin <새-브랜치>
+```
+
+PR을 생성할 때 base를 선행 브랜치로 지정한 뒤 `Create stack` 또는 `Add to stack`으로 Stack에 연결한다. base 지정만으로 Stack 등록이 완료되지 않는다.
+
+**선행 브랜치가 업데이트됐을 때**
+
+GitHub PR에서 `Rebase stack` 버튼이 표시되면 이를 눌러 후속 브랜치에 변경을 반영한다. 처리 완료 후 CI 결과를 확인한다.
+
+서버 rebase 후 로컬에 반영한다. 로컬에 미커밋 변경이나 미푸시 커밋이 있으면 먼저 보관한다.
+
+```bash
+# 실행 전 확인
+git status                                    # 미커밋 변경 확인
+git log --oneline origin/<현재-브랜치>..HEAD  # 미푸시 커밋 확인
+# 보존할 작업이 없고 원격 상태로 맞춰도 되는 경우에만 실행
+git switch <현재-브랜치>
+git fetch origin
+git reset --hard origin/<현재-브랜치>
+```
+
+`Rebase stack` 버튼이 없거나 수동 처리가 필요한 경우:
+
+```bash
+git fetch origin
+git rebase origin/<선행-브랜치>
+git push --force-with-lease
+```
+
+**선행 PR이 develop에 머지됐을 때**
+
+GitHub Stack이 자동으로 후속 PR의 base를 `develop`으로 변경한다. 자동 rebase 완료 후 후속 PR의 base와 Files changed를 확인한다.
+
+로컬에서 원격 상태를 동기화한다. 로컬에 미커밋 변경이나 미푸시 커밋이 있으면 먼저 보관한다.
+
+```bash
+# 실행 전 확인
+git status                                    # 미커밋 변경 확인
+git log --oneline origin/<현재-브랜치>..HEAD  # 미푸시 커밋 확인
+# 보존할 작업이 없고 원격 상태로 맞춰도 되는 경우에만 실행
+git switch <현재-브랜치>
+git fetch origin
+git reset --hard origin/<현재-브랜치>
+```
+
+**GitHub에서 변경이 생겼을 때 (CodeRabbit Apply suggestion 등)**
+
+원격 히스토리가 바뀌지 않은 경우 (Apply suggestion처럼 커밋만 추가된 경우):
+
+```bash
+git switch <수정할-브랜치>
+git pull origin <수정할-브랜치>
+```
+
+원격 히스토리가 바뀐 경우 (rebase·force push 등): 로컬에 미커밋 변경이나 미푸시 커밋이 있으면 먼저 보관한다.
+
+```bash
+# 실행 전 확인
+git status                                    # 미커밋 변경 확인
+git log --oneline origin/<현재-브랜치>..HEAD  # 미푸시 커밋 확인
+# 보존할 작업이 없고 원격 상태로 맞춰도 되는 경우에만 실행
+git switch <현재-브랜치>
+git fetch origin
+git reset --hard origin/<현재-브랜치>
+```
+
+현재 어떤 경우인지 모르겠다면 `git fetch origin` 후 `git log --oneline origin/<수정할-브랜치>`와 로컬 로그를 비교해 히스토리가 같은지 확인한다.
+
+수정할 브랜치 위에 쌓인 Stack 브랜치가 있다면 각 브랜치에서 순서대로 rebase한다.
+
+```bash
+git switch <위-스택-브랜치>
+git fetch origin
+git rebase origin/<수정할-브랜치>
+git push --force-with-lease
+```
+
+---
+
+## 2. 처음 작업할 때
+
+- GitHub 저장소의 `Code`에서 URL을 복사한다.
+
+```bash
+# 저장소 clone 후 현재 브랜치와 작업 파일 확인
+git clone <저장소-URL>
+cd re-solve
+git branch --show-current
+git status
+```
+
+- `Java 21`, 빌드·코드 형식은 "Spotless & Code 컨벤션 & Build 메뉴얼"을 따른다.
+- 환경 변수와 Docker Compose는 ".env.example" 문서를 확인한다.
+
+---
+
+## 3. 일반 작업 흐름
+
+### 3.1 `develop` 최신화와 브랜치 생성
+
+Issue 번호와 도메인을 실제 작업에 맞게 바꾼다.
+
+```bash
+# 작업 전 상태 확인
+git status
+
+# 최신 develop에서 Issue용 브랜치 생성
+git switch develop
+git pull --ff-only origin develop
+git switch -c feat/이슈번호-domain-summary
+```
+
+- 이미 만든 브랜치에서 작업을 이어 갈 때는 `git switch -c`로 새 브랜치를 다시 만들지 않는다.
+
+### 3.2 변경 확인·커밋·push
+
+- push 전 AI 리뷰·보완은 1.5 병합 정책을 따른다.
+
+```bash
+# 변경한 파일과 내용을 확인한 뒤 staging
+git status
+git diff
+git add .
+
+# staging된 내용 확인 후 커밋
+git diff --cached
+git commit -m "type(domain): summary"
+
+# 최초 push에만 -u 사용
+git push -u origin feat/이슈번호-domain-summary
+```
+
+- `git add .` 전에 다른 Issue의 변경이 섞이지 않았는지 확인한다.
+- 필요한 파일만 담으려면 `git add <파일>`을 사용한다.
+- 이후 push는 `git push`로 한다.
+
+### 3.3 Draft PR과 리뷰 요청
+
+1. GitHub 저장소에서 `Compare & pull request` 또는 `Pull requests → New pull request`를 연다.
+2. base `develop`, compare 본인 작업 브랜치를 확인하고 `Create draft pull request`로 만든다.
+3. PR 템플릿에 완료한 변경과 실제 수행한 검증을 작성한다.
+    - 1.5 병합 정책에 따라 Draft PR을 검토·보완하고 CI 결과를 확인한다. 수정은 같은 브랜치에 push한다.
+4. 검토·보완이 끝나면 PR 작성자가 `Ready for review`로 바꾼다. 팀원 리뷰가 있으면 발견한 문제를 검토·처리한다.
+
+---
+
+## 4. 리뷰와 병합
+
+### 4.1 리뷰어가 확인할 내용
+
+- PR 본문 `💬 리뷰어에게`의 확인 요청을 먼저 검토한다. 그다음 `Files changed`에서 Issue 범위와 실제 변경이 맞는지 확인한다.
+- 동작, 예외 상황, 문서 반영, 수행한 검증 내용을 확인한다.
+    - 모르는 부분은 PR 대화에서 질문한다.
+- 수정이 필요한 곳은 `Files changed`의 해당 줄에 코멘트를 달고, 코멘트마다 아래 세 가지를 모두 적는다.
+    - 지적: 파일 경로와 코드 위치, 무엇이 문제인지.
+    - 근거: 기준 문서 위치(`문서 > 섹션 > 찾을 문구`) 또는 관련 코드의 permalink.
+    - 대안: 바꿀 코드나 방법. 하나로 정할 수 없으면 선택지.
+- 다른 코드를 근거로 들 때는 커밋 해시가 들어간 permalink를 붙인다. 
+    - 파일 화면에서 줄을 선택하고 `y`를 누르면 permalink로 바뀐다.
+    - 파일 수가 많아 `get_files`가 토큰 한도를 초과하면 PR 브랜치를 로컬에 받아 줄 번호를 확인한다.
+  ```bash
+    git fetch origin <PR브랜치>
+    git cat-file -p <sha>:<파일경로>
+    ```
+- 대안이 몇 줄의 코드 수정이면 반드시 GitHub `suggestion` 블록으로 적는다. 서술형으로만 대안을 적지 않는다.
+- 병합 전에 반드시 고쳐야 하는 지적은 `Review changes → Request changes`로, 권장·질문은 `Comment`로 제출한다.
+- 승인 리뷰를 남기는 경우에는 `Review changes → Approve`에 아래 내용을 코멘트로 적어 제출한다.
+    - PR의 주제 (무엇을 바꾼 PR인지 한 줄)
+    - `💬 리뷰어에게`의 확인 요청마다 확인한 결과
+    - 확인 요청이 "특이사항 없음"이면 직접 확인한 범위
+    - 이전에 변경 요청을 남겼다면 요청한 내용마다 반영 여부를 확인하고 결과를 적는다.
+
+### 4.2 병합 전 확인
+
+1. Draft가 해제됐는지 확인한다.
+2. 해당 PR의 변경 요청, 미해결 대화, 충돌 여부를 확인한다.
+3. Queue 진입과 병합 전 CI(`quality-check`) 성공을 확인한다.
+4. 조건이 충족되면 Mergify Queue의 병합 결과를 확인한다.
+
+### 4.3 병합 후
+
+```bash
+# 다음 Issue를 시작하기 전에 develop 최신화
+git switch develop
+git pull --ff-only origin develop
+git status
+```
+
+- Stack 후속 PR이 있다면 선행 PR 병합 후 base와 diff를 확인한다.
+
+---
+
+## 5. 작업 중 `develop`이 바뀌었을 때
+
+### 5.1 변경 사항을 커밋한 상태
+
+```bash
+# develop 최신화 후 작업 브랜치에 병합
+git status
+git switch develop
+git pull --ff-only origin develop
+git switch feat/이슈번호-domain-summary
+git merge develop
+```
+
+### 5.2 아직 커밋하지 않은 변경 사항이 있을 때
+
+- 작업 내용을 먼저 커밋하거나, 잠시 보관해야 한다면 stash를 사용한다.
+
+```bash
+# 현재 변경을 임시 보관하고 develop 반영
+git status
+git stash push -u -m "작업내용"
+git switch develop
+git pull --ff-only origin develop
+git switch feat/이슈번호-domain-summary
+git merge develop
+
+# 보관한 변경 복원
+git stash pop
+```
+
+- `git stash pop`에서 충돌이 나면 파일을 해결한 뒤 상태를 확인한다.
+- stash가 남았는지도 `git stash list`로 확인한다.
+
+### 5.3 충돌이 발생했을 때
+
+1. `git status`로 충돌 파일을 확인하고, 양쪽 변경을 읽는다.
+2. IntelliJ의 `Resolve Conflicts` 또는 편집기에서 의도에 맞게 합친다. `<<<<<<<`, `=======`, `>>>>>>>` 표시는 최종 파일에서 제거한다.
+3. 해결한 파일만 staging하고 merge를 마무리한다.
+
+```bash
+# 해결한 파일 확인 후 merge 완료
+git status
+git add <충돌을-해결한-파일>
+git commit
+```
+
+- 변경 의도가 불분명하면 해당 담당자와 확인한다.
+- 공통 설정 파일과 API·DB 계약을 함께 바꿀 때는 관련 담당자에게 변경 내용을 공유한다.
+
+---
+
+## 6. 실수했을 때
+
+### 잘못 staging한 파일
+
+```bash
+# staging에서만 제거하며 파일 수정 내용은 유지
+git restore --staged <파일>
+```
+
+### push 전 마지막 커밋 메시지 수정
+
+```bash
+# 아직 push하지 않은 마지막 커밋에만 사용
+git commit --amend -m "type(domain): summary"
+```
+
+- 이미 push한 커밋은 팀원에게 영향을 줄 수 있으므로 임의로 amend하거나 강제 push하지 않는다.
+- 수정할 내용은 새 커밋으로 올린다.
+
+### 파일 수정 내용을 버릴 때
+
+```bash
+# 해당 파일의 커밋 전 수정 내용을 삭제
+git restore <파일>
+```
+
+- 이 명령으로 버린 수정 내용은 복구하기 어려우므로 파일과 diff를 먼저 확인한다.
+
+---
+
+end.
