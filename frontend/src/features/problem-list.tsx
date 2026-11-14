@@ -1,0 +1,293 @@
+"use client";
+import Link from "next/link";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { Search } from "lucide-react";
+import { useResource } from "@/services/hooks";
+import { problemApi } from "@/services/api";
+import type { ProblemListItem, SubmissionHistoryItem, Verdict } from "@/services/types";
+import { judgeStatusLabel, labelOf, languageLabel, solvedStatusLabel, verdictLabel } from "@/services/labels";
+import { useCatalog } from "@/services/catalog";
+import {
+  Badge,
+  Button,
+  Empty,
+  ErrorState,
+  Heading,
+  Loading,
+} from "@/components/ui";
+export function ProblemTable({ items }: { items: ProblemListItem[] }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>상태</th>
+            <th>번호</th>
+            <th>문제 제목</th>
+            <th>난이도</th>
+            <th>알고리즘</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((p) => (
+            <tr key={p.problemId}>
+              <td>
+                <Badge tone={p.solvedStatus === "SOLVED" ? "success" : ""}>
+                  {labelOf(solvedStatusLabel, p.solvedStatus)}
+                </Badge>
+              </td>
+              <td className="mono">{p.problemId}</td>
+              <td>
+                <Link href={`/problems/${p.problemId}`}>{p.title}</Link>
+              </td>
+              <td>
+                <Badge>Lv. {p.difficulty}</Badge>
+              </td>
+              <td>{p.tags.map((t) => t.name).join(", ")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+function submissionTone(verdict: Verdict | null): string {
+  if (!verdict) return "pending";
+  if (verdict === "AC") return "success";
+  if (verdict === "WA" || verdict === "RE") return "error";
+  return "warning";
+}
+export function ProblemSubmissionList({ items }: { items: SubmissionHistoryItem[] }) {
+  if (!items.length)
+    return (
+      <Empty
+        title="제출 기록이 없어요"
+        description="문제를 제출하면 여기에 결과가 남아요."
+      />
+    );
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>판정</th>
+            <th>언어</th>
+            <th>실행 시간</th>
+            <th>메모리</th>
+            <th>제출 시각</th>
+            <th>상세</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((s) => (
+            <tr key={s.submissionId}>
+              <td>
+                <Link href={`/submissions/${s.submissionId}`} className="inline-flex flex-col items-start gap-1"
+                  aria-label={`제출 ${s.submissionId} 코드 및 결과 보기`}>
+                  <Badge tone={submissionTone(s.verdict)}>
+                    {s.verdict
+                      ? labelOf(verdictLabel, s.verdict)
+                      : labelOf(judgeStatusLabel, s.status)}
+                  </Badge>
+                  <small className="underline">코드 보기</small>
+                </Link>
+              </td>
+              <td>{labelOf(languageLabel, s.language)}</td>
+              <td>{s.maxTimeMs != null ? `${s.maxTimeMs}ms` : "—"}</td>
+              <td>{s.maxMemoryKb != null ? `${Math.round(s.maxMemoryKb / 1024)}MB` : "—"}</td>
+              <td className="muted">
+                {new Date(s.submittedAt).toLocaleString("ko-KR")}
+              </td>
+              <td><Link href={`/submissions/${s.submissionId}`}>결과 상세</Link></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+export function useQuery() {
+  const params = useSearchParams(),
+    router = useRouter(),
+    path = usePathname();
+  return {
+    params,
+    change: (values: Record<string, string>) => {
+      const next = new URLSearchParams(params);
+      Object.entries(values).forEach(([k, v]) =>
+        v ? next.set(k, v) : next.delete(k),
+      );
+      router.push(`${path}?${next}`);
+    },
+  };
+}
+export function pageSlice<T>(items: T[], raw: string | null, size = 6) {
+  const requested = Number(raw || 0);
+  const page = Math.min(
+    Math.max(0, Number.isFinite(requested) ? Math.floor(requested) : 0),
+    Math.max(0, Math.ceil(items.length / size) - 1),
+  );
+  return {
+    items: items.slice(page * size, (page + 1) * size),
+    page,
+    totalPages: Math.ceil(items.length / size),
+  };
+}
+export function Pager({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (page: number) => void;
+}) {
+  if (totalPages < 2) return null;
+  return (
+    <div className="row justify-center">
+      <Button disabled={page === 0} onClick={() => onChange(page - 1)}>
+        이전
+      </Button>
+      <span>
+        {page + 1} / {totalPages}
+      </span>
+      <Button
+        disabled={page >= totalPages - 1}
+        onClick={() => onChange(page + 1)}
+      >
+        다음
+      </Button>
+    </div>
+  );
+}
+export function ProblemsPage() {
+  const { tags } = useCatalog();
+  const { params, change } = useQuery();
+  const [keyword, setKeyword] = useState(params.get("keyword") || "");
+  const appliedKeyword = params.get("keyword") || "";
+  useEffect(() => setKeyword(appliedKeyword), [appliedKeyword]);
+  const filter = {
+    keyword: params.get("keyword") || "",
+    tagIds: params.get("tagIds") || "",
+    difficulty: params.get("difficulty") || "",
+    solvedStatus: params.get("solvedStatus") || "",
+    sort: params.get("sort") || "",
+    page: Number(params.get("page") || 0),
+  };
+  const resource = useResource(
+    () => problemApi.getList(filter),
+    params.toString(),
+  );
+  return (
+    <div className="container stack">
+      <Heading
+        title="문제 풀기"
+        eyebrow="PROBLEM ARCADE"
+        description="한 문제씩 해결하며, 나만의 알고리즘 펫을 키워 보세요."
+      />
+      <form
+        className="filters"
+        onSubmit={(e) => {
+          e.preventDefault();
+          change({ keyword, page: "0" });
+        }}
+      >
+        <label className="search row">
+          <span className="visually-hidden">문제 검색</span>
+          <input
+            className="input"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="문제 제목 또는 번호 검색"
+          />
+          <Button aria-label="검색">
+            <Search size={18} />
+          </Button>
+        </label>
+        {[
+          {
+            key: "tagIds",
+            label: "모든 알고리즘",
+            options: tags.map((t) => [t.id, t.name]),
+          },
+          {
+            key: "difficulty",
+            label: "모든 난이도",
+            // 난이도는 1~3 정수다 (API 명세서 0.2 식별자 규칙).
+            options: [1, 2, 3].map((n) => [String(n), `Lv. ${n}`]),
+          },
+          {
+            key: "solvedStatus",
+            label: "모든 상태",
+            options: ["UNSOLVED", "SOLVED"].map((s) => [s, labelOf(solvedStatusLabel, s)]),
+          },
+          {
+            key: "sort",
+            label: "최신순",
+            options: [["difficulty,asc", "쉬운 문제순"]],
+          },
+        ].map((f) => (
+          <select
+            key={f.key}
+            aria-label={f.label}
+            className="input"
+            value={params.get(f.key) || ""}
+            onChange={(e) => change({ [f.key]: e.target.value, page: "0" })}
+          >
+            <option value="">{f.label}</option>
+            {f.options.map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        ))}
+      </form>
+      {resource.loading ? (
+        <Loading />
+      ) : resource.error ? (
+        <ErrorState message={resource.error.message} retry={resource.retry} />
+      ) : (
+        resource.data && (
+          <>
+            <div className="row between">
+              <p>
+                총 <b>{resource.data.totalElements}</b>문제
+              </p>
+            </div>
+            {resource.data.content.length ? (
+              <ProblemTable items={resource.data.content} />
+            ) : (
+              <Empty
+                title="검색 결과가 없어요"
+                description="검색어나 필터를 바꿔 보세요."
+                action={
+                  <Button
+                    onClick={() => {
+                      setKeyword("");
+                      change({
+                        keyword: "",
+                        tagIds: "",
+                        difficulty: "",
+                        solvedStatus: "",
+                        page: "0",
+                      });
+                    }}
+                  >
+                    필터 초기화
+                  </Button>
+                }
+              />
+            )}
+            <Pager
+              page={resource.data.page}
+              totalPages={resource.data.totalPages}
+              onChange={(p) => change({ page: String(p) })}
+            />
+          </>
+        )
+      )}
+    </div>
+  );
+}

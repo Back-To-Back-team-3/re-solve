@@ -1,0 +1,307 @@
+package com.backtoback.member.member.controller;
+
+import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.servlet.MockMvc;
+
+import com.backtoback.member.auth.service.AuthService;
+import com.backtoback.member.global.config.SecurityConfig;
+import com.backtoback.member.global.error.MemberErrorCode;
+import com.backtoback.member.global.error.MemberException;
+import com.backtoback.member.member.domain.ActiveTimeSlot;
+import com.backtoback.member.member.domain.LearningGoal;
+import com.backtoback.member.member.domain.Member;
+import com.backtoback.member.member.service.LearningProfileService;
+import com.backtoback.member.member.service.LearningProfileSnapshot;
+import com.backtoback.member.member.service.MemberService;
+import com.backtoback.member.skill.domain.MemberTagLevel;
+
+@WebMvcTest(MemberController.class)
+@Import(SecurityConfig.class)
+class MemberControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private MemberService memberService;
+
+    @MockitoBean
+    private LearningProfileService learningProfileService;
+
+    @MockitoBean
+    private AuthService authService;
+
+    @Test
+    @DisplayName("1.2.1 내 정보 조회는 계정 정보와 학습 프로필 입력 여부, +09:00 가입 시각을 준다")
+    void getMeReturnsMember() throws Exception {
+        Member member = member(7L, "kim-dev");
+        ReflectionTestUtils.setField(member, "createdAt", LocalDateTime.of(2026, 10, 1, 10, 0));
+        given(memberService.getMember(7L)).willReturn(member);
+        given(learningProfileService.hasProfile(7L)).willReturn(true);
+
+        mockMvc
+            .perform(get("/api/v1/members/me").header("X-User-Id", "7").header("X-User-Role", "USER"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.memberId").value("7"))
+            .andExpect(jsonPath("$.data.githubLogin").value("kim-dev"))
+            .andExpect(jsonPath("$.data.nickname").value("kim-dev"))
+            .andExpect(jsonPath("$.data.profileImageUrl").value("https://avatars.githubusercontent.com/u/1001"))
+            .andExpect(jsonPath("$.data.email").isEmpty())
+            .andExpect(jsonPath("$.data.role").value("USER"))
+            .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+            .andExpect(jsonPath("$.data.hasLearningProfile").value(true))
+            .andExpect(jsonPath("$.data.createdAt").value("2026-10-01T10:00:00+09:00"));
+    }
+
+    @Test
+    @DisplayName("1.2.1 Gateway 인증 정보가 없으면 401 AUTH_TOKEN_INVALID")
+    void getMeRequiresAuthentication() throws Exception {
+        mockMvc
+            .perform(get("/api/v1/members/me"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+
+        verify(memberService, never()).getMember(any());
+    }
+
+    @Test
+    @DisplayName("1.2.2 내 정보 수정은 바뀐 닉네임과 안내 메시지를 준다")
+    void updateMeReturnsNickname() throws Exception {
+        given(memberService.updateNickname(7L, "kim-algo")).willReturn(member(7L, "kim-algo"));
+
+        mockMvc
+            .perform(
+                patch("/api/v1/members/me")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"nickname\":\"kim-algo\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.message").value("회원 정보가 수정되었습니다."))
+            .andExpect(jsonPath("$.data.memberId").value("7"))
+            .andExpect(jsonPath("$.data.nickname").value("kim-algo"));
+    }
+
+    @Test
+    @DisplayName("1.2.2 정지 회원은 403 MEMBER_SUSPENDED, 닉네임 형식 위반은 400 MEMBER_NICKNAME_INVALID")
+    void updateMeMapsErrors() throws Exception {
+        given(memberService.updateNickname(7L, "kim-algo"))
+            .willThrow(new MemberException(MemberErrorCode.MEMBER_SUSPENDED));
+        given(memberService.updateNickname(7L, "a"))
+            .willThrow(new MemberException(MemberErrorCode.MEMBER_NICKNAME_INVALID));
+
+        mockMvc
+            .perform(
+                patch("/api/v1/members/me")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"nickname\":\"kim-algo\"}")
+            )
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("MEMBER_SUSPENDED"));
+        mockMvc
+            .perform(
+                patch("/api/v1/members/me")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"nickname\":\"a\"}")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("MEMBER_NICKNAME_INVALID"));
+    }
+
+    @Test
+    @DisplayName("1.2.2 Gateway 인증 정보가 없으면 401 AUTH_TOKEN_INVALID이고 수정하지 않는다")
+    void updateMeRequiresAuthentication() throws Exception {
+        mockMvc
+            .perform(
+                patch("/api/v1/members/me")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"nickname\":\"kim-algo\"}")
+            )
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+
+        verify(memberService, never()).updateNickname(any(), any());
+    }
+
+    @Test
+    @DisplayName("1.3.1 학습 프로필 조회는 입력 값과 태그 레벨(이름 없이), 문자열 순번, +09:00 변경 시각을 주고 미입력이면 data가 null이다")
+    void getLearningProfile() throws Exception {
+        MemberTagLevel tagLevel = MemberTagLevel.enterWithoutDiagnosis(7L, 3L, LocalDateTime.of(2026, 10, 1, 9, 0));
+        given(learningProfileService.getProfile(7L))
+            .willReturn(
+                Optional
+                    .of(
+                        new LearningProfileSnapshot(
+                            7L,
+                            LearningGoal.EMPLOYMENT,
+                            List.of("java"),
+                            List.of("EVENING"),
+                            List.of(tagLevel),
+                            4L,
+                            LocalDateTime.of(2026, 10, 2, 21, 0)
+                        )
+                    )
+            );
+        given(learningProfileService.getProfile(8L)).willReturn(Optional.empty());
+
+        mockMvc
+            .perform(get("/api/v1/members/me/learning-profile").header("X-User-Id", "7").header("X-User-Role", "USER"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.goal").value("EMPLOYMENT"))
+            .andExpect(jsonPath("$.data.preferredLanguages[0]").value("java"))
+            .andExpect(jsonPath("$.data.activeTimeSlots[0]").value("EVENING"))
+            .andExpect(jsonPath("$.data.tagLevels[0].tagId").value("3"))
+            .andExpect(jsonPath("$.data.tagLevels[0].level").value("LV1"))
+            .andExpect(jsonPath("$.data.tagLevels[0].tagName").doesNotExist())
+            .andExpect(jsonPath("$.data.profileVersion").value("4"))
+            .andExpect(jsonPath("$.data.updatedAt").value("2026-10-02T21:00:00+09:00"));
+        mockMvc
+            .perform(get("/api/v1/members/me/learning-profile").header("X-User-Id", "8").header("X-User-Role", "USER"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("1.3.2 학습 프로필 저장은 값 목록을 넘기고 저장 후 순번과 안내 메시지를 준다")
+    void saveLearningProfile() throws Exception {
+        given(
+            learningProfileService
+                .save(7L, LearningGoal.CONTEST, List.of("python3", "java"), List.of(ActiveTimeSlot.NIGHT))
+        ).willReturn(5L);
+
+        mockMvc
+            .perform(
+                put("/api/v1/members/me/learning-profile")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        "{\"goal\":\"CONTEST\",\"preferredLanguages\":[\"python3\",\"java\"],"
+                            + "\"activeTimeSlots\":[\"NIGHT\"]}"
+                    )
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.message").value("학습 프로필이 저장되었습니다."))
+            .andExpect(jsonPath("$.data.profileVersion").value("5"));
+    }
+
+    @Test
+    @DisplayName("1.3.2 목록에 없는 목표·언어·시간대, 숫자(순서 번호), 빈 배열, 누락은 COMMON_INVALID_REQUEST이고 저장하지 않는다")
+    void saveLearningProfileRejectsInvalidValues() throws Exception {
+        String[] bodies
+            = {
+                "{\"goal\":0,\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[\"EVENING\"]}",
+                "{\"goal\":\"STUDY\",\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[0]}",
+                "{\"goal\":\"JOB\",\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[\"EVENING\"]}",
+                "{\"goal\":\"STUDY\",\"preferredLanguages\":[\"kotlin\"],\"activeTimeSlots\":[\"EVENING\"]}",
+                "{\"goal\":\"STUDY\",\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[\"DAWN\"]}",
+                "{\"goal\":\"STUDY\",\"preferredLanguages\":[],\"activeTimeSlots\":[\"EVENING\"]}",
+                "{\"goal\":\"STUDY\",\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[null]}",
+                "{\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[\"EVENING\"]}"
+            };
+        for (String body : bodies) {
+            mockMvc
+                .perform(
+                    put("/api/v1/members/me/learning-profile")
+                        .header("X-User-Id", "7")
+                        .header("X-User-Role", "USER")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body)
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"));
+        }
+        verify(learningProfileService, never()).save(anyLong(), any(), anyCollection(), anyCollection());
+    }
+
+    @Test
+    @DisplayName("1.3.2 정지 회원은 403 MEMBER_SUSPENDED")
+    void saveLearningProfileRejectsSuspended() throws Exception {
+        given(learningProfileService.save(anyLong(), any(), anyCollection(), anyCollection()))
+            .willThrow(new MemberException(MemberErrorCode.MEMBER_SUSPENDED));
+
+        mockMvc
+            .perform(
+                put("/api/v1/members/me/learning-profile")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"goal\":\"STUDY\",\"preferredLanguages\":[\"java\"],\"activeTimeSlots\":[\"EVENING\"]}")
+            )
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("MEMBER_SUSPENDED"));
+    }
+
+    @Test
+    @DisplayName("1.2.3 회원 탈퇴는 204이고 이 요청의 세션 토큰을 폐기하며, 토큰 폐기가 실패해도 204다")
+    void withdrawRevokesCurrentSession() throws Exception {
+        mockMvc
+            .perform(
+                delete("/api/v1/members/me")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .header("Authorization", "Bearer access-token")
+            )
+            .andExpect(status().isNoContent());
+        verify(memberService).withdraw(7L);
+        verify(authService).logout("7", "Bearer access-token", null);
+
+        doThrow(new IllegalStateException("redis down")).when(authService).logout(any(), any(), any());
+        mockMvc
+            .perform(delete("/api/v1/members/me").header("X-User-Id", "7").header("X-User-Role", "USER"))
+            .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("1.2.3 차단 조건이면 409와 안내를 주고 토큰을 폐기하지 않는다")
+    void withdrawBlocked() throws Exception {
+        doThrow(new MemberException(MemberErrorCode.WITHDRAWAL_BLOCKED_STUDY_LEADER)).when(memberService).withdraw(7L);
+
+        mockMvc
+            .perform(delete("/api/v1/members/me").header("X-User-Id", "7").header("X-User-Role", "USER"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error.code").value("WITHDRAWAL_BLOCKED_STUDY_LEADER"));
+        verify(authService, never()).logout(any(), any(), any());
+    }
+
+    private Member member(Long id, String nickname) {
+        Member member
+            = Member.registerWithGitHub(1001L, "kim-dev", null, "https://avatars.githubusercontent.com/u/1001");
+        ReflectionTestUtils.setField(member, "id", id);
+        ReflectionTestUtils.setField(member, "nickname", nickname);
+        ReflectionTestUtils.setField(member, "createdAt", LocalDateTime.of(2026, 10, 1, 10, 0));
+        return member;
+    }
+}

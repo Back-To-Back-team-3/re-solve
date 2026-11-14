@@ -1,0 +1,44 @@
+package com.backtoback.problem.problem.repository;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import com.backtoback.problem.problem.domain.ProblemImage;
+
+import jakarta.persistence.LockModeType;
+
+/** 이미지 파일을 저장하고, 객체 키로 조회한다. */
+public interface ProblemImageRepository extends JpaRepository<ProblemImage, Long> {
+    /** 관리자와 멱등키에 해당하는 파일의 잠금 대상을 찾는다(API 명세서 2.4.1). */
+    @Query("select i.id from ProblemImage i where i.ownerId = :ownerId and i.idempotencyKey = :key")
+    Optional<Long> findIdByOwnerAndKey(@Param("ownerId") Long ownerId, @Param("key") String key);
+
+    /** 파일 상태 변경을 같은 행 잠금으로 직렬화한다(ERD 4.2.3). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from ProblemImage i where i.id = :id")
+    Optional<ProblemImage> findByIdForUpdate(@Param("id") Long id);
+
+    /**
+     * 이미지 ID 오름차순으로 잠가 같은 종류 파일의 잠금 순서를 고정한다(ERD 6.2).
+     *
+     * @param imageIds 잠글 이미지 ID
+     * @return 잠근 이미지 목록
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from ProblemImage i where i.id in :imageIds order by i.id")
+    List<ProblemImage> findAllByIdForUpdate(@Param("imageIds") Collection<Long> imageIds);
+
+    /**
+     * 객체 키가 일치하는 이미지 파일을 조회한다.
+     *
+     * @param objectKey S3 객체 키
+     * @return 조건에 맞는 이미지 파일
+     */
+    Optional<ProblemImage> findByObjectKey(String objectKey);
+}

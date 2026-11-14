@@ -1,0 +1,32 @@
+CREATE TABLE judge_validation_jobs (
+    validation_id BIGINT NOT NULL PRIMARY KEY,
+    problem_revision_id BIGINT NOT NULL,
+    language VARCHAR(30) COLLATE utf8mb4_bin NOT NULL,
+    request_hash CHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    correlation_id VARCHAR(64) NOT NULL,
+    runtime_id BIGINT NULL,
+    status VARCHAR(30) NOT NULL,
+    try_count INT NOT NULL DEFAULT 0,
+    lease_token VARCHAR(64) COLLATE utf8mb4_bin NULL,
+    lease_until DATETIME(6) NULL,
+    next_run_at DATETIME(6) NOT NULL,
+    deadline_at DATETIME(6) NOT NULL,
+    started_at DATETIME(6) NULL,
+    finished_at DATETIME(6) NULL,
+    last_error VARCHAR(500) NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_judge_validation_jobs_runtime FOREIGN KEY (runtime_id) REFERENCES execution_runtimes(id),
+    CONSTRAINT chk_validation_jobs_ids CHECK (validation_id > 0 AND problem_revision_id > 0),
+    CONSTRAINT chk_validation_jobs_language CHECK (language IN ('java', 'python3', 'cpp')),
+    CONSTRAINT chk_validation_jobs_tries CHECK (try_count BETWEEN 0 AND 3),
+    CONSTRAINT chk_validation_jobs_status CHECK
+        (status IN ('QUEUED', 'RUNNING', 'RETRY_WAITING', 'PASSED', 'REJECTED', 'ERROR')),
+    CONSTRAINT chk_validation_jobs_finished CHECK
+        ((status IN ('PASSED', 'REJECTED', 'ERROR')) = (finished_at IS NOT NULL)),
+    CONSTRAINT chk_validation_jobs_passed CHECK (status <> 'PASSED' OR runtime_id IS NOT NULL),
+    INDEX idx_judge_validation_jobs_runtime (runtime_id),
+    INDEX idx_judge_validation_jobs_next_run (status, next_run_at),
+    INDEX idx_judge_validation_jobs_lease (status, lease_until),
+    INDEX idx_judge_validation_jobs_deadline (status, deadline_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

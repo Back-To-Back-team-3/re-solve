@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+public/monaco/
+*.tsbuildinfo
+.env.local

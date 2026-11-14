@@ -1,0 +1,296 @@
+package com.backtoback.judge.judging.config;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Set;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+
+import com.backtoback.common.event.client.EventDestinationResolver;
+import com.backtoback.common.event.config.OutboxRelayConfiguration;
+import com.backtoback.common.event.dto.EventDestination;
+import com.backtoback.common.event.service.EventConsumer;
+import com.backtoback.common.event.service.EventHandler;
+import com.backtoback.common.event.service.EventMessageDecoder;
+import com.backtoback.common.scheduling.config.SchedulerLockConfiguration;
+import com.backtoback.judge.judging.service.SubmissionMessageListener;
+import com.backtoback.judge.judging.service.SubmissionScheduler;
+import com.backtoback.judge.judging.service.SubmissionWorker;
+import com.backtoback.judge.judging.service.ValidationMessageListener;
+import com.backtoback.judge.judging.service.ValidationScheduler;
+import com.backtoback.judge.judging.service.ValidationWorker;
+import com.backtoback.judge.judging.store.SubmissionExecutionStore;
+import com.backtoback.judge.judging.store.ValidationExecutionStore;
+
+import io.awspring.cloud.autoconfigure.sns.SnsClientCustomizer;
+import io.awspring.cloud.sqs.config.SqsMessageListenerContainerFactory;
+import io.awspring.cloud.sqs.listener.QueueNotFoundStrategy;
+import software.amazon.awssdk.core.SdkRequest;
+import software.amazon.awssdk.core.interceptor.Context;
+import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
+import software.amazon.awssdk.core.interceptor.ExecutionInterceptor;
+import software.amazon.awssdk.services.sns.model.MessageAttributeValue;
+import software.amazon.awssdk.services.sns.model.PublishRequest;
+import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+import tools.jackson.databind.ObjectMapper;
+
+/** 하나의 활성화 설정으로 검증·제출 수신, 실행·복구와 결과 SNS Relay를 등록한다. */
+@Configuration(proxyBeanMethods = false)
+@ConditionalOnProperty(
+    name = "judge.messaging.enabled",
+    havingValue = "true"
+)
+@EnableConfigurationProperties(JudgeMessagingProperties.class)
+@Import(
+    {
+        OutboxRelayConfiguration.class,
+        SchedulerLockConfiguration.class
+    }
+)
+public class JudgeMessagingConfiguration {
+    private static final Set<String> RESULT_EVENTS
+        = Set
+            .of(
+                "ProblemValidationCompleted",
+                "SubmissionJudged",
+                "ExamSubmissionJudged",
+                "ContestSubmissionJudged",
+                "DiagnosisSubmissionJudged",
+                "SubmissionFailed"
+            );
+
+    /**
+     * 확정된 Judge 결과 이벤트만 서비스의 Standard SNS 토픽으로 보낸다.
+     *
+     * @param properties 검증한 리소스 주소
+     * @return 이벤트 목적지 선택기
+     */
+    @Bean
+    public EventDestinationResolver judgeEventDestinationResolver(JudgeMessagingProperties properties) {
+        return event -> {
+            if (!RESULT_EVENTS.contains(event.metadata().eventType())
+                || !"v1".equals(event.metadata().schemaVersion())) {
+                throw new IllegalArgumentException("지원하지 않는 Judge 결과 이벤트입니다.");
+            }
+            return new EventDestination(EventDestination.Channel.SNS, properties.topicArn());
+        };
+    }
+
+    /**
+     * Judge 제출 결과에 문맥별 SNS 구독 필터가 사용할 속성을 추가한다. (이벤트 계약 §2.1)
+     *
+     * @param mapper Outbox 이벤트의 원문 해석기
+     * @return Judge SNS 클라이언트의 요청 설정
+     */
+    @Bean
+    public SnsClientCustomizer judgeResultContextAttribute(ObjectMapper mapper) {
+        return builder -> builder
+            .overrideConfiguration(config -> config.addExecutionInterceptor(new ExecutionInterceptor() {
+                /** {@inheritDoc} */
+                @Override
+                public SdkRequest modifyRequest(Context.ModifyRequest context, ExecutionAttributes attributes) {
+                    if (!(context.request() instanceof PublishRequest request)) {
+                        return context.request();
+                    }
+                    var type = request.messageAttributes().get("eventType");
+                    if (type == null || !RESULT_EVENTS.contains(type.stringValue())
+                        || "ProblemValidationCompleted".equals(type.stringValue())) {
+                        return request;
+                    }
+                    String submissionContext
+                        = "SubmissionJudged".equals(type.stringValue()) ? "PRACTICE"
+                            : mapper.readTree(request.message()).path("context").asString();
+                    var values = new HashMap<>(request.messageAttributes());
+                    values
+                        .put(
+                            "context",
+                            MessageAttributeValue.builder().dataType("String").stringValue(submissionContext).build()
+                        );
+                    return request.toBuilder().messageAttributes(values).build();
+                }
+            }));
+    }
+
+    /**
+     * ACK 배치를 끄고 삭제 완료를 기다리며 없는 큐를 자동 생성하지 않는다.
+     *
+     * @param client 기존 리전·자격 증명·엔드포인트를 사용하는 SQS 클라이언트
+     * @return 검증·제출 큐가 공유하는 수동 ACK 팩토리
+     */
+    @Bean
+    public SqsMessageListenerContainerFactory<Object> judgeManualAckListenerFactory(SqsAsyncClient client) {
+        return SqsMessageListenerContainerFactory
+            .builder()
+            .sqsAsyncClient(client)
+            .configure(
+                options -> options
+                    .acknowledgementInterval(Duration.ZERO)
+                    .acknowledgementThreshold(0)
+                    .queueNotFoundStrategy(QueueNotFoundStrategy.FAIL)
+            )
+            .build();
+    }
+
+    /**
+     * 활성화된 환경에서만 수동 ACK 리스너를 등록한다.
+     *
+     * @param consumer Judge 업무 DB의 공통 소비기
+     * @param decoder 검증 큐의 이벤트 종류·버전을 확인할 해석기
+     * @param handlers 다른 큐 소속의 등록 이벤트 종류를 확인할 처리기
+     * @return 검증 요청 리스너
+     */
+    @Bean
+    public ValidationMessageListener validationMessageListener(
+        EventConsumer consumer,
+        EventMessageDecoder decoder,
+        List<EventHandler> handlers
+    ) {
+        return new ValidationMessageListener(consumer, decoder, handlers);
+    }
+
+    /**
+     * 제출 큐 주소가 준비된 환경에 공용 채점 요청 리스너를 등록한다.
+     *
+     * @param consumer 커밋 후 ACK를 수행하는 공통 소비기
+     * @param decoder 수신 원문 형식 검사기
+     * @param handlers 종류·버전별 업무 처리기
+     * @return 시험·대회·진단 공용 제출 큐 리스너
+     */
+    @Bean
+    @ConditionalOnExpression("!environment.getProperty('judge.messaging.submission-queue-url', '').isBlank()")
+    public SubmissionMessageListener submissionMessageListener(
+        EventConsumer consumer,
+        EventMessageDecoder decoder,
+        List<EventHandler> handlers
+    ) {
+        return new SubmissionMessageListener(consumer, decoder, handlers);
+    }
+
+    /**
+     * 원격 실행으로 주기 제어가 막히지 않도록 두 개의 실행 전용 스레드를 제공한다.
+     *
+     * @return 대기열 없이 두 작업만 수행하는 실행기
+     */
+    @Bean
+    public ThreadPoolTaskExecutor judgeValidationExecutor() {
+        var executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(0);
+        executor.setThreadNamePrefix("judge-validation-worker-");
+        return executor;
+    }
+
+    /**
+     * 회수 작업과 분리해 채점 선점과 공통 예약 작업의 주기를 관리한다.
+     *
+     * @return 채점 선점과 공통 예약 작업에 사용할 기본 스케줄러
+     */
+    @Bean
+    @Primary
+    public ThreadPoolTaskScheduler judgeValidationScheduler() {
+        var scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(2);
+        scheduler.setThreadNamePrefix("judge-validation-schedule-");
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
+    /**
+     * 기한 초과·임대 만료·토큰 회수 작업을 채점 선점과 다른 스레드에서 실행한다.
+     *
+     * @return 회수 전용 스케줄러
+     */
+    @Bean
+    public ThreadPoolTaskScheduler judgeRecoveryScheduler() {
+        var scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(2);
+        scheduler.setThreadNamePrefix("judge-recovery-schedule-");
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
+    /**
+     * 원격 자료 조회가 채점 선점·임대 회수를 지연시키지 않도록 유지보수 예약 작업을 격리한다.
+     *
+     * @return 상태 대사와 관측 작업에 사용할 전용 스케줄러
+     */
+    @Bean
+    public ThreadPoolTaskScheduler judgeMaintenanceScheduler() {
+        var scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("judge-maintenance-");
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
+    /**
+     * 메시징이 활성화된 환경에서만 검증 실행과 기한 초과 정리를 예약한다.
+     *
+     * @param worker 작업 상위 실행기
+     * @param store 검증 저장소
+     * @param executor 두 작업의 실행 전용 스레드
+     * @param clock 공통 시각
+     * @param transactionManager 기한 초과 처리 트랜잭션 관리자
+     * @return 검증 예약 작업
+     */
+    @Bean
+    public ValidationScheduler validationScheduler(
+        ValidationWorker worker,
+        ValidationExecutionStore store,
+        @Qualifier("judgeValidationExecutor") ThreadPoolTaskExecutor executor,
+        Clock clock,
+        JpaTransactionManager transactionManager
+    ) {
+        return new ValidationScheduler(worker, store, executor, clock, transactionManager);
+    }
+
+    /**
+     * 일반 제출을 동시에 두 건 실행하는 전용 스레드 풀을 등록한다.
+     *
+     * @return 대기열 없이 두 작업만 수행하는 실행기
+     */
+    @Bean
+    public ThreadPoolTaskExecutor judgeSubmissionExecutor() {
+        var executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(0);
+        executor.setThreadNamePrefix("judge-submission-worker-");
+        return executor;
+    }
+
+    /**
+     * 메시징이 활성화된 환경에서 제출 선점과 기한·임대 만료 처리를 예약한다.
+     *
+     * @param worker 일반·시험 제출 실행기
+     * @param store 제출 실행 저장소
+     * @param executor 제출 전용 실행 스레드 풀
+     * @param clock 공통 시각
+     * @param transactionManager 회수 한 건마다 트랜잭션을 시작할 관리자
+     * @return 제출 실행 및 회수 예약 작업
+     */
+    @Bean
+    public SubmissionScheduler submissionScheduler(
+        SubmissionWorker worker,
+        SubmissionExecutionStore store,
+        @Qualifier("judgeSubmissionExecutor") ThreadPoolTaskExecutor executor,
+        Clock clock,
+        JpaTransactionManager transactionManager
+    ) {
+        return new SubmissionScheduler(worker, store, executor, clock, transactionManager);
+    }
+
+}

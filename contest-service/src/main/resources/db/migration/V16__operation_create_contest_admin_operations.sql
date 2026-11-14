@@ -1,0 +1,21 @@
+CREATE TABLE contest_admin_operations (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    operation_id VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    operation_type VARCHAR(30) NOT NULL,
+    context VARCHAR(30) NOT NULL,
+    context_id BIGINT NOT NULL,
+    receipt_id BIGINT NULL,
+    request_hash CHAR(64) NOT NULL,
+    expected_judge_attempt INT NULL,
+    target_judge_attempt INT NULL,
+    expected_result_revision BIGINT NULL,
+    state VARCHAR(30) NOT NULL,
+    actor_member_id BIGINT NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    response_json JSON NULL,
+    last_error_code VARCHAR(100) NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT uk_contest_admin_operations_operation_id UNIQUE (operation_id),
+    INDEX idx_contest_admin_operations_context_state (context, context_id, state)
+);

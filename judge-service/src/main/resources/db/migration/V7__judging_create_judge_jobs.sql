@@ -1,0 +1,22 @@
+CREATE TABLE judge_jobs (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    submission_id BIGINT NOT NULL,
+    judge_attempt INT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    try_count INT NOT NULL,
+    lease_token VARCHAR(64) NULL,
+    lease_until DATETIME(6) NULL,
+    next_run_at DATETIME(6) NOT NULL,
+    deadline_at DATETIME(6) NOT NULL,
+    started_at DATETIME(6) NULL,
+    finished_at DATETIME(6) NULL,
+    last_error VARCHAR(500) NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_judge_jobs_submission FOREIGN KEY (submission_id) REFERENCES submissions(id),
+    CONSTRAINT uk_judge_jobs_submission_attempt UNIQUE (submission_id, judge_attempt),
+    CONSTRAINT chk_judge_jobs_attempt CHECK (judge_attempt >= 1 AND try_count >= 1),
+    CONSTRAINT chk_judge_jobs_status CHECK (status IN ('PENDING', 'RUNNING', 'RETRY_WAITING', 'SUCCEEDED', 'FAILED')),
+    INDEX idx_judge_jobs_status_next_run_at (status, next_run_at),
+    INDEX idx_judge_jobs_status_lease_until (status, lease_until)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

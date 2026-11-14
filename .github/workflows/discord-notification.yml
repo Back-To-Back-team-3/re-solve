@@ -45,6 +45,7 @@ jobs:
 
           payload = None
           event_name = os.environ["GITHUB_EVENT_NAME"]
+          user_agent = f'DiscordBot (https://github.com/{os.environ["GITHUB_REPOSITORY"]}, 1.0)'
 
           if event_name == "pull_request":
               pr = event["pull_request"]
@@ -112,6 +113,7 @@ jobs:
                   headers={
                       "Accept": "application/vnd.github+json",
                       "Authorization": f'Bearer {os.environ["GITHUB_TOKEN"]}',
+                      "User-Agent": user_agent,
                   },
               )
               try:
@@ -142,10 +144,33 @@ jobs:
           request = urllib.request.Request(
               webhook,
               data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-              headers={"Content-Type": "application/json"},
+              headers={"Content-Type": "application/json", "User-Agent": user_agent},
               method="POST",
           )
-          with urllib.request.urlopen(request, timeout=15) as response:
-              if response.status not in (200, 204):
-                  raise RuntimeError(f"Discord 알림 실패: HTTP {response.status}")
+          try:
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  if response.status not in (200, 204):
+                      raise SystemExit(f"Discord 알림 실패: HTTP {response.status}")
+          except urllib.error.HTTPError as error:
+              print(f"Discord 알림 실패: HTTP {error.code}")
+              try:
+                  detail = json.loads(error.read(4096))
+              except (ValueError, UnicodeError):
+                  detail = None
+              if isinstance(detail, dict):
+                  code = detail.get("code")
+                  if isinstance(code, int):
+                      print(f"Discord 오류 코드: {code}")
+                  message = str(detail.get("message", ""))
+                  for secret in [webhook, webhook.rsplit("/", 1)[-1], os.environ.get("GITHUB_TOKEN", ""), *reviewer_map.values()]:
+                      if secret:
+                          message = message.replace(secret, "[REDACTED]")
+                  message = re.sub(r"https?://[^\s<>]+", "[REDACTED URL]", message)
+                  print(f"Discord 오류 메시지: {message[:500]}")
+              else:
+                  print("Discord 오류 응답이 JSON 형식이 아니어서 본문을 기록하지 않습니다.")
+              raise SystemExit(1)
+          except urllib.error.URLError as error:
+              print(f"Discord 연결 실패: {type(error.reason).__name__}")
+              raise SystemExit(1)
           PY

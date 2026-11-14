@@ -1,0 +1,15 @@
+spring:
+  autoconfigure:
+    exclude:
+      - io.awspring.cloud.autoconfigure.sqs.SqsAutoConfiguration
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password: ""
+
+study:
+  hint-context-client:
+    problem-base-url: http://localhost:8080
+  judge-client:
+    base-url: http://localhost:8080

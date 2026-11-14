@@ -30,11 +30,17 @@ repositories {
 }
 
 dependencies {
+    // 공통 모듈 (응답·예외·추적, JPA 감사, 이벤트 Outbox)
+    implementation project(':common-web')
+    implementation project(':common-jpa')
+    implementation project(':common-event')
+
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
 
     // Database
     runtimeOnly 'com.mysql:mysql-connector-j'
@@ -43,9 +49,20 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.flywaydb:flyway-mysql'
 
+    // Scheduler lock
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:7.10.1'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1'
+
     // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
+
+    // Redis
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // AWS Messaging (SQS)
+    implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:4.1.1')
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
 
     // OpenAPI / Swagger UI
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1'
@@ -56,6 +73,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-flyway-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
 
     // Testcontainers
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'

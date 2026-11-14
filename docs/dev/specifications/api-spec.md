@@ -1,0 +1,9430 @@
+# API 명세서 v1.1
+
+> 최종 수정일: 2026.10.07(수)
+> 
+
+---
+
+### 작성 분담
+
+| 절 | 담당 | 비고 |
+| --- | --- | --- |
+| 0. 공통 규약 | 공통 | 0.4 에러 코드·0.6 권한 요약은 각자 자기 서비스 행 추가 |
+| 1. 인증·회원·진단 (`member-service`) | 담당 E | 태그별 진단·레벨 포함 |
+| 2. 문제 (`problem-service`) | 담당 B | 풀이 공유·리뷰 포함 |
+| 3. 제출·채점 (`judge-service`) | 담당 B | 코드 실행(Run) 포함 |
+| 4. 모의 코테·대회 (`contest-service`) | 담당 C | 시험·대회 관리자 API 포함 |
+| 5. 스터디 (`study-service`) | 담당 D | 스터디 추천 포함 |
+| 6. AI 기능 (`study-service` AI 모듈, `ai-service` 후보) | 담당 D | 힌트·가드레일 |
+| 7. 알림 (`notification-service`) | 담당 A | SSE 포함 |
+| 8. GitHub 연동 (`integration-service`) | 담당 A |  |
+| 9. 관리자 API 색인 | 공통 | 각 서비스 절의 관리자 API 목록 |
+| 부록 | 공통 | 각자 내부 API·이벤트 행 추가 |
+
+---
+
+## 0. 공통 규약
+
+### 0.1 기본 규칙
+
+| 항목 | 값 |
+| --- | --- |
+| 외부 Base URL | `/api/v1` (API Gateway 경유) |
+| 내부 Base URL | `/internal/v1` (서비스 간 호출 전용, Gateway 라우팅 제외, 외부 비공개) |
+| 인증 방식 | `Authorization: Bearer {accessToken}` (JWT). Gateway가 검증 후 `X-User-Id`, `X-User-Role` 전달. 외부에서 보낸 같은 이름의 헤더는 Gateway가 제거 |
+| 관리자 경로 | `/api/v1/admin/**`은 Gateway와 소유 서비스 양쪽에서 `ADMIN`을 검증한다. `ADMIN`이 아닌 사용자도 호출하는 운영 API는 `/admin` 아래에 두지 않는다 |
+| 상관관계 ID | Gateway가 `X-Correlation-Id` 발급, HTTP·메시지 전 구간 전파 |
+| Content-Type | `application/json; charset=UTF-8` |
+| 경로 | 리소스는 영문 소문자 복수형, 여러 단어는 kebab-case. 공개 경로에 서비스 이름을 넣지 않는다. 리소스로 표현하기 어려운 명령은 `POST` + 하위 경로, 관계 해제는 `DELETE` |
+| 날짜·시각 | Asia/Seoul 기준 ISO 8601 (`2026-09-21T10:15:30+09:00`). 이벤트·시험 접수 시각은 마이크로초 6자리. DB는 `DATETIME(6)` |
+| 페이지네이션 | `?page=0&size=20&sort=field,desc` (`page` 0부터, `size` 기본 20·최대 100) |
+| 목록 응답 | `content`, `page`, `size`, `totalElements`, `totalPages`, `hasNext` |
+| 검색 | 검색어는 `keyword`, 도메인 필터는 의미가 드러나는 이름. 다중 값은 반복 파라미터 (`tagIds=1&tagIds=3`) |
+| 멱등 | 같은 키·같은 본문은 최초 응답 반환, 같은 키·다른 본문은 `IDEMPOTENCY_KEY_CONFLICT`(422) |
+| 버전 | 호환되지 않는 변경이 있을 때만 새 버전 추가 |
+
+**공통 요청 헤더**
+
+| 헤더 | 대상 | 설명 |
+| --- | --- | --- |
+| `Authorization` | 로그인 필요 API | `Bearer {accessToken}`. 공개 API는 선택 |
+| `Idempotency-Key` | 멱등 지정 API | 1~100자 ASCII. 같은 본문 재요청에 재사용 |
+| `X-Correlation-Id` | 전체 | 없으면 Gateway 발급 |
+- 내부 API는 인증 헤더를 요구하지 않는다.
+
+### 0.2 식별자(ID) 규칙
+
+- 경로 변수는 리소스 PK를 사용한다. 예: `/studies/{studyId}` → `studies.id`
+- DB에서 `BIGINT`인 식별자는 API JSON에서 **문자열**로 표현한다. 예: `"studyId": "12"`
+- 열거형 값(상태·판정·난이도)은 의미가 드러나는 문자열로 표현한다. 예: `"status": "APPROVED"`
+- 난이도 `difficulty`는 1~3 정수로 표현한다.
+- 태그 레벨은 `LV0` / `LV1` / `LV2` / `LV3` / `MASTER` 문자열로 표현한다.
+- 언어 식별자는 `java` / `python3` / `cpp`를 쓴다.
+- 요청자 식별자(회원 ID)는 외부 API의 요청 바디나 파라미터로 받지 않고 인증 정보(`X-User-Id`)로만 판단한다. 내부 API는 호출 서비스가 확인한 `memberId`를 전달한다.
+- 문제 회차는 식별·고정에 `problemRevisionId`, 표시에 `revisionNumber`를 쓴다.
+- 함수형 입력값은 정밀도 보존을 위해 JSON 텍스트(`argumentTexts`)로 주고받는다 (2.3.0).
+
+### 0.3 공통 성공 / 에러 응답
+
+```text
+// 조회 성공
+{
+  "success": true,
+  "message": null,
+  "data": {
+    "studyId": "12",
+    "name": "코딩 테스트 스터디"
+  }
+}
+
+// 작업 성공
+{
+  "success": true,
+  "message": "스터디 가입이 완료되었습니다.",
+  "data": {
+    "studyId": "12"
+  }
+}
+
+// 목록 조회 성공
+{
+  "success": true,
+  "message": null,
+  "data": {
+    "content": [
+      {
+        "problemId": "301",
+        "title": "두 수의 합"
+      }
+    ],
+    "page": 0,
+    "size": 20,
+    "totalElements": 1,
+    "totalPages": 1,
+    "hasNext": false
+  }
+}
+
+// 실패
+{
+  "success": false,
+  "error": {
+    "code": "STUDY_ALREADY_APPLIED",
+    "message": "이미 신청했거나 참여 중인 스터디입니다.",
+    "details": []
+  }
+}
+
+// 검증 실패
+{
+  "success": false,
+  "error": {
+    "code": "COMMON_INVALID_REQUEST",
+    "message": "입력값을 확인해 주세요.",
+    "details": [
+      {
+        "field": "name",
+        "reason": "스터디 이름은 필수입니다."
+      }
+    ]
+  }
+}
+
+```
+
+- `204 No Content`, SSE 스트림, 이미지 바이너리 응답은 공통 응답 형식을 적용하지 않는다.
+- 내부 API는 공통 응답 형식 없이 데이터 객체를 그대로 반환한다. 오류는 공통 오류 형식을 쓴다.
+- 프론트엔드는 `error.message`가 아니라 `error.code`로 분기한다.
+
+### 0.4 에러 코드 표
+
+[에러 코드 표](error-codes.md)
+
+### 0.5 상태값 요약
+
+| 대상 | 값 |
+| --- | --- |
+| 회원 `status` | `ACTIVE` / `SUSPENDED` / `WITHDRAWN` |
+| 회원 `role` | `USER` / `ADMIN` |
+| 태그 레벨 | `LV0` / `LV1` / `LV2` / `LV3` / `MASTER` |
+| 진단 응시 `status` | `IN_PROGRESS` / `CLOSED` / `SCORED` |
+| 문제 `scope` · `visibility` | `GENERAL` / `EXAM_ONLY` · `PRIVATE` / `PUBLIC` / `ARCHIVED` |
+| 제출 `context` | `PRACTICE` / `EXAM` / `CONTEST` / `DIAGNOSIS` |
+| 제출 `status` (judge) | `QUEUED` / `JUDGING` / `RETRY_WAITING` / `COMPLETED` / `FAILED` |
+| 판정 `verdict` | `AC` / `WA` / `TLE` / `MLE` / `RE` / `CE` |
+| 시험 `status` | `SCHEDULED` / `IN_PROGRESS` / `CLOSED` / `FINALIZED` / `CANCELED` |
+| 시험·대회 참가자 `status` | `REGISTERED` / `STARTED` / `FINISHED` / `ABSENT` / `CANCELED` |
+| 시험·대회 접수 `status` (contest) | `ACCEPTED` / `REQUESTED` / `JUDGED` / `FAILED` |
+| 결과 공개 `resultStatus` | `HIDDEN` / `PROVISIONAL` / `FINALIZED` |
+| 관리자 작업 `state` | `PENDING` / `SUCCEEDED` / `FAILED` |
+| 대회 `status` | `SCHEDULED` / `RUNNING` / `ENDED` / `FINALIZED` / `CANCELED` |
+| 스터디 `status` | `RECRUITING` / `ACTIVE` / `CLOSED` |
+| 스터디 가입 `status` | `PENDING` / `APPROVED` / `REJECTED` / `CANCELED` / `EXPIRED` / `LEFT` / `REMOVED` |
+| 스터디 역할 | `LEADER` / `MANAGER` / `MEMBER` |
+| 문제집 `status` · 문제 `status` | `SCHEDULED` / `OPEN` / `CLOSED` · `ACTIVE` / `EXCLUDED` |
+| 과제 상태 · 완료 유형 | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` / `INCOMPLETE` · `PRE_SOLVED` / `ON_TIME` / `LATE` |
+| 힌트 요청 `status` | `REQUESTED` / `GENERATING` / `READY` / `FALLBACK` / `BLOCKED` |
+| GitHub 연동 · Sync Job | `CONNECTED` / `DISCONNECTED` · `PENDING` / `RUNNING` / `RETRY_WAITING` / `RATE_LIMITED` / `SUCCEEDED` / `FAILED` / `CANCELED` |
+
+### **0.6 권한 요약**
+
+| 서비스 | API 그룹 | 인증 조건 | 리소스 권한 확인 | 작성 |
+| --- | --- | --- | --- | --- |
+| member | GitHub 로그인·토큰 교환 | 공개 | — | E |
+| member | 토큰 재발급·로그아웃 | Refresh Token 쿠키 / 로그인 필요 | 본인 토큰 | E |
+| member | 내 정보·학습 프로필·태그 레벨·학습 통계 | 로그인 필요 (정보 수정·프로필 저장·태그 진입은 `SUSPENDED` 차단) | 본인 | E |
+| member | 진단 테스트 | 로그인 필요 (`SUSPENDED` 차단) | 본인 응시 | E |
+| member | 회원 관리자 | `ADMIN` | — | E |
+| problem | 문제 목록·상세·통계·태그 조회 | 로그인 필요 | `GENERAL`·`PUBLIC`만 | B |
+| problem | 풀이 공유·라인 댓글 | 로그인 필요 (`SUSPENDED` 차단) | 공유 대상 스터디 `APPROVED` 구성원 (조회 시점 재검증) | B |
+| problem | 문제 관리자 | `ADMIN` | 목록은 전체, 상세·수정·상태 변경은 작성 관리자 | B |
+| judge | 제출·실행·결과 조회 | 로그인 필요 (제출·실행은 `SUSPENDED` 차단) | 본인 `PRACTICE` 제출. 시험·대회 결과는 contest 경유 | B |
+| judge | 채점 관리자 | `ADMIN` | 재채점은 `EXAM` 장애 실패 건만 | B |
+| contest | 시험 생성·수정·취소 | 로그인 필요 (`SUSPENDED` 차단) | 해당 스터디 `LEADER`·`MANAGER` (study 동기 조회) | C |
+| contest | 시험 참가·응시·결과 | 로그인 필요 (`SUSPENDED` 차단) | 등록 참가자, 등록 시 스터디 `APPROVED` 구성원 | C |
+| contest | 시험 실패 재처리·작업 조회 | 로그인 필요 | 재처리는 `ADMIN` 또는 현재 `LEADER`·`MANAGER`. 작업 조회는 `ADMIN` 또는 해당 시험 운영자의 본인 `EXAM_RETRY` | C |
+| contest | 대회 조회·순위 | 공개 | — | C |
+| contest | 대회 참가·응시 | 로그인 필요 (`SUSPENDED` 차단) | 등록·실제 입장 참가자 | C |
+| contest | 시험·대회 관리자 | `ADMIN` | — | C |
+| study | 스터디 탐색·조회 | 공개 (로그인 시 내 가입 상태 포함) | — | D |
+| study | 내 스터디·가입·탈퇴 | 로그인 필요 (`SUSPENDED` 차단) | 본인 가입 | D |
+| study | 가입 심사·강제 탈퇴·문제집·공지 | 로그인 필요 (`SUSPENDED` 차단) | 해당 스터디 `LEADER`·`MANAGER` | D |
+| study | 스터디 설정·역할·위임·종료 | 로그인 필요 (`SUSPENDED` 차단) | 해당 스터디 `LEADER` | D |
+| study | 문제집 조회·커뮤니티 | 로그인 필요 | 해당 스터디 `APPROVED` 구성원 | D |
+| study | 스터디 추천 | 로그인 필요 | — | D |
+| study | 스터디 관리자 | `ADMIN` | — | D |
+| AI | 힌트 요청·조회 | 로그인 필요 (`SUSPENDED` 차단) | 본인 요청 | D |
+| notification | 알림·SSE·수신 설정 | 로그인 필요 | 본인 알림 | A |
+| notification | 관리자 공지 발송 | `ADMIN` | — | A |
+| integration | GitHub 연동·동기화 | 로그인 필요 (수동 동기화는 `SUSPENDED` 차단) | 본인 연동 | A |
+| 공통 | 내부 API `/internal/v1/**` | 내부 네트워크 | 수신 서비스 업무 규칙 검증 | 공통 |
+
+### **0.7 작성 규칙**
+
+- 각 서비스 절은 `N.0 개요 → 외부 API → 관리자 API → 내부 API` 순서로 쓴다.
+- 다른 서비스가 제공하는 내부 API는 제공 서비스 절에 정의하고, 호출하는 쪽은 **외부 의존**과 `N.x 사용하는 내부 API` 표에서 참조만 한다.
+- 각 API는 아래 양식을 **모든 항목 빠짐없이** 따른다. 해당 내용이 없으면 "없음"으로 적는다. 다른 API와 형태가 같아도 표를 생략하지 않고, "○○와 같은 형식"이라는 설명은 **비고**에 적는다.
+- 요청·응답 예시 JSON은 한 줄에 한 필드씩 풀어 쓴다.
+- **응답 파라미터**는 리다이렉트 `Location` 등 응답에 실리는 Path·Query 값이다.
+
+```
+#### N.N.N API 이름
+- **Method / URI:**
+- **인증:** 공개 / 로그인 필요 / 로그인 필요 (`SUSPENDED` 차단) / `ADMIN` / 내부 호출
+- **Idempotency:**
+- **Rate Limit:**
+- **대응 테이블:**
+- **설명:**
+- **요청 헤더:** (표)
+- **요청 파라미터:** (표 — Path·Query)
+- **요청 바디:** (필드 표 + 예시)
+- **응답 헤더:** (표)
+- **응답 파라미터:** (표 — Path·Query)
+- **응답 바디 (200 / 201 / 202 / 204):** (필드 표 + 예시)
+- **에러:** `ERROR_CODE`(status) / 발생 조건
+- **동시성/멱등 보장:**
+- **발행:** `EventName` — 발행 시점
+- **외부 의존:** `METHOD /internal/v1/...` (서비스) — 용도, 실패 시 처리
+- **프론트 계약:**
+- **비고:**
+```
+
+---
+
+## 1. 인증·회원 (member)
+
+> 작성: 담당 E · 서비스: `member-service`
+
+### 1.0 개요
+
+| 항목 | 값 |
+| --- | --- |
+| 외부 경로 | `/api/v1/auth/**`, `/api/v1/members/**`, `/api/v1/diagnoses/**`, `/api/v1/admin/members/**` |
+| 내부 경로 | `/internal/v1/members/**` |
+| 소유 테이블 | 스키마 `member` (토큰은 Redis) |
+| 로그인 | GitHub OAuth2 단일. 인가 범위 `read:user`, `user:email` |
+| 토큰 | Access 1시간(응답 본문), Refresh 14일(`HttpOnly`·`Secure`·`SameSite=Strict` 쿠키), Redis 회전 |
+| 레벨 | 태그별 `LV0`~`MASTER`, 저장값 증감 없이 재계산 |
+| 이벤트 발행 | `MemberUpdated`, `LearningProfileUpdated`, `TagLevelChanged`, `MemberWithdrawn`, `MemberSuspended`, `DiagnosisSubmissionRequested` |
+| 이벤트 구독 | `SubmissionJudged`(레벨·성취도 재계산), `DiagnosisSubmissionJudged`(진단 결과), `SubmissionFailed`(진단 실패), `HintReady`(힌트 사용 감점, 확정 필요) |
+| 외부 서비스 | GitHub OAuth (`github.com/login/oauth`, `api.github.com/user`) |
+
+### 1.1 외부 API — 인증
+
+#### 1.1.1 GitHub 로그인 시작
+
+- **Method / URI:** `GET /api/v1/auth/github`
+- **인증:** 공개
+- **대응 테이블:** 없음 (OAuth `state`는 Redis, TTL 10분)
+- **설명:** GitHub 인가 화면으로 리다이렉트한다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `redirectPath` | Query | string | N | `/` | 로그인 후 이동할 프론트 경로. 허용 목록의 상대 경로만 |
+- **응답 (302):**
+    
+    
+    | 헤더 | 값 |
+    | --- | --- |
+    | `Location` | `https://github.com/login/oauth/authorize?client_id=…&scope=read:user%20user:email&state=…` |
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 허용 목록 밖 `redirectPath`
+- **외부 의존:** GitHub OAuth 인가 화면 (리다이렉트만, 서버 호출 없음)
+
+#### 1.1.2 GitHub 로그인 콜백
+
+- **Method / URI:** `GET /api/v1/auth/github/callback`
+- **인증:** 공개
+- **대응 테이블:** `members`, `outbox_events`
+- **설명:** GitHub 인가 코드로 사용자 정보를 받아 회원을 조회·생성하고, 1회용 로그인 교환 코드(TTL 60초)를 발급해 프론트로 리다이렉트한다. 토큰을 URL에 싣지 않는다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `code` | Query | string | Y | GitHub 인가 코드 |
+    | `state` | Query | string | Y | GitHub 로그인 시작(1.1.1)에서 발급한 `state` |
+- **응답 (302):** `Location: {frontendOrigin}/auth/callback?loginCode=…&redirectPath=/`
+- **에러:**
+    - `AUTH_OAUTH_FAILED`(502) / GitHub 응답 실패
+    - `AUTH_TOKEN_INVALID`(401) / `state` 불일치·만료
+- **동시성/멱등 보장:** 신규 가입은 `uk_members_github_id`로 중복 생성을 막는다. 위반 시 기존 회원으로 로그인.
+- **발행:** `MemberUpdated` — 신규 가입 시 (`member_replicas` 원천)
+- **외부 의존:**
+    - `POST https://github.com/login/oauth/access_token` (GitHub) — 인가 코드 교환. 타임아웃 3초, 실패 시 502
+    - `GET https://api.github.com/user`, `/user/emails` (GitHub) — 프로필·이메일. 이메일 실패는 `email = null`로 진행
+
+#### 1.1.3 로그인 코드 교환
+
+- **Method / URI:** `POST /api/v1/auth/token`
+- **인증:** 공개
+- **대응 테이블:** `members` (토큰은 Redis)
+- **설명:** 로그인 교환 코드로 Access Token을 발급하고 Refresh Token을 쿠키로 설정한다. 교환 코드는 1회만 사용한다.
+- **요청 바디:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `loginCode` | string | Y | GitHub 로그인 콜백(1.1.2)이 전달한 1회용 코드 |
+    
+    ```json
+    { "loginCode": "lc_8f2c…" }
+    ```
+    
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `accessToken` | string | JWT |
+    | `expiresIn` | integer | 초 단위 수명 (3600) |
+    | `member.memberId` · `nickname` · `role` · `status` | string | 회원 요약 |
+    | `member.isNewMember` | boolean | 최초 로그인 여부 (학습 프로필 안내용) |
+    
+    ```json
+    {
+      "success": true, "message": null,
+      "data": {
+        "accessToken": "eyJ…", "expiresIn": 3600,
+        "member": { 
+    	    "memberId": "7", 
+    	    "nickname": "kim-dev", 
+    	    "role": "USER", 
+    	    "status": "ACTIVE", 
+    	    "isNewMember": true 
+        }
+      }
+    }
+    ```
+    
+    | 응답 헤더 | 값 |
+    | --- | --- |
+    | `Set-Cookie` | `refreshToken=…; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=1209600` |
+- **에러:** `AUTH_LOGIN_CODE_INVALID`(401) / 코드 없음·만료·재사용
+- **동시성/멱등 보장:** Redis `GETDEL`로 코드를 원자적으로 소비한다.
+
+#### 1.1.4 토큰 재발급
+
+- **Method / URI:** `POST /api/v1/auth/token/refresh`
+- **인증:** Refresh Token 쿠키
+- **대응 테이블:** 없음 (Redis)
+- **설명:** Refresh Token을 회전(Rotation)하고 새 Access Token을 발급한다.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Cookie` | Y | `refreshToken=…` | 1.1.3에서 설정한 쿠키 |
+- **응답 (200):** `{ "accessToken": "eyJ…", "expiresIn": 3600 }` + 새 `Set-Cookie`
+    
+    ```json
+    	{ 
+    		"success": true, 
+    		"message": null, 
+    		"data": { 
+    			"accessToken": "eyJ…", 
+    			"expiresIn": 3600 
+    		} 
+    	}
+    ```
+    
+- **에러:**
+    - `AUTH_REFRESH_TOKEN_INVALID`(401) / 토큰 없음·만료·폐기
+    - `AUTH_REFRESH_TOKEN_REUSED`(401) / 이미 교체된 토큰 재사용 → 해당 회원의 모든 Refresh Token 폐기
+- **동시성/멱등 보장:** Redis에서 토큰 비교·교체를 원자적으로 수행(Lua). 동시 재발급 두 건 중 하나는 `REUSED`로 처리된다.
+
+#### 1.1.5 로그아웃
+
+- **Method / URI:** `POST /api/v1/auth/logout`
+- **인증:** 로그인 필요
+- **대응 테이블:** 없음 (Redis)
+- **설명:** Refresh Token을 삭제하고, Access Token은 남은 수명 동안 차단 목록에 등록한다.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | 차단 목록 등록 대상 |
+    | `Cookie` | N | `refreshToken=…` | 삭제 대상 |
+- **응답 (204):** `Set-Cookie: refreshToken=; Max-Age=0`
+
+#### 1.1.6 개발용 로그인
+
+- **Method / URI:** `POST /api/v1/auth/dev-login`
+- **인증:** 공개 (`local`·`dev` 프로필에서만 라우팅)
+- **대응 테이블:** `members`
+- **설명:** 지정한 회원으로 토큰을 발급한다. `prod`·`staging`에서 활성화 설정이 감지되면 애플리케이션 기동을 실패시킨다.
+- **요청 바디:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `memberId` | string | Y | 토큰을 발급할 회원 |
+- **응답 (200):** 로그인 코드 교환(1.1.3)과 같다.
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `accessToken` | string | JWT |
+    | `expiresIn` | integer | 초 단위 수명 (3600) |
+    | `member.memberId` · `nickname` · `role` · `status` | string | 회원 요약 |
+    | `member.isNewMember` | boolean | 최초 로그인 여부 (학습 프로필 안내용) |
+    
+    ```json
+    {
+      "success": true, "message": null,
+      "data": {
+        "accessToken": "eyJ…", "expiresIn": 3600,
+        "member": { 
+    	    "memberId": "7", 
+    	    "nickname": "kim-dev", 
+    	    "role": "USER", 
+    	    "status": "ACTIVE", 
+    	    "isNewMember": true 
+        }
+      }
+    }
+    ```
+    
+    | 응답 헤더 | 값 |
+    | --- | --- |
+    | `Set-Cookie` | `refreshToken=…; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=1209600` |
+- **에러:** `MEMBER_NOT_FOUND`(404)
+
+### 1.2 외부 API — 회원
+
+#### 1.2.1 내 정보 조회
+
+- **Method / URI:** `GET /api/v1/members/me`
+- **인증:** 로그인 필요
+- **대응 테이블:** `members`, `learning_profiles`
+- **설명:** 내 계정 정보와 학습 프로필 입력 여부를 반환한다.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | 로그인 토큰 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `memberId` · `githubLogin` · `nickname` | string | 계정 정보 |
+    | `profileImageUrl` · `email` | string 또는 null | GitHub에서 받은 값 |
+    | `role` · `status` | string | 0.5 참조 |
+    | `hasLearningProfile` | boolean | 학습 프로필 입력 여부 |
+    | `createdAt` | string (date-time) | 가입 시각 |
+    
+    ```json
+    {
+      "success": true, "message": null,
+      "data": {
+        "memberId": "7", "githubLogin": "kim-dev", "nickname": "kim-dev",
+        "profileImageUrl": "https://avatars.githubusercontent.com/u/…", "email": null,
+        "role": "USER", "status": "ACTIVE", "hasLearningProfile": false,
+        "createdAt": "2026-10-01T10:00:00+09:00"
+      }
+    }
+    ```
+    
+
+#### 1.2.2 내 정보 수정
+
+- **Method / URI:** `PATCH /api/v1/members/me`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **대응 테이블:** `members`, `outbox_events`
+- **설명:** 닉네임을 변경한다. 바꿀 필드만 보낸다.
+- **요청 헤더:** `Authorization: Bearer <accessToken>` (Y)
+- **요청 바디:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `nickname` | string | N | 2~50자, 이모지 불가 |
+    
+    ```json
+      { "nickname": "kim-algo" }
+    ```
+    
+    - `nickname` 앞뒤 공백을 지운 2~50자. 이모지(국기·피부색·키캡·이모지 조합 포함)는 쓸 수 없다
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "회원 정보가 수정되었습니다.", 
+    	  "data": { 
+    		  "memberId": "7", 
+    		  "nickname": "kim-algo" 
+    	  } 
+      }
+    ```
+    
+- **에러:**
+    - `MEMBER_NICKNAME_INVALID`(400) /
+    - `MEMBER_SUSPENDED`(403) /
+- **동시성/멱등 보장:** `members.profile_version`을 1 올리고 같은 트랜잭션에서 Outbox 기록.
+- **발행:** `MemberUpdated` — 닉네임·이미지 변경 시 (`member_replicas` 갱신, `profileVersion` = `sourceVersion`)
+
+#### 1.2.3 회원 탈퇴
+
+- **Method / URI:** `DELETE /api/v1/members/me`
+- **인증:** 로그인 필요
+- **대응 테이블:** `members`, `outbox_events`
+- **설명:** 탈퇴 차단 조건을 확인한 뒤 `WITHDRAWN`으로 전이하고 표시 정보를 익명화한다. 토큰은 모두 폐기한다.
+- **요청 헤더:** `Authorization: Bearer <accessToken>` (Y)
+- **응답 (204)**
+- **에러:**
+    - `WITHDRAWAL_BLOCKED_ACTIVE_EXAM`(409) / 실제 입장한 시험·대회가 `FINALIZED` 전
+    - `WITHDRAWAL_BLOCKED_STUDY_LEADER`(409) / `CLOSED`가 아닌 스터디의 스터디장 (위임 또는 종료 안내)
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 차단 조건 조회 실패
+- **외부 의존:**
+    - `GET /internal/v1/contest/members/{memberId}/active-participations` (contest, 4.7.2) — 실제 입장한 미확정 시험·대회 여부. 실패 시 fail-closed
+    - `GET /internal/v1/studies/memberships?memberId=&role=LEADER&activeOnly=true` (study, 5.7.2) — 스터디장 여부. 실패 시 fail-closed
+- **발행:**
+    - `MemberWithdrawn` — 탈퇴 트랜잭션 (전 서비스 정리)
+
+### 1.3 외부 API — 학습 프로필
+
+#### 1.3.1 학습 프로필 조회
+
+- **Method / URI:** `GET /api/v1/members/me/learning-profile`
+- **인증:** 로그인 필요
+- **대응 테이블:** `learning_profiles`, `member_tag_levels`
+- **설명:** 추천 입력값과 태그별 레벨 요약을 반환한다. 미입력이면 `data`가 `null`이다.
+- **요청 헤더:** `Authorization: Bearer <accessToken>` (Y)
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `goal` | string | 학습 목표. `EMPLOYMENT`(취업·코딩테스트) / `CONTEST`(대회) / `STUDY`(학습) |
+    | `preferredLanguages` | string[] | `java` / `python3` / `cpp` |
+    | `activeTimeSlots` | string[] | 활동 시간대. `MORNING`(06–12시) / `AFTERNOON`(12–18시) / `EVENING`(18–24시) / `NIGHT`(00–06시) |
+    | `tagLevels[]` | object[] | `tagId`, `level`. 진입한 태그 전체. 태그 이름은 담지 않는다(1.4.1과 같음, 화면은 2.5.1 태그 목록으로 이름을 붙인다) |
+    | `profileVersion` | string | 변경 순번 |
+    | `updatedAt` | string (date-time) | 마지막 변경 |
+    
+    ```json
+    {
+      "success": true, "message": null,
+      "data": {
+        "goal": "EMPLOYMENT", "preferredLanguages": ["java"], "activeTimeSlots": ["EVENING"],
+        "tagLevels": [ { "tagId": "3", "level": "LV2" } ],
+        "profileVersion": "4", "updatedAt": "2026-10-02T21:00:00+09:00"
+      }
+    }
+    
+    ```
+    
+    - 목표·활동 시간대 값 목록은 스터디(5.1·5.2)의 `goal`·`activeTimeSlot`과 같다(추천의 목표 일치·시간대 겹침 비교).
+
+#### 1.3.2 학습 프로필 저장
+
+- **Method / URI:** `PUT /api/v1/members/me/learning-profile`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **대응 테이블:** `learning_profiles`, `outbox_events`
+- **설명:** 학습 프로필 전체를 저장한다. 최초 입력이면 생성한다. 값이 바뀐 경우에만 `profile_version`을 올리고 이벤트를 발행한다.
+- **요청 헤더:** `Authorization: Bearer <accessToken>` (Y)
+- **요청 바디:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `goal` | string | Y | 학습 목표. `EMPLOYMENT`(취업·코딩테스트) / `CONTEST`(대회) / `STUDY`(학습) |
+    | `preferredLanguages` | string[] | Y | 1개 이상 |
+    | `activeTimeSlots` | string[] | Y | 1개 이상. `MORNING`(06–12시) / `AFTERNOON`(12–18시) / `EVENING`(18–24시) / `NIGHT`(00–06시) |
+    
+    ```json
+    { "goal": "EMPLOYMENT", "preferredLanguages": ["java"], "activeTimeSlots": ["EVENING"] }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "학습 프로필이 저장되었습니다.", 
+    	  "data": { 
+    		  "profileVersion": "5" 
+    	  } 
+      }
+    ```
+    
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) /
+    - `MEMBER_SUSPENDED`(403) /
+- **발행:** `LearningProfileUpdated` — 최초 입력·값 변경 시 (전체 상태 + `profileVersion`)
+
+### 1.4 외부 API — 태그 레벨·성취도
+
+#### 1.4.1 태그 레벨 목록
+
+- **Method / URI:** `GET /api/v1/members/me/tag-levels`
+- **인증:** 로그인 필요
+- **대응 테이블:** `member_tag_levels`, `member_tag_achievements`
+- **설명:** 진입한 태그의 레벨·성취도와 진단 응시 가능 여부를 반환한다. 진입하지 않은 태그를 `LV0`으로 그리려면 태그 목록 조회(2.5.1)와 합친다. 페이지네이션 없음(태그 수 고정).
+- **요청 헤더:** `Authorization: Bearer <accessToken>` (Y)
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `content[].tagId` · `level` | string | 태그·현재 레벨 |
+    | `content[].accessibleMaxDifficulty` | integer | 연습 제출 가능한 최대 난이도 |
+    | `content[].achievements[]` | object[] | 난이도별 `solvedCount`, `achievementRate`, `band` |
+    | `content[].diagnosis` | object | `isEligible`, `cooldownEndsAt`, `inProgressDiagnosisId` |
+    | `content[].nextPromotion` | object 또는 null | 다음 승급 기준 |
+    
+    ```json
+    {
+      "success": true, "message": null,
+      "data": {
+        "content": [
+          {
+            "tagId": "3", "level": "LV2", "accessibleMaxDifficulty": 2,
+            "achievements": [
+              { "difficulty": 1, "solvedCount": 6, "achievementRate": 83.33, "band": "GOOD" },
+              { "difficulty": 2, "solvedCount": 2, "achievementRate": 50.00, "band": "WEAK" }
+            ],
+            "diagnosis": { "isEligible": true, "cooldownEndsAt": null, "inProgressDiagnosisId": null },
+            "nextPromotion": { "targetLevel": "LV3", "requiredSolvedCount": 6, "requiredAchievementRate": 70.00 }
+          }
+        ]
+      }
+    }
+    ```
+    
+    - `band`: `GOOD`(80% 이상) / `NORMAL`(60~79%) / `WEAK`(0~59%, 약점). 승급 기준값은 설정값으로 관리한다.
+
+#### 1.4.2 태그 진입 (진단 건너뛰기)
+
+- **Method / URI:** `POST /api/v1/members/me/tag-levels`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **대응 테이블:** `member_tag_levels`, `member_level_histories`, `learning_profiles`, `outbox_events`
+- **설명:** 태그에 처음 진입하며 진단 없이 `LV1`로 시작한다. 쿨타임을 걸지 않는다. 진단을 선택하면 이 API 대신 진단 시작(1.5.1)을 호출한다.
+- **요청 헤더:** `Authorization: Bearer <accessToken>` (Y)
+- **요청 바디:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `tagId` | string | Y | 진입할 태그 |
+    
+    ```json
+      { "tagId": "3" }
+    ```
+    
+- **응답 (201):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "Lv.1로 시작합니다.", 
+    	  "data": { 
+    		  "tagId": "3", 
+    		  "level": "LV1" 
+    	  } 
+      }
+    ```
+    
+- **에러:**
+    - `LEVEL_TAG_NOT_FOUND`(404), /
+    - `LEVEL_ALREADY_ENTERED`(409) /
+    - `MEMBER_SUSPENDED`(403) /
+- **동시성/멱등 보장:** `uk_member_tag_levels_member_tag`. 위반 시 `LEVEL_ALREADY_ENTERED`.
+- **발행:** `LearningProfileUpdated` — 태그 레벨 확정 (`tagLevels` 갱신)
+- **외부 의존:** problem 태그 존재 확인(2.6.11). `PROBLEM_TAG_NOT_FOUND`(404)는 `LEVEL_TAG_NOT_FOUND`(404)로 바꾸고, 통신 오류·그 밖의 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503)로 처리한다(fail-closed).
+
+#### 1.4.3 레벨 변경 근거 조회
+
+- **Method / URI:** `GET /api/v1/members/me/tag-levels/{tagId}/histories`
+- **인증:** 로그인 필요
+- **대응 테이블:** `member_level_histories`, `member_tag_levels`
+- **설명:** 태그의 레벨 변경 이력(진단·승급·재채점 하향)을 최신순으로 반환한다.
+- **요청 헤더:** `Authorization: Bearer <accessToken>` (Y)
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `tagId` | Path | string | Y | — | 태그 ID |
+    | `page` | Query | int | N | 0 |  |
+    | `size` | Query | int | N | 20 | 최대 100 |
+    | `sort` | Query | string | N | `createdAt,desc` | 허용: `createdAt` |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `content[].fromLevel` · `toLevel` | string | 변경 전후 |
+    | `content[].reasonType` | string | `ENTRY_SKIP` / `DIAGNOSIS` / `PROMOTION` / `REJUDGE` |
+    | `content[].sourceSubmissionId` · `diagnosisId` | string 또는 null | 근거 |
+    | `content[].createdAt` | string (date-time) |  |
+    
+    ```json
+    {
+      "success": true, "message": null,
+      "data": {
+        "content": [ { "fromLevel": "LV1", "toLevel": "LV2", "reasonType": "PROMOTION", "sourceSubmissionId": "91023", "diagnosisId": null, "createdAt": "2026-10-02T21:00:00+09:00" } ],
+        "page": 0, "size": 20, "totalElements": 2, "totalPages": 1, "hasNext": false
+      }
+    }
+    
+    ```
+    
+    - `reasonType`: `ENTRY_SKIP` / `DIAGNOSIS` / `PROMOTION` / `REJUDGE`
+
+#### 1.4.4 약점 태그 조회
+
+- **Method / URI:** `GET /api/v1/members/me/weak-tags`
+- **인증:** 로그인 필요
+- **대응 테이블:** `member_tag_achievements`
+- **설명:** 성취도 부족(0~59%) 구간인 태그·난이도를 성취도 오름차순으로 반환한다(T5-08, P3). 페이지네이션 없음.
+- **요청 헤더:** `Authorization: Bearer <accessToken>` (Y)
+- **응답 (200):**
+    
+    ```json
+    { "success": true, "message": null, "data": { "content": [ { "tagId": "5", "difficulty": 2, "achievementRate": 40.00, "solvedCount": 2 } ] } }
+    ```
+    
+
+### 1.5 외부 API — 진단 테스트
+
+> `member-service`가 진단 제출을 접수하고 `DiagnosisSubmissionRequested`(M6)를 `exam-submission-queue`로 전송한다. Judge는 정상 종결을 J5, 시스템 실패를 J4로 발행한다(이벤트 계약서 M6·J5·J4).
+> 
+
+#### 1.5.1 진단 시작
+
+- **Method / URI:** `POST /api/v1/diagnoses`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **대응 테이블:** `diagnosis_attempts`, `diagnosis_problems`, `member_tag_levels`
+- **설명:** 태그의 난이도 1·2·3 공개 문제 중 무작위로 1문항씩 출제하고 60분 진단을 시작한다. 태그 첫 진입이면 레벨은 `LV0`으로 두고 진단 결과로 확정한다.
+- **요청 바디:**
+    
+    ```json
+      { "tagId": "3" }
+    ```
+    
+- **응답 (201):**
+    
+    ```json
+      {
+        "success": true,
+        "message": "진단을 시작합니다.",
+        "data": {
+          "diagnosisId": "120",
+          "tagId": "3",
+          "startedAt": "2026-10-03T20:00:00+09:00",
+          "endsAt": "2026-10-03T21:00:00+09:00",
+          "serverNow": "2026-10-03T20:00:00+09:00",
+          "problems": [
+            { "problemId": "301", "problemRevisionId": "1001", "difficulty": 1, "title": "두 수의 합" },
+            { "problemId": "315", "problemRevisionId": "1040", "difficulty": 2, "title": "…" },
+            { "problemId": "330", "problemRevisionId": "1092", "difficulty": 3, "title": "…" }
+          ]
+        }
+      }
+    ```
+    
+- **에러:**
+    - `LEVEL_TAG_NOT_FOUND`(404)
+    - `DIAGNOSIS_NOT_ELIGIBLE`(409) / 레벨 `LV3`·`MASTER`
+    - `DIAGNOSIS_COOLDOWN`(409) / 직전 종료 + 3일 전 (`Retry-After` 포함)
+    - `DIAGNOSIS_ALREADY_IN_PROGRESS`(409)
+    - `DIAGNOSIS_PROBLEMS_UNAVAILABLE`(409) / 난이도 1·2·3 중 출제 후보가 없는 난이도가 있음 (태그 진입 1.4.2로 Lv.1 시작 안내)
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 출제 후보 조회 실패, 또는 운영 스위치(`MEMBER_DIAGNOSIS_ENABLED`)가 꺼져 있음
+    - `MEMBER_SUSPENDED`(403)
+- **동시성/멱등 보장:** 생성 컬럼 `active_tag_id` + `uk_diagnosis_attempts_member_active_tag`. 동시 시작 두 건 중 하나는 `DIAGNOSIS_ALREADY_IN_PROGRESS`.
+- **외부 의존:**
+    - `GET /internal/v1/problems/diagnosis-candidates?tagId=` (problem) — 난이도별 공개 문제 1개씩 무작위 반환. 실패 시 fail-closed.
+
+#### 1.5.2 진단 상세·복구
+
+- **Method / URI:** `GET /api/v1/diagnoses/{diagnosisId}`
+- **인증:** 로그인 필요 (본인)
+- **대응 테이블:** `diagnosis_attempts`, `diagnosis_problems`, `diagnosis_drafts`, `diagnosis_submissions`
+- **설명:** 재진입 시 남은 시간과 문항별 서버 Draft(`seq`)·최종 제출 상태를 반환한다. 클라이언트는 LocalStorage와 `seq`를 비교해 큰 쪽으로 복구한다. 종료 후에는 결과를 함께 반환한다.
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "diagnosisId": "120",
+          "tagId": "3",
+          "status": "IN_PROGRESS",
+          "endsAt": "2026-10-03T21:00:00+09:00",
+          "serverNow": "2026-10-03T20:21:10+09:00",
+          "problems": [
+            {
+              "problemId": "301", 
+              "problemRevisionId": "1001", 
+              "difficulty": 1,
+              "draft": { 
+    	          "language": "python3", 
+    	          "sourceCode": "def solution(a, b):\n    ...", 
+    	          "seq": "14", 
+    	          "savedAt": "2026-10-03T20:20:58+09:00" 
+    	        },
+              "lastSubmission": { 
+    	          "submissionStatus": "JUDGED", 
+    	          "draftSeq": "12" 
+              }
+            }
+          ],
+          "result": null
+        }
+    }
+    ```
+    
+    - `result`: `SCORED`이면 `{ "score": 3.00, "resultLevel": "LV2", "appliedLevel": "LV2" }`. 판정은 진단 종료 후에만 공개.
+    - 문제 본문은 문제 상세 조회(2.1.2) 대신 `GET /api/v1/diagnoses/{diagnosisId}/problems/{problemId}` 진단 문제 본문 조회(1.5.3)로 조회
+- **에러:**
+    - `DIAGNOSIS_NOT_FOUND`(404)
+
+#### 1.5.3 진단 문제 본문 조회
+
+- **Method / URI:** `GET /api/v1/diagnoses/{diagnosisId}/problems/{problemId}`
+- **인증:** 로그인 필요 (본인)
+- **대응 테이블:** `diagnosis_problems`
+- **설명:** 진단에 고정한 회차의 본문·함수 명세·공개 예제를 반환한다. 레벨 접근 제한을 적용하지 않는다.
+- **응답 (200):** problem 고정 회차 본문 조회(2.6.3)의 응답 객체를 `data`에 그대로 담는다(본문·함수 명세·실행 제한·기본 코드·공개 예제).
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": { "problemId": "301", "problemRevisionId": "1001", "title": "두 수의 합", "difficulty": 1, "description": "## 문제\n…", "samples": [] }
+      }
+    ```
+    
+- **에러:**
+    - `DIAGNOSIS_NOT_FOUND`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content` (problem) — 고정 회차 본문. 실패 시 503
+
+#### 1.5.4 진단 Draft 저장
+
+- **Method / URI:** `PUT /api/v1/diagnoses/{diagnosisId}/problems/{problemId}/draft`
+- **인증:** 로그인 필요 (본인)
+- **Rate Limit:** 응시자당 초당 1회 (초과 요청은 마지막 요청만 반영) — 아직 적용하지 않음(`seq` 비교와 응시 잠금으로 순서·정합성만 보장, 부하 측정 후 적용 여부 결정)
+- **대응 테이블:** `diagnosis_drafts`
+- **설명:** 작성 중 코드를 저장한다. 입력이 2초 멈추면, 입력 중에도 최대 10초마다 호출한다.
+- **요청 바디:**
+    
+    ```json
+      { 
+    	  "language": "python3", 
+    	  "sourceCode": "def solution(a, b):\n    return a + b\n", 
+    	  "seq": "15" 
+      }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": null, 
+    	  "data": { 
+    		  "applied": true, 
+    		  "seq": "15", 
+    		  "savedAt": "2026-10-03T20:21:12+09:00" 
+    	  } 
+      }
+    ```
+    
+    - 늦게 도착한 이전 Draft는 `applied: false`와 서버 `seq`를 반환한다.
+- **에러:**
+    - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409), `CODE_TOO_LARGE`(413)
+- **동시성/멱등 보장:** 응시 행을 잠근 뒤 문항의 모든 언어 중 가장 큰 `seq`보다 클 때만 저장(순번은 문항 단위). 같은 `seq` 재전송·늦게 도착한 이전 `seq`는 `applied: false`. 서버 접수 시각(잠금 대기 전)이 `ends_at`을 넘거나 응시가 `IN_PROGRESS`가 아니면 거절.
+
+#### 1.5.5 진단 문항 제출
+
+- **Method / URI:** `POST /api/v1/diagnoses/{diagnosisId}/problems/{problemId}/submissions`
+- **인증:** 로그인 필요 (본인)
+- **Idempotency:** 같은 `(진단, 문항, seq)`는 기존 접수를 반환
+- **Rate Limit:** 동일 문항 5초 간격
+- **대응 테이블:** `diagnosis_drafts`, `diagnosis_submissions`, `outbox_events`
+- **설명:** 해당 코드·`seq`로 Draft를 반영하고 제출을 접수한 뒤 채점을 요청한다. 판정은 진단 종료 후 공개한다.
+- **요청 바디:**
+    
+    ```json
+      { 
+    	  "language": "python3", 
+    	  "sourceCode": "def solution(a, b):\n    return a + b\n", 
+    	  "seq": "16" 
+      }
+    ```
+    
+- **응답 (202):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "제출이 접수되었습니다.", 
+    	  "data": { 
+    		  "diagnosisSubmissionId": "880", 
+    		  "status": "ACCEPTED", 
+    		  "receivedAt": "2026-10-03T20:22:00+09:00" 
+    	  } 
+      }
+    ```
+    
+- **에러:**
+    - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409), `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `SUBMISSION_RATE_LIMITED`(429)
+- **동시성/멱등 보장:** `uk_diagnosis_submissions_attempt_problem_seq`. Draft 반영·제출·Outbox를 한 트랜잭션에 저장.
+- **발행:**
+    - `DiagnosisSubmissionRequested` — 접수 트랜잭션 (judge 채점 요청, SQS `exam-submission-queue`, 이벤트 계약 M6). 전송 성공 후 `REQUESTED`
+
+#### 1.5.6 진단 최종 제출 (종료)
+
+- **Method / URI:** `POST /api/v1/diagnoses/{diagnosisId}/finish`
+- **인증:** 로그인 필요 (본인)
+- **대응 테이블:** `diagnosis_attempts`, `diagnosis_drafts`, `diagnosis_submissions`, `outbox_events`
+- **설명:** 진단을 종료한다. 마지막 제출 이후 변경된 Draft가 있는 문항은 자동 제출한다. 이후 저장·제출은 거절한다. 제한 시각 도달 시에는 스케줄러가 같은 처리를 한다.
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "진단이 종료되었습니다. 채점이 끝나면 결과를 알려드립니다.", 
+    	  "data": { 
+    		  "diagnosisId": "120", 
+    		  "status": "CLOSED", 
+    		  "closedAt": "2026-10-03T20:40:00+09:00" 
+    	  } 
+      }
+    ```
+    
+- **에러:**
+    - `DIAGNOSIS_NOT_FOUND`(404), `DIAGNOSIS_CLOSED`(409)
+- **동시성/멱등 보장:** `WHERE status = 'IN_PROGRESS'` 조건부 UPDATE. 수동 종료와 만료 스케줄러가 경합해도 1회만 종료된다.
+- **발행:**
+    - `DiagnosisSubmissionRequested` — 자동 제출 문항마다 (SQS `exam-submission-queue`, 이벤트 계약 M6)
+    - `TagLevelChanged`·`LearningProfileUpdated` — 모든 제출 채점 후 `SCORED` 전이 시
+- **프론트 계약:**
+    - 결과 확정은 SSE `LEVEL_CHANGED`(진단 결과) 알림으로 받고 진단 상세·복구(1.5.2)로 결과를 조회한다.
+
+#### 1.5.7 진단 이력
+
+- **Method / URI:** `GET /api/v1/diagnoses`
+- **인증:** 로그인 필요
+- **대응 테이블:** `diagnosis_attempts`
+- **설명:** 본인의 진단 응시 이력을 반환한다. 재응시 결과가 현재 레벨보다 낮아도 점수 이력으로 보여준다.
+- **요청 파라미터:**
+허용 정렬 필드: `startedAt` (기본 `startedAt,desc`)
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `tagId` | string | N | — | 태그 필터 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [ 
+    	      { 
+    		      "diagnosisId": "120", 
+    		      "tagId": "3", 
+    		      "status": "SCORED", 
+    		      "score": 3.00, 
+    		      "resultLevel": "LV2", 
+    		      "closeReason": "SUBMITTED", 
+    		      "startedAt": "2026-10-03T20:00:00+09:00", 
+    		      "closedAt": "2026-10-03T20:40:00+09:00" 
+    	      } 
+          ],
+          "page": 0, 
+          "size": 20, 
+          "totalElements": 1, 
+          "totalPages": 1, 
+          "hasNext": false
+        }
+      }
+    ```
+    
+
+### 1.6 관리자 API — 회원
+
+#### 1.6.1 회원 목록 조회
+
+- **Method / URI:** `GET /api/v1/admin/members`
+- **인증:** `ADMIN`
+- **대응 테이블:** `members`
+- **요청 파라미터:**
+허용 정렬 필드: `createdAt` (기본 `createdAt,desc`)
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `keyword` | string | N | — | 닉네임·GitHub 로그인명 검색 |
+    | `status` | string | N | — | `ACTIVE` / `SUSPENDED` / `WITHDRAWN` |
+    | `role` | string | N | — | `USER` / `ADMIN` |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [ 
+    	      { 
+    		      "memberId": "7", 
+    		      "nickname": "kim-dev", 
+    		      "githubLogin": "kim-dev", 
+    		      "role": "USER", 
+    		      "status": "ACTIVE", 
+    		      "createdAt": "2026-10-01T10:00:00+09:00" 
+    	      } 
+          ],
+          "page": 0, 
+          "size": 20, 
+          "totalElements": 1, 
+          "totalPages": 1, 
+          "hasNext": false
+        }
+      }
+    ```
+    
+
+#### 1.6.2 회원 정지·해제
+
+- **Method / URI:** `PATCH /api/v1/admin/members/{memberId}/status`
+- **인증:** `ADMIN`
+- **대응 테이블:** `members`, `audit_logs`, `outbox_events`
+- **설명:** `ACTIVE ↔ SUSPENDED`로 전이하고 사유·집행자를 감사 로그에 남긴다.
+    - **진행 중 시험·대회의 기존 제출 처리는 미결정.**
+- **요청 바디:**
+    
+    ```json
+      { 
+    	  "status": "SUSPENDED", 
+    	  "reason": "부정 행위 신고 확인" 
+      }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "회원 상태가 변경되었습니다.", 
+    	  "data": { 
+    		  "memberId": "7", 
+    		  "status": "SUSPENDED" 
+    	  } 
+      }
+    ```
+    
+- **에러:**
+    - `MEMBER_NOT_FOUND`(404), `COMMON_INVALID_REQUEST`(400) / `WITHDRAWN` 대상 또는 같은 상태
+- **발행:**
+    - `MemberSuspended` — 정지·해제 시 (`suspended: true/false`, 순번 포함)
+
+#### 1.6.3 회원 권한 변경
+
+- **Method / URI:** `PATCH /api/v1/admin/members/{memberId}/role`
+- **인증:** `ADMIN`
+- **대응 테이블:** `members`, `audit_logs`
+- **요청 바디:**
+    
+    ```json
+      { 
+    	  "role": "ADMIN", 
+    	  "reason": "운영진 합류" 
+      }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "권한이 변경되었습니다.", 
+    	  "data": { 
+    		  "memberId": "7", 
+    		  "role": "ADMIN" 
+    	  } 
+      }
+    ```
+    
+- **에러:**
+    - `MEMBER_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403) / 본인 권한 변경
+- **동시성/멱등 보장:** 권한 변경은 다음 토큰 발급부터 반영된다(기존 Access Token 만료 대기 최대 1시간).
+
+### 1.7 내부 API
+
+#### 1.7.1 회원 상태 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/members/{memberId}/status`
+- **인증:** 내부 호출
+- **대응 테이블:** `members`
+- **설명:** `SUSPENDED` 차단 확인용. 각 서비스는 `MemberSuspended` 복제본을 우선 쓰고, 복제본이 없을 때만 호출한다.
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "memberId": "7", 
+    	  "status": "ACTIVE", 
+    	  "role": "USER" 
+      }
+    ```
+    
+
+#### 1.7.2 태그 레벨 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/members/{memberId}/tag-levels`
+- **인증:** 내부 호출
+- **대응 테이블:** `member_tag_levels`
+- **설명:** judge가 `PRACTICE` 제출 전 레벨 접근 제한(난이도 ≤ 레벨)을 확인할 때 호출한다.
+    - 다중 태그 문제는 모든 태그의 레벨이 난이도를 충족해야 허용한다(최저 레벨 기준). 미진입 태그는 `LV0`으로 본다.
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "memberId": "7", 
+    	  "tagLevels": [ 
+    		  { 
+    			  "tagId": "3", 
+    			  "level": "LV2" 
+    		  } 
+    	  ] 
+      }
+    ```
+    
+- **실패 시 처리:** judge는 fail-closed(`COMMON_DEPENDENCY_UNAVAILABLE`)
+
+#### 1.7.3 회원 탈퇴 작업 상태 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/members/{memberId}/operations/{operationId}`
+- **인증:** 내부 호출 (contest)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **설명:** Contest 자원 가드에 사용한 원래 회원 탈퇴 작업의 확정 여부를 반환한다. 조회로 탈퇴나 가드 상태를 변경하지 않는다.
+- **요청 파라미터:** `memberId`, `operationId` — 모두 Path, string, 필수.
+- **응답 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 조회한 원래 탈퇴 작업 ID |
+    | `state` | string | PENDING / COMMITTED / ABORTED |
+    | `sourceVersion` | string | 원래 작업에 대응하는 원천 상태 순서 값 |
+    | `resourceStatus` | string | 원래 작업에 대응하는 회원 상태 |
+
+- **실패 시 처리:** 없는 작업은 404. Contest는 `PENDING`·404·조회 실패 시 PREPARED 차단을 유지한다. `COMMITTED`는 §4.7.4 complete, `ABORTED`는 cancel로 복구한다.
+- **대사 기준:** 원래 작업의 결과를 반환한다. 현재 회원 상태만으로 원래 작업의 성공·취소를 추정하지 않는다.
+
+### 1.8 사용하는 내부 API
+
+| 제공 | Method / URI | 요청 | 성공 응답 | 실패 처리 |
+| --- | --- | --- | --- | --- |
+| problem | `GET /internal/v1/tags/{tagId}` | 진입할 태그 ID | `{tagId, name}` | `PROBLEM_TAG_NOT_FOUND`(404)는 `LEVEL_TAG_NOT_FOUND`(404), 그 밖의 응답·통신 오류는 `COMMON_DEPENDENCY_UNAVAILABLE`(503) |
+
+- 공통 타임아웃은 2초다.
+
+---
+
+## 2. 문제 (problem)
+
+> 작성: 담당 B · 서비스: `problem-service`
+> 
+
+### 2.1 외부 API — 문제 조회
+
+이 절의 현재 회차는 정책 및 상태 > 4 > 사용 회차를 뜻한다.
+
+#### 2.1.1 문제 목록 조회
+
+- **Method / URI:** `GET /api/v1/problems`
+- **인증:** 로그인 필요
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`, `tags`, `member_problem_statuses`
+- **설명:** 일반 공개 문제(`GENERAL`·`PUBLIC`)의 현재 회차를 조건으로 검색한다. 시험 전용 문제는 제외한다. 레벨 접근 가능 여부는 프론트가 태그 레벨 목록(1.4.1)의 태그 레벨과 비교해 표시한다(제출 시 judge가 검증).
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `keyword` | string | N | — | 제목 검색 |
+    | `difficulty` | int | N | — | 1~3 |
+    | `tagIds` | string[] | N | — | 태그 ID 목록, 하나라도 포함하면 일치(OR). `tagIds=1&tagIds=3` |
+    | `solvedStatus` | string | N | — | `SOLVED` / `UNSOLVED` |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 | 최대 100 |
+    | `sort` | string | N | `publishedAt,desc` |  |
+
+    허용 정렬 필드: `publishedAt`, `difficulty`, `problemId`
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.content` | object[] | 검색 조건에 맞는 사용 회차 목록 |
+    | `data.content[].problemId / problemRevisionId` | string | 문제·사용 회차 ID |
+    | `data.content[].revisionNumber / title / difficulty` | integer / string / integer | 사용 회차 번호·제목·난이도 |
+    | `data.content[].tags` | object[] | 사용 회차의 태그 ID·이름 |
+    | `data.content[].publishedAt / solvedStatus / supportedLanguages` | date-time / string / string[] | 회차 등록 시각·본인 풀이 상태·통과 언어 |
+    | `data.page / size / totalElements / totalPages / hasNext` | integer / integer / integer / integer / boolean | 공통 페이지 정보 |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "problemId": "301",
+            "problemRevisionId": "1001",
+            "revisionNumber": 1,
+            "title": "두 수의 합",
+            "difficulty": 1,
+            "tags": [
+              {
+                "tagId": "1",
+                "name": "구현"
+              }
+            ],
+            "publishedAt": "2026-09-27T10:00:00+09:00",
+            "solvedStatus": "UNSOLVED",
+            "supportedLanguages": [
+              "python3"
+            ]
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 1,
+        "totalPages": 1,
+        "hasNext": false
+      }
+    }
+    ```
+
+    - `publishedAt`: 현재 회차 등록 시각(`problem_revisions.created_at`)
+    - `supportedLanguages`: 해당 사용 회차에 PASSED가 반영된 언어. 제목·난이도·태그 필터는 사용 회차를 고른 뒤 적용한다.
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 페이지·필터와 응답의 회차 ID를 함께 사용한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
+
+#### 2.1.2 문제 상세 조회
+
+- **Method / URI:** `GET /api/v1/problems/{problemId}`
+- **인증:** 로그인 필요
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tags`, `tags`, `problem_revision_tests`, `problem_test_assets`, `member_problem_statuses`
+- **설명:** 일반 공개 문제(`GENERAL`·`PUBLIC`)의 사용 회차 본문·함수 명세·실행 제한·통과 언어의 기본 코드·공개 예제를 조회한다. 숨김 테스트와 과거 회차는 제공하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.problemId / problemRevisionId / revisionNumber` | string / string / integer | 문제·사용 회차·회차 번호 |
+    | `data.title / difficulty / tags` | string / integer / object[] | 사용 회차 제목·난이도·태그 |
+    | `data.publishedAt / solvedStatus` | date-time / string | 회차 등록 시각·본인 풀이 상태 |
+    | `data.description / constraints / examples` | string | 본문·제한·입출력 예시 Markdown |
+    | `data.functionSpec / executionLimits` | object | 회차의 함수 명세·고정 실행 제한 |
+    | `data.supportedLanguages / starterCodes` | string[] / object[] | 통과 언어·언어별 기본 코드 |
+    | `data.samples` | object[] | 공개 테스트의 ID·입력·기대값 |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "problemId": "301",
+        "problemRevisionId": "1001",
+        "revisionNumber": 1,
+        "title": "두 수의 합",
+        "difficulty": 1,
+        "tags": [
+          {
+            "tagId": "1",
+            "name": "구현"
+          }
+        ],
+        "publishedAt": "2026-09-27T10:00:00+09:00",
+        "solvedStatus": "UNSOLVED",
+        "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
+        "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
+        "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
+        "functionSpec": {
+          "name": "solution",
+          "parameters": [
+            {
+              "name": "a",
+              "type": {
+                "kind": "INT32"
+              }
+            },
+            {
+              "name": "b",
+              "type": {
+                "kind": "INT32"
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "INT32"
+          }
+        },
+        "executionLimits": {
+          "timeMs": 2000,
+          "memoryKb": 262144,
+          "wallTimeMs": 7000,
+          "outputLimitKb": 64
+        },
+        "starterCodes": [
+          {
+            "language": "python3",
+            "sourceCode": "def solution(a: int, b: int) -> int:\n    raise NotImplementedError()\n"
+          }
+        ],
+        "samples": [
+          {
+            "testAssetId": "501",
+            "argumentTexts": {
+              "a": "1",
+              "b": "2"
+            },
+            "expectedReturnText": "3"
+          }
+        ],
+        "supportedLanguages": [
+          "python3"
+        ]
+      }
+    }
+    ```
+
+    - `executionLimits`: 모든 지원 언어에 같은 값을 적용한다. `wallTimeMs = timeMs + 5초`
+
+- **에러:**
+    - `PROBLEM_NOT_FOUND`(404), `PROBLEM_NOT_AVAILABLE`(404)
+
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** Judge 기본 코드 HTTP(§2.7) — 사용 회차의 `functionSpec`과 통과 언어 `languages`로 `starterCodes`를 받는다. 조회 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)이며 미검증 언어의 코드를 대신 반환하지 않는다.
+- **프론트 계약:** 응답 회차·지원 언어를 기준으로 기본 코드와 공개 예제를 표시한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
+
+#### 2.1.3 일반 문제 본문 이미지 조회
+
+- **Method / URI:** `GET /api/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}`
+- **인증:** 로그인 필요
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_body_images`, `problem_images`
+- **설명:** 현재 `GENERAL`·`PUBLIC`인 문제의 지정 회차 본문에 연결된 이미지를 반환한다. 최신 회차 여부는 검사하지 않아, 풀던 중 새 회차가 등록돼도 원래 회차 이미지를 볼 수 있다.
+- **응답 (200):** 이미지 바이너리 (`Content-Type: image/png` 등, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`)
+- **에러:**
+    - `PROBLEM_NOT_FOUND`(404) / 미존재·열람 불가·연결 불일치
+
+### 2.2 외부 API — 스터디 풀이 공유·리뷰
+
+> 공유 시점의 코드·언어·회차를 스냅샷으로 저장한다(ERD `solution_shares`). 
+1차 범위는 `PRACTICE` AC 제출, 시험·대회 제출은 `FINALIZED` 이후 확정 필요.
+> 
+
+#### 2.2.1 풀이 공유
+
+- **Method / URI:** `POST /api/v1/solution-shares`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **대응 테이블:** `solution_shares`, `study_membership_replicas`
+- **설명:** 본인의 AC 제출 한 건을 본인이 속한 스터디 하나에 공유한다.
+- **요청 바디:**
+    
+    ```json
+      { "submissionId": "91023", "studyId": "12" }
+    ```
+    
+- **응답 (201):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "풀이를 공유했습니다.", 
+    	  "data": { "solutionShareId": "450" } 
+      }
+    ```
+    
+- **에러:**
+    - `SOLUTION_SHARE_NOT_ALLOWED`(409) / 본인 제출이 아니거나 `PRACTICE` AC가 아님
+    - `SOLUTION_ALREADY_SHARED`(409)
+    - `AUTH_ACCESS_DENIED`(403) / 해당 스터디 `APPROVED` 구성원이 아님
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **동시성/멱등 보장:** 생성 컬럼 `active_submission_id` + `uk_solution_shares_study_active_submission`.
+- **외부 의존:**
+    - `GET /internal/v1/submissions/{submissionId}/source?purpose=SOLUTION_SHARE&memberId=` (judge) — 소유·AC 확인 후 코드 스냅샷. 실패 시 fail-closed
+
+#### 2.2.2 스터디 공유 풀이 목록
+
+- **Method / URI:** `GET /api/v1/solution-shares`
+- **인증:** 로그인 필요
+- **대응 테이블:** `solution_shares`, `study_membership_replicas`, `member_replicas`
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `studyId` | string | Y | — | 스터디 ID |
+    | `problemId` | string | N | — | 문제 필터 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    
+    허용 정렬 필드: `sharedAt` (기본 `sharedAt,desc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [ 
+    	      { 
+    		      "solutionShareId": "450", 
+    		      "problemId": "301", 
+    		      "revisionNumber": 1, 
+    		      "language": "python3", 
+    		      "author": { 
+    			      "memberId": "7", 
+    			      "nickname": "kim-dev" 
+    		      }, 
+    		      "commentCount": 3, 
+    		      "sharedAt": "2026-10-02T22:00:00+09:00" 
+    	      } 
+          ],
+          "page": 0, 
+          "size": 20, 
+          "totalElements": 1, 
+          "totalPages": 1, 
+          "hasNext": false
+        }
+      }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403) / 해당 스터디 `APPROVED` 구성원이 아님
+
+#### 2.2.3 공유 풀이 상세
+
+- **Method / URI:** `GET /api/v1/solution-shares/{solutionShareId}`
+- **인증:** 로그인 필요
+- **대응 테이블:** `solution_shares`, `study_membership_replicas`, `member_replicas`
+- **설명:** 공유 코드 스냅샷을 반환한다. 조회 시점마다 공유 스터디 구성원 여부를 다시 확인한다. 숨김 테스트는 공개하지 않는다.
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "solutionShareId": "450", 
+          "studyId": "12", 
+          "problemId": "301", 
+          "problemRevisionId": "1001", 
+          "revisionNumber": 1,
+          "language": "python3", 
+          "sourceCode": "def solution(a, b):\n    return a + b\n",
+          "author": { 
+    	      "memberId": "7", 
+    	      "nickname": "kim-dev" 
+          }, 
+          "sharedAt": "2026-10-02T22:00:00+09:00"
+        }
+      }
+    ```
+    
+- **에러:**
+    - `SOLUTION_SHARE_NOT_FOUND`(404) / 없음·공유 취소·열람 권한 없음
+
+#### 2.2.4 공유 취소
+
+- **Method / URI:** `DELETE /api/v1/solution-shares/{solutionShareId}`
+- **인증:** 로그인 필요 (공유자 본인)
+- **대응 테이블:** `solution_shares`
+- **응답 (204)**
+- **에러:**
+    - `SOLUTION_SHARE_NOT_FOUND`(404)
+- **동시성/멱등 보장:** `WHERE status = 'SHARED'` 조건부 UPDATE → `CANCELED`.
+
+#### 2.2.5 풀이 비교 (Diff)
+
+- **Method / URI:** `GET /api/v1/solution-shares/diff`
+- **인증:** 로그인 필요
+- **대응 테이블:** `solution_shares`
+- **설명:** 같은 문제의 공유 풀이 두 개 또는 본인 제출과 공유 풀이를 비교할 원문을 반환한다. Diff 계산은 클라이언트(Monaco Diff)가 한다. 회차가 다르면 `isRevisionDifferent: true`.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `baseShareId` | string | N | — | 기준 공유 풀이 (`baseSubmissionId`와 택1) |
+    | `baseSubmissionId` | string | N | — | 기준 본인 제출 |
+    | `targetShareId` | string | Y | — | 비교 대상 공유 풀이 |
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "base": { "language": "python3", "sourceCode": "…", "revisionNumber": 1 },
+          "target": { "language": "java", "sourceCode": "…", "revisionNumber": 2 },
+          "isRevisionDifferent": true
+        }
+      }
+    ```
+    
+- **에러:**
+    - `SOLUTION_SHARE_NOT_FOUND`(404), `COMMON_INVALID_REQUEST`(400) / 서로 다른 문제
+- **외부 의존:**
+    - `GET /internal/v1/submissions/{submissionId}/source?purpose=SOLUTION_SHARE&memberId=` (judge) — `baseSubmissionId` 사용 시
+
+#### 2.2.6 라인 댓글 목록
+
+- **Method / URI:** `GET /api/v1/solution-shares/{solutionShareId}/comments`
+- **인증:** 로그인 필요 (공유 풀이 열람 권한)
+- **대응 테이블:** `solution_comments`, `member_replicas`
+- **설명:** 라인 번호 오름차순 → 작성 시각 오름차순으로 반환한다. 페이지네이션 없음.
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": { 
+    	    "content": [ 
+    		    { 
+    			    "commentId": "900", 
+    			    "lineNumber": 2, 
+    			    "content": "여기서 overflow 가능성은?", 
+    			    "author": { 
+    				    "memberId": "8", 
+    				    "nickname": "lee" 
+    			    }, 
+    			    "status": "VISIBLE", 
+    			    "createdAt": "2026-10-02T22:10:00+09:00" 
+    		    } 
+    	    ] 
+        }
+      }
+    ```
+    
+    - `DELETED` 댓글은 `content: null`로 자리만 남긴다.
+
+#### 2.2.7 라인 댓글 작성
+
+- **Method / URI:** `POST /api/v1/solution-shares/{solutionShareId}/comments`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단, 열람 권한)
+- **대응 테이블:** `solution_comments`
+- **요청 바디:**
+    
+    ```json
+      { "lineNumber": 2, "content": "여기서 overflow 가능성은?" }
+    ```
+    
+    - `lineNumber`는 1 이상, 코드 줄 수 이하
+- **응답 (201):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "댓글이 작성되었습니다.", 
+    	  "data": { "commentId": "900" } 
+      }
+    ```
+    
+- **에러:**
+    - `SOLUTION_SHARE_NOT_FOUND`(404), `COMMON_INVALID_REQUEST`(400)
+
+#### 2.2.8 라인 댓글 수정·삭제
+
+- **Method / URI:** `PATCH /api/v1/solution-shares/{solutionShareId}/comments/{commentId}`, `DELETE …/comments/{commentId}`
+- **인증:** 로그인 필요 (작성자 본인)
+- **대응 테이블:** `solution_comments`
+- **요청 바디 (PATCH):**
+    
+    ```json
+      { "content": "수정한 내용" }
+    ```
+    
+- **응답:**
+    - PATCH `200` `{ "commentId": "900" }`
+    - DELETE `204` (`status = DELETED`)
+- **에러:**
+    - `SOLUTION_COMMENT_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403)
+
+### 2.3 관리자 API — 문제 작성·등록·수정
+
+#### 2.3.0 문제·테스트 공통 데이터 형식
+
+**등록(2.3.1)·새 회차(2.3.4) 요청 필드**
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `scope` | string | 최초 등록만 | `GENERAL` / `EXAM_ONLY`. 이후 변경하지 않음 |
+| `rowVersion` | int | 새 회차 등록만 | 조회 당시 문제의 낙관적 락 값 |
+| `title` | string | Y | 1~200자 |
+| `description` | string | Y | 문제 설명 Markdown. 이미지는 `![설명](image:{imageId})` |
+| `constraints` | string | Y | 제한 사항 Markdown |
+| `examples` | string | Y | 입출력 예시·해설 Markdown (채점 테스트와 별개) |
+| `difficulty` | int | Y | 1~3 |
+| `tagIds` | string[] | Y | 태그 ID 목록. 없으면 빈 배열. 존재하지 않는·중복 ID 거절 |
+| `functionSpec` | object | Y | 함수명(`solution` 고정)·매개변수·반환 타입(TypeSpec) |
+| `executionLimits` | object 또는 null | N | 생략·null 항목은 등록 시점 공통값 적용 |
+| `testCases` | object[] | Y | 공개(`isSample=true`) 1개 이상·숨김 1개 이상, 합계 최대 50개·4MB 이하(정책 §4) |
+
+- 일부만 편집해도 전체 본문·테스트를 보낸다. 서버가 기존 파일과 비교해 바뀌지 않은 본문·테스트 파일은 재사용한다.
+- 등록 요청에는 에셋 ID·테스트 순번을 받지 않는다.
+- 등록·새 회차 요청의 전체 HTTP 본문은 JSON 이스케이프·Markdown 포함 8MB 이하. 테스트 크기·개수와 별도로 검사하며 정확한 바이트 기준은 [정책 및 상태 §4](../planning/policy-and-state.md#4-문제테스트케이스-정책)를 따른다.
+
+**파일 저장·연결**
+
+- 최초 등록·새 회차·검증 코드 접수·이미지 업로드는 Problem 백엔드가 에셋 추적 행을 먼저 커밋한 뒤 S3에 저장한다. 요청에는 본문·테스트·코드 원문과 이미지 참조를 사용한다. 업로드 시작·갱신은 해당 API의 백엔드 내부 처리다. 추적 필드·상태는 ERD §4.2.3을 따른다.
+- 새 업로드마다 새 파일 행·불변 객체 키를 사용한다. 입력 바이트에서 구한 체크섬·크기와 업로드 결과를 대조하고, 버전 관리 버킷은 저장된 객체 버전을 고정한다. 저장 결과 확인과 업로드 쓰기 종료 기록은 최종 회차·검증 요청 연결과 분리해 커밋한다.
+- 연결은 짧은 최종 트랜잭션에서 파일을 잠그고 저장 완료·연결 가능 상태·작성 관리자·문제 소속을 다시 검사한다. 신규 `PENDING` 파일은 참조 생성과 함께 `LINKED`가 되며, 같은 문제의 `LINKED` 파일은 새 회차·검증 요청이 재사용할 수 있다. `DISCARDED`·`DELETING` 또는 이미 삭제된 파일에는 새 참조를 만들지 않는다.
+- 업로드·정리 유예의 기산점·만료·갱신은 정책 §4를 따른다. 진행 중 유효기간이 만료된 파일은 기존 작업으로 쓰기·연결을 재개하지 않으며, 종료 확인 후 폐기한다. 유효기간 안에 저장·종료를 확정한 미연결 파일은 삭제 선점 전까지 연결할 수 있다. 새 업로드는 새 파일·객체 키를 사용한다.
+- 파일 업로드 중에는 DB 행 잠금을 유지하지 않는다. 최종 DB 실패·버전 충돌·멱등 경합의 패배만으로 S3 객체를 즉시 삭제하지 않는다. 커밋된 최초 회차·요청과 파일 참조를 먼저 확인하고, 미참조 파일만 스케줄러 §2.1에 맡긴다. DB 커밋 결과가 불명확하면 실패로 단정해 폐기하지 않고 같은 멱등키의 저장 결과를 재조회한다.
+- 본문·테스트 재사용은 같은 문제의 저장된 불변 파일을 대상으로 하며 원문·체크섬·크기를 대조한다. 이미지마다 업로드 관리자·같은 문제 소속·실제 저장 완료를 확인하고, 기존 회차가 참조하는 이미지 연결은 제거하지 않는다. 새 회차의 본문에서 이미지를 빼더라도 이전 본문·이미지 참조는 유지한다.
+
+**testCases[]**
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `isSample` | boolean | Y | true 공개 예제, false 숨김. 둘 다 채점에 사용 |
+| `argumentTexts` | object | Y | 매개변수 이름별 입력 JSON 텍스트. 키는 선언된 이름과 정확히 일치 |
+| `expectedReturnText` | string | Y | 기대 반환값 JSON 텍스트 |
+
+- 테스트 1건의 모든 `argumentTexts` 값과 `expectedReturnText` 문자열의 UTF-8 바이트 합계는 256KB 이하(정확한 바이트 기준은 정책 §4).
+- 숫자는 정밀도 보존을 위해 JSON 텍스트로 보낸다. 예: `"a": "9007199254740993"`. 문자열 `abc`는 `"\"abc\""`.
+- 같은 입력·기대값의 중복 테스트는 공개 여부와 무관하게 거절한다.
+- TypeSpec 필드·지원 타입·검증 규칙은 [TypeSpec 공통 타입 명세](type-spec.md)를 따른다.
+- Java 클래스·함수 선언 조건과 반환값·디버그 출력 구분은 [정책 및 상태 3.1·3.2](../planning/policy-and-state.md#3-제출채점-정책)를 따른다. Java 타입 매핑은 [TypeSpec 명세](type-spec.md#4-java-타입-매핑)에 둔다.
+
+**executionLimits**
+
+| 필드 | 타입 | 단위 | 설명 |
+| --- | --- | --- | --- |
+| `timeMs` | int 또는 null | ms | CPU 시간 제한. 기본 2,000·최소 1,000. 저장 시 정적 조건을 검사하고 공개 전 관리자가 C++ 정답 최대 실행 시간 ×3 이상인지 확인 (B-5) |
+| `memoryKb` | int 또는 null | KB | 메모리 제한. 허용 범위 1~512,000, 생략·null이면 기본 262,144 |
+| `wallTimeMs` | int 또는 null | ms | 생략 시 `timeMs + 5,000` |
+| `outputLimitKb` | int 또는 null | KiB | 테스트별 반환 JSON 크기 제한. 허용 범위 1~256, 생략·null이면 기본 64. 디버그 출력 제한과 별개이며 초과 판정은 정책 및 상태 §3.2·§3.3을 따른다 |
+- 언어별 보정은 두지 않는다. 최종 값은 회차에 저장하고 이후 공통 설정 변경은 기존 회차에 반영하지 않는다.
+- 반환값·디버그 출력의 크기 계산과 개별 제한은 [정책 및 상태 > 3.2 채점 실행](../planning/policy-and-state.md#32-채점-실행)을 따른다. 디버그 출력은 테스트별 공통 64KiB 제한으로, `executionLimits`의 요청·응답 필드나 회차별 설정에 포함하지 않는다.
+
+#### 2.3.1 문제 등록
+
+- **Method / URI:** `POST /api/v1/admin/problems`
+- **인증:** `ADMIN`
+- **Idempotency:** `Idempotency-Key` 필수. 작성 관리자·키별 같은 요청은 저장된 회차의 최초 응답을 반환한다.
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_body_images`, `problem_images`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `audit_logs`
+- **설명:** 완성된 본문과 전체 테스트로 문제와 첫 회차를 `PRIVATE`로 저장하고 `201`을 반환한다. 정답 코드 검증은 저장 후 별도 `202` 접수로 수행한다(정책 §4).
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `Idempotency-Key` | Y | 1~100자 ASCII, 관리자·업무별 키 |
+    | `X-Correlation-Id` | N | 미지정 시 Gateway 발급 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `scope` | string | Y | GENERAL / EXAM_ONLY, 최초 등록 후 변경 불가 |
+    | `title` | string | Y | 1~200자 |
+    | `description` / `constraints` / `examples` | string | Y | Markdown 본문·제한·입출력 예시 |
+    | `difficulty` | integer | Y | 1~3 |
+    | `tagIds` | string[] | Y | 중복 없는 존재 태그 ID. 태그 없으면 [] |
+    | `functionSpec` | object | Y | 함수 명세 |
+    | `functionSpec.name` | string | Y | solution 고정 |
+    | `functionSpec.parameters` | object[] | Y | 선언 순서의 이름·TypeSpec, 이름 중복 금지 |
+    | `functionSpec.returnType` | TypeSpec | Y | 반환값 타입 |
+    | `executionLimits` | object 또는 null | N | 생략·null 필드는 등록 시 기본값 |
+    | `executionLimits.timeMs` | integer 또는 null | N | 기본 2,000, 최소 1,000. C++ 실행 시간 ×3은 공개 전 관리자 확인 |
+    | `executionLimits.memoryKb` | integer 또는 null | N | 허용 범위 1~512,000KB. 생략·null이면 기본 262,144KB |
+    | `executionLimits.wallTimeMs` | integer 또는 null | N | 기본 timeMs+5,000ms |
+    | `executionLimits.outputLimitKb` | integer 또는 null | N | 1~256KB, 기본 64 |
+    | `testCases` | object[] | Y | 최대 50개, 공개·숨김 각 1개 이상, UTF-8 합계 4MB 이하 |
+    | `testCases[].isSample` | boolean | Y | true 공개, false 숨김 |
+    | `testCases[].argumentTexts` | object (이름→string) | Y | 선언한 매개변수 이름과 일치하는 JSON 텍스트 |
+    | `testCases[].expectedReturnText` | string | Y | 기대 반환값 JSON 텍스트. 한 테스트의 입력·기대값 합계 256KB 이하 |
+
+    전체 HTTP 본문은 8MB 이하이며 테스트 바이트와 별도로 검사한다. 정확한 바이트 수는 정책 §4를 따른다.
+
+    ```json
+    {
+      "scope": "GENERAL",
+      "title": "두 수의 합",
+      "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
+      "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
+      "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
+      "difficulty": 1,
+      "tagIds": ["1"],
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": null
+      },
+      "testCases": [
+        {
+          "isSample": true,
+          "argumentTexts": {
+            "a": "1",
+            "b": "2"
+          },
+          "expectedReturnText": "3"
+        },
+        {
+          "isSample": false,
+          "argumentTexts": {
+            "a": "-5",
+            "b": "7"
+          },
+          "expectedReturnText": "2"
+        }
+      ]
+    }
+    ```
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (201):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string | 공통 성공 응답 |
+    | `data.problemId` | string | 생성 문제 ID |
+    | `data.problemRevisionId` | string | 첫 회차 ID |
+    | `data.revisionNumber` | integer | 첫 회차 번호 1 |
+    | `data.rowVersion` | integer | 문제 초기 변경 버전 1 |
+
+    ```json
+    {
+      "success": true,
+      "message": "문제가 등록되었습니다.",
+      "data": {
+        "problemId": "301",
+        "problemRevisionId": "1001",
+        "revisionNumber": 1,
+        "rowVersion": 1
+      }
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400), `PROBLEM_TEST_CASE_INVALID`(400), `PROBLEM_TEST_CASE_TOO_LARGE`(413), `PROBLEM_REQUEST_TOO_LARGE`(413), `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_IMAGE_INVALID`(400) / 본문 이미지 10개 초과·미검증 이미지 참조, `IDEMPOTENCY_KEY_CONFLICT`(422), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 파일 저장 실패
+
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "PROBLEM_REQUEST_TOO_LARGE",
+        "message": "요청 본문 크기 제한을 초과했습니다.",
+        "details": []
+      }
+    }
+    ```
+
+- **동시성/멱등 보장:** 기존 작성 관리자·키의 요청 해시를 먼저 확인한다. 신규 파일은 업로드 추적 행을 먼저 저장한 뒤 DB 행 잠금 없이 S3에 업로드한다. 짧은 DB 트랜잭션에 회차·파일 연결·멱등 정보·최초 응답 버전·감사 로그를 저장한다. 최종 DB 실패 시 요청은 발행하지 않으며, 파일별 저장·종료 기록을 보존하고 §2.3.0 파일 저장·연결 규칙에 따라 미연결 파일을 정리한다.
+- **발행:** 없음. 최초 저장은 코드 검증과 분리한다.
+- **외부 의존:** 본문·테스트의 불변 파일 저장소.
+- **프론트 계약:** 201 후 검증 코드 접수 화면으로 진행한다.
+- **비고:** 입력 상세는 §2.3.0·TypeSpec을 따르며 사용 회차 없는 PRIVATE로 시작한다.
+
+#### 2.3.2 관리자 문제 목록 조회
+
+- **Method / URI:** `GET /api/v1/admin/problems`
+- **인증:** `ADMIN`
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`
+- **설명:** 작성자와 무관하게 전체 문제의 회차 목록을 조회한다. 기본은 보관되지 않은 문제의 최신 회차만, `latestOnly=false`면 과거 회차도 포함한다. 한 행은 하나의 `problemRevisionId`다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `keyword` | string | N | — | 해당 회차 제목 검색 |
+    | `difficulty` | int | N | — | 1~3 |
+    | `tagIds` | string[] | N | — | OR 조건 |
+    | `scope` | string | N | — | `GENERAL` / `EXAM_ONLY` |
+    | `visibility` | string | N | `PRIVATE`·`PUBLIC` | 생략 시 `ARCHIVED` 제외 |
+    | `latestOnly` | boolean | N | true | true면 최신 회차를 먼저 고른 뒤 필터 적용 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    | `sort` | string[] | N | `problemId,asc` → `createdAt,desc` | 여러 개 전달 시 순서대로 적용 |
+
+    허용 정렬 필드: `problemId`, `createdAt`(회차 등록일)
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.content` | object[] | 최신 또는 지정 조건의 작성 회차 목록 |
+    | `data.content[].problemId / problemRevisionId / revisionNumber` | string / string / integer | 문제·회차·회차 번호 |
+    | `data.content[].title / authorId / scope / visibility / rowVersion` | string / string / string / string / integer | 회차 제목·작성자·문제 용도·공개 상태·변경 버전 |
+    | `data.content[].currentProblemRevisionId / supportedLanguages` | string 또는 null / string[] | 사용 회차 ID·각 행 회차의 통과 언어 |
+    | `data.page / size / totalElements / totalPages / hasNext` | integer / integer / integer / integer / boolean | 공통 페이지 정보 |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "problemId": "301",
+            "problemRevisionId": "1001",
+            "revisionNumber": 1,
+            "title": "두 수의 합",
+            "authorId": "11",
+            "scope": "GENERAL",
+            "visibility": "PUBLIC",
+            "rowVersion": 7,
+            "currentProblemRevisionId": "1001",
+            "supportedLanguages": [
+              "java",
+              "python3"
+            ]
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 1,
+        "totalPages": 1,
+        "hasNext": false
+      }
+    }
+    ```
+
+    - `rowVersion`은 문제 단위 값이라 같은 문제의 행에서 공유한다. `currentProblemRevisionId`는 사용 회차 ID이며 `supportedLanguages`는 각 행의 회차 기준이다. 목록에는 코드 원문·검증 상세를 포함하지 않는다.
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 페이지·필터와 응답의 회차 ID를 함께 사용한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
+
+#### 2.3.3 관리자 문제 상세 조회
+
+- **Method / URI:** `GET /api/v1/admin/problems/{problemId}`
+- **인증:** `ADMIN` (작성 관리자)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `tags`, `problem_validations`, `problem_code_assets`
+- **설명:** 문제 기본 정보·공개 상태·`rowVersion`과 최신 작성 회차의 전체 내용(숨김 테스트 포함)을 반환한다. 수정 화면은 이 API 한 번으로 채운다. 사용 회차와 다를 수 있다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.problemId / authorId / problemRevisionId / revisionNumber` | string / string / string / integer | 문제·작성 관리자·조회 회차·번호 |
+    | `data.scope / visibility / rowVersion` | string / string / integer | 문제 용도·공개 상태·변경 버전 |
+    | `data.title / description / constraints / examples / difficulty / tagIds` | string / string / string / string / integer / string[] | 전체 작성 입력 |
+    | `data.publishedAt / functionSpec / executionLimits` | date-time / object / object | 회차 등록 시각·함수 명세·고정 제한 |
+    | `data.testCases` | object[] | 공개·숨김 전체 테스트와 조회 전용 testAssetId |
+
+    | 추가 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `currentProblemRevisionId` | string 또는 null | 사용 가능한 최신 회차 ID. 조회한 작성 회차와 다를 수 있음 |
+    | `supportedLanguages` | string[] | 조회한 회차에 PASSED가 반영된 언어. 없으면 [] |
+    | `referenceSolutions` | object[] | 언어별 코드 원문. PASSED가 있으면 고정된 통과 코드, 없으면 최신 요청 코드 |
+    | `referenceSolutions[].language` / `sourceCode` | string / string | 언어와 Problem이 고정 S3 객체에서 읽은 코드 원문 |
+    | `languageResults` | object[] | 언어별 최신 검증 요청과 Judge 진행 조회를 결합. 요청 없는 언어는 생략 |
+    | `languageResults[].validationId` / `language` | string / string | §2.3.11 조회에 사용할 검증 ID와 언어 |
+    | `languageResults[].status` / `tests` / `maxTimeMs` / `message` / `resultApplied` | §2.3.11과 동일 | 작업 상태·테스트별 판정과 Problem 결과 반영 여부 |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "problemId": "301",
+        "authorId": "11",
+        "scope": "GENERAL",
+        "visibility": "PUBLIC",
+        "rowVersion": 7,
+        "problemRevisionId": "1002",
+        "revisionNumber": 2,
+        "publishedAt": "2026-09-28T10:20:00+09:00",
+        "title": "두 수의 합",
+        "description": "...",
+        "constraints": "...",
+        "examples": "...",
+        "difficulty": 1,
+        "tagIds": [
+          "1"
+        ],
+        "functionSpec": {
+          "name": "solution",
+          "parameters": [
+            {
+              "name": "a",
+              "type": {
+                "kind": "INT32"
+              }
+            },
+            {
+              "name": "b",
+              "type": {
+                "kind": "INT32"
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "INT32"
+          }
+        },
+        "executionLimits": {
+          "timeMs": 2000,
+          "memoryKb": 262144,
+          "wallTimeMs": 7000,
+          "outputLimitKb": 64
+        },
+        "testCases": [
+          {
+            "argumentTexts": {
+              "b": "2",
+              "a": "1"
+            },
+            "expectedReturnText": "3",
+            "isSample": true,
+            "testAssetId": "501"
+          },
+          {
+            "argumentTexts": {
+              "b": "7",
+              "a": "-5"
+            },
+            "expectedReturnText": "2",
+            "isSample": false,
+            "testAssetId": "502"
+          }
+        ],
+        "currentProblemRevisionId": "1001",
+        "supportedLanguages": [],
+        "referenceSolutions": [
+          {
+            "language": "java",
+            "sourceCode": "class Solution {\n    public int solution(int a, int b) {\n        return a + b;\n    }\n}\n"
+          }
+        ],
+        "languageResults": [
+          {
+            "validationId": "2002",
+            "language": "java",
+            "status": "REQUESTED",
+            "tests": [],
+            "maxTimeMs": null,
+            "message": null,
+            "resultApplied": false
+          }
+        ]
+      }
+    }
+    ```
+
+    - `testAssetId`는 조회 응답 전용이며 등록·수정 요청에는 포함하지 않는다.
+
+- **에러:**
+    - `PROBLEM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403) / 작성 관리자가 아님, `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 원문 파일·Judge 진행 조회 실패
+
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 고정 S3 원문 저장소와 Judge 검증 진행 조회(§2.7). 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)다.
+- **프론트 계약:** 작성 회차와 사용 회차를 구분하고 검증 상태·결과 반영 여부를 표시한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
+
+#### 2.3.4 새 문제 수정 회차 등록
+
+- **Method / URI:** `POST /api/v1/admin/problems/{problemId}/revisions`
+- **인증:** `ADMIN` (작성 관리자)
+- **Idempotency:** `Idempotency-Key` 필수. 작성 관리자·키별 같은 요청은 저장된 회차의 최초 응답을 반환한다.
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_body_images`, `problem_images`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `problem_code_assets`, `problem_validations`, `audit_logs`, `outbox_events`
+- **설명:** 전체 본문·테스트로 새 불변 회차를 등록하고 기존 통과 코드로 자동 재검증한다. 저장만으로 사용 회차를 교체하지 않으며, 검증 중·전부 실패하면 기존 사용 회차를 유지한다. 기존 회차·제출·시험과 `scope`·공개 상태는 바꾸지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `Idempotency-Key` | Y | 1~100자 ASCII, 관리자·업무별 키 |
+    | `X-Correlation-Id` | N | 미지정 시 Gateway 발급 |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 작성 관리자의 문제 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `rowVersion` | integer | Y | 조회 당시 문제 변경 버전 |
+    | `title` | string | Y | 1~200자 |
+    | `description` / `constraints` / `examples` | string | Y | Markdown 본문·제한·입출력 예시 |
+    | `difficulty` | integer | Y | 1~3 |
+    | `tagIds` | string[] | Y | 중복 없는 존재 태그 ID. 태그 없으면 [] |
+    | `functionSpec` | object | Y | 함수 명세 |
+    | `functionSpec.name` | string | Y | solution 고정 |
+    | `functionSpec.parameters` | object[] | Y | 선언 순서의 이름·TypeSpec, 이름 중복 금지 |
+    | `functionSpec.returnType` | TypeSpec | Y | 반환값 타입 |
+    | `executionLimits` | object 또는 null | N | 생략·null 필드는 등록 시 기본값 |
+    | `executionLimits.timeMs` | integer 또는 null | N | 기본 2,000, 최소 1,000. C++ 실행 시간 ×3은 공개 전 관리자 확인 |
+    | `executionLimits.memoryKb` | integer 또는 null | N | 허용 범위 1~512,000KB. 생략·null이면 기본 262,144KB |
+    | `executionLimits.wallTimeMs` | integer 또는 null | N | 기본 timeMs+5,000ms |
+    | `executionLimits.outputLimitKb` | integer 또는 null | N | 1~256KB, 기본 64 |
+    | `testCases` | object[] | Y | 최대 50개, 공개·숨김 각 1개 이상, UTF-8 합계 4MB 이하 |
+    | `testCases[].isSample` | boolean | Y | true 공개, false 숨김 |
+    | `testCases[].argumentTexts` | object (이름→string) | Y | 선언한 매개변수 이름과 일치하는 JSON 텍스트 |
+    | `testCases[].expectedReturnText` | string | Y | 기대 반환값 JSON 텍스트. 한 테스트의 입력·기대값 합계 256KB 이하 |
+
+    전체 HTTP 본문은 8MB 이하이며 테스트 바이트와 별도로 검사한다. 정확한 바이트 수는 정책 §4를 따른다.
+
+    ```json
+    {
+      "rowVersion": 6,
+      "title": "두 수의 합",
+      "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
+      "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
+      "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
+      "difficulty": 1,
+      "tagIds": ["1"],
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": null
+      },
+      "testCases": [
+        {
+          "isSample": true,
+          "argumentTexts": {
+            "a": "1",
+            "b": "2"
+          },
+          "expectedReturnText": "3"
+        },
+        {
+          "isSample": false,
+          "argumentTexts": {
+            "a": "-5",
+            "b": "7"
+          },
+          "expectedReturnText": "2"
+        }
+      ]
+    }
+    ```
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (201):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string | 공통 성공 응답 |
+    | `data.problemRevisionId` | string | 새 회차 ID |
+    | `data.revisionNumber` | integer | 문제별 다음 회차 번호 |
+    | `data.rowVersion` | integer | 증가한 문제 변경 버전 |
+
+    ```json
+    {
+      "success": true,
+      "message": "새 회차가 등록되었습니다.",
+      "data": {
+        "problemRevisionId": "1002",
+        "revisionNumber": 2,
+        "rowVersion": 7
+      }
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400), `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_IMAGE_INVALID`(400), `PROBLEM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_TEST_CASE_INVALID`(400), `PROBLEM_TEST_CASE_TOO_LARGE`(413), `PROBLEM_REQUEST_TOO_LARGE`(413), `IDEMPOTENCY_KEY_CONFLICT`(422), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 파일 저장 실패, `PROBLEM_INVALID_STATE_TRANSITION`(409) / ARCHIVED 문제의 신규 회차
+
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "PROBLEM_REQUEST_TOO_LARGE",
+        "message": "요청 본문 크기 제한을 초과했습니다.",
+        "details": []
+      }
+    }
+    ```
+
+- **동시성/멱등 보장:** 작성 관리자·키의 기존 요청 해시 확인을 `rowVersion` 검사보다 먼저 수행한다. 신규 파일 업로드 중에는 DB 행 잠금을 유지하지 않는다. 저장 트랜잭션에서 멱등키를 재확인하고 `problems` 행을 `rowVersion` 조건으로 갱신한 뒤 다음 회차 번호를 계산한다. 회차·파일 연결·자동 검증 요청·Outbox·멱등 정보·최초 응답 버전·감사 기록은 함께 커밋한다. 유일 제약 경합으로 패배한 트랜잭션은 롤백하고 먼저 커밋된 최초 응답을 읽는다. 재사용한 파일과 새 업로드 파일의 참조 보호·실패 정리는 §2.3.0 파일 저장·연결 규칙을 따른다.
+- **발행:** 자동 검증 요청 Outbox. `ProblemStateChanged`는 검증 결과로 사용 회차·통과 언어가 바뀔 때 발행(이벤트 계약서 §4.2).
+- **외부 의존:** 본문·테스트 파일 저장소. 자동 검증은 Outbox를 사용한다.
+- **프론트 계약:** 201은 새 회차 저장 완료다. 관리자 상세의 `languageResults[].validationId`로 §2.3.11을 조회한다.
+- **비고:** 통과 결과를 복사하지 않고 기존 사용 회차의 언어별 최신 통과 코드 파일만 재사용한다.
+
+#### 2.3.5 문제 수정 회차 내용 조회
+
+- **Method / URI:** `GET /api/v1/admin/problems/{problemId}/revisions/{revisionId}`
+- **인증:** `ADMIN` (작성 관리자)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tests`, `problem_test_assets`, `problem_revision_tags`, `tags`, `problem_validations`, `problem_code_assets`
+- **설명:** 지정한 저장 회차의 전체 내용과 언어별 검증 상태를 조회한다. 통과 언어 없는 회차와 보관 문제도 작성 관리자에게 제공한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `revisionId` | Path | string | Y | 해당 문제 소속의 고정 회차 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.problemId / authorId / problemRevisionId / revisionNumber` | string / string / string / integer | 문제·작성 관리자·지정 회차·번호 |
+    | `data.title / description / constraints / examples / difficulty / tagIds` | string / string / string / string / integer / string[] | 지정 회차의 전체 작성 입력 |
+    | `data.publishedAt / functionSpec / executionLimits / testCases` | date-time / object / object / object[] | 회차 등록 시각·함수 명세·제한·전체 테스트 |
+    | `data.currentProblemRevisionId / supportedLanguages` | string 또는 null / string[] | 사용 회차 ID·지정 회차의 통과 언어 |
+    | `data.referenceSolutions / languageResults` | object[] / object[] | 지정 회차의 언어별 코드 원문·검증 진행. 필드는 §2.3.3과 동일 |
+
+
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "problemId": "301",
+        "authorId": "11",
+        "problemRevisionId": "1002",
+        "revisionNumber": 2,
+        "publishedAt": "2026-09-28T10:20:00+09:00",
+        "title": "두 수의 합",
+        "description": "...",
+        "constraints": "...",
+        "examples": "...",
+        "difficulty": 1,
+        "tagIds": [
+          "1"
+        ],
+        "functionSpec": {
+          "name": "solution",
+          "parameters": [
+            {
+              "name": "a",
+              "type": {
+                "kind": "INT32"
+              }
+            },
+            {
+              "name": "b",
+              "type": {
+                "kind": "INT32"
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "INT32"
+          }
+        },
+        "executionLimits": {
+          "timeMs": 2000,
+          "memoryKb": 262144,
+          "wallTimeMs": 7000,
+          "outputLimitKb": 64
+        },
+        "testCases": [
+          {
+            "argumentTexts": {
+              "b": "2",
+              "a": "1"
+            },
+            "expectedReturnText": "3",
+            "isSample": true,
+            "testAssetId": "501"
+          },
+          {
+            "argumentTexts": {
+              "b": "7",
+              "a": "-5"
+            },
+            "expectedReturnText": "2",
+            "isSample": false,
+            "testAssetId": "502"
+          }
+        ],
+        "currentProblemRevisionId": "1001",
+        "supportedLanguages": [],
+        "referenceSolutions": [
+          {
+            "language": "java",
+            "sourceCode": "class Solution {\n    public int solution(int a, int b) {\n        return a + b;\n    }\n}\n"
+          }
+        ],
+        "languageResults": [
+          {
+            "validationId": "2002",
+            "language": "java",
+            "status": "REQUESTED",
+            "tests": [],
+            "maxTimeMs": null,
+            "message": null,
+            "resultApplied": false
+          }
+        ]
+      }
+    }
+    ```
+
+- **에러:**
+    - `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403)
+
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 고정 S3 원문 저장소와 Judge 검증 진행 조회(§2.7). 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)다.
+- **프론트 계약:** 작성 회차와 사용 회차를 구분하고 검증 상태·결과 반영 여부를 표시한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
+
+#### 2.3.6 문제 수정 기록 목록 조회
+
+- **Method / URI:** `GET /api/v1/admin/problems/{problemId}/revisions`
+- **인증:** `ADMIN` (작성 관리자)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`
+- **설명:** 통과 언어 없는 회차를 포함해 회차 메타 요약을 반환한다. `currentProblemRevisionId`는 사용 회차 ID, `supportedLanguages`는 각 회차 기준이다. S3 원문과 검증 상세는 읽지 않으며 보관된 문제도 조회한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+
+    허용 정렬 필드: `revisionNumber` (기본 `revisionNumber,desc`)
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string 또는 null | 공통 성공 응답 |
+    | `data.content` | object[] | 작성 회차의 메타 요약 |
+    | `data.content[].problemRevisionId / revisionNumber / title / publishedAt` | string / integer / string / date-time | 회차 ID·번호·제목·등록 시각 |
+    | `data.content[].currentProblemRevisionId / supportedLanguages` | string 또는 null / string[] | 사용 회차 ID·각 회차의 통과 언어 |
+    | `data.page / size / totalElements / totalPages / hasNext` | integer / integer / integer / integer / boolean | 공통 페이지 정보 |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "problemRevisionId": "1002",
+            "revisionNumber": 2,
+            "title": "두 수의 합",
+            "publishedAt": "2026-09-28T10:20:00+09:00",
+            "currentProblemRevisionId": "1001",
+            "supportedLanguages": []
+          },
+          {
+            "problemRevisionId": "1001",
+            "revisionNumber": 1,
+            "title": "두 수의 합",
+            "publishedAt": "2026-09-27T14:00:00+09:00",
+            "currentProblemRevisionId": "1001",
+            "supportedLanguages": [
+              "java",
+              "python3"
+            ]
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 2,
+        "totalPages": 1,
+        "hasNext": false
+      }
+    }
+    ```
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404)
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 페이지·필터와 응답의 회차 ID를 함께 사용한다.
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
+
+#### 2.3.7 문제 공개
+
+- **Method / URI:** `POST /api/v1/admin/problems/{problemId}/publication`
+- **인증:** `ADMIN` (작성 관리자)
+- **Idempotency:** `Idempotency-Key` 필수. §2.3.7 공통 처리의 동일 요청·최초 응답 규칙
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_state_operations`, `audit_logs`, `outbox_events`
+- **설명:** 검증을 통과한 사용 회차가 있는 `GENERAL` 문제를 `PUBLIC`으로 전환한다. `EXAM_ONLY` 문제는 대회 설정으로 공개된다.
+    - 공개 전 관리자가 해당 회차의 C++ 실행 결과와 시간 제한 ×3·최소 1,000ms 기준을 확인한다(정책 §4). 측정 근거가 없으면 관리자 확인이 필요하며 검증 통과만으로 확인 완료로 간주하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증, ADMIN |
+    | `Idempotency-Key` | Y | 1~100자 ASCII. 동일 요청 재시도에 재사용 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 작성 관리자 소유 문제 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `rowVersion` | integer | Y | 조회한 문제 행 버전, 1 이상 |
+
+    ```json
+    {
+      "rowVersion": 8
+    }
+    ```
+
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success / message` | boolean / string | 공통 성공 응답 |
+    | `data.visibility / data.rowVersion` | string / integer | 변경된 공개 상태·증가한 행 버전 |
+
+    ```json
+    {
+      "success": true,
+      "message": "문제가 공개되었습니다.",
+      "data": {
+        "visibility": "PUBLIC",
+        "rowVersion": 9
+      }
+    }
+    ```
+
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `PROBLEM_NOT_FOUND`(404), `COMMON_INVALID_REQUEST`(400), `IDEMPOTENCY_KEY_CONFLICT`(422)
+    - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409) / 통과 사용 회차 없음·`EXAM_ONLY`·이미 `PUBLIC`·`ARCHIVED`
+- **발행:**
+    - `ProblemStateChanged` v2 — `visibility = PUBLIC`
+
+**공개·비공개·보관 공통 처리**
+
+- `Idempotency-Key`는 필수다. 작성 관리자·문제·작업 종류·키와 정규화 요청 해시를 함께 식별한다. 같은 키·같은 본문은 최초 성공 응답 또는 진행 중인 동일 작업에 연결하고, 다른 본문은 `IDEMPOTENCY_KEY_CONFLICT`(422)다. 원래 응답이 유실돼도 새 작업 ID로 재실행하지 않는다.
+- 처리 중 작업은 `PENDING`, Problem 상태 변경이 커밋되면 `COMMITTED`, 변경하지 않았음이 확정되면 `ABORTED`다. 작업 ID·원래 요청·요청 해시·기대 버전·집행자·변경 전후 상태·결과 버전·최초 응답을 영속 보존한다. 같은 키의 `ABORTED` 작업을 다시 준비하지 않고 새 시도는 새 키·작업 ID를 사용한다.
+- 신규 요청은 문제의 작성 관리자·상태·`rowVersion`을 확인한다. 공개는 `GENERAL`·`PRIVATE`와 통과 사용 회차를 요구한다. 비공개는 `PUBLIC`만, 보관은 `PRIVATE`·`PUBLIC`만 허용한다. `ARCHIVED`에서 나가는 전이는 없다. 기존 성공 재요청은 현재 버전으로 다시 실행하지 않고 최초 응답을 반환한다.
+- 비공개·보관은 작업을 먼저 기록한 뒤 DB 잠금 밖에서 §4.7.3에 `resourceType=PROBLEM`·`resourceId=problemId`·`operationType=PROBLEM_HIDE`·`expectedSourceVersion`(원래 `rowVersion`의 10진 문자열)을 보낸다. 같은 가드 행을 잠그는 신규 시험·대회 편입과 직렬화한다. 예정·진행 중 참조가 있으면 409로 거절하며, 조회 결과가 비어 있다는 이유로 준비를 생략하지 않는다.
+- 비공개·보관은 `PREPARED`·`ready=true` 확인 후 짧은 Problem 트랜잭션에서 문제를 잠그고 원래 버전·상태를 다시 검증한다. 공개 상태·`row_version + 1`·감사 로그·`ProblemStateChanged` v2 Outbox·`COMMITTED` 결과를 함께 저장한다. 새 문제 회차를 만들거나 기존 회차·제출·이미지·고정 참조를 삭제하지 않는다.
+- 커밋 후 같은 `operationId`와 새 `sourceVersion`(증가한 행 버전의 10진 문자열), 조치 사유로 §4.7.4 `complete`를 호출한다. 완료 전달 실패는 커밋을 취소하지 않는다. 이미 확정된 성공 응답을 반환하고 같은 완료 호출·상태 이벤트·Contest 작업 대사로 복구한다. 공개는 원격 준비 없이 문제 잠금 아래 같은 상태·버전·감사·Outbox·작업 결과 원자 저장을 적용한다.
+- 준비 거절이나 Problem 재검증 실패 등 변경하지 않았음이 확정되면 `ABORTED`를 보존하고, 준비된 같은 작업에만 `cancel`을 호출한다. 예상치 못한 5xx·타임아웃으로 준비 또는 DB 커밋 결과가 불명확하면 `PENDING`과 가드 차단을 유지하고 결과를 대사한다. 404·TTL 경과만으로 취소하거나 새 작업을 시작하지 않는다.
+- 통신 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503), Problem 버전 경합은 `PROBLEM_VERSION_CONFLICT`(409)다. C의 작업 점유·작업 ID·버전 충돌은 §4.7.3·§4.7.4대로 처리하며, 성공으로 바꾸지 않는다.
+- 일반 제출·태그의 24시간 만료를 이 기록에 적용하지 않는다. 미종결 작업·가드와 멱등 응답에 필요한 완료 기록은 자동 삭제하지 않는다. Problem 작업 상태 조회 경로는 §4.8.9의 `GET /internal/v1/problems/{problemId}/operations/{operationId}`를 사용하며 `operationId`·`state`·`sourceVersion`·`resourceStatus`를 직접 객체로 반환한다. `sourceVersion`은 10진 문자열이며 `PENDING`·`ABORTED`는 원래 기대 버전, `COMMITTED`는 결과 버전이다. `resourceStatus`는 해당 작업의 변경 전 상태 또는 COMMITTED의 결과 상태이며 현재 문제 상태로 덮어쓰지 않는다. 문제·작업 소속을 함께 확인하고 contest-service에만 제공한다. 미존재 작업의 HTTP 404는 자동 취소 근거가 아니다.
+- 작업 기록은 ERD §4.2.19 problem_state_operations에 저장한다. 문제 행 잠금 뒤 다른 PENDING 상태 작업을 확인하고, 있으면 PROBLEM_VERSION_CONFLICT(409)로 거절한다.
+
+#### 2.3.8 문제 비공개 전환
+
+- **Method / URI:** `POST /api/v1/admin/problems/{problemId}/unpublication`
+- **인증:** `ADMIN` (작성 관리자)
+- **Idempotency:** `Idempotency-Key` 필수. §2.3.7 공통 처리의 동일 요청·최초 응답 규칙
+- **대응 테이블:** `problems`, `problem_state_operations`, `audit_logs`, `outbox_events`
+- **설명:** `PUBLIC → PRIVATE`. 일반 목록 노출과 새 일반 풀이 접수를 중단한다. 회차·제출·이미 시험에 고정된 회차는 유지한다. 준비·상태 커밋·완료·실패 복구는 §2.3.7 공통 처리를 따른다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증, ADMIN |
+    | `Idempotency-Key` | Y | 1~100자 ASCII. 동일 요청 재시도에 재사용 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 작성 관리자 소유 문제 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `rowVersion` | integer | Y | 조회한 문제 행 버전, 1 이상 |
+
+    ```json
+    {
+      "rowVersion": 9
+    }
+    ```
+
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success / message` | boolean / string | 공통 성공 응답 |
+    | `data.visibility / data.rowVersion` | string / integer | 변경된 공개 상태·증가한 행 버전 |
+
+    ```json
+    {
+      "success": true,
+      "message": "문제가 비공개로 전환되었습니다.",
+      "data": {
+        "visibility": "PRIVATE",
+        "rowVersion": 10
+      }
+    }
+    ```
+
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `PROBLEM_NOT_FOUND`(404), `COMMON_INVALID_REQUEST`(400), `IDEMPOTENCY_KEY_CONFLICT`(422)
+    - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409)
+    - `PROBLEM_IN_ACTIVE_EXAM`(409) / 예정·진행 중 시험·대회에 포함
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - contest 자원 가드 `prepare`·`complete`·`cancel`(§4.7.3·§4.7.4). 사용 조회(§4.7.6)는 안내용이며 준비를 대체하지 않는다. 실패·결과 불명은 §2.3.7 공통 처리를 따른다.
+- **발행:**
+    - `ProblemStateChanged` v2 — `visibility = PRIVATE` (study 문제집 `EXCLUDED` 처리)
+
+#### 2.3.9 문제 보관
+
+- **Method / URI:** `POST /api/v1/admin/problems/{problemId}/archive`
+- **인증:** `ADMIN` (작성 관리자)
+- **Idempotency:** `Idempotency-Key` 필수. §2.3.7 공통 처리의 동일 요청·최초 응답 규칙
+- **대응 테이블:** `problems`, `problem_state_operations`, `audit_logs`, `outbox_events`
+- **설명:** `ARCHIVED`(소프트 딜리트)로 전환해 새 풀이·시험 선택을 막는다. 기존에 고정한 회차는 유지한다. `PRIVATE`·`PUBLIC`에서만 전환하며 `ARCHIVED`는 종단 상태로 보관 해제·재공개를 허용하지 않는다. 가드와 상태 커밋은 §2.3.7 공통 처리를 따른다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증, ADMIN |
+    | `Idempotency-Key` | Y | 1~100자 ASCII. 동일 요청 재시도에 재사용 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 작성 관리자 소유 문제 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `rowVersion` | integer | Y | 조회한 문제 행 버전, 1 이상 |
+    | `reason` | string | Y | 보관 사유, audit_logs.reason에 보존 |
+
+    ```json
+    {
+      "rowVersion": 9,
+      "reason": "신규 풀이 제공 종료"
+    }
+    ```
+
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success / message` | boolean / string | 공통 성공 응답 |
+    | `data.visibility / data.rowVersion` | string / integer | 변경된 공개 상태·증가한 행 버전 |
+
+    ```json
+    {
+      "success": true,
+      "message": "문제가 보관되었습니다.",
+      "data": {
+        "visibility": "ARCHIVED",
+        "rowVersion": 10
+      }
+    }
+    ```
+
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `PROBLEM_NOT_FOUND`(404), `COMMON_INVALID_REQUEST`(400), `IDEMPOTENCY_KEY_CONFLICT`(422)
+    - `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409), `PROBLEM_IN_ACTIVE_EXAM`(409), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** contest 자원 가드(§4.7.3·§4.7.4). 준비 조회 실패·완료 결과 불명은 §2.3.7 공통 처리를 따른다.
+- **발행:**
+    - `ProblemStateChanged` v2 — `visibility = ARCHIVED`
+
+#### 2.3.10 문제 회차 검증 코드 접수
+
+- **Method / URI:** `POST /api/v1/admin/problems/{problemId}/revisions/{problemRevisionId}/validations`
+- **인증:** `ADMIN` (문제 작성 관리자)
+- **Idempotency:** `Idempotency-Key` 필수. 같은 관리자·키·요청에는 기존 검증 ID와 최초 응답을 반환한다.
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_code_assets`, `problem_validations`, `audit_logs`, `outbox_events`
+- **설명:** 저장된 회차의 언어별 정답 코드를 별도로 접수한다. 코드 원문은 S3에 불변 파일로 저장하고, 파일 참조·검증 요청·Outbox 커밋 후 `202`를 반환한다. 실패 코드 수정과 미검증 언어 추가도 이 API를 사용한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 미지정 시 Gateway 발급 |
+
+    | `Idempotency-Key` | Y | 1~100자 ASCII. 코드를 수정한 재요청에는 새 키 사용 |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `problemRevisionId` | Path | string | Y | 해당 문제 소속의 고정 회차 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
+    | `sourceCode` | string | Y | 함수 명세에 맞는 코드 문자열. 공백만인 코드 거절, 기존 공통 코드 크기 제한 적용. 원문 공백·줄바꿈 보존 |
+
+    ```json
+    {
+      "language": "java",
+      "sourceCode": "class Solution {\n    public int solution(int a, int b) {\n        return a + b;\n    }\n}\n"
+    }
+    ```
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (202):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / string | 공통 성공 응답 |
+    | `data.validationId` | string | 고정 검증 요청 ID |
+    | `data.problemRevisionId` | string | 검증 대상 회차 |
+    | `data.language` | string | 접수 언어 |
+    | `data.status` | string | `REQUESTED`. Problem 접수·전달 예약 완료이며 Judge 작업 생성과 구분 |
+
+    ```json
+    {
+      "success": true,
+      "message": "검증 코드가 접수되었습니다.",
+      "data": {
+        "validationId": "2001",
+        "problemRevisionId": "1001",
+        "language": "java",
+        "status": "REQUESTED"
+      }
+    }
+    ```
+
+- **에러:**
+    - `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404) / 문제 없음·회차 소속 불일치
+    - `AUTH_ACCESS_DENIED`(403) / 작성 관리자가 아님
+    - `COMMON_INVALID_REQUEST`(400), `CODE_TOO_LARGE`(413) / 언어·코드 형식 또는 크기 오류
+    - `PROBLEM_VALIDATION_IN_PROGRESS`(409) / 같은 회차·언어의 결과 미반영 요청
+    - `PROBLEM_INVALID_STATE_TRANSITION`(409) / 보관 문제의 신규 검증 또는 이미 통과한 회차·언어의 코드 교체
+    - `IDEMPOTENCY_KEY_CONFLICT`(422) / 동일 키의 다른 본문·대상
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 코드 파일 저장 실패
+
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "PROBLEM_VALIDATION_IN_PROGRESS",
+        "message": "같은 회차와 언어의 검증이 진행 중입니다.",
+        "details": []
+      }
+    }
+    ```
+
+- **동시성/멱등 보장:** 기존 멱등 요청을 먼저 확인한다. 신규 파일의 추적 행을 먼저 저장하고, DB 행 잠금 없이 S3 업로드·체크섬을 확인한다. 짧은 트랜잭션에서 문제·회차·파일 순으로 잠그고 권한·상태·멱등키를 재확인한다. 같은 회차·언어에 결과 미반영 요청 또는 `PASSED`가 있으면 새 요청을 만들지 않는다. `REJECTED`·`ERROR` 반영 후에만 새 키·새 ID의 수정 코드를 허용한다.
+- **발행:** `ProblemValidationRequested` — 파일 연결·요청·감사 기록과 같은 트랜잭션의 Outbox를 검증 SQS로 전달
+- **외부 의존:** 비공개 S3 코드 저장소. Judge 실행 완료를 기다리지 않는다.
+- **프론트 계약:** `validationId`와 입력 코드를 보관하고 §2.3.11에서 진행 상태와 결과 반영 여부를 확인한다.
+- **비고:** 이미 통과한 코드·실행 환경을 바꾸려면 새 회차에서 검증한다.
+- **파일 보관:** 업로드 추적·실패 정리는 §2.3.0을 따른다. 연결 파일은 `problem_validations.code_asset_id`로 보호하며 `REQUESTED`·미반영·`PASSED`·`REJECTED`·`ERROR` 모두 정리에서 제외한다. 자동 재검증으로 여러 회차가 공유하는 코드도 모든 요청의 참조를 보존한다.
+
+#### 2.3.11 문제 회차 검증 상태·결과 조회
+
+- **Method / URI:** `GET /api/v1/admin/problems/validations/{validationId}`
+- **인증:** `ADMIN` (문제 작성 관리자)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_validations`
+- **설명:** Problem의 결과 반영 여부와 Judge의 작업 상태·테스트별 판정을 결합한다. Judge 작업이 아직 없으면 `REQUESTED`이며 결과 이벤트가 아직 반영되지 않았으면 종결 상태여도 `resultApplied=false`다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `Authorization` | Y | Gateway 사용자 인증 |
+    | `X-Correlation-Id` | N | 미지정 시 Gateway 발급 |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `validationId` | Path | string | Y | 수동 접수 응답 또는 관리자 회차 상세의 검증 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `success` / `message` | boolean / null | 공통 성공 응답 |
+    | `data.validationId` / `problemId` / `problemRevisionId` | string | 요청·문제·고정 회차 식별자 |
+    | `data.language` | string | 검증 언어 |
+    | `data.status` | string | `REQUESTED` / `QUEUED` / `RUNNING` / `RETRY_WAITING` / `PASSED` / `REJECTED` / `ERROR` |
+    | `data.tests` | object[] | 고정 테스트 순서의 결과. 필드·시도별 공개 조건은 §3.3.9와 동일. REQUESTED·목록 미확보는 [] |
+    | `data.tests[].testOrder` | integer | 1부터 시작하는 고정 테스트 순서 |
+    | `data.tests[].verdict` | string 또는 null | `AC` / `WA` / `TLE` / `MLE` / `RE` / `CE` / `SYSTEM_ERROR`. 현재 시도의 미판정 결과는 null. SYSTEM_ERROR는 코드 오답이 아닌 시스템 실패 |
+    | `data.tests[].timeMs` | integer 또는 null | 현재 시도의 측정 CPU 시간(ms). 미측정·이전 시도 결과는 null |
+    | `data.tests[].memoryKb` | integer 또는 null | 현재 시도의 측정 메모리(KiB). 미측정·이전 시도 결과는 null |
+    | `data.maxTimeMs` | number 또는 null | 종결한 최종 시도의 측정 가능한 최대 CPU 시간. 비종결·실행 전 종결·측정값 없음은 null |
+    | `data.message` | string 또는 null | 관리자용 검증 실패·시스템 장애 설명 |
+    | `data.resultApplied` | boolean | Judge 최종 결과가 Problem에 반영됐는지 여부 |
+    | `data.supportedLanguages` | string[] | 대상 회차에 PASSED 결과가 반영된 언어 |
+    | `data.currentProblemRevisionId` | string 또는 null | 문제의 사용 가능 회차. 대상 회차와 다를 수 있음 |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "validationId": "2001",
+        "problemId": "301",
+        "problemRevisionId": "1001",
+        "language": "java",
+        "status": "PASSED",
+        "tests": [
+          {
+            "testOrder": 1,
+            "verdict": "AC",
+            "timeMs": 12,
+            "memoryKb": 8192
+          }
+        ],
+        "maxTimeMs": 12,
+        "message": null,
+        "resultApplied": true,
+        "supportedLanguages": [
+          "java"
+        ],
+        "currentProblemRevisionId": "1001"
+      }
+    }
+    ```
+
+- **에러:** `PROBLEM_VALIDATION_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge 조회 장애·요청 연결 불일치
+
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "PROBLEM_VALIDATION_NOT_FOUND",
+        "message": "검증 요청을 찾을 수 없습니다.",
+        "details": []
+      }
+    }
+    ```
+
+- **동시성/멱등 보장:** 읽기 전용. Judge 조회는 DB 행 잠금 없이 수행하고 검증 ID·회차·언어를 대조한다. 테스트별 결과는 §3.3.9의 조건을 그대로 전달하며 대표 판정을 생성하지 않는다. 조회로 결과를 저장하거나 실행 재시도를 지시하지 않는다.
+- **발행:** 없음
+- **외부 의존:** `GET /internal/v1/judge/validations/{validationId}` (Judge). Problem에 요청 원본이 있고 Judge가 작업 없음으로 응답한 경우만 `REQUESTED`로 표시한다. 통신 장애를 작업 미생성·코드 실패로 바꾸지 않는다.
+- **프론트 계약:** 2초에서 5초 간격으로 조회하고 종결 상태이면서 `resultApplied=true`일 때 멈춘다. 결과 반영 전에는 지원 언어가 늘지 않을 수 있다.
+- **비고:** 코드·테스트 입력·기대값·실제 출력·Judge0 토큰·Judge 시도 이력은 반환하지 않는다. 숨김 테스트도 번호·판정·측정값만 제공한다. 작업 상태·테스트별 판정의 원본은 Judge다.
+
+### 2.4 관리자 API — 본문 이미지
+
+#### 2.4.1 본문 이미지 업로드
+
+- **Method / URI:** `POST /api/v1/admin/problems/images`
+- **인증:** `ADMIN`
+- **Idempotency:** `Idempotency-Key` 필수. 관리자별 최초 접수부터 24시간 보관한다.
+- **Rate Limit:** 없음 (별도 API 제한 없음)
+- **대응 테이블:** `problem_images`
+- **설명:** 이미지 한 개를 백엔드로 업로드한다. 검증·S3 저장 후 `imageId`를 반환한다. 문제 등록 전에도 올릴 수 있으며 첫 본문 연결 시 소속 문제가 정해진다. 본문에는 S3 주소 대신 `![설명](image:701)`로 넣는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Content-Type` | Y | `multipart/form-data` | 파일 업로드 형식. boundary 포함 |
+    | `Idempotency-Key` | Y | `image-upload-001` | 관리자별 키. 1~100자 ASCII, 대소문자 구별 |
+    | `X-Correlation-Id` | N | `image-request-001` | 없으면 Gateway 발급 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:** `multipart/form-data` (JSON 아님)
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `file` | binary | Y | 이미지 한 개. 정적 PNG/JPEG/WebP, 5MiB·2,000만 픽셀 이하. SVG/GIF 제외 |
+
+    요청 예시: multipart의 `file` 파트에 `example.png` 파일 바이트를 전달한다. 본문당 서로 다른 이미지 10개 이하를 문제 등록 시 검사한다.
+
+- **응답 헤더:**
+
+    | 헤더 | 설명 |
+    | --- | --- |
+    | `X-Correlation-Id` | 요청 추적 ID |
+- **응답 파라미터:** 없음
+- **응답 바디 (201):**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `success` | boolean | Y | 성공 시 `true` |
+    | `message` | string 또는 null | Y | 이 응답은 null |
+    | `data` | object | Y | 생성 결과 |
+    | `data.imageId` | string | Y | 업로드된 이미지 ID |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "imageId": "701"
+      }
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 필수 파일·키 누락 또는 요청 형식 오류
+    - `PROBLEM_IMAGE_INVALID`(400) / 허용되지 않는 형식·해상도, 삭제 선점된 이미지 연결
+    - `PROBLEM_IMAGE_TOO_LARGE`(413) / 이미지 5MiB 초과
+    - `PROBLEM_IMAGE_UPLOAD_IN_PROGRESS`(409) / 같은 키·해시의 업로드가 진행 중이거나 결과 불명
+    - `IDEMPOTENCY_KEY_CONFLICT`(422) / 유효한 같은 키에 다른 파일 해시
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 파일 저장 의존 실패
+- **동시성/멱등 보장:**
+    - 관리자 ID·키와 원본 파일 바이트 SHA-256으로 요청을 식별한다. 파일명은 해시에 포함하지 않는다. 서로 다른 키의 같은 파일은 별도 업로드다. 추적 행 생성 전 요청 검증 실패는 키를 예약하지 않는다.
+    - 최초 접수부터 24시간 동안 다음 규칙을 적용한다. 조회·재요청은 키 만료를 연장하지 않는다.
+
+    | 유효한 같은 관리자·키의 요청 | 처리 |
+    | --- | --- |
+    | 다른 해시 | 422, 새 S3 쓰기 시작 안 함 |
+    | 같은 해시·성공 종결 | 최초 201·`imageId` 반환 |
+    | 같은 해시·확정 실패 | 보존한 최초 종결 응답 반환. 새 시도는 새 키 사용 |
+    | 같은 해시·진행 중 또는 결과 불명 | 409, 최초 작업 유지·중복 쓰기 시작 안 함 |
+
+    - 만료 키는 잠금 안에서 기존 행의 키를 해제하고 새 행·불변 객체 키로 접수한다. 기존 파일·해시·참조·삭제 상태는 유지한다. 최초 종결 상태와 응답은 파일 행에 함께 저장한다. 필드·유일 제약은 ERD §4.2.4를 따른다.
+    - §2.3.0의 파일 저장·연결 규칙에 따라 추적 행(`PENDING`)을 먼저 커밋하고 DB 행 잠금 없이 저장한다. 저장 결과·쓰기 종료를 확인한 후에만 `imageId`를 반환한다. 응답 시점에는 본문 미연결이며 문제·회차 저장 트랜잭션이 연결한다. 미리보기·동일 요청 조회는 업로드 보호 기간이나 정리 유예를 연장하지 않는다.
+    - 추적 행 생성 후 검증·S3 저장이 확정 실패하면 파일 행에 실패 정보를 남긴다. 결과 불명은 업로드 종료로 기록하지 않는다. 정책 §4의 유예·보호 조건을 충족한 미참조 이미지만 정리한다. 본문 연결과 삭제 선점은 파일 잠금으로 직렬화하며 삭제 선점 후 연결은 `PROBLEM_IMAGE_INVALID`(400)로 거절한다.
+- **발행:** 없음
+- **외부 의존:** S3 파일 저장. 저장 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503), 결과 불명은 종료로 기록하지 않는다.
+- **프론트 계약:** 재시도는 같은 키와 원본 파일을 사용한다. 새 업로드나 확정 실패 후 새 시도는 새 키를 사용한다. 409는 기존 작업이 진행 중이거나 결과 불명임을 표시한다.
+- **비고:** 키 만료, 업로드 보호 만료, 쓰기 종료 후 정리 유예는 별도 기준이다. 정리·복구는 스케줄러 §2.1을 따른다.
+
+#### 2.4.2 관리자 이미지 조회
+
+- **Method / URI:** `GET /api/v1/admin/problems/images/{imageId}/content`
+- **인증:** `ADMIN` (업로드 관리자)
+- **대응 테이블:** `problem_images`
+- **설명:** 등록 전 미리보기·편집용. 업로드 저장이 확인된 `PENDING` 또는 `LINKED` 파일을 백엔드가 S3에서 읽어 바이너리로 반환한다. 조회는 파일 연결이나 업로드 갱신으로 처리하지 않는다. `DISCARDED`·`DELETING`·저장 미확인 파일은 반환하지 않는다.
+- **응답 (200):** 이미지 바이너리 (`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`)
+- **에러:**
+    - `PROBLEM_NOT_FOUND`(404) / 없음·본인 업로드 아님
+
+### 2.5 외부·관리자 API — 태그
+
+#### 2.5.1 태그 목록 조회
+
+- **Method / URI:** `GET /api/v1/problems/tags`
+- **인증:** 로그인 필요
+- **대응 테이블:** `tags`
+- **설명:** 태그 목록(프로그래머스 고득점 Kit 기준)을 반환한다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `keyword` | Query | string | N | 빈 문자열 | 최대 200자. 앞뒤 공백을 제거하여 태그명 부분 검색. 빈 값이면 전체 조회 |
+    | `page` | Query | int | N | 0 | 0~21,474,836 |
+    | `size` | Query | int | N | 100 | 1~100 |
+    | `sort` | Query | string | N | `displayOrder,asc` | `displayOrder` 또는 `name`과 `asc` 또는 `desc` 조합. 같은 값은 태그 ID 오름차순 정렬 |
+    
+- **응답 (200):**
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "tagId": "1",
+            "name": "해시",
+            "displayOrder": 0
+          },
+          {
+            "tagId": "2",
+            "name": "스택/큐",
+            "displayOrder": 1
+          }
+        ],
+        "page": 0,
+        "size": 100,
+        "totalElements": 10,
+        "totalPages": 1,
+        "hasNext": false
+      }
+    }
+    ```
+    
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 검색어 길이·페이지·크기·정렬 조건이 유효하지 않음
+
+#### 2.5.2 태그 생성
+
+- **Method / URI:** `POST /api/v1/admin/problems/tags`
+- **인증:** `ADMIN`
+- **Idempotency:** `Idempotency-Key` 헤더 필수. 같은 관리자·같은 키로 접수 후 24시간 이내에 같은 요청값을 보내면 최초 생성 응답(201)을 반환한다. 유효 기간 내 다른 요청값은 `IDEMPOTENCY_KEY_CONFLICT`(422)로 처리한다.
+- **대응 테이블:** `tags`, `tag_creation_records`
+- **설명:** 기존 태그가 n개이면 요청 순번을 0~n으로 보정하여 삽입한다. 삽입 위치부터 기존 태그를 한 칸씩 뒤로 밀며, 태그 저장과 순번 변경은 같은 트랜잭션으로 처리한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Content-Type` | Y | `application/json` | 요청 본문 형식 |
+    | `Idempotency-Key` | Y | `tag-create-001` | 관리자별 요청 식별 키. 1~100자 ASCII, 공백만 입력 불가, 대소문자 구별 |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `name` | string | Y | 1~200자. 공백만 입력할 수 없으며 앞뒤 공백을 제거하여 저장 |
+    | `displayOrder` | int | Y | 삽입할 순번. 0 미만은 0, 기존 태그 개수보다 크면 마지막 위치로 보정 |
+
+    ```json
+    {
+      "name": "해시",
+      "displayOrder": 1
+    }
+    ```
+    
+- **응답 (201):**
+    
+    ```json
+    {
+      "success": true,
+      "message": "태그가 생성되었습니다.",
+      "data": {
+        "tagId": "1",
+        "name": "해시",
+        "displayOrder": 0
+      }
+    }
+    ```
+    
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 필수값 누락 또는 이름·순번·멱등키 형식이 유효하지 않음
+    - `PROBLEM_TAG_DUPLICATED`(409) / 같은 이름의 태그가 존재함
+    - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
+    - `IDEMPOTENCY_KEY_CONFLICT`(422) / 유효 기간 내 같은 관리자·같은 키에 다른 요청값을 전달함
+- **동시성/멱등 보장:** `(admin_id, idempotency_key)` 유일 제약과 기록 행 잠금으로 중복 생성을 방지한다. 요청 기록·태그 생성·순번 변경·최초 응답 저장은 같은 DB 트랜잭션으로 처리한다.
+- **프론트 계약:** 응답 유실 등으로 재요청할 때는 같은 멱등키와 같은 `name`·`displayOrder`를 사용한다. 새로운 생성 요청에는 새 키를 사용한다.
+
+#### 2.5.3 태그 수정
+
+- **Method / URI:** `PATCH /api/v1/admin/problems/tags/{tagId}`
+- **인증:** `ADMIN`
+- **대응 테이블:** `tags`
+- **설명:** 이름·표시 순서를 바꾼다. 새 회차를 만들지 않으며 연결된 현재·과거 회차에 바뀐 이름이 표시된다. 태그가 n개이면 요청 순번을 0~(n-1)로 보정하고, 이동 구간의 다른 태그 순번도 조정한다.
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `tagId` | Path | string | Y | — | 수정할 태그 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `name` | string | N | 1~200자. 공백만 입력할 수 없으며 앞뒤 공백을 제거하여 저장. 생략 또는 null이면 유지 |
+    | `displayOrder` | int | N | 이동할 순번. 범위를 벗어나면 첫 번째 또는 마지막 위치로 보정. 생략 또는 null이면 유지 |
+
+    두 필드 중 하나 이상은 null이 아닌 값으로 전달한다.
+
+    ```json
+    {
+      "name": "그리디",
+      "displayOrder": 0
+    }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+    {
+      "success": true,
+      "message": "태그가 수정되었습니다.",
+      "data": {
+        "tagId": "2",
+        "name": "그리디",
+        "displayOrder": 0
+      }
+    }
+    ```
+    
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 변경값이 없거나 이름·순번 형식이 유효하지 않음
+    - `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_TAG_DUPLICATED`(409)
+    - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
+
+#### 2.5.4 태그 삭제
+
+- **Method / URI:** `DELETE /api/v1/admin/problems/tags/{tagId}`
+- **인증:** `ADMIN`
+- **대응 테이블:** `tags`, `problem_revision_tags`
+- **설명:** 어떤 회차에서도 쓰지 않는 태그만 삭제한다. 연결을 자동 해제하지 않는다. 삭제 후 뒤에 있는 태그의 순번을 한 칸씩 당기며, 삭제와 순번 변경은 같은 트랜잭션으로 처리한다.
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `tagId` | Path | string | Y | — | 삭제할 태그 ID |
+
+- **응답 (204)**
+- **에러:**
+    - `PROBLEM_TAG_NOT_FOUND`(404), `PROBLEM_TAG_IN_USE`(409)
+    - `PROBLEM_VERSION_CONFLICT`(409) / 잠금 대기 시간 초과 또는 동시 변경 충돌
+
+### 2.6 내부 API
+
+#### 2.6.1 채점 대상 사전 검증
+
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/validation`
+- **인증:** 내부 호출 (judge)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`, `problem_validations`
+- **설명:** 지정 회차의 존재·문제 소속·함수 명세·제한·테스트 파일 준비 상태와 통과 언어·실행 환경을 반환한다. 최신 회차 여부는 검사하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `revisionId` | Path | string | Y | 해당 문제 소속의 고정 회차 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `problemId / problemRevisionId` | string | 문제·고정 회차 ID |
+    | `scope / visibility / difficulty / tagIds` | string / string / integer / string[] | 접수·레벨 검증용 상태와 회차 난이도·태그 |
+    | `totalCount / testAssetIds` | integer / string[] | 전체 테스트 수와 파일 ID |
+    | `supportedLanguages` | string[] | 고정 회차의 통과 언어 |
+    | `executionProfiles` | object[] | 통과 언어별 실행 프로필. `supportedLanguages`와 일대일 대응 |
+    | `executionProfiles[].language` | string | 통과한 언어. 언어당 한 항목이며 중복 없음 |
+    | `executionProfiles[].runtimeKey` | string | 검증에서 사용한 불변 실행 환경 키. 형식·해석은 정책 및 상태 §3.2를 따름 |
+    | `executionProfiles[].runnerVersion` | string | 검증 당시 생성기 참고 식별 정보. 이전 구현 선택·일치 검사의 기준으로 사용하지 않으며 정책 및 상태 §3.2를 따름 |
+
+    ```json
+    {
+      "problemId": "301",
+      "problemRevisionId": "1001",
+      "scope": "GENERAL",
+      "visibility": "PUBLIC",
+      "difficulty": 1,
+      "tagIds": [
+        "1"
+      ],
+      "totalCount": 2,
+      "testAssetIds": [
+        "501",
+        "502"
+      ],
+      "supportedLanguages": [
+        "java"
+      ],
+      "executionProfiles": [
+        {
+          "language": "java",
+          "runtimeKey": "fbc2a5e3e4cc2495a37b2e73b4824478ee5103e910cbd21ec1e109defd598c9c",
+          "runnerVersion": "java-runner-v1"
+        }
+      ]
+    }
+    ```
+
+    - `supportedLanguages`는 이 고정 회차에 PASSED가 반영된 언어다. `executionProfiles`에는 각 통과 언어의 검증 당시 키·버전을 정확히 한 항목씩 반환한다. Problem은 Judge의 통과 이벤트에서 보관한 원본 값을 반환하며 직접 실행 환경을 선택하거나 키를 재발급하지 않는다. 필수 값은 null·빈 문자열로 반환하지 않는다.
+    - 키·버전의 의미와 선택·보관 규칙은 정책 및 상태 §3.2를 따른다. JSON의 키는 Java 예시 환경 속성에 대한 해시이며 배포 DB에 실제 스냅샷이 존재한다는 의미는 아니다.
+    - `PRACTICE`는 Judge가 `GENERAL`·`PUBLIC`을 확인한다. 시험·대회의 참가·공개 권한은 호출 서비스가 확인한다. 모든 실행 문맥에서 고정 회차의 통과 언어·환경을 사용한다.
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404)
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 없음
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다. 실패 시 처리: Judge는 조회 장애 시 fail-closed로 처리한다. 미검증 언어는 기존 `UNSUPPORTED_LANGUAGE`(400)로 거절하고 최신 회차·실행 환경으로 대체하지 않는다.
+
+#### 2.6.2 채점 기준 데이터 조회
+
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/data`
+- **인증:** 내부 호출 (judge)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`, `problem_validations`, `problem_revision_tags`, `tags`
+- **설명:** 고정 회차의 함수 명세·실행 제한·전체 테스트 파일 참조와 통과 언어·실행 환경, 결과 이벤트에 사용할 제목·난이도·태그 정보를 반환한다. 정답 코드는 반환하지 않는다. 검증 전 회차의 관리자 검증 자료는 §2.6.8에서 조회한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `revisionId` | Path | string | Y | 해당 문제 소속의 고정 회차 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `problemId / problemRevisionId` | string | 문제·고정 회차 ID |
+    | `problemTitle` | string | 필수. 요청한 고정 회차의 제목 |
+    | `problemDifficulty` | integer | 필수. 요청한 고정 회차의 난이도(1~3) |
+    | `problemTags` | string[] | 필수. 해당 회차에 연결된 태그의 조회 시점 이름. `problemTagIds`와 같은 길이·순서 |
+    | `problemTagIds` | string[] | 필수. 해당 회차에 연결된 태그 ID. 중복 없이 숫자 ID 오름차순으로 반환 |
+    | `functionSpec / executionLimits` | object / object | 회차의 함수 명세·고정 실행 제한 |
+    | `supportedLanguages / executionProfiles` | string[] / object[] | 통과 언어·검증 당시 실행 프로필. 목록 대응·원본 반환 규칙은 §2.6.1과 같음 |
+    | `executionProfiles[].language` | string | 통과한 언어. 언어당 한 항목 |
+    | `executionProfiles[].runtimeKey` | string | 검증에서 사용한 불변 실행 환경 키. 정책 및 상태 §3.2를 따름 |
+    | `executionProfiles[].runnerVersion` | string | 검증 당시 생성기 참고 식별 정보. 이전 구현 선택·일치 검사의 기준으로 사용하지 않으며 정책 및 상태 §3.2를 따름 |
+    | `cases` | object[] | 공개·숨김 전체 테스트 참조 |
+    | `cases[].testAssetId / testOrder / isSample` | string / integer / boolean | 테스트 파일 ID·순서·공개 여부 |
+    | `cases[].asset` | object | 고정 objectKey·objectVersion·sha256. 원문은 포함하지 않음 |
+
+    ```json
+    {
+      "problemId": "301",
+      "problemRevisionId": "1001",
+      "problemTitle": "두 수의 합",
+      "problemDifficulty": 1,
+      "problemTags": [
+        "구현"
+      ],
+      "problemTagIds": [
+        "3"
+      ],
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": 262144,
+        "wallTimeMs": 7000,
+        "outputLimitKb": 64
+      },
+      "supportedLanguages": [
+        "java"
+      ],
+      "executionProfiles": [
+        {
+          "language": "java",
+          "runtimeKey": "fbc2a5e3e4cc2495a37b2e73b4824478ee5103e910cbd21ec1e109defd598c9c",
+          "runnerVersion": "java-runner-v1"
+        }
+      ],
+      "cases": [
+        {
+          "testAssetId": "501",
+          "testOrder": 1,
+          "isSample": true,
+          "asset": {
+            "objectKey": "test-cases/501.json",
+            "objectVersion": "v-501",
+            "sha256": "c6b8..."
+          }
+        },
+        {
+          "testAssetId": "502",
+          "testOrder": 2,
+          "isSample": false,
+          "asset": {
+            "objectKey": "test-cases/502.json",
+            "objectVersion": "v-502",
+            "sha256": "d7c9..."
+          }
+        }
+      ]
+    }
+    ```
+
+    - 제목·난이도는 `problem_revisions`, 태그 소속은 `problem_revision_tags`의 요청 회차를 기준으로 조회한다. 최신 사용 회차의 값으로 대체하지 않는다. 태그 이름은 `tags.name`의 조회 시점 값이며 회차 생성 당시 이름의 복원을 보장하지 않는다.
+    - `problemTags[i]`는 `problemTagIds[i]`의 이름이다. Judge는 같은 응답에서 받은 네 필드를 결과 이벤트 J1에 사용하며, 다른 회차나 별도 조회 결과를 섞지 않는다. 필수 정보가 누락되거나 배열 대응이 올바르지 않으면 정상 결과 이벤트를 만들지 않고 시스템 실패·재시도 정책을 따른다.
+    - Judge 제출 테이블에 제목·난이도·태그 복제 컬럼을 추가하지 않는다. 결과 저장 트랜잭션에서 Outbox payload에 포함하고, Relay 재발행은 저장된 payload를 그대로 사용한다. 이 응답 확장은 이벤트 계약 J1의 `problemTagIds` 소비 관련 B·E 협의 상태를 변경하지 않는다.
+    - 공개·숨김 테스트를 모두 반환하고 Judge 실행기가 제한된 S3 읽기 권한으로 원문을 가져온다. 사용 가능 여부는 접수 단계에서 확인한 고정 회차를 기준으로 하며 최신 회차로 치환하지 않는다.
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 필터·식별자 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404)
+- **동시성/멱등 보장:** 상태를 변경하지 않고 응답에 표시한 회차를 기준으로 조회한다. 조회 중 최신 회차로 치환하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 없음
+- **비고:** 식별자·페이지·성공 응답은 §0 공통 규약을 따른다.
+
+#### 2.6.3 고정 회차 본문 조회
+
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content`
+- **인증:** 내부 호출 (contest, member). 서비스 토큰을 요구하지 않으며 내부망 신뢰 경계는 결정 기록 > 서비스 간 인증 방식을 따른다.
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_revision_tags`, `tags`, `problem_revision_tests`, `problem_test_assets`, `problem_validations`
+- **설명:** 호출 서비스에 고정된 회차의 본문·함수 명세·실행 제한·통과 언어의 기본 코드·공개 예제를 반환한다. 현재 사용 회차로 치환하지 않는다. 숨김 테스트·정답 코드·회원별 풀이 상태를 반환하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `X-Access-Context` | Y | `EXAM:{examId}` / `CONTEST:{contestId}` / `DIAGNOSIS:{diagnosisId}`. 호출 서비스가 권한을 확인한 문맥 |
+    | `X-Correlation-Id` | N | 원 요청 상관관계 ID |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 문제 ID |
+    | `revisionId` | Path | string | Y | 해당 문맥에 고정된 문제 수정 회차 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 래퍼 없는 직접 객체. 아래 필드는 요청한 고정 회차 기준이며 `solvedStatus`는 포함하지 않는다.
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `problemId / problemRevisionId / revisionNumber` | string / string / integer | 문제·고정 회차·표시 회차 번호 |
+    | `title / difficulty / tags` | string / integer / object[] | 고정 회차 제목·난이도·태그 |
+    | `publishedAt` | string (date-time) | 기존 상세 조회와 같은 회차 등록 시각 |
+    | `description / constraints / examples` | string | 본문·제한·예시 Markdown |
+    | `functionSpec / executionLimits` | object | 고정 회차의 함수 명세·실행 제한 |
+    | `supportedLanguages / starterCodes` | string[] / object[] | 해당 고정 회차의 통과 언어와 그 언어의 기본 코드 |
+    | `samples` | object[] | 고정 회차의 공개 테스트 ID·입력·기대값 |
+
+    ```json
+    {
+      "problemId": "301",
+      "problemRevisionId": "1001",
+      "revisionNumber": 1,
+      "title": "두 수의 합",
+      "difficulty": 1,
+      "tags": [
+        {
+          "tagId": "1",
+          "name": "구현"
+        }
+      ],
+      "publishedAt": "2026-09-27T10:00:00+09:00",
+      "description": "## 문제\n두 정수 a와 b의 합을 반환하세요.\n\n![덧셈 예시](image:701)",
+      "constraints": "- 입력 범위: -1000 <= a, b <= 1000",
+      "examples": "| a | b | 반환값 |\n|---|---|---|\n| 1 | 2 | 3 |",
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": 262144,
+        "wallTimeMs": 7000,
+        "outputLimitKb": 64
+      },
+      "starterCodes": [
+        {
+          "language": "python3",
+          "sourceCode": "def solution(a, b):\n    pass\n"
+        }
+      ],
+      "samples": [
+        {
+          "testAssetId": "501",
+          "argumentTexts": {
+            "a": "1",
+            "b": "2"
+          },
+          "expectedReturnText": "3"
+        }
+      ],
+      "supportedLanguages": [
+        "python3"
+      ]
+    }
+    ```
+
+- **에러:** `COMMON_INVALID_REQUEST`(400) / 문맥 헤더·ID 형식 오류, `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404) / 문제·회차 소속 불일치, `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 본문·공개 예제·기본 코드 조회 실패
+- **동시성/멱등 보장:** 지정 회차의 불변 본문·테스트 연결로 조회한다. 최신 회차가 생기거나 문제가 `PRIVATE`·`ARCHIVED`로 바뀌어도 적법한 기존 고정 참조는 유지한다.
+- **발행:** 없음
+- **외부 의존:** Judge 기본 코드 HTTP(§2.7). 요청한 고정 회차의 `functionSpec`·통과 언어로만 생성하며 다른 회차·미통과 언어로 대체하지 않는다.
+- **비고:** contest는 참가·시작 전 비공개·종료 후 복기·종료 공개 설정과 자기 DB의 고정 문제 연결을 먼저 확인한다. member는 자기 진단 응시·열람 권한과 고정 회차를 먼저 확인한다. Problem은 문제 존재·회차 소속·자료 연결을 확인하며 호출 서비스의 참가 권한을 대신 판정하거나 Contest에 같은 열람 검증을 다시 요청하지 않는다. 문맥 헤더만으로 외부 회원의 열람 권한이 생기지 않는다.
+
+#### 2.6.4 고정 회차 본문 이미지 조회
+
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}`
+- **인증:** 내부 호출 (contest, member). 참가·열람 권한과 Problem 소속 검증의 책임은 §2.6.3과 같다.
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_body_assets`, `problem_body_images`, `problem_images`
+- **설명:** 요청한 고정 회차 본문에 연결된 이미지 바이너리를 반환한다. 브라우저에는 contest·member의 권한 검사 경로로 전달한다.
+- **요청 헤더:** §2.6.3의 `X-Access-Context` 필수, `X-Correlation-Id` 선택
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId / revisionId / imageId` | Path | string | Y | 문제·고정 회차·본문 연결 이미지 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 실제 이미지의 `Content-Type`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 이미지 바이너리. 공통 JSON 래퍼와 S3 주소를 반환하지 않는다.
+- **에러:** `COMMON_INVALID_REQUEST`(400), `PROBLEM_REVISION_NOT_FOUND`(404) / 문제·회차 소속 불일치, `PROBLEM_NOT_FOUND`(404) / 이미지 없음·소속 또는 본문 연결 불일치, `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 저장소 조회 장애
+- **동시성/멱등 보장:** `revision.body_asset_id`에 연결된 이미지와 소속 문제를 함께 확인한다. 같은 문제의 다른 회차나 다른 문제의 이미지로 대체하지 않는다. 보관 후에도 기존 고정 회차 연결을 보존한다.
+- **발행:** 없음
+- **외부 의존:** S3 이미지 읽기
+- **비고:** 호출 서비스는 §2.6.3과 같은 권한 확인 후 바이너리를 전달한다.
+
+#### 2.6.5 문제 선택용 요약 조회
+
+- **Method / URI:** `GET /internal/v1/problems/summaries`
+- **인증:** 내부 호출 (study, contest)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_revision_tags`, `tags`, `problem_validations`
+- **설명:** 문제집·시험·대회 생성 시 고정할 사용 회차와 표시용 요약을 반환한다. 사용 회차는 PASSED가 있는 최대 회차이며 `sourceVersion`·`supportedLanguages`를 상태 이벤트와 같은 스냅샷으로 반환한다.
+- **요청 헤더:** `X-Correlation-Id` 선택
+- **요청 파라미터:**
+
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `ids` | string[] | Y | — | 문제 ID 최대 50개. §0.1의 반복 파라미터 형식 |
+    | `purpose` | string | Y | — | `ASSIGNMENT` / `EXAM` / `CONTEST` |
+
+- **요청 바디:** 없음
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 래퍼 없는 `{items:[...]}` 객체
+
+    | 필드 | 타입 | 반환 조건·설명 |
+    | --- | --- | --- |
+    | `items[].problemId / isAvailable` | string / boolean | 모든 요청 ID. 없는 문제도 해당 ID와 false로 식별 |
+    | `items[].scope / visibility / sourceVersion` | string / string / integer | 존재하는 문제는 비가용이어도 현재 상태·행 버전 반환. 없는 문제는 필드 생략 |
+    | `items[].problemRevisionId / revisionNumber` | string 또는 null / integer 또는 null | 존재하는 문제의 사용 회차. 통과 회차가 없으면 둘 다 null |
+    | `items[].supportedLanguages` | string[] | 존재하는 문제의 사용 회차 통과 언어. 회차가 없으면 [] |
+    | `items[].title / difficulty / tags` | string / integer / object[] | 존재하며 사용 회차가 있을 때 그 회차의 표시용 요약. 그 외 생략 |
+
+    ```json
+    {
+      "items": [
+        {
+          "problemId": "101",
+          "problemRevisionId": "201",
+          "revisionNumber": 3,
+          "title": "최단 경로",
+          "difficulty": 3,
+          "tags": [{"tagId": "7", "name": "그래프"}],
+          "scope": "GENERAL",
+          "visibility": "PUBLIC",
+          "isAvailable": true,
+          "sourceVersion": 7,
+          "supportedLanguages": ["java", "python3"]
+        },
+        {
+          "problemId": "102",
+          "isAvailable": false,
+          "scope": "GENERAL",
+          "visibility": "PRIVATE",
+          "sourceVersion": 1,
+          "problemRevisionId": null,
+          "revisionNumber": null,
+          "supportedLanguages": []
+        },
+        {"problemId": "999", "isAvailable": false}
+      ]
+    }
+    ```
+
+- **가용 조건:** `ASSIGNMENT`·`EXAM`은 `GENERAL`·`PUBLIC`만, `CONTEST`는 `GENERAL`·`PUBLIC` 또는 `EXAM_ONLY`·`PRIVATE/PUBLIC`을 허용한다. 모든 용도에서 통과 사용 회차와 하나 이상의 통과 언어가 필요하며 `ARCHIVED`는 신규 편입할 수 없다. `EXAM_ONLY`의 대회 연결 검증은 종료 공개 계약과 별개로 수행한다.
+- **에러:** `COMMON_INVALID_REQUEST`(400) / ID 형식·최대 50개·purpose 위반. 개별 미존재·비가용은 404로 전체 실패시키지 않고 항목별 false로 반환한다.
+- **동시성/멱등 보장:** 문제별 행 버전·사용 회차·언어·요약을 일치시킨다. 호출 서비스는 고정할 회차를 저장하며, Contest는 §4.7.3과 같은 PROBLEM 가드 잠금 안에서 신규 편입을 확정한다. 요약 조회만으로 이후 편입 가능성을 예약하지 않는다. 이벤트와 재조회 결과는 더 큰 `sourceVersion`만 반영한다.
+- **발행:** 없음
+- **외부 의존:** 없음. 요약은 본문·기본 코드·숨김 테스트·정답 코드를 포함하지 않으며 기본 코드는 §2.6.3·§2.7에서 통과 언어에 한해 제공한다.
+- **비고:** 비가용 항목의 회차·표시용 필드를 가용으로 해석하지 않는다. 호출 서비스는 모든 선택 항목의 `isAvailable`을 확인한다.
+
+#### 2.6.6 힌트 문맥 조회
+
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/hint-context`
+- **인증:** 내부 호출 (study). 공통 내부 네트워크 신뢰 규칙을 따른다.
+- **Idempotency:** 없음 (조회, 상태 변경 없음)
+- **Rate Limit:** 없음
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_validations`, `problem_body_assets`, `problem_revision_tags`, `tags`
+- **설명:** 힌트 입력(제목·Markdown 본문·태그)과 현재 사용 회차, 힌트 가능 여부를 반환한다. 정책 §8.1에 따라 `GENERAL`·`PUBLIC`이고 통과 사용 회차와 통과 언어가 있는 문제만 허용한다. `EXAM_ONLY`는 대회 종료 후 공개된 상태여도 힌트 대상에서 제외한다. 회원별 시험·진단 차단과 일일 횟수 검증은 Study가 담당한다.
+- **요청 헤더:** 없음 (공통 Correlation ID 전달 규칙 적용)
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 양수 BIGINT 문제 ID |
+
+- **요청 바디:** 없음
+- **응답 (200):** 공통 래퍼 없이 데이터 객체를 반환한다.
+
+    ```json
+    {
+      "problemId": "101",
+      "problemRevisionId": "201",
+      "problemTitle": "최단 경로",
+      "problemBody": "두 정점 사이의 최단 경로를 구하시오.\n\n## 제한 사항\n\n정점 수는 100 이하이다.\n\n## 예시\n\n입력과 출력 예시",
+      "problemTags": ["그래프"],
+      "isHintAvailable": true
+    }
+    ```
+
+    - `problemRevisionId`는 최신 작성 회차가 아니라 검증을 통과한 현재 사용 회차 ID다.
+    - `problemBody`는 해당 회차의 설명·제한 사항·예시를 위 순서의 Markdown으로 조합한다. 숨김 테스트·정답 코드·사용자 코드는 포함하지 않는다.
+    - `problemTags`는 해당 회차의 태그 이름이며 태그 ID 순으로 반환한다. 태그가 없으면 빈 배열이다.
+    - 문제가 존재하지만 공개 상태·회차 등 힌트 대상 조건을 충족하지 않으면 `isHintAvailable=false`, `problemRevisionId`·`problemTitle`·`problemBody`는 `null`, `problemTags`는 빈 배열이다. 이 경우 저장소 원문을 조회하지 않는다.
+    - 원문 조합 후 정책 §8.1의 임시 힌트 입력 크기 기준을 초과해도 같은 비가용 응답을 반환한다. 이 검사는 원문 조회 후 수행하며, 본문을 잘라서 제공하지 않는다. Study의 404 응답·일일 횟수·기존 캐시 처리도 해당 정책을 따른다.
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 문제 ID가 양수 BIGINT가 아님
+    - `PROBLEM_NOT_FOUND`(404) / 존재하지 않는 문제
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 사용 회차의 본문 메타 정보·저장소 조회·체크섬·크기·JSON 해석 실패
+- **동시성/멱등 보장:** 문제 상태·통과 사용 회차·태그·불변 본문 참조를 같은 읽기 트랜잭션에서 고정한다. 본문 저장소는 트랜잭션 밖에서 고정된 객체 버전으로 조회하고 체크섬·크기를 검증한다.
+- **발행:** 없음
+- **외부 의존:** 기존 S3 본문 저장소 — 읽기 실패 시 503으로 거절한다. Judge·Contest·Member API를 호출하지 않는다.
+- **비고:** 응답 필드명은 Study 수신 형식과 `HintRequested`의 제목·본문·태그 필드에 맞춘다. 기존 내부 API의 `enabled=true`·`implementation=real` 선택을 따르며 `internal-stub` 프로필에서는 실제 경로를 등록하지 않는다.
+
+#### 2.6.7 진단 출제 후보 조회
+
+- **Method / URI:** `GET /internal/v1/problems/diagnosis-candidates`
+- **인증:** 내부 호출 (member)
+- **대응 테이블:** `tags`, `problems`, `problem_revisions`, `problem_revision_tags`, `problem_validations`
+- **설명:** `GENERAL`·`PUBLIC` 문제에서 검증을 통과한 최신 회차의 태그와 난이도를 기준으로 후보를 찾는다. 난이도 1·2·3에서 각각 1개를 무작위로 골라 고정 회차 ID와 함께 반환한다. 응답 배열의 순서는 난이도 1·2·3이며, 후보가 없는 위치는 `null`이다.
+- **요청 파라미터:**
+
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `tagId` | string | Y | — | 태그 ID |
+
+- **응답 (200):**
+
+    ```json
+    {
+      "tagId": "3",
+      "problems": [
+        {
+          "difficulty": 1,
+          "problemId": "301",
+          "problemRevisionId": "1001",
+          "title": "두 수의 합"
+        },
+        {
+          "difficulty": 2,
+          "problemId": "315",
+          "problemRevisionId": "1040",
+          "title": "..."
+        },
+        {
+          "difficulty": 3,
+          "problemId": "330",
+          "problemRevisionId": "1092",
+          "title": "..."
+        }
+      ]
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 태그 ID 누락 또는 양의 정수 범위를 벗어남
+    - `PROBLEM_TAG_NOT_FOUND`(404) / 존재하지 않는 태그
+
+---
+
+#### 2.6.8 관리자 검증 자료 조회
+
+- **Method / URI:** `GET /internal/v1/problems/validations/{validationId}/data`
+- **인증:** 내부 호출 (judge)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `problem_validations`, `problem_code_assets`, `problem_revisions`, `problem_revision_tests`, `problem_test_assets`
+- **설명:** Judge가 실행·재시도 때 같은 검증 ID의 불변 코드·함수 명세·제한·전체 테스트를 조회한다. 검증 전 회차도 조회하며 일반 제출용 API에는 정답 코드를 추가하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 설명 |
+    | --- | --- | --- |
+    | `X-Correlation-Id` | Y | 원 요청 상관관계 ID. 별도 인증 헤더는 공통 내부 API 규칙을 따름 |
+
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `validationId` | Path | string | Y | 원래 검증 요청 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `validationId` / `problemRevisionId` | string | 요청과 고정 회차 |
+    | `language` / `requestHash` | string | 요청 언어와 원래 요청 해시 |
+    | `sourceCode` | string | 고정 S3 코드 객체에서 읽은 UTF-8 원문. S3 URL은 반환하지 않음 |
+    | `functionSpec` / `executionLimits` | object | 고정 회차의 함수 명세와 최종 제한 |
+    | `testCases` | object[] | 공개·숨김 전체 테스트 |
+    | `testCases[].testAssetId` / `isSample` / `argumentTexts` / `expectedReturnText` | §2.3.0과 동일, ID는 string | 조회 전용 테스트 ID와 공개 여부·입력·기대값 |
+
+    ```json
+    {
+      "validationId": "2001",
+      "problemRevisionId": "1001",
+      "language": "java",
+      "requestHash": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "sourceCode": "class Solution {\n    public int solution(int a, int b) {\n        return a + b;\n    }\n}\n",
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "executionLimits": {
+        "timeMs": 2000,
+        "memoryKb": 262144,
+        "wallTimeMs": 7000,
+        "outputLimitKb": 64
+      },
+      "testCases": [
+        {
+          "testAssetId": "501",
+          "isSample": true,
+          "argumentTexts": {
+            "a": "1",
+            "b": "2"
+          },
+          "expectedReturnText": "3"
+        },
+        {
+          "testAssetId": "502",
+          "isSample": false,
+          "argumentTexts": {
+            "a": "-5",
+            "b": "7"
+          },
+          "expectedReturnText": "2"
+        }
+      ]
+    }
+    ```
+
+- **에러:** `PROBLEM_VALIDATION_NOT_FOUND`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 고정 파일 조회·체크섬 확인 실패
+- **동시성/멱등 보장:** 요청의 고정 회차·파일 참조를 읽고 S3 키·버전·체크섬을 확인한다. 파일 조회 중 DB 행 잠금을 유지하지 않는다. 최신 코드·회차로 대체하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 비공개 S3 원문 저장소
+- **프론트 계약:** 없음
+- **비고:** Judge는 요청 ID·회차·언어·해시를 수신 메시지와 대조하고 코드를 실행 메모리에서 사용한다. 코드·테스트 원문을 메시지나 Judge 업무 DB에 복사하지 않는다.
+
+#### 2.6.9 대회 전용 문제 연결
+
+- **Method / URI:** `PUT /internal/v1/problems/{problemId}/contest`
+- **인증:** 내부 호출 (contest). C가 실제 생성 대회·고정 문제와 ADMIN 설정 관리자를 확인한 뒤 호출한다. 내부 서비스 토큰은 요구하지 않는다.
+- **Idempotency:** 문제·대회·고정 회차·설정 관리자별 동일 연결은 최초 연결 결과 반환
+- **대응 테이블:** `problems`, `problem_revisions`, `problem_validations`, `audit_logs`
+- **설명:** 기존 EXAM_ONLY 문제의 contest_id와 고정 회차·연결 기준 버전·종료 공개 설정 관리자를 명시적으로 기록한다. GENERAL은 호출 대상이 아니다.
+- **요청 헤더:** `X-Correlation-Id` 선택
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | Path | string | Y | 선택한 문제 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `contestId` | string | Y | C에 먼저 영속 저장한 대회 ID |
+    | `problemRevisionId` | string | Y | C가 선택·고정한 통과 회차 |
+    | `rowVersion` | integer | Y | 선택 요약의 sourceVersion, 1 이상 |
+    | `actorMemberId` | string | Y | C가 ADMIN 권한을 확인한 종료 공개 설정 관리자 |
+
+    ```json
+    {"contestId":"8","problemRevisionId":"2001","rowVersion":7,"actorMemberId":"7"}
+    ```
+
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 래퍼 없는 직접 객체
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `problemId / contestId / problemRevisionId` | string | 최초 연결 문제·대회·고정 회차 |
+    | `linkedSourceVersion` | integer | 최초 연결 커밋의 Problem 버전. 재요청도 같은 값 |
+    | `policyActorId` | string | 보존한 실제 설정 관리자 |
+
+    ```json
+    {"problemId":"601","contestId":"8","problemRevisionId":"2001","linkedSourceVersion":8,"policyActorId":"7"}
+    ```
+
+- **에러:** `COMMON_INVALID_REQUEST`(400), `PROBLEM_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_FOUND`(404), `PROBLEM_VERSION_CONFLICT`(409), `PROBLEM_INVALID_STATE_TRANSITION`(409) / GENERAL·ARCHIVED·다른 대회 또는 회차·설정 관리자로 덮어쓰기·통과 회차/언어 없음
+- **동시성/멱등 보장:** 문제 행을 잠그고 기존 연결부터 확인한다. 대회·고정 회차·관리자가 모두 같으면 현재 공개 상태·버전이 바뀌었어도 최초 연결을 반환한다. 새 연결은 rowVersion·EXAM_ONLY·비보관·해당 문제의 회차·통과 언어를 확인한다. 연결 필드·row_version + 1·`contest_link_source_version`·연결 감사는 같은 트랜잭션이다. 연결 후 회차·대회·관리자·기준 버전은 덮어쓰지 않는다.
+- **발행:** 없음. 연결 자체는 공개 상태·사용 회차·언어를 바꾸지 않는다.
+- **외부 의존:** 없음. C의 대회 생성·설정 관리자 검증을 B가 C에 재질의하지 않는다.
+- **비고:** 생성 실패·응답 유실 시 C는 §4.6.1의 같은 생성 작업·대회·고정 회차로 연결을 재시도한다. B의 연결을 자동 해제하거나 다른 대회로 재배정하지 않는다. 종료 공개 비교·감사는 이벤트 계약서 §4.4 C12~C14를 따른다.
+
+#### 2.6.10 문제 상태 작업 조회
+
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/operations/{operationId}`
+- **인증:** 내부 호출 (contest)
+- **Idempotency:** 조회, 상태 변경 없음
+- **대응 테이블:** `problem_state_operations`
+- **설명:** 자원 가드와 동일한 원래 작업의 확정 여부를 조회한다.
+- **요청 헤더:** `X-Correlation-Id` 선택
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId / operationId` | Path | string | Y | 문제와 그 문제의 원래 작업 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 원래 작업 ID |
+    | `state` | string | PENDING / COMMITTED / ABORTED |
+    | `sourceVersion` | string | COMMITTED는 결과 버전, 그 외 기대 버전의 10진 문자열 |
+    | `resourceStatus` | string | COMMITTED는 target_visibility, 그 외 before_visibility |
+
+    ```json
+    {"operationId":"problem-hide-301","state":"COMMITTED","sourceVersion":"10","resourceStatus":"PRIVATE"}
+    ```
+
+- **에러:** `COMMON_INVALID_REQUEST`(400), `PROBLEM_NOT_FOUND`(404) / 작업 없음·문제 소속 불일치
+- **동시성/멱등 보장:** 영속된 원래 작업의 스냅샷을 반환하며 현재 문제 상태로 치환하지 않는다. C는 조회 후 자기 가드 잠금 안에서 작업 ID·버전을 다시 확인한다. 404·PENDING·통신 실패는 자동 취소 근거가 아니다.
+- **발행:** 없음
+- **외부 의존:** 없음
+
+#### 2.6.11 태그 존재 확인
+
+- **Method / URI:** `GET /internal/v1/tags/{tagId}`
+- **인증:** 내부 호출 (member)
+- **Idempotency:** 조회, 상태 변경 없음
+- **Rate Limit:** 없음
+- **대응 테이블:** `tags`
+- **설명:** 태그가 있는지 확인한다. member가 태그 진입(1.4.2) 전에 호출한다.
+- **요청 헤더:** `X-Correlation-Id` 선택
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `tagId` | Path | string | Y | 태그 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:** `Content-Type: application/json`
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `tagId` | string | 태그 ID |
+    | `name` | string | 태그 이름 |
+
+    ```json
+    {
+      "tagId": "3",
+      "name": "해시"
+    }
+    ```
+
+- **에러:** `PROBLEM_TAG_NOT_FOUND`(404) / 없는 태그
+- **동시성/멱등 보장:** 조회만 한다.
+- **발행:** 없음
+- **외부 의존:** 없음
+
+### 2.7 사용하는 내부 API
+
+| 제공 | Method / URI | 요청 | 성공 응답 | 실패 처리 |
+| --- | --- | --- | --- | --- |
+| judge | `GET /internal/v1/judge/validations/{validationId}` | 원래 검증 ID | §3.3.9의 작업 상태·테스트별 판정·최대 시간·설명·통과 실행 환경. Judge 작업 미생성은 404 | §2.3.11에서 작업 미생성과 조회 장애를 구분 |
+| judge | `POST /internal/v1/judge/starter-codes` | 사용 회차의 `functionSpec`, `languages`: 통과 언어 목록 | 래퍼 없는 `{starterCodes:[{language,sourceCode}]}` | 통신 오류·누락/중복 언어·잘못된 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503) |
+
+- 내부 호출 인증·성공 응답 형식은 §0.1·§0.3을 따르며 공통 타임아웃은 2초다. Judge 진행 조회 응답은 검증 ID·회차·언어와 일치해야 한다.
+- 기본 코드의 생성 책임은 Judge다. 기존 `ExecutionCodeGenerator.starterCode(FunctionSpec)`를 연결하며 응답 언어 집합은 요청과 정확히 일치해야 한다. Problem이 기본 코드를 생성하거나 이전 회차·미통과 언어 코드로 대체하지 않는다.
+- 제공 계약은 §3.3.5를 따른다. 요청 언어 집합과 응답이 정확히 일치하고 각 `sourceCode`가 문자열인지 검사한다.
+
+### 2.8 관리자 API — Outbox 운영
+
+> 작성: 담당 D (B 지원) · 서비스: `problem-service`
+>
+
+#### 2.8.1 실패 Outbox 재처리
+
+> Problem의 서비스별 경로·재요청·동시성 처리 계약을 정의한다. Judge 계약은 §3.2.6을 따른다.
+
+- **Method / URI:** `POST /api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses`
+- **인증:** `ADMIN`
+- **Idempotency:** 없음. `Idempotency-Key`와 최초 응답 보존을 추가하지 않는다. 재요청 시 현재 상태가 `PENDING`·`PUBLISHED`이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)을 반환한다. 재발행이 다시 실패해 `FAILED`가 되면 상태·유효 기간을 재검증해 새 운영 조치를 허용한다.
+- **대응 테이블:** `outbox_events`, `audit_logs`
+- **설명:** `FAILED` 상태이고 발생 7일 이내인 Outbox 이벤트를 `PENDING`으로 되돌려 Outbox Relay가 재발행하도록 한다. 원래 `event_id`를 유지하므로 소비자가 `processed_events`로 중복 소비를 방지한다.
+- **요청 바디:**
+
+    ```json
+      { "reason": "DLQ 원인 수정 후 재처리" }
+    ```
+
+- **응답 (202):**
+
+    ```json
+      { "success": true, "message": "재처리를 접수했습니다.", "data": { "outboxEventId": "1001" } }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400): 양수가 아닌 Outbox ID, 공백 사유 또는 500자 초과 사유
+    - `OUTBOX_EVENT_NOT_FOUND`(404): 존재하지 않는 ID이거나 발생 7일 초과
+    - `OUTBOX_EVENT_NOT_REPROCESSABLE`(409): `FAILED` 외 상태
+- **서비스별 경로 구분 — 확정:** 각 서비스의 `outbox_events.id`는 자기 DB 안에서만 유일하다. 서비스는 경로로 구분하고, 바디로 임의의 서비스나 스키마를 지정하지 않는다.
+
+    | 대상 | 확정 경로 |
+    | --- | --- |
+    | Problem | `/api/v1/admin/problems/outbox-events/{outboxEventId}/reprocesses` |
+    | Judge | `/api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses` |
+
+    - Gateway는 각 경로를 해당 서비스로 전달한다. 서비스는 자기 DB의 Outbox만 조회·변경한다.
+- **동시성/멱등 보장:**
+    - 자기 서비스의 Outbox 대상 행을 `SELECT ... FOR UPDATE`로 잠그고, 잠금 획득 후 공통 `Clock` 기준 서울 시각을 정한다. 대상 없음·발생 7일 초과는 404, `FAILED` 외 상태는 409다. 발생 시각이 정확히 `now - 7일`이면 허용한다.
+    - 상태를 다시 확인한 뒤 `WHERE id = :id AND status = 'FAILED' AND occurred_at >= :cutoff` 조건부 UPDATE로 `status=PENDING`, `retry_count=0`, `published_at=NULL`, `updated_at=now`를 반영한다.
+    - 영향 행이 정확히 1건일 때만 감사와 202 응답을 확정한다. 0건이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)로 롤백하며 성공 응답·감사를 남기지 않는다.
+    - 상태 변경과 `audit_logs` INSERT는 같은 트랜잭션이다. 감사 저장 실패 시 상태 변경도 롤백한다.
+        - `actor_id`는 인증한 관리자, `action=OUTBOX_REPROCESS`, `target_type=OUTBOX_EVENT`, `target_id`는 Outbox 행 ID, `reason`은 요청 사유, `client_ip`는 신뢰할 수 있는 요청 주소로 기록한다.
+        - `before_state`에는 행 잠금으로 확인한 기존 `status`·`retryCount`·`publishedAt`을 기록한다. `after_state`에는 `status=PENDING`, `retryCount=0`, `publishedAt=null`을 기록한다. 이벤트 본문·코드·인증 정보는 감사 JSON에 복사하지 않는다.
+        - `created_at`에는 잠금 획득 후 정한 기준 시각을 서울 시간대·마이크로초 정밀도로 기록한다. 변경 전후 값·감사 시각은 ERD §3.3과 정책 §9.4를 따른다.
+    - `reason`은 공백만 허용하지 않는 1~500자다(ERD §3.3의 저장 길이).
+    - `event_id`·`payload`·`occurred_at`·`correlation_id`는 보존하고 기존 공통 Relay가 재발행한다. Relay도 같은 Outbox 행을 잠그므로 행 단위로 직렬화된다.
+- **비고:** 동시 운영 요청의 성공·409 분기, 실제 전환 1건당 감사 1건, 감사 실패 전체 롤백, Relay 경합, 정확히 7일인 경계값을 구현 회귀 테스트로 확인한다. 테이블·컬럼·환경변수를 추가하지 않는다.
+
+## 3. 제출·채점 (judge)
+
+> 작성: 담당 B · 서비스: `judge-service`
+> 
+
+### 3.0 개요
+
+| 항목 | 값 |
+| --- | --- |
+| 외부 경로 | `/api/v1/submissions/**`, `/api/v1/me/submissions`, `/api/v1/runs`, `/api/v1/judge/languages`, `/api/v1/admin/judge-jobs/**`, `/api/v1/admin/submissions/**`, `/api/v1/admin/judge/outbox-events/**` |
+| 내부 경로 | `/internal/v1/submissions/**` |
+| 소유 테이블 | 스키마 `judge` (`submissions`, `judge_jobs`, `judge_job_runs`, `judge_test_results`) |
+| 문맥 | `PRACTICE`(외부 API), `EXAM`·`CONTEST`·`DIAGNOSIS`(SQS `exam-submission-queue`). 시험·대회는 contest, 진단은 member가 접수한다. |
+| 지원 언어 | `java`(Java 17), `python3`(Python 3), `cpp`(C++17). 런타임 버전과 Judge0 `language_id`는 Judge0 목록에서 조회하여 선택한다. 서비스의 언어 활성화 설정과 지원 실행 환경의 존재 여부를 함께 확인한다. |
+| 채점 | 202는 접수 완료이며 채점 완료가 아니다. 작업 원천은 `judge_jobs`, SKIP LOCKED 선점·임대, 실행 시도 상한 3회. |
+| 회차 용어 | 채점 회차 `judgeAttempt`(재채점마다 +1), 실행 시도 `tryCount`(회차 안 재시도). 기존 초안의 `attemptId`·`attemptNo`는 `judgeAttempt`로 통일 |
+| 재채점 | `PRACTICE`는 재채점하지 않는다. 채점 서버 장애로 실패한 `EXAM` 제출만 대상 (T2-11) |
+| 결과 공개 | 숨김 테스트의 입력·출력은 어떤 API로도 반환하지 않는다. 시험·대회 판정 공개 시점은 contest 정책을 따른다 |
+| 이벤트 발행 | `SubmissionJudged`(PRACTICE), `ExamSubmissionJudged`, `ContestSubmissionJudged`, `DiagnosisSubmissionJudged`, `SubmissionFailed` |
+
+### 3.1 외부 API — 언어·제출·실행
+
+#### 3.1.1 지원 언어 조회
+
+- **Method / URI:** `GET /api/v1/judge/languages`
+- **인증:** 로그인 필요
+- **Idempotency:** 없음
+- **Rate Limit:** 없음 (API별 별도 제한 없음)
+- **대응 테이블:** 없음 (애플리케이션 설정·메모리 캐시)
+- **설명:** 지원 언어 3종과 선택된 실행 환경, 활성화 여부를 반환한다. Judge0 목록에서 지원 범위에 맞는 최신 실행 환경을 선택하며, 서비스의 언어 활성화 설정이 켜져 있고 실행 환경이 존재할 때만 `enabled: true`를 반환한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:** 없음
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+    | `X-Correlation-Id` | 요청 추적 ID | 요청 처리에 사용한 추적 ID |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `content` | array | Java, Python, C++ 순서의 언어 목록. 비활성 언어도 포함하며 페이지네이션하지 않는다 |
+    | `content[].language` | string | `java` / `python3` / `cpp` |
+    | `content[].displayName` | string | `Java 17` / `Python 3` / `C++17` |
+    | `content[].runtimeVersion` | string | 선택된 Judge0 실행 환경의 표시 정보. 예: `JDK 17.0.6`, `3.11.2`, `GCC 12.2.0`. 지원 실행 환경이 없으면 `배포 환경 확인 전` |
+    | `content[].enabled` | boolean | 서비스의 해당 언어 활성화 설정이 켜져 있고, 지원 실행 환경이 존재하면 `true` |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "language": "java",
+            "displayName": "Java 17",
+            "runtimeVersion": "JDK 17.0.6",
+            "enabled": true
+          },
+          {
+            "language": "python3",
+            "displayName": "Python 3",
+            "runtimeVersion": "3.11.2",
+            "enabled": false
+          },
+          {
+            "language": "cpp",
+            "displayName": "C++17",
+            "runtimeVersion": "배포 환경 확인 전",
+            "enabled": false
+          }
+        ]
+      }
+    }
+    ```
+
+- **에러:**
+    - `JUDGE0_CONNECTION_FAILED`(503) / Judge0 목록 조회 중 연결 실패 또는 통신 시간 초과
+    - `JUDGE0_RESPONSE_FAILED`(503) / Judge0 HTTP 오류, 본문 누락, JSON 변환 실패, 잘못된 항목 또는 중복 ID 수신
+- **동시성/멱등 보장:**
+    - 서비스 인스턴스별로 최초 목록 조회와 캐시 초기화를 직렬화한다.
+    - 초기화에 성공하면 이후 요청은 캐시를 공유한다.
+    - 초기화에 실패하면 캐시를 저장하지 않고 다음 요청에서 다시 조회한다.
+- **발행:** 없음
+- **외부 의존:**
+    - `GET /languages/` (Judge0) — 실행 환경 목록 조회
+    - 연결 제한 기본값은 2초, 응답 대기 제한 기본값은 5초이며 환경 설정으로 변경할 수 있다.
+    - 요청 한 번 안에서 자동 재시도하지 않는다.
+    - 서버 주소가 설정되지 않았으면 외부 호출 없이 모든 언어를 비활성으로 반환한다.
+- **프론트 계약:**
+    - `enabled: false`인 언어는 선택할 수 없도록 표시한다.
+    - `runtimeVersion`에 값이 있어도 `enabled: false`일 수 있으므로, 활성 여부는 `enabled`로 판단한다.
+    - 이 응답은 서비스 전체의 언어 지원 상태이며, 개별 문제의 언어별 검증 상태를 의미하지 않는다.
+- **비고:**
+    - 실행 환경 선택 범위는 Java JDK·OpenJDK 17, Python 3, GCC 기반 C++이다.
+    - 숫자 버전으로 비교해 가장 높은 정식 버전을 선택하고, 같은 최고 버전의 후보가 여러 개이면 가장 작은 Judge0 ID를 선택한다.
+    - 전체 실행 환경 목록과 언어별 선택 결과는 서비스 인스턴스의 메모리에 보관하며 자동 갱신하지 않는다. 정상 응답인 빈 목록도 캐시한다.
+    - Judge0 실행 환경 목록이나 언어 활성화 설정을 변경한 경우 judge-service를 재시작해야 한다.
+    - 이 API는 실행 환경 목록을 조회하며, 코드를 실행하여 언어의 정상 동작을 검증하지 않는다. 캐시 생성 후 Judge0의 실시간 장애 여부도 확인하지 않는다.
+    - 응답 예시의 버전은 설명용이며 배포 환경의 실제 버전을 보장하지 않는다.
+
+#### 3.1.2 일반 풀이 제출
+
+- **Method / URI:** `POST /api/v1/submissions`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **Idempotency:** 있음 (`Idempotency-Key` 필수, 24시간 보관)
+- **Rate Limit:** 사용자당 분당 10회, 동일 문제 5초 간격
+- **대응 테이블:** `submissions`, `judge_jobs`, `judge_test_results`
+- **설명:** 사용자 코드를 제출하고 비동기 채점을 접수한다. 최신 회차와 달라도 요청한 회차로 제출할 수 있다. 해당 회차·언어의 통과 실행 프로필을 사용하며 정책 및 상태 §3.2의 식별·선택 규칙을 따른다.
+- **요청 바디:**
+    
+    ```json
+      { 
+    	  "problemId": "301", 
+    	  "problemRevisionId": "1001", 
+    	  "language": "python3", 
+    	  "sourceCode": "def solution(a, b):\n    return a + b\n" 
+      }
+    ```
+    
+    - 네 필드 모두 필수. `sourceCode`는 UTF-8 64KB 이하, 실행용 래퍼 코드는 포함하지 않는다.
+    - `userId`·`examId`·제한값·`expectedOutput`·`callbackUrl`은 받지 않는다.
+- **응답 (202):**
+    
+    ```json
+      {
+        "success": true,
+        "message": "제출이 접수되었습니다.",
+        "data": { 
+    	    "submissionId": "2001", 
+    	    "judgeAttempt": 1, 
+    	    "status": "QUEUED", 
+    	    "submittedAt": "2026-09-28T10:00:00+09:00", 
+    	    "statusUrl": "/api/v1/submissions/2001" 
+        }
+      }
+    ```
+    
+- **에러:**
+    - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `SUBMISSION_RATE_LIMITED`(429)
+    - `PROBLEM_NOT_AVAILABLE`(404) / `PRIVATE`·`ARCHIVED`·`EXAM_ONLY`
+    - `LEVEL_PROBLEM_LOCKED`(403) / 태그 레벨보다 높은 난이도
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / 사전 검증·레벨 조회 실패, 필수 프로필 누락·키 형식 오류·언어 중복·통과 언어와 프로필 목록 불일치 (같은 키·본문으로 재시도 안내)
+    - `SUBMISSION_RUNTIME_UNAVAILABLE`(409) / 형식이 올바른 키의 스냅샷 부재·언어 불일치 또는 고정 런타임 미지원
+    - `JUDGE0_CONNECTION_FAILED`(503) / 고정 런타임 가용성 조회의 연결 실패·시간 초과
+    - `JUDGE0_RESPONSE_FAILED`(503) / 가용성 조회의 HTTP 오류·본문 누락·잘못된 응답
+    - `JUDGE0_CONFIGURATION_INVALID`(503) / Judge0 서버 주소 미설정
+    - `IDEMPOTENCY_KEY_CONFLICT`(422), `MEMBER_SUSPENDED`(403)
+- **동시성/멱등 보장:**
+    - 24시간 내 같은 키·본문의 기존 접수가 있으면 환경·생성기를 재선택하지 않고 원래 응답을 반환한다(`uk_submissions_member_idempotency_key` + `request_hash`).
+    - 외부 검증과 고정 런타임 가용성 조회는 저장 트랜잭션 밖에서 수행한다. 프로필의 키로 복원한 고정 실행 환경을 확인한다. `runnerVersion`과 현재 생성기의 식별자 일치는 접수 조건으로 검사하지 않는다.
+    - 검증 통과 후 `submissions`(`QUEUED`)의 `runtime_id`, `judge_jobs`(`PENDING`)·테스트별 결과 자리를 한 트랜잭션에 저장한다. 실패하면 접수 전체를 롤백한다. `PREPARING` 선저장 단계는 두지 않는다.
+    - 접수 완료 후 모든 테스트·재시도는 저장한 실행 환경과 현재 언어별 생성기를 사용한다. 고정 런타임 부재를 최신 런타임 선택이나 사용자 WA로 바꾸지 않는다.
+    - 정확히 24시간이 지난 키는 만료다. 만료된 이전 제출의 키만 NULL로 해제하고 코드·요청 해시·결과를 보존하며, 키 해제와 새 접수 저장을 같은 트랜잭션에서 처리한다. 동시 접수는 UNIQUE 제약으로 승자를 정하고 실패한 저장 트랜잭션 종료 후 기존 응답을 조회한다.
+    - 작업의 `deadline_at`은 정책 및 상태 §2의 일반 제출 전체 처리 기한에 따라 접수 저장 트랜잭션에서 확정한다. 대기열 체류를 포함하며 멱등 재요청·동일 작업 재시도로 연장하지 않는다.
+    - 일반 풀이 채점 요청은 SQS를 거치지 않는다.
+- **외부 의존:**
+    - `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/validation` (problem) — 회차 검증. 실패 시 fail-closed
+    - `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/data` (problem) — 초기 결과 자리의 테스트 순번·공개 여부 조회. 사전 검증의 회차·파일 목록·프로필과 대조하고, S3 원문은 읽지 않는다. 실패 시 fail-closed
+    - `GET /internal/v1/members/{memberId}/status` (member) — 회원 상태 복제본이 없을 때 조회. 실패 시 fail-closed
+    - `GET /internal/v1/members/{memberId}/tag-levels` (member) — 모든 태그의 레벨이 난이도를 충족해야 허용. 미진입 태그는 LV0, 실패 시 fail-closed
+    - 내부 HTTP 연결·응답 제한은 각각 2초이며 요청 한 번 안에서 자동 재시도하지 않는다. `judge.clients.problem-base-url`·`member-base-url`은 Compose 서비스 주소를 기본으로 하고 `judge.clients.timeout`으로 제한 시간을 설정한다.
+- **프론트 계약:**
+    - 202 후 SSE(`/api/v1/notifications/subscribe`)의 `SUBMISSION_JUDGED` 알림을 받으면 제출 상태·결과 조회(3.1.3)으로 결과를 조회한다. SSE 연결이 없으면 3.1.3을 2초 → 5초 간격으로 조회한다.
+    - 응답이 유실되면 같은 키·본문으로 재요청한다. 새 코드에는 새 키를 쓴다.
+    - 작성 중 코드는 브라우저에 사용자·문제·언어별로 자동 저장한다(서버 Draft API 없음).
+
+#### 3.1.3 제출 상태·결과 조회
+
+- **Method / URI:** `GET /api/v1/submissions/{submissionId}`
+- **인증:** 로그인 필요 (본인 `PRACTICE` 제출)
+- **대응 테이블:** `submissions`, `judge_jobs`
+- **설명:** 제출 상태와 최신 유효 판정을 반환한다. 재채점 진행 중에도 직전 회차 결과를 `effectiveResult`로 유지한다. 시스템 실패는 `status = FAILED`로 전달하며 WA로 바꾸지 않는다.
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "submissionId": "2001", 
+          "problemId": "301", 
+          "problemRevisionId": "1001", 
+          "language": "python3",
+          "context": "PRACTICE", 
+          "status": "COMPLETED", 
+          "judgeAttempt": 1, 
+          "submittedAt": "2026-09-28T10:00:00+09:00",
+          "effectiveResult": { 
+    	      "judgeAttempt": 1, 
+    	      "verdict": "AC", 
+    	      "passedCount": 12, 
+    	      "totalCount": 12, 
+    	      "maxTimeMs": 12, 
+    	      "maxMemoryKb": 8192, 
+    	      "judgedAt": "2026-09-28T10:00:02+09:00" 
+          },
+          "compileMessage": null,
+          "failureCode": null
+        }
+      }
+    ```
+    
+    - `status`: `QUEUED` / `JUDGING` / `RETRY_WAITING` / `COMPLETED` / `FAILED`. `RETRY_WAITING`은 화면에 "채점 중"으로 표시
+    - `effectiveResult.verdict`: 정책 및 상태 §3.3의 대표 판정 규칙(CE 우선, 그 외 고정 `testOrder` 기준 첫 비AC, 모두 AC이면 AC)을 따른다. 미완료·시스템 실패를 코드 판정으로 확정하지 않는다.
+    - `compileMessage`: `CE`일 때만, 본인에게만 제공
+    - `failureCode`: `FAILED`일 때 (예: `ENGINE_UNAVAILABLE`)
+- **에러:**
+    - `SUBMISSION_NOT_FOUND`(404)
+
+#### 3.1.4 내 제출 목록 조회
+
+- **Method / URI:** `GET /api/v1/me/submissions`
+- **인증:** 로그인 필요
+- **대응 테이블:** `submissions`
+- **설명:** 일반 풀이·시험·진단의 본인 제출을 문맥과 함께 보여준다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | string | N | — | 문제 필터 |
+    | `context` | string | N | — | `PRACTICE` / `EXAM` / `DIAGNOSIS`. `CONTEST`를 지정하면 빈 목록 |
+    | `verdict` | string | N | — | 지정하면 `PRACTICE`에만 적용한다. 시험·진단 제출은 목록과 페이지 집계에서 제외한다 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    
+    허용 정렬 필드: `submittedAt` (기본 `submittedAt,desc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [
+            {
+              "submissionId": "2001",
+              "problemId": "301",
+              "language": "python3",
+              "context": "EXAM",
+              "contextId": "401",
+              "status": "COMPLETED",
+              "verdict": null,
+              "maxTimeMs": null,
+              "maxMemoryKb": null,
+              "submittedAt": "2026-09-28T10:00:00.000000+09:00"
+            }
+          ],
+          "page": 0, 
+          "size": 20, 
+          "totalElements": 1, 
+          "totalPages": 1, 
+          "hasNext": false
+        }
+      }
+    ```
+    
+    - 문제 제목은 저장하지 않는다. 화면은 문제 서비스 조회로 채운다.
+    - 시험·진단의 `verdict`·`maxTimeMs`·`maxMemoryKb`는 목록에서 항상 `null`이다. 판정은 시험 결과 또는 진단 상세 화면에서 각 문맥의 공개 정책에 따라 확인한다.
+    - `contextId`(string 또는 null)는 상세 화면 연결용이다. 시험은 시험 ID, 진단은 진단 ID, 일반 풀이는 `null`을 반환한다.
+    - 시험 제출의 `submittedAt`은 원래 접수 시각을 마이크로초 6자리로 반환한다(§0.1).
+
+#### 3.1.5 제출 코드 조회
+
+- **Method / URI:** `GET /api/v1/submissions/{submissionId}/source`
+- **인증:** 로그인 필요 (본인 `PRACTICE` 제출)
+- **대응 테이블:** `submissions`
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": null, 
+    	  "data": { 
+    		  "language": "python3", 
+    		  "sourceCode": "def solution(a, b):\n    return a + b\n" 
+    	  } 
+      }
+    ```
+    
+    - 응답 헤더 `Cache-Control: no-store`
+- **에러:**
+    - `SUBMISSION_NOT_FOUND`(404)
+
+#### 3.1.6 채점 회차 목록 조회
+
+- **Method / URI:** `GET /api/v1/submissions/{submissionId}/judge-attempts`
+- **인증:** 로그인 필요 (본인 `PRACTICE` 제출)
+- **대응 테이블:** `judge_jobs`
+- **설명:** 제출의 채점 회차 이력을 반환한다. `PRACTICE`는 재채점이 없어 보통 1건이다.
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [ 
+    	      { 
+    		      "judgeAttempt": 1, 
+    		      "trigger": "INITIAL", 
+    		      "status": "SUCCEEDED", 
+    		      "verdict": "AC", 
+    		      "passedCount": 12, 
+    		      "totalCount": 12, 
+    		      "maxTimeMs": 12, 
+    		      "maxMemoryKb": 8192, 
+    		      "createdAt": "2026-09-28T10:00:00+09:00", 
+    		      "finishedAt": "2026-09-28T10:00:02+09:00" 
+    	      } 
+          ]
+        }
+      }
+    ```
+    
+    - `trigger`: `INITIAL` / `REJUDGE` / `REPROCESS`
+
+#### 3.1.7 테스트별 결과 조회
+
+- **Method / URI:** `GET /api/v1/submissions/{submissionId}/judge-attempts/{judgeAttempt}/test-results`
+- **인증:** 로그인 필요 (본인 `PRACTICE` 제출)
+- **대응 테이블:** `judge_test_results`
+- **설명:** 회차의 테스트별 판정·성능을 반환한다. 공개 테스트는 입력·기대값·실제 출력을, 숨김 테스트는 번호와 통과 여부만 반환한다.
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [
+            { 
+    	        "testOrder": 1, 
+    	        "isSample": true, 
+    	        "verdict": "AC", 
+    	        "timeMs": 12, 
+    	        "memoryKb": 8192, 
+    	        "argumentTexts": { "a": "1", "b": "2" }, 
+    	        "expectedReturnText": "3", 
+    	        "actualReturnText": "3" 
+            },
+            { 
+    	        "testOrder": 2, 
+            "passed": true
+            }
+          ]
+        }
+      }
+    ```
+    
+    - `testOrder` 오름차순으로 반환한다.
+    - 공개 테스트는 예시의 상세 필드를 유지한다. 숨김 테스트 항목은 `testOrder`·`passed` 두 필드만 반환하며 `isSample`·`verdict`·`timeMs`·`memoryKb`·원문 필드를 포함하지 않는다.
+    - 숨김 테스트의 `passed`는 AC이면 true, 확정된 비AC 판정이면 false다. 미판정·SYSTEM_ERROR는 null로 반환하며 시스템 실패를 코드 실패로 표시하지 않는다. 재시도 중 이전 실행 시도의 결과를 현재 시도의 확정 결과로 사용하지 않는다.
+    - 정상 완료된 채점 회차는 최종 집계에 포함한 이전 시도의 확정 결과도 반환한다.
+    - 제출 전체 대표 판정은 정책 및 상태 §3.3을 따르며 테스트별 판정을 덮어쓰지 않는다.
+    - token·S3 경로·체크섬·stderr는 반환하지 않는다.
+
+#### 3.1.8 코드 실행 (Run)
+
+- **Method / URI:** `POST /api/v1/runs`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **Rate Limit:** `run:{memberId}` 키로 일반·시험 Run을 합쳐 사용자당 동시에 1개만 허용한다. 초과 시 `RUN_RATE_LIMITED`(429), 종료 후 쿨다운 없이 다음 실행을 허용한다.
+- **대응 테이블:** 없음 (결과 저장·이벤트 발행 없음)
+- **설명:** 공개 테스트케이스 또는 사용자 직접 입력으로 코드를 실행한다. 제출 이력에 포함하지 않고 Judge0를 동기 호출한다(T2-14).
+- **요청 바디:**
+    
+    ```json
+      {
+        "problemId": "301", 
+        "problemRevisionId": "1001", 
+        "language": "python3",
+        "sourceCode": "def solution(a, b):\n    return a + b\n",
+        "useSamples": true,
+        "customInputs": [ 
+    	    { 
+    		    "argumentTexts": { "a": "100", "b": "200" } 
+    	    } 
+        ]
+      }
+    ```
+    
+    - `customInputs` 최대 5개, 함수 명세로 타입 검증
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "results": [
+            { 
+    	        "source": "SAMPLE", 
+    	        "testAssetId": "501", 
+    	        "verdict": "AC", 
+    	        "actualReturnText": "3", 
+    	        "expectedReturnText": "3", 
+    	        "timeMs": 11, 
+    	        "memoryKb": 8000, 
+    	        "stdout": "" 
+            },
+            { 
+    	        "source": "CUSTOM", 
+    	        "index": 0, 
+    	        "verdict": null, 
+    	        "actualReturnText": "300", 
+    	        "timeMs": 10, 
+    	        "memoryKb": 8000, 
+    	        "stdout": "" 
+            }
+          ],
+          "compileMessage": null
+        }
+      }
+    ```
+    
+    - `CUSTOM`은 기대값이 없어 `verdict`가 `null`(실행 오류면 `RE`·`TLE` 등)
+    - `stdout`은 디버그 출력이며 테스트별 64KiB 제한을 적용한다. `actualReturnText`는 회차의 `outputLimitKb`로 별도 제한하며 두 출력은 합산하지 않는다. 어느 하나라도 초과하면 `RE`(출력 초과)로 처리한다. 크기 계산은 [정책 및 상태 > 3.2 채점 실행](../planning/policy-and-state.md#32-채점-실행)을 따른다.
+    - `timeMs`는 Judge0 실행 시간(초)을 밀리초로 변환한 뒤 올림한 정수다. 측정값이 없으면 null을 유지한다(정책 및 상태 §3.2).
+- **동시성/멱등 보장:** 사용자별 실행 제한을 원자적으로 획득하고, 정상 완료·예외 시 소유 토큰이 일치할 때만 해제한다. 인스턴스 중단 후 회수는 스케줄러 §3.5를 따른다. Redis에서 제한을 확인할 수 없으면 실행을 허용하지 않고 503으로 처리한다.
+- **에러:**
+    - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `RUN_RATE_LIMITED`(429), `PROBLEM_NOT_AVAILABLE`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge0 장애·실행 제한 확인 실패
+    - `RUN_TIMEOUT`(504) / 전체 실행 기한 30초 초과
+
+### 3.2 관리자 API — 진단·복구·재채점
+
+#### 3.2.1 채점 작업 목록 조회
+
+- **Method / URI:** `GET /api/v1/admin/judge-jobs`
+- **인증:** `ADMIN`
+- **대응 테이블:** `judge_jobs`, `submissions`
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `status` | string | N | — | `PENDING` / `RUNNING` / `RETRY_WAITING` / `SUCCEEDED` / `FAILED` |
+    | `context` | string | N | — | 제출 문맥 |
+    | `contextId` | string | N | — | 시험·대회 ID |
+    | `failureCode` | string | N | — | 실패 코드 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    
+    허용 정렬 필드: `createdAt`, `updatedAt` (기본 `updatedAt,desc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [ { "judgeJobId": "9101", "submissionId": "2002", "judgeAttempt": 1, "status": "FAILED", "tryCount": 3, "failureCode": "ENGINE_UNAVAILABLE", "memberId": "11", "context": "EXAM", "contextId": "401", "problemRevisionId": "1001", "deadlineAt": "2026-09-28T10:10:00+09:00", "createdAt": "2026-09-28T10:00:00+09:00", "updatedAt": "2026-09-28T10:01:00+09:00" } ],
+          "page": 0, "size": 20, "totalElements": 1, "totalPages": 1, "hasNext": false
+        }
+      }
+    ```
+    
+
+#### 3.2.2 채점 작업 상세 조회
+
+- **Method / URI:** `GET /api/v1/admin/judge-jobs/{judgeJobId}`
+- **인증:** `ADMIN`
+- **대응 테이블:** `judge_jobs`, `judge_job_runs`, `judge_test_results`, `submissions`
+- **설명:** 작업과 실행 시도 이력·테스트별 token 상태를 반환한다. 문제 본문·테스트 원문은 포함하지 않는다.
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "judgeJobId": "9101", "submissionId": "2002", "judgeAttempt": 1, "status": "FAILED", "tryCount": 3,
+          "leaseUntil": null, "nextRunAt": null, "deadlineAt": "2026-09-28T10:10:00+09:00", "lastError": "Judge0 연결 실패",
+          "runs": [ { "tryCount": 1, "result": "SYSTEM_ERROR", "errorMessage": "connect timeout", "startedAt": "…", "finishedAt": "…" } ],
+          "testResults": [ { "testOrder": 1, "tokenStatus": "UNKNOWN", "judge0Token": null, "verdict": null } ]
+        }
+      }
+    ```
+    
+
+#### 3.2.3 시험 제출 재채점 요청
+
+- **Method / URI:** `POST /api/v1/admin/submissions/{submissionId}/rejudges`
+- **인증:** `ADMIN` (시험 운영자 경로는 contest 경유 확정 필요)
+- **Idempotency:** 있음
+- **대응 테이블:** `submissions`, `judge_jobs`, `judge_test_results`, `audit_logs`
+- **설명:** 채점 서버 장애로 실패한 `EXAM` 제출을 같은 원본 회차·런타임으로 재채점한다. `judge_attempt`를 1 올리고 새 작업을 만든다. 이전 회차 결과는 이력으로 보존한다.
+- **요청 바디:**
+    
+    ```json
+      { "reason": "채점 서버 장애 복구 후 재채점" }
+    ```
+    
+- **응답 (202):**
+    
+    ```json
+      { "success": true, "message": "재채점을 접수했습니다.", "data": { "submissionId": "2002", "judgeAttempt": 2, "status": "QUEUED" } }
+    ```
+    
+- **에러:**
+    - `SUBMISSION_NOT_FOUND`(404)
+    - `SUBMISSION_REJUDGE_NOT_ALLOWED`(409) / `PRACTICE`·정상 판정·결과 확정(`FINALIZED`) 후
+    - `SUBMISSION_JUDGING_IN_PROGRESS`(409)
+    - `SUBMISSION_RUNTIME_UNAVAILABLE`(409), `SUBMISSION_REJUDGE_INPUT_UNAVAILABLE`(409)
+- **동시성/멱등 보장:** `(submission_id, judge_attempt)` 유일 제약. 최신 회차로 대체하지 않는다.
+- **외부 의존:**
+    - `GET /internal/v1/exams/{examId}/rejudge-eligibility` (contest) — 결과 확정 전 여부. 실패 시 fail-closed
+- **발행:**
+    - `ExamSubmissionJudged`(새 `judgeAttempt`) — 재채점 완료 시
+
+#### 3.2.4 실패 제출 재처리
+
+- **Method / URI:** `POST /api/v1/admin/submissions/{submissionId}/reprocesses`
+- **인증:** `ADMIN`
+- **Idempotency:** 있음
+- **대응 테이블:** `submissions`, `judge_jobs`, `audit_logs`
+- **설명:** `FAILED` 제출(DLQ 격리 포함)을 `QUEUED`로 되돌려 새 회차로 다시 채점한다. `PRACTICE`는 사용자에게 새 제출을 안내하는 것이 원칙이며, 이 API는 시험·대회·진단과 운영 판단이 필요한 건에 쓴다.
+- **요청 바디:**
+    
+    ```json
+      { "reason": "DLQ 원인 수정 후 재처리" }
+    ```
+    
+- **응답 (202):**
+    
+    ```json
+      { "success": true, "message": "재처리를 접수했습니다.", "data": { "submissionId": "2002", "judgeAttempt": 2, "status": "QUEUED" } }
+    ```
+    
+- **에러:**
+    - `SUBMISSION_NOT_FOUND`(404), `SUBMISSION_REJUDGE_NOT_ALLOWED`(409) / `FAILED`가 아님
+
+#### 3.2.5 진행 중 채점 작업 복구
+
+- **Method / URI:** `POST /api/v1/admin/judge-jobs/{judgeJobId}/recoveries`
+- **인증:** `ADMIN`
+- **Idempotency:** `Idempotency-Key` 필수(ASCII 1~100자). 관리자·작업·키와 양끝 공백을 제거한 사유의 해시를 저장한다. 같은 요청은 최초 202 응답을 반환하고 다른 사유는 `IDEMPOTENCY_KEY_CONFLICT`(422)다.
+- **대응 테이블:** `judge_jobs`, `judge_job_runs`, `submissions`, `audit_logs`, `judge_recovery_requests`
+- **설명:** 종결되지 않은 작업을 같은 회차 안에서 재개한다(임대 해제 → `RETRY_WAITING`). 새 회차를 만들지 않고, 종결 상태를 되살리거나 시도 상한·처리 기한을 우회하지 않는다.
+- **요청 바디:**
+    
+    ```json
+      { "reason": "실행기 중단 후 작업 복구" }
+    ```
+    
+- **응답 (202):**
+    
+    ```json
+      { "success": true, "message": "복구를 요청했습니다.", "data": { "judgeJobId": "9103", "status": "RETRY_WAITING" } }
+    ```
+    
+- **에러:**
+    - `SUBMISSION_NOT_FOUND`(404), `SUBMISSION_REJUDGE_NOT_ALLOWED`(409) / 이미 종결된 작업
+
+- **동시성/멱등 보장:** 채점 작업 → 복구 요청 → 제출 순서로 잠근다. `RUNNING` 복구는 현재 시도를 `SYSTEM_ERROR`로 종결하고 다음 시도로 전환하므로 상한 3회에서는 거절한다. 대기 작업은 시도 수를 유지하며, `UNKNOWN`은 기존 30초 유예를 보존한다. 기한·최신 회차·종결 여부를 잠금 후 재검증하고 작업·제출·감사를 함께 커밋한다.
+
+#### 3.2.6 실패 Outbox 재처리
+
+> Problem §2.8.1을 기준으로 서비스별 경로와 재요청 처리를 확정했다. 나머지 상세 사항은 검토안이다. 기존 채점 작업 복구(§3.2.5)와 별개의 작업이다.
+
+- **Method / URI:** `POST /api/v1/admin/judge/outbox-events/{outboxEventId}/reprocesses`
+- **인증:** `ADMIN`
+- **Idempotency:** 없음. `Idempotency-Key`와 최초 응답 보존을 추가하지 않는다. 재요청 시 현재 상태가 `PENDING`·`PUBLISHED`이면 `OUTBOX_EVENT_NOT_REPROCESSABLE`(409)을 반환한다. 재발행이 다시 실패해 `FAILED`가 되면 상태·유효 기간을 재검증해 새 운영 조치를 허용한다. 기존 `eventId`에 의한 소비자 중복 제거는 이벤트 계약 §1.1·§1.4를 따른다.
+- **Rate Limit:** 없음
+- **대응 테이블:** `outbox_events`, `audit_logs` (Judge 자기 DB)
+- **설명:** 발생 7일 이내이고 `FAILED`인 Judge Outbox 이벤트를 `PENDING`으로 전환해 재발행을 접수한다. 원래 이벤트 식별자·본문을 보존하며 기존 공통 Relay가 저장된 메시지를 비동기로 발행한다. Outbox 변경과 관리자 조치 감사는 같은 트랜잭션에서 확정한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Content-Type` | Y | `application/json` | 요청 본문 형식 |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `outboxEventId` | Path | string | Y | — | Judge DB의 Outbox 행 ID. 양수 BIGINT 범위. 이벤트 UUID인 `eventId`와 구분 |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `reason` | string | Y | 공백만 허용하지 않는 1~500자 조치 사유 |
+
+    ```json
+    {
+      "reason": "발행 권한 복구 후 결과 이벤트 재전달"
+    }
+    ```
+
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json; charset=UTF-8` | 응답 본문 형식 |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (202):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `outboxEventId` | string | 재처리 접수가 확정된 Judge Outbox 행 ID |
+
+    ```json
+    {
+      "success": true,
+      "message": "재처리를 접수했습니다.",
+      "data": {
+        "outboxEventId": "1001"
+      }
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 양수 BIGINT 범위가 아닌 ID 또는 사유 검증 실패
+    - `AUTH_TOKEN_INVALID`(401), `AUTH_TOKEN_EXPIRED`(401) / Gateway 인증 실패
+    - `AUTH_ACCESS_DENIED`(403) / ADMIN 권한 없음
+    - `OUTBOX_EVENT_NOT_FOUND`(404) / Judge DB에 대상이 없거나 발생 7일 초과
+    - `OUTBOX_EVENT_NOT_REPROCESSABLE`(409) / `FAILED` 외 상태 또는 조건부 UPDATE 영향 행 0건
+    - `COMMON_INTERNAL_SERVER_ERROR`(500) / 상태 변경·감사 저장 등 예상하지 못한 내부 오류. 전체 롤백
+- **동시성/멱등 보장:** §2.8.1의 동시성 처리 보완안과 같은 단일 행 잠금·잠금 후 시각 확인·조건부 UPDATE·감사 원자 저장 규칙을 적용한다. 재요청 시 현재 상태가 `PENDING`·`PUBLISHED`이면 409이며 최초 202 응답을 재사용하지 않는다. 새 운영 요청이나 Relay가 상태를 변경했으면 최신 상태로 판단한다.
+- **발행:** 기존 Outbox 행을 `PENDING`으로 전환한 뒤 공통 Relay가 원래 메시지를 발행한다. 결과 이벤트의 `judgeAttempt` 등 순서 값을 변경하지 않는다.
+- **외부 의존:** 없음 (API 트랜잭션에서 SNS·SQS·다른 서비스 호출 없음)
+- **프론트 계약:** 202는 재처리 접수이며 실제 발행 완료를 의미하지 않는다.
+- **비고:**
+    - 범용 운영 인터페이스를 새 공통 모듈로 만드는 것은 이번 문서 보완 범위에 포함하지 않는다. 각 서비스는 자기 DB에서 권한·유효 기간·감사를 처리하고 기존 `common-event` Relay를 재사용한다.
+    - 기존 `OutboxEventWriter.append()`는 새 이벤트 ID를 발급하므로 이 재발행 경로에서 호출하지 않는다. 기존 행의 이벤트 ID·본문·발생 시각·상관관계 ID를 보존한다.
+    - `submissions`·`judge_jobs`·`judge_test_results`를 변경하거나 Judge0 실행을 다시 만들지 않는다. 실패 Outbox 재발행은 제출 재채점·채점 작업 복구·SQS DLQ redrive와 구분한다.
+    - 구현 시 동시 요청·Relay 경합·감사 실패 전체 롤백·7일 경계와 다른 서비스 DB를 조회하지 않는 경계를 검증한다. 테이블·컬럼·환경변수 추가는 없다.
+
+### 3.3 내부 API
+
+> 시험·대회 채점 요청은 SQS `exam-submission-queue`로만 받는다. 
+메시지 계약은 부록 B를 따른다.
+> 
+
+#### 3.3.1 시험·대회 제출 결과 조회
+
+- **Method / URI:** `GET /internal/v1/submissions/{submissionId}/result`
+- **인증:** 내부 호출 (contest, member). contest는 `EXAM`·`CONTEST`, member는 `DIAGNOSIS`를 조회한다.
+- **대응 테이블:** `submissions`, `judge_jobs`
+- **설명:** 시험·대회·진단의 이벤트 유실 복구·결과 확정 전 대사용. 점수·사용자 공개 판단은 문맥을 소유한 contest·member가 한다. 진단 내부 대사는 사용자 공개 전에도 허용하며 Member의 기존 공개 정책을 변경하지 않는다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `submissionId` | string | Y | — | Path |
+    | `contextId` | string | Y | — | 시험·대회·진단 ID (불일치 시 404) |
+- **응답 (200):**
+    
+    ```json
+      { "submissionId": "2002", "context": "EXAM", "contextId": "401", "sourceSubmissionId": "4001", "status": "COMPLETED", "judgeAttempt": 1, "verdict": "AC", "passedCount": 12, "totalCount": 12, "maxTimeMs": 12, "maxMemoryKb": 8192, "submittedAt": "2026-09-28T10:00:00+09:00" }
+    ```
+
+    - `DIAGNOSIS`의 `contextId`는 `diagnosisId`, `sourceSubmissionId`는 `diagnosisSubmissionId`다. 원본 접수·고정 회차를 유지하며, 숨김 테스트 원문은 반환하지 않는다.
+    - 진단 대사는 §3.3.6을 `context=DIAGNOSIS`, `receiptId=diagnosisSubmissionId`로 함께 조회한다. `found=true`일 때 두 응답의 `submissionId`가 같고, 접수 ID 조회의 `userId`·`problemId`·`problemRevisionId`·`contextId`·`receiptId`·`submittedAt`이 원래 접수와 일치하는지 확인한다.
+    - 미종결·실패 상태의 판정·통과 수·성능은 null이다. 미발견·식별자 불일치·조회 실패로 결과를 확정하지 않으며, 응답 형식은 유지한다.
+
+#### 3.3.2 제출 코드 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/submissions/{submissionId}/source`
+- **인증:** 내부 호출 (contest, problem, member)
+- **대응 테이블:** `submissions`
+- **설명:** 호출 목적별로 조건을 확인한 뒤 코드를 반환한다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `purpose` | string | Y | — | `EXAM_REVIEW`(contest, 시험 결과 화면) / `SOLUTION_SHARE`(problem, 풀이 공유) / `DIAGNOSIS_REVIEW`(member, 진단 복기) |
+    | `memberId` | string | Y | — | 호출 서비스가 인증으로 확인한 요청자 |
+    | `contextId` | string | N | — | `EXAM_REVIEW`·`DIAGNOSIS_REVIEW`일 때 각각 시험·진단 ID 필수 |
+    - `SOLUTION_SHARE`: 제출 소유자 = `memberId`, `context = PRACTICE`, 최신 판정 `AC`일 때만 반환
+    - `EXAM_REVIEW`: 제출 소유자 = `memberId`, `contextId` 일치. 공개 시점 판단은 contest 책임
+    - `DIAGNOSIS_REVIEW`: `context = DIAGNOSIS`, 제출 소유자 = `memberId`, `contextId = diagnosisId` 일치. member가 본인 진단·원래 접수·문제·고정 회차와 기존 사용자 공개 조건을 확인한다. Judge가 새로운 Member 검증 API를 호출하지 않는다.
+- **응답 헤더:** `Cache-Control: no-store`
+- **응답 (200):**
+    
+    ```json
+      { "submissionId": "91023", "problemId": "301", "problemRevisionId": "1001", "language": "python3", "sourceCode": "…", "verdict": "AC" }
+    ```
+    
+- **실패 시 처리:** 조건 불일치는 404. 호출 서비스는 fail-closed. 숨김 테스트 원문은 반환하지 않으며 일반 제출 코드 API의 `PRACTICE` 범위는 확대하지 않는다.
+
+#### 3.3.3 GitHub 동기화용 정답 코드 조회
+
+- **Method / URI:** `GET /internal/v1/submissions/{submissionId}/accepted/code`
+- **인증:** 내부 호출 (integration)
+- **대응 테이블:** `submissions`
+- **설명:** `PRACTICE` AC 제출의 코드를 반환한다. 시험·대회·진단 제출은 거절한다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `memberId` | string | Y | — | 연동 회원 (제출 소유자와 일치해야 함) |
+- **응답 (200):**
+    
+    ```json
+      { "submissionId": "91023", "problemId": "301", "language": "python3", "sourceCode": "…", "judgeAttempt": 1, "submittedAt": "2026-09-28T10:00:00+09:00" }
+    ```
+    
+
+#### 3.3.4 회원별 PRACTICE AC 목록 (재동기화)
+
+- **Method / URI:** `GET /internal/v1/submissions/accepted`
+- **인증:** 내부 호출 (study, member)
+- **대응 테이블:** `submissions`
+- **설명:** 복제본 재동기화 관리자 절차 전용. 평상시 흐름에서는 호출하지 않는다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `context` | string | Y | — | `PRACTICE`만 허용 |
+    | `userId` | string | Y | — | 회원 ID |
+    | `after` | string | N | — | 커서 (마지막 `submissionId`) |
+    | `size` | int | N | 100 | 최대 500 |
+- **응답 (200):**
+    
+    ```json
+      { "items": [ { "submissionId": "91023", "problemId": "301", "submittedAt": "2026-09-28T10:00:00+09:00", "judgeAttempt": 1 } ], "nextCursor": "91023" }
+    ```
+    
+    - AC만 반환하므로 판정 필드는 두지 않는다. 회원이 없으면 빈 목록
+    - 각 페이지는 조회 시점의 완료 AC를 반환한다. 순회 중 커서보다 작은 제출 ID가 AC로 바뀌면 이후 페이지에서 조회되지 않으므로, 복제본 재동기화는 §5.6.2의 이벤트 반영·복구 절차를 함께 적용한다.
+
+#### 3.3.5 기본 코드 생성 (내부)
+
+- **Method / URI:** `POST /internal/v1/judge/starter-codes`
+- **인증:** 내부 호출 (problem). 내부 네트워크 기준은 §0.1을 따른다.
+- **Idempotency:** 없음
+- **Rate Limit:** 없음 (별도 API 제한 없음)
+- **대응 테이블:** 없음
+- **설명:** 고정 회차의 함수 명세와 통과 언어로 언어별 기본 코드를 생성한다. 생성 책임은 Judge이며 `ExecutionCodeGenerator.starterCode(FunctionSpec)`를 연결한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Content-Type` | Y | `application/json` | JSON 요청 본문 |
+    | `X-Correlation-Id` | N | `problem-request-001` | 요청 추적 ID 전달 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `functionSpec` | object | Y | 고정 회차의 함수 명세. null 불가 |
+    | `functionSpec.name` | string | Y | `solution` 고정 |
+    | `functionSpec.parameters` | object[] | Y | 선언 순서의 매개변수. null 불가 |
+    | `functionSpec.parameters[].name` | string | Y | 중복 없는 매개변수 이름 |
+    | `functionSpec.parameters[].type` | object | Y | TypeSpec. null 불가 |
+    | `functionSpec.returnType` | object | Y | 반환값 TypeSpec. null 불가 |
+    | `languages` | string[] | Y | 고정 회차의 통과 언어. `java` / `python3` / `cpp`, 중복 없이 전달 |
+
+    ```json
+    {
+      "functionSpec": {
+        "name": "solution",
+        "parameters": [
+          {
+            "name": "a",
+            "type": {
+              "kind": "INT32"
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "kind": "INT32"
+            }
+          }
+        ],
+        "returnType": {
+          "kind": "INT32"
+        }
+      },
+      "languages": [
+        "python3"
+      ]
+    }
+    ```
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 공통 성공 래퍼 없이 반환한다.
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `starterCodes` | object[] | Y | 요청 언어별 기본 코드. null 불가 |
+    | `starterCodes[].language` | string | Y | 요청 언어. 중복·null 불가 |
+    | `starterCodes[].sourceCode` | string | Y | 해당 언어의 기본 코드. null 불가 |
+
+    ```json
+    {
+      "starterCodes": [
+        {
+          "language": "python3",
+          "sourceCode": "def solution(a: int, b: int) -> int:\n    raise NotImplementedError()\n"
+        }
+      ]
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 요청 필드·함수 명세·언어 형식이 유효하지 않음
+    - `COMMON_INTERNAL_SERVER_ERROR`(500) / Judge의 예상하지 못한 생성 오류
+- **동시성/멱등 보장:** 저장·상태 변경 없음. 같은 입력은 각 요청에서 생성한다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 없음. 프론트는 Problem의 상세 응답을 사용한다.
+- **비고:** TypeSpec 상세는 §2.3.0과 TypeSpec 명세를 따른다. Problem은 응답 언어 집합이 요청과 정확히 일치하는지, 누락·중복 및 비문자열 코드가 없는지 검사한다. 통신 실패·Judge 비정상 HTTP 응답·잘못된 성공 응답은 Problem이 `COMMON_DEPENDENCY_UNAVAILABLE`(503)으로 처리하며, 다른 회차·미통과 언어·로컬 생성 코드로 대체하지 않는다. 타임아웃은 §2.7을 따른다.
+
+#### 3.3.6 접수 ID 기준 시험·대회 채점 상태 조회
+
+- **Method / URI:** `GET /internal/v1/judge/submissions/by-receipt`
+- **인증:** 내부 호출 (contest, member)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** `submissions`, `judge_jobs`
+- **설명:** Judge 제출 ID를 아직 받지 못했거나 결과 이벤트가 유실된 시험·대회·진단 접수를 원래 접수 ID로 대사한다. §3.3.1의 제출 ID 기준 조회를 대체하지 않는다.
+- **요청 파라미터:**
+
+    | 필드 | 위치 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `context` | Query | string | Y | EXAM / CONTEST / DIAGNOSIS |
+    | `receiptId` | Query | string | Y | contest의 원래 시험·대회 접수 ID 또는 member의 `diagnosisSubmissionId` |
+
+- **응답 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `found` | boolean | 원래 접수에 대응하는 Judge 제출 존재 여부 |
+    | `submissionId` | string | found=true일 때 Judge 제출 ID |
+    | `context / contextId / receiptId` | string | found=true일 때 원래 실행 문맥·접수 식별자 |
+    | `userId / problemId / problemRevisionId` | string | found=true일 때 원래 회원·문제·고정 회차 |
+    | `submittedAt` | string (date-time) | found=true일 때 contest·member가 확정한 원래 접수 시각 |
+    | `status` | string | found=true일 때 Judge 제출 상태 |
+    | `judgeAttempt` | integer | found=true일 때 채점 회차 |
+    | `verdict` | string 또는 null | 미종결·실패는 null |
+    | `passedCount / totalCount` | integer 또는 null | 미종결·실패는 null |
+
+- **실패 시 처리:** contest·member는 자기 서비스의 원래 접수와 문맥·회원·문제·고정 회차·접수 시각을 대조하고 불일치를 격리한다. 진단은 `contextId = diagnosisId`, `receiptId = diagnosisSubmissionId`를 사용한다. 미발견·조회 실패를 정상 채점 결과로 처리하거나 결과를 확정하지 않는다.
+
+
+#### 3.3.7 실패 시험 제출 재처리 (내부)
+
+- **Method / URI:** `POST /internal/v1/judge/submissions/{submissionId}/retry`
+- **인증:** 내부 호출 (contest). 시험 운영 권한은 C가 검증한다.
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** `submissions`, `judge_jobs`, `audit_logs`
+- **설명:** `EXAM`·`FAILED`이고 기대 회차가 일치하는 제출에 새 채점 회차를 접수한다. C는 부모 결과 `FINALIZED` 전을 확인하고 관리자 작업을 먼저 `PENDING` 저장한다.
+- **요청 파라미터:** `submissionId` — Path, string, 필수.
+- **요청 본문:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `context` | string | Y | EXAM만 허용 |
+    | `receiptId` | string | Y | C의 원래 시험 접수 ID |
+    | `expectedJudgeAttempt` | integer | Y | 재처리할 종결 채점 회차 |
+    | `operationId` | string | Y | 원래 재처리 작업 ID. 1~100자 |
+    | `actorMemberId` | string | Y | C가 운영 권한을 검증한 실행자 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+
+- **응답 (202):** `submissionId`(string), `judgeAttempt`(integer, `expectedJudgeAttempt + 1`), `status`(string, `QUEUED`).
+- **동시성/멱등 보장:** 같은 operationId·같은 본문 재요청은 기존 접수 결과를 반환하고 회차를 다시 올리지 않는다. 같은 operationId·다른 본문은 §0.1에 따라 422 IDEMPOTENCY_KEY_CONFLICT로 거절한다. C는 응답 유실 시 같은 operationId·expectedJudgeAttempt로 재요청한다. 새 회차 반영과 기존 회차 무시는 §4.6.3과 시퀀스 §3.6을 따른다.
+- **실패 시 처리:** EXAM·FAILED·기대 회차 조건 불일치는 409. 조회·호출 결과가 불명확하면 C의 관리자 작업과 확정 보류를 유지한다.
+- **발행:** 새 회차 결과는 `ExamSubmissionJudged`로 전달한다.
+- **비고:** §3.2.3·§3.2.4의 외부 관리자 경로와 구분한다.
+
+#### 3.3.8 시험·대회 코드 실행 (내부)
+
+- **Method / URI:** `POST /internal/v1/judge/runs`
+- **인증:** 내부 호출 (contest)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** 없음. Draft·제출·점수·통계를 저장하거나 이벤트를 발행하지 않는다.
+- **설명:** §4.7.1의 RUN 검증을 거쳐 공개 예제·사용자 입력만 동기 실행한다. 숨김 테스트는 실행하지 않는다.
+- **Rate Limit:** §3.1.8과 같은 `run:{memberId}` 제한을 공유해 일반·시험 Run을 합쳐 사용자당 동시에 1개만 허용한다. 정상 완료·예외 시 소유 토큰이 일치할 때만 해제하며 종료 후 쿨다운은 없다. 중단 회수는 스케줄러 §3.5를 따른다.
+- **요청 본문:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `context` | string | Y | EXAM / CONTEST |
+    | `contextId / memberId / problemId / problemRevisionId` | string | Y | C가 확인한 문맥·회원·문제·고정 회차 |
+    | `language` | string | Y | java / python3 / cpp |
+    | `sourceCode` | string | Y | 공통 코드 크기·빈 코드 규칙 적용 |
+    | `customTests` | object[] | N | 사용자 입력, 최대 10개 |
+    | `customTests[].args` | JSON value[] | Y | 사용자 입력 인수 배열 |
+
+- **응답 (200):** §4.2.13·§4.4.11의 실행 결과를 전달한다. `results[]`는 `type`(SAMPLE/CUSTOM), `index`, `output`, `error`, `timeMs`, `memoryKb`를 포함하고 `completedAt`을 반환한다.
+- **실패 시 처리:** 실행 기한 30초, 초과 504 RUN_TIMEOUT. 실행 중 재요청은 429 RUN_IN_PROGRESS. 의존 서비스 장애는 C에서 503으로 처리한다.
+- **비고:** §3.1.8의 외부 PRACTICE Run은 customInputs 최대 5개와 다른 입출력 형식을 사용하므로 이 내부 계약과 구분한다.
+
+#### 3.3.9 검증 진행·결과 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/judge/validations/{validationId}`
+- **인증:** 내부 호출 (problem). 내부 네트워크 기준은 §0.1을 따른다.
+- **Idempotency:** 없음 (읽기 전용)
+- **Rate Limit:** 없음
+- **대응 테이블:** `judge_validation_jobs`, `judge_validation_runs`, `judge_validation_test_results`, `execution_runtimes`
+- **설명:** Judge에 저장된 검증 작업 상태와 테스트별 판정을 반환한다. 상태·판정·측정값의 원본은 정책 및 상태 §3.5의 진행 조회 규칙을 따른다. Problem이 보유한 요청 원본·결과 반영 여부를 대신 판단하거나 조회를 계기로 재실행하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `X-Correlation-Id` | N | `problem-validation-2001` | 요청 추적 ID 전달 |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `validationId` | Path | string | Y | — | 양의 BIGINT 범위 검증 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | JSON 응답 본문 |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 공통 성공 래퍼 없이 반환한다. 아래 필드는 null인 경우에도 포함하고 tests는 항상 배열이다. 대표 verdict 필드는 두지 않는다.
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `validationId` | string | 조회한 검증 작업 ID |
+    | `problemRevisionId` | string | 요청에 고정된 회차 ID |
+    | `language` | string | 요청 언어: `java` / `python3` / `cpp` |
+    | `status` | string | `QUEUED` / `RUNNING` / `RETRY_WAITING` / `PASSED` / `REJECTED` / `ERROR`. `REQUESTED`는 Judge가 반환하지 않음 |
+    | `tests` | object[] | 고정 testOrder 오름차순의 알려진 테스트 목록. 목록 미확보는 []. 현재 시도 결과의 공개 조건은 정책 및 상태 §3.5를 따름 |
+    | `tests[].testOrder` | integer | 1부터 시작하는 고정 테스트 순서 |
+    | `tests[].verdict` | string 또는 null | `AC` / `WA` / `TLE` / `MLE` / `RE` / `CE` / `SYSTEM_ERROR`. 미판정·이전 시도 결과는 null. SYSTEM_ERROR는 코드 오답이 아닌 시스템 실패 |
+    | `tests[].timeMs` | integer 또는 null | 현재 시도의 측정 CPU 시간(ms). 미측정·이전 시도 결과는 null |
+    | `tests[].memoryKb` | integer 또는 null | 현재 시도의 측정 메모리(KiB). 미측정·이전 시도 결과는 null |
+    | `maxTimeMs` | integer 또는 null | 종결한 최종 시도의 측정 가능한 최대 CPU 시간(ms). 비종결·실행 전 종결·측정값 없음은 null |
+    | `message` | string 또는 null | `REJECTED`·`ERROR`의 정제한 설명. 그 외 상태는 null. 코드·테스트 원문·외부 응답·스택 추적은 포함하지 않음 |
+    | `runtimeKey` | string 또는 null | `PASSED`에서 실제 사용한 실행 환경 키. 그 외 상태는 null |
+    | `runnerVersion` | string 또는 null | `PASSED`의 최종 시도에 기록한 생성기 참고 식별 정보. 그 외 상태는 null |
+
+    ```json
+    {
+      "validationId": "2001",
+      "problemRevisionId": "1001",
+      "language": "java",
+      "status": "QUEUED",
+      "tests": [],
+      "maxTimeMs": null,
+      "message": null,
+      "runtimeKey": null,
+      "runnerVersion": null
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 검증 ID가 양의 BIGINT 범위가 아님
+    - `PROBLEM_VALIDATION_NOT_FOUND`(404) / Judge에 해당 검증 작업이 없음
+    - `COMMON_INTERNAL_SERVER_ERROR`(500) / DB 조회 실패 또는 저장된 종결 결과의 무결성 오류. 작업 없음 404로 변환하지 않음
+- **동시성/멱등 보장:** 읽기 전용으로 작업·현재 테스트 결과·최종 시도·실행 환경을 같은 조회 스냅샷에서 읽는다. 행 잠금·상태 변경·원격 호출·재시도 지시를 하지 않는다.
+- **발행:** 없음
+- **외부 의존:** 없음
+- **프론트 계약:** 없음. Problem의 §2.3.11이 조회 결과를 조합한다.
+- **비고:** Problem은 요청 원본이 존재하고 이 API가 작업 없음 404를 반환한 경우만 `REQUESTED`로 표시한다. 응답의 검증 ID·회차·언어 불일치, 통신 실패와 5xx는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)으로 처리한다. 실행 환경 키와 생성기 참고 정보의 의미는 정책 및 상태 §3.2를 따르며, 이 조회로 Problem의 통과 프로필이나 `resultApplied`를 갱신하지 않는다.
+
+---
+
+## 4. 모의 코테·대회 (contest)
+
+> 작성: 담당 C · 서비스: `contest-service`
+> 
+
+### 4.0 개요
+
+| 항목 | 값 |
+| --- | --- |
+| 외부 경로 | `/api/v1/studies/{studyId}/exams`, `/api/v1/exams/**`, `/api/v1/contests/**`, `/api/v1/admin/exams/**`, `/api/v1/admin/contests/**` |
+| 내부 경로 | `/internal/v1/contest/**`, `/internal/v1/exams/{examId}/rejudge-eligibility` |
+| 소유 테이블 | 스키마 `contest` |
+| 시간 판정 | 모든 시작·종료·저장·제출 유효성은 서버 시각과 `personalEndsAt` 비교로 판정한다. 클라이언트 타이머는 표시용이며, 서버 시각 필드는 `serverNow`로 통일한다 |
+| 제출 경로 | 접수(`received_at` 기록) → Outbox → SQS `exam-submission-queue` → judge. 결과는 `ExamSubmissionJudged`·`ContestSubmissionJudged`로 받는다 |
+| 공개 범위 | 시험: `IN_PROGRESS` 공개 테스트 결과만 → `CLOSED` 잠정 점수·순위(화면) → `FINALIZED` 확정(알림). 대회: 판정 즉시 공개 |
+| 순위 | Redis Sorted Set 조회용, 원천은 DB 결과 테이블. 확정 시 DB로 재계산 |
+| 이벤트 발행 | `ExamParticipantRegistered`, `ExamStarted`, `ExamClosed`, `ExamFinalized`, `ExamUpdated`, `ExamCanceled`, `Contest*` 동일 계열, `ExamSubmissionRequested`, `ContestSubmissionRequested` |
+
+### 4.1 외부 API — 시험 생성·조회·변경
+
+#### 4.1.1 시험 생성
+
+- **Method / URI:** `POST /api/v1/studies/{studyId}/exams`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + 해당 스터디 `LEADER`·`MANAGER`
+- **대응 테이블:** `exams`, `exam_problems`, `study_membership_replicas`, `contest_resource_guards`, `outbox_events`
+- **설명:** 스터디 시험(`FIXED`)을 만들고 각 문제의 현재 공개 회차를 고정한다. `STUDY` 가드가 `PREPARED`/`BLOCKED`이거나 `CLOSED` 스터디면 `EXAM_STUDY_CLOSED`(409). 기본 3문제·90분·100점.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `studyId` | string | Y | Path · 식별자 문자열 |
+- **요청 바디:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `title` | string | Y | 제목 |
+    | `mode` | string | Y | FIXED |
+    | `startsAt` | string (date-time) | Y | 시작 시각 |
+    | `endsAt` | string (date-time) | Y | 전체 종료 시각 |
+    | `problems` | object[] | Y | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
+    | `problems[].problemId` | string | Y | 문제 ID 문자열 |
+    | `problems[].score` | string | Y | 소수점 둘째 자리 점수 문자열 |
+    | `problems[].displayOrder` | integer | Y | 1부터 문제 수까지 연속된 표시 순서 |
+    
+    ```json
+    {
+      "title": "10월 1주차 모의 코테",
+      "mode": "FIXED",
+      "startsAt": "2026-10-20T20:00:00+09:00",
+      "endsAt": "2026-10-20T21:30:00+09:00",
+      "problems": [
+        { "problemId": "101", "score": "30.00", "displayOrder": 1 },
+        { "problemId": "102", "score": "30.00", "displayOrder": 2 },
+        { "problemId": "103", "score": "40.00", "displayOrder": 3 }
+      ]
+    }
+    ```
+    
+    - `title` 1~200자, `mode`는 `FIXED`만 허용, `problems` 1~20개 (중복 `problemId` 불가), `displayOrder`는 1부터 문제 수까지 연속, `startsAt`은 현재 이후, `endsAt > startsAt`, 시험 시간 1~180분, `score` 0.01~9999.99 소수점 둘째 자리 문자열, 배점 합계 9999.99 이하
+    - `startsAt`·`endsAt`을 서울 시간으로 변환했을 때 연도가 1000~9999 범위를 벗어나면 `COMMON_INVALID_REQUEST`(400)를 반환한다.
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (201):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `examId` | string | 시험 ID 문자열 |
+    | `studyId` | string | 스터디 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `examRevision` | string | 시험 설정 변경 버전 문자열 |
+    | `version` | string | 조회한 낙관적 락 버전 문자열 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `startsAt` | string (date-time) | 시작 시각 |
+    | `endsAt` | string (date-time) | 전체 종료 시각 |
+    | `totalScore` | string | 배점 합계 문자열 |
+    | `problems` | object[] | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
+    | `problems[].problemId` | string | 문제 ID 문자열 |
+    | `problems[].problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
+    | `problems[].revisionNumber` | integer | 문제의 수정 회차 번호 |
+    | `problems[].score` | string | 배점 문자열. 0.01~9999.99 |
+    | `problems[].displayOrder` | integer | 1부터 문제 수까지 연속된 표시 순서 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "시험이 생성되었습니다.",
+      "data": {
+        "examId": "55",
+        "studyId": "12",
+        "status": "SCHEDULED",
+        "examRevision": "1",
+        "version": "0",
+        "resultRevision": "0",
+        "startsAt": "2026-10-20T20:00:00+09:00",
+        "endsAt": "2026-10-20T21:30:00+09:00",
+        "totalScore": "100.00",
+        "problems": [
+          {
+            "problemId": "101",
+            "problemRevisionId": "1001",
+            "revisionNumber": 1,
+            "score": "30.00",
+            "displayOrder": 1
+          }
+        ]
+      }
+    }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `EXAM_STUDY_CLOSED`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `CONTEST_DEPENDENCY_UNAVAILABLE`(503), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `COMMON_INVALID_REQUEST`(400)
+- **외부 의존:**
+    - `GET /internal/v1/problems/summaries?ids=` (problem) — `GENERAL`·`PUBLIC` 및 현재 `problemRevisionId` 검증. 실패 시 503
+    - `GET /internal/v1/studies/{studyId}/members` (study) — 역할·스터디 상태 검증. 실패 시 503
+    - `GET /internal/v1/members/{memberId}/status` (member) — 회원 상태 확인. 실패 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **발행:** `ExamParticipantRegistered`는 참가 등록 시 (생성 단계에서는 불필요)
+
+#### 4.1.2 스터디 시험 목록
+
+- **Method / URI:** `GET /api/v1/studies/{studyId}/exams`
+- **인증:** 로그인 필요 + 현재 `APPROVED` 구성원 또는 해당 시험의 활성 참가자 본인
+- **대응 테이블:** `exams`, `exam_participants`
+- **설명:** 현재 `APPROVED` 구성원은 스터디의 모든 시험을 조회한다. 스터디 탈퇴자는 본인의 활성 참가가 있는 시험만 조회하며 취소 이력만 있으면 조회할 수 없다. 조회 권한이 없으면 403을 반환하고, 권한 범위에서 상태 필터·페이지에 맞는 시험이 없으면 200과 빈 페이지를 반환한다. 시작 전에는 문제 식별자·본문을 반환하지 않는다.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `studyId` | string | Y | — | Path · 스터디 ID (식별자 문자열) |
+    | `status` | string | N | — | Query · 시험 상태 필터 — 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `page` | int | N | 0 | Query · 0부터 시작 |
+    | `size` | int | N | 20 | Query · 최대 100. 기본 20 |
+    | `sort` | string | N | `startsAt,desc` | Query · 허용: `startsAt`, `createdAt` |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `content` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `content[].examId` | string | 시험 ID |
+    | `content[].title` | string | 제목 |
+    | `content[].status` | string | 시험 상태 |
+    | `content[].startsAt` | string (date-time) | 시작 시각 |
+    | `content[].endsAt` | string (date-time) | 전체 종료 시각 |
+    | `content[].problemCount` | integer | 편입된 문제 수 |
+    | `content[].myParticipantStatus` | string 또는 null | 본인의 활성 참가 상태. 활성 참가가 없으면 null |
+    | `page` · `size` · `totalElements` · `totalPages` · `hasNext` | — | 공통 목록 필드 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "examId": "55",
+            "title": "10월 1주차 모의 코테",
+            "status": "SCHEDULED",
+            "startsAt": "2026-10-20T20:00:00+09:00",
+            "endsAt": "2026-10-20T21:30:00+09:00",
+            "problemCount": 3,
+            "myParticipantStatus": null
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 1,
+        "totalPages": 1,
+        "hasNext": false
+      }
+    }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403)
+
+#### 4.1.3 시험 상세
+
+- **Method / URI:** `GET /api/v1/exams/{examId}`
+- **인증:** 로그인 필요 + 현재 스터디 `APPROVED` 구성원 또는 해당 시험의 활성 참가자 본인
+- **대응 테이블:** `exams`, `exam_problems`, `exam_participants`
+- **설명:** 스터디 탈퇴자도 해당 시험에 활성 참가가 있으면 조회할 수 있으며 취소 이력만 있으면 조회할 수 없다. 시작 전에는 문제 식별자·본문을 포함하지 않는다. 상세 조회만으로 입장을 기록하지 않는다.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `examId` | string | Y | Path |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `examId` | string | 시험 ID 문자열 |
+    | `studyId` | string | 스터디 ID 문자열 |
+    | `title` | string | 제목 |
+    | `mode` | string | FIXED |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `startsAt` | string (date-time) | 시작 시각 |
+    | `endsAt` | string (date-time) | 전체 종료 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    | `totalScore` | string | 배점 합계 문자열 |
+    | `problemCount` | integer | 편입된 문제 수 |
+    | `examRevision` | string | 시험 설정 변경 버전 문자열 |
+    | `version` | string | 조회한 낙관적 락 버전 문자열 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `myParticipation` | object 또는 null | 본인의 활성 참가 정보. 미등록은 null |
+    | `myParticipation.participantId` | string | 참가 ID 문자열 |
+    | `myParticipation.status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `myParticipation.enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
+    | `myParticipation.personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
+    
+    ```json
+    	{
+    	  "success": true,
+    	  "message": null,
+    	  "data": {
+    	    "examId": "55",
+    	    "studyId": "12",
+    	    "title": "10월 1주차 모의 코테",
+    	    "mode": "FIXED",
+    	    "status": "SCHEDULED",
+    	    "startsAt": "2026-10-20T20:00:00+09:00",
+    	    "endsAt": "2026-10-20T21:30:00+09:00",
+    	    "serverNow": "2026-10-10T09:00:00+09:00",
+    	    "totalScore": "100.00",
+    	    "problemCount": 3,
+    	    "examRevision": "1",
+    	    "version": "0",
+    	    "resultRevision": "0",
+    	    "myParticipation": {
+    	      "participantId": "411",
+    	      "status": "REGISTERED",
+    	      "enteredAt": null,
+    	      "personalEndsAt": "2026-10-20T21:30:00+09:00"
+    	    }
+    	  }
+    	}
+    ```
+    
+- **에러:**
+    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403)
+
+#### 4.1.4 시험 수정
+
+- **Method / URI:** `PATCH /api/v1/exams/{examId}`
+- **인증:** 로그인 필요 + 현재 `LEADER`·`MANAGER`
+- **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `contest_resource_guards`, `outbox_events`
+- **설명:** `SCHEDULED` 상태이고 양쪽 `startsAt`이 모두 서버 시간보다 미래일 때만 허용. 전체 설정을 전달한다. 문제를 다시 선택하면 그 시점 현재 회차로 고정하며 참가자 `personalEndsAt`을 함께 갱신. `examRevision`·`version` +1.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 바디:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `version` | string | Y | 조회한 낙관적 락 버전 문자열 |
+    | `title` | string | Y | 제목 |
+    | `startsAt` | string (date-time) | Y | 시작 시각 |
+    | `endsAt` | string (date-time) | Y | 전체 종료 시각 |
+    | `problems` | object[] | Y | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
+    | `problems[].problemId` | string | Y | 문제 ID 문자열 |
+    | `problems[].score` | string | Y | 소수점 둘째 자리 점수 문자열 |
+    | `problems[].displayOrder` | integer | Y | 1부터 문제 수까지 연속된 표시 순서 |
+    
+    ```json
+    {
+      "version": "0",
+      "title": "10월 1주차 모의 코테 (수정)",
+      "startsAt": "2026-10-20T20:00:00+09:00",
+      "endsAt": "2026-10-20T21:30:00+09:00",
+      "problems": [
+        { "problemId": "101", "score": "30.00", "displayOrder": 1 },
+        { "problemId": "102", "score": "30.00", "displayOrder": 2 },
+        { "problemId": "103", "score": "40.00", "displayOrder": 3 }
+      ]
+    }
+    ```
+    
+- 입력 제한은 시험 생성(4.1.1)과 같으며 `mode`는 기존 시험의 `FIXED`를 유지한다.
+- 시험 생성·수정은 원격 회원 조회를 저장 트랜잭션 전에 끝내고, 저장 트랜잭션에서 Contest 회원 복제본을 잠가 `ACTIVE` 상태를 다시 확인한다. 활성 복제본이 없으면 `AUTH_ACCESS_DENIED`(403)를 반환한다.
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    ```json
+    {
+      "success": true,
+      "message": "시험이 수정되었습니다.",
+      "data": {
+        "examId": "55",
+        "studyId": "12",
+        "status": "SCHEDULED",
+        "examRevision": "2",
+        "version": "1",
+        "resultRevision": "0",
+        "startsAt": "2026-10-20T20:00:00+09:00",
+        "endsAt": "2026-10-20T21:30:00+09:00",
+        "totalScore": "100.00",
+        "problems": [
+          {
+            "problemId": "101",
+            "problemRevisionId": "1001",
+            "revisionNumber": 1,
+            "score": "30.00",
+            "displayOrder": 1
+          },
+          {
+            "problemId": "102",
+            "problemRevisionId": "1002",
+            "revisionNumber": 1,
+            "score": "30.00",
+            "displayOrder": 2
+          },
+          {
+            "problemId": "103",
+            "problemRevisionId": "1003",
+            "revisionNumber": 1,
+            "score": "40.00",
+            "displayOrder": 3
+          }
+        ]
+      }
+    }
+    ```
+    
+    - 시험 생성(4.1.1) 응답 본문 구조와 같음
+- **에러:**
+    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFICATION_CLOSED`(409), `EXAM_REVISION_CONFLICT`(409), `EXAM_STUDY_CLOSED`(409), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `COMMON_INVALID_REQUEST`(400)
+    - 스터디·문제 조회 실패 또는 불완전한 응답은 `CONTEST_DEPENDENCY_UNAVAILABLE`(503), 회원 상태 조회 실패는 `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** 시험 생성(4.1.1)과 같은 스터디 구성원·문제 선택 조회와 회원 상태 조회를 수행한다.
+- **발행:** `ExamUpdated` — 전체 문제 목록·시간·배점·활성 등록자 ID 포함
+
+#### 4.1.5 시험 취소
+
+- **Method / URI:** `POST /api/v1/exams/{examId}/cancellation`
+- **인증:** 로그인 필요 + 현재 `LEADER`·`MANAGER`
+- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `outbox_events`
+- **설명:** `SCHEDULED`에서만 `CANCELED`로 전이. 이미 `CANCELED`면 변경 없이 현재 상태 반환. 참가 이력과 코드·제출은 삭제하지 않는다.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 바디:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `version` | string | Y | 조회한 낙관적 락 버전 문자열 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+    
+    ```json
+    {
+      "version": "0",
+      "reason": "일정 변경으로 인한 취소"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `examId` | string | 시험 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `canceledAt` | string (date-time) | 취소 시각 |
+    | `examRevision` | string | 시험 설정 변경 버전 문자열 |
+    | `version` | string | 조회한 낙관적 락 버전 문자열 |
+    
+    ```json
+    	{
+    	  "success": true,
+    	  "message": "시험이 취소되었습니다.",
+    	  "data": {
+    	    "examId": "55",
+    	    "status": "CANCELED",
+    	    "canceledAt": "2026-10-10T09:00:00+09:00",
+    	    "examRevision": "2",
+    	    "version": "1"
+    	  }
+    	}
+    ```
+    
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 시험 식별자·버전·사유 유효성 검증 실패
+    - `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `EXAM_MODIFICATION_CLOSED`(409), `EXAM_REVISION_CONFLICT`(409)
+    - `CONTEST_DEPENDENCY_UNAVAILABLE`(503) / 현재 스터디 관리자 권한 확인에 필요한 외부 의존 조회 실패 또는 불완전한 응답
+- **발행:** `ExamCanceled` — 취소 시각·사유·활성 등록자 ID 스냅샷 포함
+
+### 4.2 외부 API — 시험 참가·Draft·제출·결과
+
+#### 4.2.1 시험 참가 등록
+
+- **Method / URI:** `POST /api/v1/exams/{examId}/participants`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + `ACTIVE` 회원이며 등록 시 `APPROVED` 구성원 복제본이 있어야 한다. 없으면 `EXAM_NOT_ELIGIBLE`(403)
+- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `study_membership_replicas`, `member_replicas`, `contest_resource_guards`, `outbox_events`
+- **설명:** 종료 전 등록 가능. 기존 활성 참가가 있으면 `200`으로 기존 반환, 새 등록은 `201`. `CANCELED` 문맥에는 등록 불가.
+    - 시험별 활성 참가가 10,000명이면 신규 등록을 `EXAM_PARTICIPANT_LIMIT_REACHED`(409)로 거절한다. 취소된 참가는 세지 않으며 기존 활성 참가의 재요청은 기존 응답을 유지한다.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200/201):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `participantId` | string | 참가 ID 문자열 |
+    | `examId` | string | 시험 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
+    | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "참가 등록이 완료되었습니다.",
+      "data": {
+        "participantId": "411",
+        "examId": "55",
+        "status": "REGISTERED",
+        "enteredAt": null,
+        "personalEndsAt": "2026-10-20T21:30:00+09:00",
+        "serverNow": "2026-10-10T09:00:00+09:00",
+        "participantRevision": "1"
+      }
+    }
+    ```
+    
+- **에러:**
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_ELIGIBLE`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `EXAM_PARTICIPANT_LIMIT_REACHED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `CONTEST_OPERATION_BLOCKED`(409)
+- **동시성 보장:** `MEMBER` 가드·시험·참가자 순으로 잠근다. 회원별 활성 참가 1건을 보장하고 시험 행 잠금 아래 신규 등록 한도를 확인한다.
+- **발행:** `ExamParticipantRegistered` — 새 등록 시(`201`)만
+- **외부 의존:** `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 상태 조회 실패·불완전 응답 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 자원 잠금 전에 수행한다.
+
+#### 4.2.2 시험 입장
+
+- **Method / URI:** `POST /api/v1/exams/{examId}/start`
+- **인증:** 로그인 필요 + 활성 등록 본인. `startsAt <= 서버 시간 <= personalEndsAt`이고 개인 종료 전
+- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `contest_resource_guards`, `member_replicas`
+- **설명:** 최초 `enteredAt` 기록·`STARTED` 전이. 재입장은 최초 `enteredAt` 유지. 등록 후 스터디 탈퇴해도 입장·제출 자격은 유지.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `participantId` | string | 참가 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
+    | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
+    
+    ```json
+    	{
+    	  "success": true,
+    	  "message": null,
+    	  "data": {
+    	    "participantId": "411",
+    	    "status": "STARTED",
+    	    "enteredAt": "2026-10-20T20:00:30+09:00",
+    	    "personalEndsAt": "2026-10-20T21:30:00+09:00",
+    	    "serverNow": "2026-10-20T20:00:30+09:00",
+    	    "participantRevision": "2"
+    	  }
+    	}
+    ```
+    
+- **동시성 보장:** `MEMBER` 가드·시험·참가자 잠금
+- **에러:**
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_CLOSED`(409), `EXAM_ALREADY_FINISHED`(409), `CONTEST_OPERATION_BLOCKED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 상태 조회 실패·불완전 응답 시 `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 자원 잠금 전에 수행한다.
+
+#### 4.2.3 시험 문제 목록·본문
+
+- **Method / URI:** `GET /api/v1/exams/{examId}/problems`
+- **인증:** 로그인 필요 + 입장한 본인. 시작 전 `EXAM_NOT_STARTED`(403). 문제 조회만으로 입장시키지 않는다.
+- **대응 테이블:** `exams`, `exam_problems`, `exam_participants`
+- **설명:** B의 고정 회차 본문 계약으로 조회. 숨김 테스트·정답 코드는 포함하지 않는다. 종료 후 본인 복기도 같은 회차를 사용.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `examId` | string | 시험 ID 문자열 |
+    | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    | `problems` | object[] | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
+    | `problems[].problemId` | string | 문제 ID 문자열 |
+    | `problems[].problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
+    | `problems[].revisionNumber` | integer | 문제의 수정 회차 번호 |
+    | `problems[].title` | string | 제목 |
+    | `problems[].score` | string 또는 null | 소수점 둘째 자리 점수 문자열 |
+    | `problems[].displayOrder` | integer | 1부터 문제 수까지 연속된 표시 순서 |
+    | `problems[].body` | string | description·constraints·examples를 조합한 화면 본문 |
+    | `problems[].functionSpec` | object | 고정 회차의 함수 명세. B 공통 데이터 형식 참조 |
+    | `problems[].executionLimits` | object | 고정 회차의 실행 제한. B 공통 데이터 형식 참조 |
+    | `problems[].sampleTests` | object[] | B samples를 변환한 공개 실행 예제 목록 |
+    | `problems[].imageIds` | string[] | 고정 회차 본문에 연결된 이미지 ID 목록 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "examId": "55",
+        "personalEndsAt": "2026-10-20T21:30:00+09:00",
+        "serverNow": "2026-10-20T20:05:00+09:00",
+        "problems": [
+          {
+            "problemId": "101",
+            "problemRevisionId": "1001",
+            "revisionNumber": 1,
+            "title": "두 수의 합",
+            "score": "30.00",
+            "displayOrder": 1,
+            "body": "## 문제\n두 정수 a와 b의 합을 반환하세요.",
+            "functionSpec": { "name": "solution", "parameters": [{ "name": "a", "type": { "kind": "INT32" } }], "returnType": { "kind": "INT32" } },
+            "executionLimits": { "timeMs": 2000, "memoryKb": 262144, "wallTimeMs": 7000 },
+            "sampleTests": [{ "testAssetId": "501", "argumentTexts": { "a": "1", "b": "2" }, "expectedReturnText": "3" }],
+            "imageIds": ["701"]
+          }
+        ]
+      }
+    }
+    ```
+    
+- **에러:**
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content` (problem) — 실패 시 503
+
+#### 4.2.4 시험 Draft 저장
+
+- 신규 저장은 원문 UTF-8 64KiB 이하여야 하고, 공통 직렬화기로 공통 헤더와 업무 필드를 합친 향후 채점 요청 이벤트도 최대 유효 필드 길이 기준 256KiB 이하여야 한다. 초과 시 `CODE_TOO_LARGE`(413)를 반환하고 기존 Draft는 보존한다. 클라이언트는 해당 코드를 서버 미저장 상태로 유지하고 오류를 표시한다. 이 전달 크기 조건은 Contest에 추가되는 제한이며 Judge의 원문 크기 제한과 별개다. 빈 Draft와 오래된 순번의 기존 처리 규칙은 유지한다.
+
+- **Method / URI:** `PUT /api/v1/exams/{examId}/drafts/{problemId}`
+- **인증:** 로그인 필요 + `ACTIVE`·`STARTED` 본인
+- **Rate Limit:** 참가자당 초당 1회 (초과 요청은 마지막 요청만 반영하는 서버 버퍼 처리)
+- **버퍼 응답:** 같은 버퍼에서 밀린 요청은 마지막 요청의 처리 완료 뒤 `applied=false`와 해당 문제의 실제 서버 최대 `seq`를 반환한다. 저장된 Draft가 없으면 `serverSeq`는 `"0"`, `savedAt`은 `null`이다.
+- **대응 테이블:** `exams`, `exam_participants`, `exam_drafts`, `member_replicas`
+- **설명:** 참가자 잠금 아래 문제의 전체 언어 최대 `seq`보다 큰 경우 해당 언어 Draft를 저장. 같거나 작으면 무시하고 `applied: false` 반환. 직접 제출은 이 버퍼를 우회해 최신 코드를 트랜잭션에서 저장. 저장 성공은 DB 커밋 후 응답하며 개인 마감 판정은 DB §6.4.1을 따른다.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+    | `problemId` | string | Y | — | Path · 문제 ID 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
+    | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
+    | `seq` | string | Y | 문제별 전체 언어 공통 증가 순번 문자열 |
+    
+    ```json
+    {
+      "language": "java",
+      "sourceCode": "class Solution { public int solution(int a, int b) { return a + b; } }",
+      "seq": "15"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `applied` | boolean | 신규 Draft가 실제 저장됐는지 |
+    | `serverSeq` | string | 서버의 전체 언어 최대 순번 문자열 |
+    | `savedAt` | string (date-time) 또는 null | 서버 Draft 저장 시각. 버퍼에서 밀린 요청의 문제에 저장된 Draft가 없으면 null |
+    | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "applied": true,
+        "serverSeq": "15",
+        "savedAt": "2026-10-20T20:30:58+09:00",
+        "personalEndsAt": "2026-10-20T21:30:00+09:00",
+        "serverNow": "2026-10-20T20:30:58+09:00"
+      }
+    }
+    ```
+    
+- **에러:**
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_PROBLEM_NOT_INCLUDED`(404), `MEMBER_SUSPENDED`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400), `COMMON_INVALID_REQUEST`(400), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+
+#### 4.2.5 시험 직접 제출
+
+- 신규 접수에는 §4.2.4의 원문·이벤트 크기 조건을 적용한다. 초과하면 `CODE_TOO_LARGE`(413)를 반환하고 기존 Draft·접수·Outbox를 보존한다. 이미 접수한 동일 본문 재요청은 새 크기 조건을 소급 적용하지 않고 기존 결과를 반환한다.
+
+- **Method / URI:** `POST /api/v1/exams/{examId}/submissions`
+- **인증:** 신규 접수는 `ACTIVE`·`STARTED` 등록 본인. 이미 접수한 동일 요청은 `FINISHED`·`SUSPENDED`에서도 반환
+- **Idempotency:** 같은 `(participantId, problemId, seq)` 기존 제출이면 동일 본문은 기존 `examSubmissionId` 반환, 다른 본문은 `IDEMPOTENCY_KEY_CONFLICT`(422)
+- **Rate Limit:** 회원당 분당 10회, 같은 문제 5초 간격
+- **대응 테이블:** `exams`, `exam_participants`, `exam_problems`, `exam_drafts`, `exam_submissions`, `member_replicas`, `outbox_events`
+- **설명:** `receivedAt`은 참가자 행 잠금 획득 직후 서버에서 기록. 신규 제출은 시간·언어·고정 회차 검증 후 Draft·`exam_submissions`·Outbox를 한 트랜잭션에 저장.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `problemId` | string | Y | 문제 ID 문자열 |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
+    | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
+    | `seq` | string | Y | 문제별 전체 언어 공통 증가 순번 문자열 |
+    
+    ```json
+    {
+      "problemId": "101",
+      "language": "java",
+      "sourceCode": "class Solution { public int solution(int a, int b) { return a + b; } }",
+      "seq": "16"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (202):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `examSubmissionId` | string | C 시험 접수 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `receivedAt` | string (date-time) | 잠금 안에서 기록한 서버 접수 시각 |
+    | `draftSeq` | string | 접수에 사용한 Draft 순번 문자열 |
+    | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "제출이 접수되었습니다.",
+      "data": {
+        "examSubmissionId": "4001",
+        "status": "ACCEPTED",
+        "receivedAt": "2026-10-20T21:29:59.123456+09:00",
+        "draftSeq": "16",
+        "personalEndsAt": "2026-10-20T21:30:00+09:00"
+      }
+    }
+    ```
+    
+- **에러:**
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_CLOSED`(409), `EXAM_CANCELED`(409), `EXAM_ALREADY_FINISHED`(409), `DRAFT_SEQ_CONFLICT`(409), `IDEMPOTENCY_KEY_CONFLICT`(422), `SUBMISSION_RATE_LIMITED`(429), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400)
+- **발행:** `ExamSubmissionRequested`
+
+#### 4.2.6 시험 수동 종료
+
+- 기존 Draft가 원문·채점 요청 이벤트 크기 제한을 넘거나 고정 회차가 지원하지 않는 언어이면 원문·언어·사유를 보존한 `AUTO` 접수를 `FAILED`로 기록하고 참가자를 종료한다. `dispatch_failure_code`는 각각 `CODE_TOO_LARGE`·`UNSUPPORTED_LANGUAGE`이며, `judge_attempt=0`, `is_zero_confirmed=false`로 Judge 연결·요청 스냅샷·Outbox를 만들지 않는다. 정상 Draft의 접수·Outbox, 실패 접수, 완료 표식·`FINISHED`는 같은 트랜잭션에 저장한다. 관리자 0점 종결(§4.6.4) 전까지 결과 확정을 보류하며 코드를 자르거나 이전 코드로 대체하거나 자동으로 0점을 확정하지 않는다. 지원 언어 조회 결과가 없거나 잠금 후 고정 회차와 일치하지 않으면 종료를 롤백하고 재시도로 다시 확인한다.
+
+- **Method / URI:** `POST /api/v1/exams/{examId}/finish`
+- **인증:** 로그인 필요 + 입장 본인
+- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `exam_drafts`, `exam_submissions`, `outbox_events`
+- **설명:** 참가자 잠금 아래 `personalEndsAt = min(현재 값, 서버 시간)` 확정 후 같은 트랜잭션에서 최신 Draft 자동 제출·`autoSubmittedAt`·`FINISHED`·상태 이력 저장. 실패 시 전부 롤백. `FINISHED` 재요청은 기존 값 반환. 수동 종료는 개인 마감이며 시험 전체 `CLOSED`/힌트 차단 해제가 아님.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `participantId` | string | 참가 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
+    | `autoSubmittedAt` | string (date-time) | 개인 자동 제출 처리 완료 시각 |
+    | `autoSubmissionIds` | string[] | 수동 종료 시 생성한 자동 접수 ID 목록 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "participantId": "411",
+        "status": "FINISHED",
+        "personalEndsAt": "2026-10-20T21:10:00+09:00",
+        "autoSubmittedAt": "2026-10-20T21:10:00+09:00",
+        "autoSubmissionIds": ["4002", "4003"]
+      }
+    }
+    ```
+    
+- **에러:**
+    - `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403)
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Problem 지원 언어 조회에 실패하거나 응답의 지원 언어 목록이 비어 있는 등 응답이 유효하지 않은 경우.
+    - `UNSUPPORTED_LANGUAGE`(400) / 시험 잠금 후 자동 제출 대상의 지원 언어 조회 결과가 없거나 조회한 회차가 현재 고정 회차와 일치하지 않는 경우. 유효한 지원 언어 목록에 기존 Draft의 언어가 없으면 위 실패 접수로 보존한다.
+- **발행:** `ExamSubmissionRequested` — 언어·크기 검사를 통과한 자동 제출 문제별
+
+#### 4.2.7 내 시험 결과
+
+- **Method / URI:** `GET /api/v1/exams/{examId}/results/me`
+- **인증:** 로그인 필요 + 등록 본인
+- **대응 테이블:** `exams`, `exam_participants`, `exam_submissions`, `exam_problem_results`, `result_snapshots`
+- **설명:** 시험 전체 `CLOSED` 전에는 `score`/`rank`/`progress`=null, `problems`는 빈 배열. `CLOSED` 이후 잠정 결과(`PROVISIONAL`), `FINALIZED` 이후 확정 결과. 개인 수동 종료 후에도 전체 종료 전까지 같은 제한 적용.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `resultStatus` | string | HIDDEN / PROVISIONAL / FINALIZED. 문맥별 공개 규칙 적용 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `score` | string 또는 null | 소수점 둘째 자리 점수 문자열 |
+    | `rank` | integer 또는 null | 공동 순위. 미집계는 null |
+    | `isRanked` | boolean | 순위 집계 대상 여부 |
+    | `progress` | object 또는 null | 종결 제출 수·전체 접수 제출 수. 시험 전체 `CLOSED` 전에는 null |
+    | `progress.terminalCount` | integer | 종결 제출 수 |
+    | `progress.totalSubmissionCount` | integer | 전체 유효 접수 제출 수 |
+    | `problems` | object[] | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
+    | `problems[].problemId` | string | 문제 ID 문자열 |
+    | `problems[].lastValidExamSubmissionId` | string 또는 null | 마지막 유효 시험 접수 ID. 미제출은 null |
+    | `problems[].verdict` | string 또는 null | 최종 판정. 미산정·공개 제한은 null |
+    | `problems[].score` | string 또는 null | 소수점 둘째 자리 점수 문자열 |
+    | `problems[].passedCount` | integer 또는 null | 통과 테스트 수. 미산정·공개 제한은 null |
+    | `problems[].totalCount` | integer 또는 null | 전체 테스트 수. 미산정·공개 제한은 null |
+    | `problems[].pending` | boolean | 마지막 유효 제출의 채점 미종결 여부 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "resultStatus": "PROVISIONAL",
+        "resultRevision": "3",
+        "score": "85.00",
+        "rank": 1,
+        "isRanked": true,
+        "progress": {
+          "terminalCount": 3,
+          "totalSubmissionCount": 5
+        },
+        "problems": [
+          {
+            "problemId": "101",
+            "lastValidExamSubmissionId": "4001",
+            "verdict": "AC",
+            "score": "30.00",
+            "passedCount": 12,
+            "totalCount": 12,
+            "pending": false
+          }
+        ]
+      }
+    }
+    ```
+    
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403)
+
+#### 4.2.8 시험 결과 순위
+
+- **Method / URI:** `GET /api/v1/exams/{examId}/results`
+- **인증:** 로그인 필요 + 활성 등록자 또는 현재 스터디 구성원
+- **대응 테이블:** `exams`, `exam_participants`, `exam_problem_results`, `member_replicas`, `result_snapshots`
+- **설명:** `CLOSED` 전 `EXAM_RESULT_NOT_AVAILABLE`(409). `isRanked=true`만 포함, 총점 내림차순·마지막 유효 제출 시간 오름차순, 완전 동점 공동 순위(1,1,3). `resultRevision`에 묶인 커서 페이지네이션이며 버전이 달라지면 `RESULT_CURSOR_EXPIRED`(409).
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+    | `after` | string | N | — | Query · 불투명 페이지 커서. 생략 시 첫 페이지 |
+    | `size` | integer | N | 20 | Query · 1~100. 기본 20 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `resultStatus` | string | HIDDEN / PROVISIONAL / FINALIZED. 문맥별 공개 규칙 적용 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `items[].memberId` | string | 회원 ID 문자열 |
+    | `items[].nickname` | string | 회원 표시 이름. 탈퇴자는 익명화 |
+    | `items[].score` | string 또는 null | 소수점 둘째 자리 점수 문자열 |
+    | `items[].rank` | integer 또는 null | 공동 순위. 미집계는 null |
+    | `items[].pending` | boolean | 마지막 유효 제출의 채점 미종결 여부 |
+    | `nextCursor` | string 또는 null | 다음 페이지 커서. 마지막 페이지는 null |
+    | `hasMore` | boolean | 다음 페이지 존재 여부 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "resultStatus": "PROVISIONAL",
+        "resultRevision": "3",
+        "items": [
+          {
+            "memberId": "7",
+            "nickname": "kim-dev",
+            "score": "85.00",
+            "rank": 1,
+            "pending": false
+          }
+        ],
+        "nextCursor": null,
+        "hasMore": false
+      }
+    }
+    ```
+    
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_RESULT_NOT_AVAILABLE`(409), `RESULT_CURSOR_EXPIRED`(409)
+
+#### 4.2.9 내 시험 제출 내역
+
+- **Method / URI:** `GET /api/v1/exams/{examId}/submissions`
+- **인증:** 로그인 필요 + 등록 본인
+- **대응 테이블:** `exams`, `exam_participants`, `exam_submissions`, `exam_problem_results`
+- **설명:** `CLOSED` 전 `status`는 `ACCEPTED`/`REQUESTED`까지만 표시하며 `verdict`/`score`/통과 수는 `null`. `FAILED`는 처리 장애 표시만.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+    | `problemId` | string | N | — | Query · 문제 ID 문자열 |
+    | `after` | string | N | — | Query · 불투명 페이지 커서. 생략 시 첫 페이지 |
+    | `size` | integer | N | 20 | Query · 1~100. 기본 20 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `items[].examSubmissionId` | string | C 시험 접수 ID 문자열 |
+    | `items[].problemId` | string | 문제 ID 문자열 |
+    | `items[].draftSeq` | string | 접수에 사용한 Draft 순번 문자열 |
+    | `items[].submissionType` | string | MANUAL / AUTO |
+    | `items[].receivedAt` | string (date-time) | 잠금 안에서 기록한 서버 접수 시각 |
+    | `items[].status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `items[].verdict` | string 또는 null | 최종 판정. 미산정·공개 제한은 null |
+    | `items[].score` | string 또는 null | 소수점 둘째 자리 점수 문자열 |
+    | `items[].passedCount` | integer 또는 null | 통과 테스트 수. 미산정·공개 제한은 null |
+    | `items[].totalCount` | integer 또는 null | 전체 테스트 수. 미산정·공개 제한은 null |
+    | `nextCursor` | string 또는 null | 다음 페이지 커서. 마지막 페이지는 null |
+    | `hasMore` | boolean | 다음 페이지 존재 여부 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "examSubmissionId": "4001",
+            "problemId": "101",
+            "draftSeq": "16",
+            "submissionType": "MANUAL",
+            "receivedAt": "2026-10-20T21:29:59.123456+09:00",
+            "status": "JUDGED",
+            "verdict": "AC",
+            "score": "30.00",
+            "passedCount": 12,
+            "totalCount": 12
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 3,
+        "totalPages": 1,
+        "hasNext": false
+      }
+    }
+    ```
+    
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403)
+
+#### 4.2.10 시험 참가 취소
+
+- **Method / URI:** `POST /api/v1/exams/{examId}/participants/me/cancellation`
+- **인증:** 로그인 필요 (회원·문맥 권한 적용). `SUSPENDED` 회원은 새로운 참가 취소를 할 수 없다.
+- **대응 테이블:** `exams`, `exam_participants`, `exam_participant_histories`, `member_replicas`, `outbox_events`
+- **설명:** 시작 전 `REGISTERED`만 `CANCELED`로 전이. 이미 취소됐으면 회원이 정지 상태여도 기존 취소를 반환한다. 시작 이후 `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409).
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `participantId` | string | 참가 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "참가가 취소되었습니다.",
+      "data": {
+        "participantId": "411",
+        "status": "CANCELED",
+        "participantRevision": "2"
+      }
+    }
+    ```
+    
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_PARTICIPATION_CANCELLATION_CLOSED`(409), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **발행:** `ExamParticipantCanceled`
+- **외부 의존:** 신규 취소는 `GET /internal/v1/members/{memberId}/status` (member, 1.7.1)로 회원 상태를 조회한다. 조회 실패·불완전 응답은 `COMMON_DEPENDENCY_UNAVAILABLE`(503)이며, 이미 취소된 참가의 재요청은 조회 없이 기존 결과를 반환한다. 원격 조회 중에는 잠금을 유지하지 않고 조회 후 참가 상태를 다시 확인한다.
+
+#### 4.2.11 시험 Draft 조회
+
+- **Method / URI:** `GET /api/v1/exams/{examId}/drafts/me`
+- **인증:** 로그인 필요 + 입장 본인. 종료 후에도 읽기 가능.
+- **대응 테이블:** `exams`, `exam_participants`, `exam_drafts`
+- **설명:** 재진입 시 문제·언어별 서버 Draft와 `seq` 반환. 클라이언트는 LocalStorage와 비교해 `seq`가 큰 쪽을 보여주고, LocalStorage가 크면 즉시 시험  Draft 저장(4.2.4)으로 저장.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `participantId` | string | 참가 ID 문자열 |
+    | `personalEndsAt` | string (date-time) | 개인 제출 마감 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    | `content` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `content[].problemId` | string | 문제 ID 문자열 |
+    | `content[].language` | string | `java` / `python3` / `cpp` |
+    | `content[].sourceCode` | string | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
+    | `content[].seq` | string | 문제별 전체 언어 공통 증가 순번 문자열 |
+    | `content[].savedAt` | string (date-time) | 서버 Draft 저장 시각 |
+    | `problemSequences` | object[] | 문제별 전체 언어 최고 seq 목록 |
+    | `problemSequences[].problemId` | string | 문제 ID 문자열 |
+    | `problemSequences[].serverSeq` | string | 서버의 전체 언어 최대 순번 문자열 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "participantId": "411",
+        "personalEndsAt": "2026-10-20T21:30:00+09:00",
+        "serverNow": "2026-10-20T20:31:00+09:00",
+        "content": [
+          {
+            "problemId": "101",
+            "language": "java",
+            "sourceCode": "class Solution { ... }",
+            "seq": "15",
+            "savedAt": "2026-10-20T20:30:58+09:00"
+          }
+        ],
+        "problemSequences": [
+          { "problemId": "101", "serverSeq": "15" },
+          { "problemId": "102", "serverSeq": "0" }
+        ]
+      }
+    }
+    ```
+    
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403)
+
+#### 4.2.12 시험 문제 이미지
+
+- **Method / URI:** `GET /api/v1/exams/{examId}/problems/{problemId}/images/{imageId}`
+- **인증:** 로그인 필요 + 입장한 본인. 시작 전 `EXAM_NOT_STARTED`(403). 문제 조회만으로 입장시키지 않는다.
+    - 시험 문제 목록·본문(4.2.3)과 동일
+- **대응 테이블:** `exams`, `exam_problems`, `exam_participants`
+- **설명:** 고정 `problemRevisionId`에 연결된 이미지인지 C와 B가 검증. 연결되지 않은 이미지는 404.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+    | `problemId` | string | Y | — | Path · 문제 ID 문자열 |
+    | `imageId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `image/*` | 원본 이미지 MIME 타입 |
+    | `Cache-Control` | `private, no-store` | 응답 캐시 금지 |
+- **응답  (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | 이미지 | binary | 고정 회차에 연결된 원본 이미지. JSON 래퍼 없음 |
+    - 이미지 바이너리 (`Content-Type: image/*`, `Cache-Control: private, no-store`
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_STARTED`(403), `EXAM_NOT_REGISTERED`(403), `PROBLEM_NOT_FOUND`(404)
+- **외부 의존:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}` (problem)
+
+#### 4.2.13 시험 Run
+
+- **Method / URI:** `POST /api/v1/exams/{examId}/problems/{problemId}/runs`
+- **인증:** 로그인 필요 + `ACTIVE`·입장 본인·접수 시간 안. 종료 후 신규 Run은 `EXAM_CLOSED`(409).
+- **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `member_replicas`
+- **설명:** B의 `POST /internal/v1/judge/runs`(§4.8.6) Run 계약에 전달. Draft·제출·점수·통계를 저장하거나 이벤트를 발행하지 않음. 공개 예제만 실행하며 숨김 테스트는 실행하지 않음. 실행 기한 30초, 초과 `504 RUN_TIMEOUT`. 실행 중 재요청 `429 RUN_IN_PROGRESS`.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+    | `problemId` | string | Y | — | Path · 문제 ID 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
+    | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
+    | `customTests` | object[] | N | 선택 사용자 입력. 최대 10개 |
+    | `customTests[].args` | JSON value[] | Y | 사용자 입력 인수 배열 |
+    
+    ```json
+    {
+      "language": "java",
+      "sourceCode": "class Solution { public int solution(int a, int b) { return a + b; } }",
+      "customTests": [
+        { "args": [3, 5] }
+      ]
+    }
+    ```
+    
+    - `customTests` 최대 10개
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `results` | object[] | 공개 예제·사용자 입력 실행 결과 목록 |
+    | `results[].type` | string | SAMPLE / CUSTOM 실행 결과 구분 |
+    | `results[].index` | integer | 공개 예제 또는 사용자 입력 목록의 0부터 시작하는 순번 |
+    | `results[].output` | string | 공개 예제·사용자 입력의 실행 출력 |
+    | `results[].error` | string 또는 null | 실행 오류. 오류가 없으면 null |
+    | `results[].timeMs` | integer | 실행 시간(ms) |
+    | `results[].memoryKb` | integer | 최대 사용 메모리(KB) |
+    | `completedAt` | string (date-time) | Run 완료 시각 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "results": [
+          { "type": "SAMPLE", "index": 0, "output": "3", "error": null, "timeMs": 150, "memoryKb": 8192 },
+          { "type": "CUSTOM", "index": 0, "output": "8", "error": null, "timeMs": 148, "memoryKb": 8192 }
+        ],
+        "completedAt": "2026-10-20T20:15:00+09:00"
+      }
+    }
+    ```
+    
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403), `EXAM_NOT_STARTED`(403), `EXAM_PROBLEM_NOT_INCLUDED`(404), `MEMBER_SUSPENDED`(403), `EXAM_CANCELED`(409), `EXAM_CLOSED`(409), `RUN_IN_PROGRESS`(429), `RUN_TIMEOUT`(504), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400), `COMMON_INVALID_REQUEST`(400), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** `POST /internal/v1/judge/runs` (judge) — 실패 시 503
+
+### 4.3 외부 API — 시험 실시간 결과
+
+#### 4.3.1 시험 결과 SSE
+
+- **Method / URI:** `GET /api/v1/exams/{examId}/events`
+- **인증:** 로그인 필요 + 활성 등록 본인
+- **대응 테이블:** `exams`, `exam_participants`, `exam_problem_results`, `result_snapshots`
+- **설명:** 전체 `CLOSED` 전에는 시험 상태·서버 시각만 전송. 결과 이벤트는 `CLOSED` 이후 `PROVISIONAL` 또는 `FINALIZED`만 반환. 재연결 시 `Last-Event-ID`로 복구. heartbeat 30초, 60초마다 정상 종료 후 재연결.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Last-Event-ID` | N | `EXAM:501:3` | 재연결 시 마지막 수신 결과 버전 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `text/event-stream` | 응답 본문 형식 |
+    | `Cache-Control` | `private, no-store` | 응답 캐시 금지 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `id` | string | 문맥:ID:resultRevision. 상태 이벤트는 본문 상태로 복구 |
+    | `event` | string | 해당 문맥의 상태·결과 변경 이벤트 |
+    | `data` | object | 아래 이벤트별 필드를 포함한 JSON 객체 |
+- **응답 이벤트 필드:**
+    
+    
+    | 이벤트 | 필드 | 타입 | 설명 |
+    | --- | --- | --- | --- |
+    | exam-state-updated / exam-result-updated | `examId` | string | 시험 ID |
+    | exam-state-updated | `status` | string | 시험 상태 |
+    | exam-state-updated | `serverNow` | string (date-time) | C 서버 시각 |
+    | exam-result-updated | `resultStatus` | string | PROVISIONAL / FINALIZED |
+    | exam-result-updated | `resultRevision` | string | DB 결과 버전 |
+    | exam-result-updated | `terminalCount` | integer | 해당 본인 종결 접수 수 |
+    | exam-result-updated | `totalSubmissionCount` | integer | 해당 본인 유효 접수 수 |
+    
+    ```
+    event: exam-state-updated
+    id: EXAM:55:0
+    data: {"examId":"55","status":"IN_PROGRESS","serverNow":"2026-10-20T20:00:00+09:00"}
+    
+    event: exam-result-updated
+    id: EXAM:55:3
+    data: {"examId":"55","resultStatus":"PROVISIONAL","resultRevision":"3","terminalCount":3,"totalSubmissionCount":5}
+    ```
+    
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_NOT_REGISTERED`(403)
+
+### 4.4 외부 API — 대회
+
+#### 4.4.1 대회 목록
+
+- **Method / URI:** `GET /api/v1/contests`
+- **인증:** 공개 (로그인 선택)
+- **대응 테이블:** `contests`
+- **설명:** 시작 전 문제 식별자·본문 없음.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | N | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `status` | string | N | — | Query · 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `after` | string | N | — | Query · 불투명 페이지 커서. 생략 시 첫 페이지 |
+    | `size` | integer | N | 20 | Query · 1~100. 기본 20 |
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `status` | string | N | — | 대회 상태 필터 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 | 최대 100 |
+    | `sort` | string | N | `startsAt,desc` |  |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `items[].contestId` | string | 대회 ID 문자열 |
+    | `items[].title` | string | 제목 |
+    | `items[].status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `items[].startsAt` | string (date-time) | 시작 시각 |
+    | `items[].endsAt` | string (date-time) | 전체 종료 시각 |
+    | `items[].problemCount` | integer | 편입된 문제 수 |
+    | `nextCursor` | string 또는 null | 다음 페이지 커서. 마지막 페이지는 null |
+    | `hasMore` | boolean | 다음 페이지 존재 여부 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "content": [
+          {
+            "contestId": "8",
+            "title": "Re:Solve 10월 오픈 대회",
+            "status": "SCHEDULED",
+            "startsAt": "2026-10-31T20:00:00+09:00",
+            "endsAt": "2026-10-31T22:00:00+09:00",
+            "problemCount": 5
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 3,
+        "totalPages": 1,
+        "hasNext": false
+      }
+    }
+    ```
+    
+
+#### 4.4.2 대회 상세
+
+- **Method / URI:** `GET /api/v1/contests/{contestId}`
+- **인증:** 공개 (로그인 선택)
+- **대응 테이블:** `contests`
+- **설명:** 시작 전 문제 식별자·본문은 반환하지 않음.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | N | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `contestId` | string | 대회 ID 문자열 |
+    | `title` | string | 제목 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `startsAt` | string (date-time) | 시작 시각 |
+    | `endsAt` | string (date-time) | 전체 종료 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    | `problemCount` | integer | 편입된 문제 수 |
+    | `isProblemsPublicAfterEnd` | boolean | 대회 종료 후 로그인 회원의 문제 열람 허용 여부 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "contestId": "8",
+        "title": "Re:Solve 10월 오픈 대회",
+        "status": "RUNNING",
+        "startsAt": "2026-10-31T20:00:00+09:00",
+        "endsAt": "2026-10-31T22:00:00+09:00",
+        "serverNow": "2026-10-31T20:10:00+09:00",
+        "problemCount": 5,
+        "isProblemsPublicAfterEnd": true,
+        "resultRevision": "0"
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404)
+
+#### 4.4.3 대회 참가 등록
+
+- **Method / URI:** `POST /api/v1/contests/{contestId}/participants`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + `ACTIVE` 회원
+- **대응 테이블:** `contests`, `contest_participants`, `contest_participant_histories`, `contest_resource_guards`, `member_replicas`
+- **설명:** `ACTIVE` 회원, 종료 전. `MEMBER` 가드·대회·참가자 잠금, 활성 참가 1건. 기존 활성 등록은 `200`, 새 등록은 `201`.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200 / 201):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `participantId` | string | 참가 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
+    | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
+    | `endsAt` | string (date-time) | 전체 종료 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "참가 등록이 완료되었습니다.",
+      "data": {
+        "participantId": "801",
+        "status": "REGISTERED",
+        "enteredAt": null,
+        "participantRevision": "1",
+        "endsAt": "2026-10-31T22:00:00+09:00",
+        "serverNow": "2026-10-20T09:00:00+09:00"
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404), `CONTEST_CLOSED`(409), `CONTEST_CANCELED`(409)
+- **발행:** `ContestParticipantRegistered` — 새 등록 시(`201`)만
+
+#### 4.4.4 대회 참가 취소
+
+- **Method / URI:** `POST /api/v1/contests/{contestId}/participants/me/cancellation`
+- **인증:** 로그인 필요 (회원·문맥 권한 적용)
+- **대응 테이블:** `contests`, `contest_participants`, `contest_participant_histories`, `outbox_events`
+- **설명:** 시작 전 `REGISTERED`만 취소. 재요청 기존 반환. 재등록 새 행.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `participantId` | string | 참가 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "참가가 취소되었습니다.",
+      "data": {
+        "participantId": "801",
+        "status": "CANCELED",
+        "participantRevision": "2"
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404), `CONTEST_NOT_REGISTERED`(403), `CONTEST_PARTICIPATION_CANCELLATION_CLOSED`(409)
+- **발행:** `ContestParticipantCanceled`
+
+#### 4.4.5 대회 입장
+
+- **Method / URI:** `POST /api/v1/contests/{contestId}/start`
+- **인증:** 로그인 필요 + `ACTIVE` 활성 등록 본인. `startsAt <= 서버 시간 <= endsAt`
+- **대응 테이블:** `contests`, `contest_participants`, `contest_participant_histories`, `contest_resource_guards`, `member_replicas`
+- **설명:** `MEMBER` 가드·대회·참가자 잠금 아래 `enteredAt` 최초 기록·`STARTED`·상태 이력. 재입장은 기존 시간 반환.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `participantId` | string | 참가 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
+    | `endsAt` | string (date-time) | 전체 종료 시각 |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    | `participantRevision` | string | 참가 상태 변경 버전 문자열 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "participantId": "801",
+        "status": "STARTED",
+        "enteredAt": "2026-10-31T20:00:30+09:00",
+        "endsAt": "2026-10-31T22:00:00+09:00",
+        "serverNow": "2026-10-31T20:00:30+09:00",
+        "participantRevision": "2"
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404), `CONTEST_NOT_REGISTERED`(403), `CONTEST_NOT_STARTED`(403), `CONTEST_CLOSED`(409)
+
+#### 4.4.6 대회 문제 목록·본문
+
+- **Method / URI:** `GET /api/v1/contests/{contestId}/problems`
+- **인증:** 로그인 필요 + 시작 후 실제 입장 본인. `ENDED` 이후 `isProblemsPublicAfterEnd=true`이면 로그인 회원도 읽기 가능 (입장 기록 없음).
+- **대응 테이블:** `contests`, `contest_problems`, `contest_participants`
+- **설명:** 숨김 테스트 없음. `EXAM_ONLY` 문제를 `GENERAL`로 전환하지 않음.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `problems` | object[] | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
+    | `problems[].problemId` | string | 문제 ID 문자열 |
+    | `problems[].problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
+    | `problems[].revisionNumber` | integer | 문제의 수정 회차 번호 |
+    | `problems[].label` | string | 문제 라벨 A~T. 대회 안에서 중복 불가 |
+    | `problems[].title` | string | 제목 |
+    | `problems[].displayOrder` | integer | 1부터 문제 수까지 연속된 표시 순서 |
+    | `problems[].body` | string | description·constraints·examples를 조합한 화면 본문 |
+    | `problems[].functionSpec` | object | 고정 회차의 함수 명세. B 공통 데이터 형식 참조 |
+    | `problems[].executionLimits` | object | 고정 회차의 실행 제한. B 공통 데이터 형식 참조 |
+    | `problems[].sampleTests` | object[] | B samples를 변환한 공개 실행 예제 목록 |
+    | `problems[].imageIds` | string[] | 고정 회차 본문에 연결된 이미지 ID 목록 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "problems": [
+          {
+            "problemId": "601",
+            "problemRevisionId": "2001",
+            "revisionNumber": 1,
+            "label": "A",
+            "title": "두 수의 합",
+            "displayOrder": 1,
+            "body": "## 문제\n...",
+            "functionSpec": { "name": "solution", "parameters": [], "returnType": { "kind": "INT32" } },
+            "executionLimits": { "timeMs": 2000, "memoryKb": 262144, "wallTimeMs": 7000 },
+            "sampleTests": [{ "testAssetId": "601", "argumentTexts": { "a": "1", "b": "2" }, "expectedReturnText": "3" }],
+            "imageIds": []
+          }
+        ]
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404), `CONTEST_NOT_REGISTERED`(403), `CONTEST_NOT_STARTED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content` (problem)
+
+#### 4.4.7 대회 제출
+
+- **Method / URI:** `POST /api/v1/contests/{contestId}/submissions`
+- **인증:** 신규 접수는 `ACTIVE`·실제 입장 본인. 이미 접수한 동일 요청은 `SUSPENDED`에서도 반환
+- **Idempotency:** `Idempotency-Key` 헤더 필수 (1~100자 ASCII, 대소문자 구분). 같은 키·동일 본문은 기존 반환, 다른 본문은 `IDEMPOTENCY_KEY_CONFLICT`(422). 동일 요청 `requestHash`는 `problemId`·`language`·UTF-8 `sourceCode`의 SHA-256
+- **Rate Limit:** 회원당 분당 10회, 같은 문제 5초 간격
+- **대응 테이블:** `contests`, `contest_problems`, `contest_participants`, `contest_submissions`, `member_replicas`, `outbox_events`
+- **설명:** `receivedAt`은 서버 시간 `<= endsAt`이면 접수. 접수·Outbox 원자 저장.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Idempotency-Key` | Y | `contest-request-001` | 1~100자 ASCII. 대소문자 구분; 같은 본문 재요청에 재사용 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `problemId` | string | Y | 문제 ID 문자열 |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
+    | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
+    
+    ```json
+    {
+      "problemId": "601",
+      "language": "java",
+      "sourceCode": "class Solution { public int solution(int a, int b) { return a + b; } }"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (202):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `contestSubmissionId` | string | C 대회 접수 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `receivedAt` | string (date-time) | 잠금 안에서 기록한 서버 접수 시각 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "제출이 접수되었습니다.",
+      "data": {
+        "contestSubmissionId": "9001",
+        "status": "ACCEPTED",
+        "receivedAt": "2026-10-31T20:30:00.123456+09:00"
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404), `CONTEST_NOT_REGISTERED`(403), `CONTEST_CLOSED`(409), `CONTEST_CANCELED`(409), `IDEMPOTENCY_KEY_CONFLICT`(422), `SUBMISSION_RATE_LIMITED`(429), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400)
+- **발행:** `ContestSubmissionRequested`
+
+#### 4.4.8 대회 순위
+
+- **Method / URI:** `GET /api/v1/contests/{contestId}/leaderboard`
+- **인증:** 공개 (로그인 선택)
+- **대응 테이블:** `contests`, `contest_participants`, `contest_problem_results`, `member_replicas`, `result_snapshots`
+- **설명:** 제출 1건 이상 활성 참가자만. solved 내림차순·penalty 오름차순·`lastAcceptedAt` 오름차순, 동점 공동 순위. Redis 장애/버전 불일치면 DB 조회, `FINALIZED`는 스냅샷 원천. `resultRevision`에 묶인 커서 페이지네이션.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | N | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+    | `after` | string | N | — | Query · 불투명 페이지 커서. 생략 시 첫 페이지 |
+    | `size` | integer | N | 20 | Query · 1~100. 기본 20 |
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 50 | 최대 100 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `resultStatus` | string | HIDDEN / PROVISIONAL / FINALIZED. 문맥별 공개 규칙 적용 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `items[].memberId` | string | 회원 ID 문자열 |
+    | `items[].nickname` | string | 회원 표시 이름. 탈퇴자는 익명화 |
+    | `items[].solvedCount` | integer | ICPC 해결 문제 수 |
+    | `items[].penaltyMinutes` | integer | ICPC 패널티 분 |
+    | `items[].lastAcceptedAt` | string (date-time) 또는 null | 순위 기준 마지막 최초 AC 접수 시각. AC가 없으면 null |
+    | `items[].rank` | integer 또는 null | 공동 순위. 미집계는 null |
+    | `nextCursor` | string 또는 null | 다음 페이지 커서. 마지막 페이지는 null |
+    | `hasMore` | boolean | 다음 페이지 존재 여부 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "resultStatus": "PROVISIONAL",
+        "resultRevision": "5",
+        "content": [
+          {
+            "memberId": "7",
+            "nickname": "kim-dev",
+            "solvedCount": 3,
+            "penaltyMinutes": 142,
+            "lastAcceptedAt": "2026-10-31T21:45:00+09:00",
+            "rank": 1
+          }
+        ],
+        "page": 0,
+        "size": 50,
+        "totalElements": 34,
+        "totalPages": 1,
+        "hasNext": false
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404), `RESULT_CURSOR_EXPIRED`(409)
+
+#### 4.4.9 내 대회 제출·결과
+
+- **Method / URI:** `GET /api/v1/contests/{contestId}/results/me`
+- **인증:** 로그인 필요 + 등록 본인
+- **대응 테이블:** `contests`, `contest_participants`, `contest_submissions`, `contest_problem_results`, `result_snapshots`
+- **설명:** 진행 중에도 본인 최종 판정 공개. 숨김 케이스 입력/출력·정답 코드 없음. `FAILED`는 `SYSTEM_ERROR` 처리 상태로 표시하며 오답 패널티에 포함하지 않음.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+    | `after` | string | N | — | Query · 불투명 페이지 커서. 생략 시 첫 페이지 |
+    | `size` | integer | N | 20 | Query · 1~100. 기본 20 |
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `page` | int | N | 0 | 제출 목록 페이지 |
+    | `size` | int | N | 20 | 최대 100 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `resultStatus` | string | HIDDEN / PROVISIONAL / FINALIZED. 문맥별 공개 규칙 적용 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `solvedCount` | integer | ICPC 해결 문제 수 |
+    | `penaltyMinutes` | integer | ICPC 패널티 분 |
+    | `isRanked` | boolean | 순위 집계 대상 여부 |
+    | `rank` | integer 또는 null | 공동 순위. 미집계는 null |
+    | `submissions` | object[] | 본인 대회 제출 목록 |
+    | `submissions[].contestSubmissionId` | string | C 대회 접수 ID 문자열 |
+    | `submissions[].problemId` | string | 문제 ID 문자열 |
+    | `submissions[].receivedAt` | string (date-time) | 잠금 안에서 기록한 서버 접수 시각 |
+    | `submissions[].status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `submissions[].verdict` | string 또는 null | 최종 판정. 미산정·공개 제한은 null |
+    | `nextCursor` | string 또는 null | 다음 제출 페이지 커서 |
+    | `hasMore` | boolean | 다음 제출 페이지 존재 여부 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "resultStatus": "PROVISIONAL",
+        "resultRevision": "5",
+        "solvedCount": 3,
+        "penaltyMinutes": 142,
+        "isRanked": true,
+        "rank": 1,
+        "content": [
+          {
+            "contestSubmissionId": "9001",
+            "problemId": "601",
+            "receivedAt": "2026-10-31T20:30:00.123456+09:00",
+            "status": "JUDGED",
+            "verdict": "AC"
+          }
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 8,
+        "totalPages": 1,
+        "hasNext": false
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404), `CONTEST_NOT_REGISTERED`(403)
+
+#### 4.4.10 대회 이미지
+
+- **Method / URI:** `GET /api/v1/contests/{contestId}/problems/{problemId}/images/{imageId}`
+- **인증:** 로그인 필요 + 4.4.6의 열람 조건과 동일
+- **대응 테이블:** `contests`, `contest_problems`, `contest_participants`
+- **설명:** 고정 회차 이미지 계약은 4.2.12와 동일.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+    | `problemId` | string | Y | — | Path · 문제 ID 문자열 |
+    | `imageId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `image/*` | 원본 이미지 MIME 타입 |
+    | `Cache-Control` | `private, no-store` | 응답 캐시 금지 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | 이미지 | binary | 고정 회차에 연결된 원본 이미지. JSON 래퍼 없음 |
+    - 이미지 바이너리 (`Content-Type: image/*`, `Cache-Control: private, no-store`)
+- **에러:** `CONTEST_NOT_FOUND`(404), `CONTEST_NOT_REGISTERED`(403), `CONTEST_NOT_STARTED`(403)
+- **외부 의존:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}` (problem)
+
+#### 4.4.11 대회 Run
+
+- **Method / URI:** `POST /api/v1/contests/{contestId}/problems/{problemId}/runs`
+- **인증:** 로그인 필요 + `ACTIVE`·`STARTED` 본인·접수 시간 안
+- **대응 테이블:** `contests`, `contest_problems`, `contest_participants`, `member_replicas`
+- **설명:** 4.2.13 시험 Run과 동일 계약. 응답 본문 구조 동일.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+    | `problemId` | string | Y | — | Path · 문제 ID 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `language` | string | Y | `java` / `python3` / `cpp` |
+    | `sourceCode` | string | Y | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
+    | `customTests` | object[] | N | 선택 사용자 입력. 최대 10개 |
+    | `customTests[].args` | JSON value[] | Y | 사용자 입력 인수 배열 |
+    - 4.2.13과 같음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):** 4.2.13 응답 구조와 같음
+- **에러:** `CONTEST_NOT_FOUND`(404), `CONTEST_NOT_REGISTERED`(403), `CONTEST_NOT_STARTED`(403), `CONTEST_CLOSED`(409), `RUN_IN_PROGRESS`(429), `RUN_TIMEOUT`(504), `CODE_TOO_LARGE`(413), `UNSUPPORTED_LANGUAGE`(400)
+
+### 4.5 외부 API — 대회 실시간 순위
+
+#### 4.5.1 대회 순위 SSE
+
+- **Method / URI:** `GET /api/v1/contests/{contestId}/events`
+- **인증:** 로그인 필요
+- **대응 테이블:** `contests`, `contest_participants`, `contest_problem_results`, `result_snapshots`
+- **설명:** 재연결 시 `Last-Event-ID`로 복구. heartbeat 30초, 60초마다 정상 종료 후 재연결. 종료·잠정·건별 정상 채점 완료 알림은 보내지 않음.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Last-Event-ID` | N | `CONTEST:501:3` | 재연결 시 마지막 수신 결과 버전 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `text/event-stream` | 응답 본문 형식 |
+    | `Cache-Control` | `private, no-store` | 응답 캐시 금지 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `id` | string | 문맥:ID:resultRevision. 상태 이벤트는 본문 상태로 복구 |
+    | `event` | string | 해당 문맥의 상태·결과 변경 이벤트 |
+    | `data` | object | 아래 이벤트별 필드를 포함한 JSON 객체 |
+- **응답 이벤트 필드:**
+    
+    
+    | 이벤트 | 필드 | 타입 | 설명 |
+    | --- | --- | --- | --- |
+    | contest-rank-updated / contest-state-updated | `contestId` | string | 대회 ID |
+    | contest-rank-updated | `resultStatus` | string | PROVISIONAL / FINALIZED |
+    | contest-rank-updated | `resultRevision` | string | DB 결과 버전 |
+    | contest-rank-updated | `updatedAt` | string (date-time) | 결과 갱신 시각 |
+    | contest-state-updated | `status` | string | 대회 상태 |
+    | contest-state-updated | `serverNow` | string (date-time) | C 서버 시각 |
+    
+    ```
+    event: contest-state-updated
+    id: CONTEST:8:0
+    data: {"contestId":"8","status":"RUNNING","serverNow":"2026-10-31T20:00:00+09:00"}
+    
+    event: contest-rank-updated
+    id: CONTEST:8:5
+    data: {"contestId":"8","resultStatus":"PROVISIONAL","resultRevision":"5","updatedAt":"2026-10-31T20:30:05+09:00"}
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404)
+
+### 4.6 관리자 API
+
+#### 4.6.1 대회 생성
+
+- **Method / URI:** `POST /api/v1/admin/contests`
+- **인증:** `ADMIN`
+- **Idempotency:** 요청 operationId와 집행자·정규화 본문 해시를 기존 관리자 작업에 보존. 같은 요청은 같은 대회·고정 회차·최초 성공 응답 반환, 다른 본문은 IDEMPOTENCY_KEY_CONFLICT(422)
+- **대응 테이블:** `contests`, `contest_problems`, `contest_resource_guards`, `contest_admin_operations`, `audit_logs`, `outbox_events`
+- **설명:** 공개 대회를 만들고 문제(`EXAM_ONLY` 또는 `GENERAL`·`PUBLIC`)·라벨·표시 순서를 설정. B의 현재 회차를 고정. `title` 1~200자, 1~20문제, 기간 1~180분, `startsAt`은 미래, 중복 `problemId`·`label` 불가, `label`은 `A`~`T`, `displayOrder`는 1부터 연속.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:** 없음
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `operationId` | string | Y | 생성 작업 ID, 1~100자. 응답 유실에도 재사용 |
+    | `title` | string | Y | 제목 |
+    | `startsAt` | string (date-time) | Y | 시작 시각 |
+    | `endsAt` | string (date-time) | Y | 전체 종료 시각 |
+    | `isProblemsPublicAfterEnd` | boolean | Y | 대회 종료 후 로그인 회원의 문제 열람 허용 여부 |
+    | `problems` | object[] | Y | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
+    | `problems[].problemId` | string | Y | 문제 ID 문자열 |
+    | `problems[].label` | string | Y | 문제 라벨 A~T. 대회 안에서 중복 불가 |
+    | `problems[].displayOrder` | integer | Y | 1부터 문제 수까지 연속된 표시 순서 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+    
+    ```json
+    {
+      "operationId": "contest-create-8",
+      "title": "Re:Solve 10월 오픈 대회",
+      "startsAt": "2026-10-31T20:00:00+09:00",
+      "endsAt": "2026-10-31T22:00:00+09:00",
+      "isProblemsPublicAfterEnd": true,
+      "problems": [
+        { "problemId": "601", "label": "A", "displayOrder": 1 },
+        { "problemId": "602", "label": "B", "displayOrder": 2 }
+      ],
+      "reason": "10월 오픈 대회 생성"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (201):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `contestId` | string | 대회 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `contestRevision` | string | 대회 설정 변경 버전 문자열 |
+    | `version` | string | 조회한 낙관적 락 버전 문자열 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `startsAt` | string (date-time) | 시작 시각 |
+    | `endsAt` | string (date-time) | 전체 종료 시각 |
+    | `isProblemsPublicAfterEnd` | boolean | 대회 종료 후 로그인 회원의 문제 열람 허용 여부 |
+    | `problems` | object[] | 고정 회차 문제·문제별 결과 목록. 문맥별 하위 필드 적용 |
+    | `problems[].problemId` | string | 문제 ID 문자열 |
+    | `problems[].problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
+    | `problems[].revisionNumber` | integer | 문제의 수정 회차 번호 |
+    | `problems[].label` | string | 문제 라벨 A~T. 대회 안에서 중복 불가 |
+    | `problems[].displayOrder` | integer | 1부터 문제 수까지 연속된 표시 순서 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "대회가 생성되었습니다.",
+      "data": {
+        "contestId": "8",
+        "status": "SCHEDULED",
+        "contestRevision": "1",
+        "version": "0",
+        "resultRevision": "0",
+        "startsAt": "2026-10-31T20:00:00+09:00",
+        "endsAt": "2026-10-31T22:00:00+09:00",
+        "isProblemsPublicAfterEnd": true,
+        "problems": [
+          { "problemId": "601", "problemRevisionId": "2001", "revisionNumber": 1, "label": "A", "displayOrder": 1 }
+        ]
+      }
+    }
+    ```
+    
+- **에러:** `AUTH_ACCESS_DENIED`(403), `EXAM_PROBLEM_NOT_AVAILABLE`(409), `CONTEST_DEPENDENCY_UNAVAILABLE`(503), `COMMON_INVALID_REQUEST`(400), `IDEMPOTENCY_KEY_CONFLICT`(422)
+- **외부 의존:** Problem 선택 요약(§2.6.5, `purpose=CONTEST`)과 전용 문제의 명시적 대회 연결. `GENERAL`은 연결 대상에서 제외하며, `EXAM_ONLY`는 선택한 고정 회차와 `problems.contest_id`가 생성한 대회에 연결돼야 한다. 같은 연결 재요청은 같은 결과이고 다른 대회·다른 회차로 묵시적으로 덮어쓰지 않는다. 생성·연결 응답 유실 시 기존 대회·같은 연결을 대사하며 새 대회를 중복 생성하지 않는다. 연결은 §2.6.9 PUT API를 사용한다.
+
+- **생성·연결 복구:** 선택 요약을 조회한 뒤 C의 PROBLEM 가드·대회 잠금 안에서 대회·고정 문제·선택 버전과 CONTEST_CREATE PENDING 작업을 함께 저장한다. 원격 PUT은 커밋 후 수행한다. 모든 EXAM_ONLY 연결이 확인된 뒤 SUCCEEDED·생성 감사·최초 응답을 확정하고 201을 반환한다. GENERAL만 있으면 연결 호출 없이 같은 완료 절차를 따른다.
+- **미완료 차단:** CONTEST_CREATE가 SUCCEEDED이기 전에는 SCHEDULED 대회를 일반 목록에 노출하거나 참가·입장·시작시키지 않는다. 연결 요청의 5xx·타임아웃은 미실행 증거가 아니며 PENDING 유지·같은 대회/고정 회차/요청 재시도·§4.7 대사로 복구한다. 이때 호출자에는 CONTEST_DEPENDENCY_UNAVAILABLE(503)를 반환한다.
+- **확정 실패:** B의 연결 불일치 등 확정 거절 또는 연결 미완료 상태에서 시작 시각 경과가 확인되면 대회를 CANCELED로 종결하고 생성 작업 FAILED·감사·ContestCanceled Outbox를 함께 기록한다. 이미 완료된 B 연결은 취소 대회의 이력으로 보존하며 자동 해제·다른 대회 덮어쓰기를 하지 않는다. 같은 operationId는 새 대회를 만들지 않고 보존한 결과를 반환한다.
+
+#### 4.6.2 대회 취소
+
+- **Method / URI:** `POST /api/v1/admin/contests/{contestId}/cancellation`
+- **인증:** `ADMIN`
+- **대응 테이블:** `contests`, `contest_problems`, `contest_participants`, `contest_participant_histories`, `audit_logs`, `outbox_events`
+- **설명:** `SCHEDULED`에서만 `CANCELED`. 재요청 기존 취소 반환. 활성 등록자에게 취소 알림, 코드·참가 이력 보존.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `version` | string | Y | 조회한 낙관적 락 버전 문자열 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+    
+    ```json
+    {
+      "version": "0",
+      "reason": "운영 일정 변경으로 인한 취소"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `contestId` | string | 대회 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `canceledAt` | string (date-time) | 취소 시각 |
+    | `contestRevision` | string | 대회 설정 변경 버전 문자열 |
+    | `version` | string | 조회한 낙관적 락 버전 문자열 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "대회가 취소되었습니다.",
+      "data": {
+        "contestId": "8",
+        "status": "CANCELED",
+        "canceledAt": "2026-10-10T09:00:00+09:00",
+        "contestRevision": "2",
+        "version": "1"
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `CONTEST_MODIFY_NOT_ALLOWED`(409), `EXAM_UPDATE_CONFLICT`(409)
+- **발행:** `ContestCanceled`
+
+#### 4.6.3 실패 시험 제출 재처리
+
+- **Method / URI:** `POST /api/v1/exams/{examId}/submissions/{examSubmissionId}/retry`
+- **인증:** `ADMIN` 또는 해당 시험 스터디의 현재 `LEADER`·`MANAGER`. C가 최종 검증.
+- **대응 테이블:** `exams`, `exam_submissions`, `contest_admin_operations`, `audit_logs`
+- **설명:** `EXAM`·`FAILED` 및 부모 `FINALIZED` 전만. §4.8.5의 `POST /internal/v1/judge/submissions/{submissionId}/retry`로 새 회차 요청. `contest_admin_operations`를 먼저 `PENDING` 저장 후 원격 호출. 이 작업이 남으면 결과 확정을 보류.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 시험 ID 문자열 |
+    | `examSubmissionId` | string | Y | — | Path · 해당 시험의 접수 ID 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
+    | `expectedJudgeAttempt` | integer | Y | 처리 대상 종결 채점 회차 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+    
+    ```json
+    {
+      "operationId": "retry-op-001",
+      "expectedJudgeAttempt": 1,
+      "reason": "채점 서버 재기동 후 재처리"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (202):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `state` | string | 작업 또는 가드 상태. 해당 처리 규칙 적용 |
+    | `examSubmissionId` | string | C 시험 접수 ID 문자열 |
+    | `submissionId` | string | judge 제출 ID 문자열 |
+    | `judgeAttempt` | integer | 종결 결과의 마지막 반영 회차 |
+    | `targetJudgeAttempt` | integer 또는 null | 원격에서 확인한 재처리 목표 회차. 확인 전 null |
+    
+    ```json
+    {
+      "success": true,
+      "message": "재처리를 요청했습니다.",
+      "data": {
+        "operationId": "retry-op-001",
+        "state": "PENDING",
+        "examSubmissionId": "4001",
+        "submissionId": "2001",
+        "judgeAttempt": 1,
+        "targetJudgeAttempt": null
+      }
+    }
+    ```
+    
+- **에러:** `EXAM_NOT_FOUND`(404), `EXAM_SUBMISSION_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `REJUDGE_NOT_ALLOWED`(409), `IDEMPOTENCY_KEY_CONFLICT`(422)
+
+#### 4.6.4 실패 제출 종결 처리
+
+- 시험의 전달 전 크기 초과·지원 불가 언어 실패(`dispatch_failure_code=CODE_TOO_LARGE`·`UNSUPPORTED_LANGUAGE`)도 종결 대상이다. Judge 제출이 없으므로 `expectedJudgeAttempt=0`으로 검증하고 Judge 재처리·대사는 호출하지 않는다. 원문·언어·실패 사유를 보존하며 나머지 잠금·재계산·감사 규칙은 동일하다. 회차 0에서는 이 두 실패 사유와 Judge 연결 없음이 모두 확인돼야 하며, 종결 후 기존 시험 확정 경로로 진행한다.
+
+- **Method / URI:** `POST /api/v1/admin/contest-submissions/{context}/{receiptId}/resolution`
+- **인증:** `ADMIN`
+- **대응 테이블:** `exams`, `exam_participants`, `exam_submissions`, `exam_problem_results`, `contests`, `contest_participants`, `contest_submissions`, `contest_problem_results`, `contest_admin_operations`, `audit_logs`
+- **설명:** `FAILED` 및 부모 `FINALIZED` 전만. 미완료 재처리 작업이 있으면 거절. 시험은 `isZeroConfirmed=true`·`score=0`, 대회는 `isVoidConfirmed=true`·`SYSTEM_ERROR` 무효 처리 (오답 패널티 제외). 참가자·문제 결과 재계산·`resultRevision` 증가·감사 로그를 함께 저장.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `context` | string | Y | — | Path · EXAM / CONTEST |
+    | `receiptId` | string | Y | — | Path · C 시험·대회 접수 ID 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
+    | `action` | string | Y | 문맥 검증·관리 조치 종류. 해당 허용 값 적용 |
+    | `expectedJudgeAttempt` | integer | Y | 처리 대상 종결 채점 회차 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+    
+    ```json
+    {
+      "operationId": "resolution-op-001",
+      "action": "ZERO_CONFIRM",
+      "expectedJudgeAttempt": 1,
+      "reason": "채점 서버 장애 복구 불가, 0점 확정"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `context` | string | EXAM / CONTEST |
+    | `receiptId` | string | C 시험·대회 접수 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `resolved` | boolean | 실패 제출의 수동 종결 여부 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "종결 처리가 완료되었습니다.",
+      "data": {
+        "operationId": "resolution-op-001",
+        "context": "EXAM",
+        "receiptId": "4001",
+        "status": "FAILED",
+        "resolved": true,
+        "resultRevision": "4"
+      }
+    }
+    ```
+    
+- **비고:**
+    - **처리:** FAILED 및 부모 FINALIZED 전만. 시험은 isZeroConfirmed=true·score=0, 대회는 isVoidConfirmed=true·SYSTEM_ERROR 무효 처리로 오답 패널티 제외. 미완료 재처리 작업이 있으면 거절한다.
+    - 참가자·문제 결과 재계산·resultRevision 증가·작업 기록·감사 로그를 함께 저장한다.
+    - **응답 값:** `status=FAILED`
+    - **조치 종류:** EXAM의 action은 ZERO_CONFIRM, CONTEST의 action은 VOID_CONFIRM이다.
+- **오류:** 공통 오류 및 §4.7. 권한 오류 403, 대상 없음 404, 상태·회차 충돌 409, 같은 작업 ID의 다른 본문 422.
+
+#### 4.6.5 시험 결과 재확정
+
+- **Method / URI:** `POST /api/v1/admin/exams/{examId}/results/refinalization`
+- **인증:** `ADMIN`
+- **대응 테이블:** `exams`, `exam_participants`, `exam_submissions`, `exam_problem_results`, `result_snapshots`, `contest_admin_operations`, `audit_logs`, `outbox_events`
+- **설명:** `FINALIZED`·미종결/미완료 관리자 작업 0건만. 기존 유효 제출을 DB 기준으로 재계산, `resultRevision` 증가·새 불변 스냅샷·`ExamFinalized` Outbox·감사 로그. 기존 스냅샷 보존.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자. 후행 공백은 허용하지 않는다. |
+    | `expectedResultRevision` | string | Y | 재확정 대상의 이전 결과 버전 문자열 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+    
+    ```json
+    {
+      "operationId": "refinalize-op-001",
+      "expectedResultRevision": "3",
+      "reason": "재채점 결과 반영 후 재확정"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `examId` | string | 시험 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `finalizedAt` | string (date-time) | 해당 스냅샷 확정 시각 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "결과를 재확정했습니다.",
+      "data": {
+        "examId": "55",
+        "status": "FINALIZED",
+        "resultRevision": "4",
+        "finalizedAt": "2026-10-21T10:00:00+09:00"
+      }
+    }
+    ```
+    
+- **에러:** `EXAM_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `RESULT_NOT_FINALIZED`(409), `RESULT_FINALIZATION_BLOCKED`(409), `IDEMPOTENCY_KEY_CONFLICT`(422)
+- **발행:** `ExamFinalized`
+
+#### 4.6.6 대회 결과 재확정
+
+- **Method / URI:** `POST /api/v1/admin/contests/{contestId}/results/refinalization`
+- **인증:** `ADMIN`
+- **대응 테이블:** `contests`, `contest_participants`, `contest_submissions`, `contest_problem_results`, `result_snapshots`, `contest_admin_operations`, `audit_logs`, `outbox_events`
+- **설명:** 4.6.5의 조건을 대회에 적용. ICPC 접수 순서로 재계산. `resultRevision` 증가·새 스냅샷·`ContestFinalized` Outbox·관리자 작업·감사 로그를 한 트랜잭션에 저장.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `contestId` | string | Y | — | Path · 식별자 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `expectedResultRevision` | string | Y | 재확정 대상의 이전 결과 버전 문자열 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+    
+    ```json
+    {
+      "operationId": "refinalize-contest-op-001",
+      "expectedResultRevision": "5",
+      "reason": "재채점 결과 반영 후 재확정"
+    }
+    ```
+    
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `contestId` | string | 대회 ID 문자열 |
+    | `status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `finalizedAt` | string (date-time) | 해당 스냅샷 확정 시각 |
+    
+    ```json
+    {
+      "success": true,
+      "message": "결과를 재확정했습니다.",
+      "data": {
+        "contestId": "8",
+        "status": "FINALIZED",
+        "resultRevision": "6",
+        "finalizedAt": "2026-11-01T10:00:00+09:00"
+      }
+    }
+    ```
+    
+- **에러:** `CONTEST_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403), `RESULT_NOT_FINALIZED`(409), `RESULT_FINALIZATION_BLOCKED`(409), `IDEMPOTENCY_KEY_CONFLICT`(422)
+- **발행:** `ContestFinalized`
+
+#### 4.6.7 관리자 작업 상태 조회
+
+- **Method / URI:**
+    - 관리자: `GET /api/v1/admin/contest-operations?operationId={operationId}`, `GET /api/v1/admin/contest-operations/{operationId}`
+    - 시험 운영자: `GET /api/v1/exams/{examId}/operations?operationId={operationId}`, `GET /api/v1/exams/{examId}/operations/{operationId}`
+- **인증:** 관리자 경로는 `ADMIN` 전용. 시험 경로는 해당 시험 스터디의 현재 `LEADER`·`MANAGER` 전용이며 본인이 요청한 해당 시험의 `EXAM_RETRY` 작업만 조회한다. C가 작업 소유자·시험·D 구성원 권한을 재검증한다.
+- **대응 테이블:** `contest_admin_operations`
+- **설명:** 관리자 작업 상태 조회
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `examId` | string | 시험 경로에서 Y | — | Path · 시험 ID 문자열 |
+    | `operationId` | string | Y | — | Query 또는 Path · 호출자 생성 멱등 작업 ID. 1~100자. `/`가 포함된 ID는 URL 인코딩한 쿼리 값으로 전달한다. |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationType` | string | 작업 종류. 해당 API의 허용 작업만 지정 |
+    | `context` | string | EXAM / CONTEST |
+    | `contextId` | string | 시험·대회 ID 문자열 |
+    | `receiptId` | string | C 시험·대회 접수 ID 문자열 |
+    | `state` | string | 작업 또는 가드 상태. 해당 처리 규칙 적용 |
+    | `expectedJudgeAttempt` | integer | 처리 대상 종결 채점 회차 |
+    | `targetJudgeAttempt` | integer 또는 null | 원격에서 확인한 재처리 목표 회차. 확인 전 null |
+    | `lastErrorCode` | string 또는 null | 마지막 작업 오류 코드. 오류가 없으면 null |
+    | `updatedAt` | string (date-time) | 해당 상태의 마지막 갱신 시각 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "operationId": "retry-op-001",
+        "operationType": "EXAM_RETRY",
+        "context": "EXAM",
+        "contextId": "55",
+        "receiptId": "4001",
+        "state": "SUCCEEDED",
+        "expectedJudgeAttempt": 1,
+        "targetJudgeAttempt": 2,
+        "lastErrorCode": null,
+        "updatedAt": "2026-10-21T09:05:00+09:00"
+      }
+    }
+    ```
+    
+- **에러:** `AUTH_ACCESS_DENIED`(403), `EXAM_NOT_FOUND`(404)
+
+### 4.7 내부 API — C 제공
+
+> 공통 규칙: 내부 네트워크 전용. `/internal/**`는 Gateway 공개 라우팅에서 제외. 조회 타임아웃 2초. 검증 조회 실패는 fail-closed.
+
+#### 4.7.1 실행 문맥·열람 권한 검증
+
+- **Method / URI:** `POST /internal/v1/contest/contexts/validate`
+- **인증:** 내부 호출 (judge, problem, study)
+- **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `exam_submissions`, `contests`, `contest_problems`, `contest_participants`, `contest_submissions`
+- **설명:** 고정 문제·회차 일치 검증. `READ_BODY`/`READ_IMAGE`는 종료 후 복기와 대회 종료 공개 설정 적용. `RUN`은 입장한 `ACTIVE` 참가자의 시간 안 요청만. 본인 제출 열람은 소유권·실제 입장 추가 검증.
+- **요청 헤더:** 없음
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `context` | string | Y | EXAM / CONTEST |
+    | `contextId` | string | Y | 시험·대회 ID 문자열 |
+    | `memberId` | string | Y | 회원 ID 문자열 |
+    | `problemId` | string | Y | 문제 ID 문자열 |
+    | `problemRevisionId` | string | Y | 고정 문제 수정 회차 ID 문자열 |
+    | `action` | string | Y | READ_BODY / READ_IMAGE / RUN / READ_SUBMISSION |
+    | `receiptId` | string | N | C 접수 ID. READ_SUBMISSION이면 필수, 다른 행위는 생략 |
+    
+    ```json
+    {
+      "context": "EXAM",
+      "contextId": "55",
+      "memberId": "7",
+      "problemId": "101",
+      "problemRevisionId": "1001",
+      "action": "RUN",
+      "receiptId": null
+    }
+    ```
+
+- **응답 헤더:**
+
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `allowed` | boolean | 문맥·행위 권한 검증 성공 |
+    | `participantId` | string 또는 null | 검증한 본인 참가 ID. 대회 종료 공개 일반 열람은 null |
+    | `problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
+    | `resultVisibility` | string | SAMPLES_ONLY / PROVISIONAL / FINALIZED / FULL_VERDICT. §4.0의 시험·대회 공개 범위 적용 |
+    | `personalEndsAt` | string (date-time) 또는 null | EXAM 개인 마감 / CONTEST 전체 마감. 종료 공개 일반 열람은 null |
+    | `serverNow` | string (date-time) | C 서버 기준 시각 |
+    
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "allowed": true,
+        "participantId": "411",
+        "problemRevisionId": "1001",
+        "resultVisibility": "SAMPLES_ONLY",
+        "personalEndsAt": "2026-10-20T21:30:00+09:00",
+        "serverNow": "2026-10-20T20:15:00+09:00"
+      }
+    }
+    ```
+    
+- **에러:** `CONTEXT_ACCESS_DENIED`(403), `CONTEXT_NOT_FOUND`(404), `PROBLEM_REVISION_NOT_INCLUDED`(404), `EXAM_CLOSED`(409), `CONTEST_CLOSED`(409)
+
+#### 4.7.2 실제 입장·미확정 문맥 조회
+
+- **Method / URI:** `GET /internal/v1/contest/members/{memberId}/active-participations`
+- **인증:** member-service.
+- **대응 테이블:** `exams`, `exam_participants`, `contests`, `contest_participants`
+- **설명:** 실제 입장·미확정 문맥 조회
+- **요청 헤더:** 없음
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `memberId` | string | Y | — | Path · 회원 ID 문자열 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `withdrawalBlocked` | boolean | 실제 입장한 미확정 문맥으로 탈퇴가 차단되는지 |
+    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `items[].context` | string | EXAM / CONTEST |
+    | `items[].contextId` | string | 시험·대회 ID 문자열 |
+    | `items[].participantId` | string | 참가 ID 문자열 |
+    | `items[].enteredAt` | string (date-time) 또는 null | 최초 실제 입장 시각. 미입장은 null |
+    | `items[].status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+- **비고:**
+    - **기준:** enteredAt이 있고 부모 상태가 FINALIZED/CANCELED가 아닌 참가는 포함한다.
+    - 단순 등록·ABSENT는 포함하지 않는다.
+    - 조회 결과만으로 탈퇴를 확정하지 않고 §4.7.3 가드를 준비한다.
+- **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
+
+#### 4.7.3 자원 작업 준비
+
+- **Method / URI:** `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/prepare`
+- **인증:** MEMBER/WITHDRAWAL은 member-service, STUDY/STUDY_CLOSE는 study-service, PROBLEM/PROBLEM_HIDE는 problem-service만.
+- **대응 테이블:** `contest_resource_guards`, `exams`, `exam_participants`, `contests`, `contest_participants`, `exam_problems`, `contest_problems`, `outbox_events`
+- **설명:** 소유 서비스의 상태 변경 전에 신규 편입을 차단하고 기존 차단 조건을 확인한다. PROBLEM은 비공개와 보관 모두 PROBLEM_HIDE를 사용한다.
+- **요청 헤더:** 없음
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `resourceType` | string | Y | — | Path · MEMBER / STUDY / PROBLEM |
+    | `resourceId` | string | Y | — | Path · 소유 서비스 자원 ID 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `operationType` | string | Y | WITHDRAWAL / STUDY_CLOSE / PROBLEM_HIDE. 자원·소유 서비스 조합은 비고 참조 |
+    | `expectedSourceVersion` | string | Y | 원천 상태의 기대 순서 값 문자열 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200 / 202):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `state` | string | OPEN / PREPARED / BLOCKED |
+    | `operationResult` | string | PENDING / COMMITTED / ABORTED, 현재 작업의 결과 |
+    | `ready` | boolean | 소유 서비스가 원격 작업을 완료할 수 있는지 |
+    | `preparedAt` | string (date-time) 또는 null | 자원 가드 준비 시각. 준비 전은 null |
+    | `canceledExamIds` | string[] | 준비 과정에서 취소한 예정 시험 ID 목록 |
+    | `blockingExamIds` | string[] | 종료를 기다리는 시험 ID 목록 |
+- **비고:**
+    - **MEMBER:** 자원 잠금 아래 실제 입장한 미확정 시험·대회가 있으면 WITHDRAWAL_BLOCKED_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 등록·입장을 차단한다.
+    - **STUDY:** PREPARED와 신규 시험 생성 차단을 저장한다.
+    - 모든 SCHEDULED 시험을 동일 취소 계약으로 취소하고 등록자에게 알린다. 취소 이벤트의 `reason`은 `스터디 종료 준비로 시험이 취소되었습니다.`이다.
+    - 같은 `operationId`로 재요청하면 최초 `canceledExamIds`를 반환하고 현재 시험 상태로 `ready`와 `blockingExamIds`를 계산한다.
+    - 아직 시간상 진행 중인 시험이 있으면 202와 함께 `ready=false` 및 `blockingExamIds`를 반환한다.
+    - 모든 시험이 CLOSED/FINALIZED/CANCELED면 ready=true. 아직 미확정인 CLOSED 시험은 차단하지 않는다.
+    - **PROBLEM:** SCHEDULED 또는 시간상 진행 중인 시험·대회에 포함되면 PROBLEM_IN_ACTIVE_EXAM(409). 없으면 PREPARED 저장 후 새 문제 편입을 막는다.
+    - EXAM_ONLY 종료공개와 고정 회차 채점은 가드와 분리한다.
+    - **응답 조건:** 진행 중 스터디 시험만 202/ready=false. 회원·문제 거절은 준비 상태를 남기지 않는다.
+    - **응답 값:** 신규 준비 성공은 `state=PREPARED`. 동일 작업의 완료·취소 후 prepare 재요청은 보존한 `BLOCKED`·`OPEN`을 반환하며 다시 준비하지 않는다. `ready=true`는 해당 작업의 PREPARED 상태에서만 반환한다.
+    - **멱등:** 같은 operationId·type·expectedSourceVersion이면 기존 상태 반환. prepare 요청 해시는 DB 가드에 저장하고 완료·취소 후에도 마지막 operationId와 함께 보존한다.
+    - OPEN으로 취소된 같은 작업은 OPEN을 반환하며 재준비하지 않는다. BLOCKED에서 시작한 취소는 BLOCKED를 반환한다. operationResult=ABORTED를 보존하며 재준비하지 않는다.
+    - 다른 본문은 422 IDEMPOTENCY_KEY_CONFLICT. 다른 PREPARED 작업이 점유하면 409 CONTEST_OPERATION_BLOCKED. expectedSourceVersion < 저장 sourceVersion은 409 SOURCE_VERSION_CONFLICT.
+    - **PROBLEM 응답:** 신규 준비 성공은 200·`PREPARED`·`ready=true`이며 `canceledExamIds`·`blockingExamIds`는 빈 배열이다. 예정·진행 참조가 있으면 `PROBLEM_IN_ACTIVE_EXAM`(409)이며 PREPARED를 남기지 않는다. PROBLEM 준비로 시험·대회를 자동 취소하지 않는다.
+    - **직렬화:** PROBLEM prepare와 시험 생성·문제 교체·대회 생성의 해당 문제 편입은 같은 `(PROBLEM, problemId)` 가드 행을 잠근다. 신규 가드 행은 유일 제약으로 먼저 확보한 후 잠근다. 둘 중 먼저 커밋한 결과를 다른 쪽이 확인하므로 사용 조회 뒤 신규 편입을 끼워 넣을 수 없다. 원격 HTTP는 이 잠금 밖에서 끝낸다.
+    - **준비 전 상태:** PROBLEM_HIDE는 다른 미종결 작업이 없는 OPEN 또는 BLOCKED에서 준비한다. prepared_from_state와 operation_result=PENDING을 같은 가드 트랜잭션에 저장한다. 회원·문제의 종결 작업은 작업별로 보존한다. 이후 다른 작업을 준비했어도 동일 prepare는 기존 결과를 반환하며 가드를 다시 준비하지 않는다.
+    - **작업 유형:** MEMBER/WITHDRAWAL은 member-service, STUDY/STUDY_CLOSE는 study-service, PROBLEM/PROBLEM_HIDE는 problem-service만 호출한다.
+- **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
+
+#### 4.7.4 자원 작업 완료·취소
+
+- **Method / URI:** `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/complete`, `POST /internal/v1/contest/guards/{resourceType}/{resourceId}/cancel`
+- **인증:** §4.7.3의 자원 소유 서비스.
+- **대응 테이블:** `contest_resource_guards`, `contest_guard_operation_history`
+- **설명:** 자원 작업 완료·취소
+- **요청 헤더:** 없음
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `resourceType` | string | Y | — | Path · MEMBER / STUDY / PROBLEM |
+    | `resourceId` | string | Y | — | Path · 소유 서비스 자원 ID 문자열 |
+- **요청 본문:**
+    
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `operationId` | string | Y | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `sourceVersion` | string | Y | 소유 서비스의 상태 순서 값 문자열 |
+    | `reason` | string | Y | 조치 사유. 1~500자 |
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 호출자 생성 멱등 작업 ID. 1~100자 |
+    | `state` | string | OPEN / PREPARED / BLOCKED |
+    | `operationResult` | string | PENDING / COMMITTED / ABORTED, 현재 작업의 결과 |
+    | `sourceVersion` | string | 원천 상태 순서 값의 10진 문자열. Problem의 INT 행 버전은 값 손실 없이 변환 |
+- **비고:**
+    - **complete:** 소유 서비스가 자기 DB 상태를 변경한 뒤 호출한다.
+    - 가드 operationId 일치와 expectedSourceVersion보다 큰 결과 버전을 확인해 operation_result=COMMITTED로 종결한다. source_version은 기존값과 결과 버전 중 큰 값으로 보존한다. PROBLEM은 최신 source_status가 결과보다 큰 버전의 PUBLIC이고 GENERAL 재공개인 경우에만 OPEN, 그 외 BLOCKED로 반영한다. PROBLEM complete의 버전은 Problem COMMITTED 결과와 같아야 하며, cancel은 원래 기대 버전을 사용하고 원천 상태를 증가시키지 않는다.
+    - STUDY는 ready=true일 때만 완료한다.
+    - `StudyClosed`와 `ProblemStateChanged`는 같은 완료 처리를 복구한다. 다른 준비 작업 중 관찰한 스터디 종료는 준비를 유지하고 이후 취소 시에도 신규 생성을 차단한다.
+    - `MemberWithdrawn`은 탈퇴 상태와 원천 버전을 반영한다. `PREPARED`인 회원 가드는 유지하며, 대사로 복구할 때는 §1.7.3에서 같은 `operationId`의 `COMMITTED` 결과와 완료 버전을 확인한 뒤 종결한다.
+    - **cancel:** 소유 서비스가 작업을 실행하지 않았음(`ABORTED`)을 확정한 뒤 취소한다. OPEN에서 준비한 작업은 OPEN으로 복귀하되 MEMBER의 더 최신 탈퇴 상태는 BLOCKED로 보존한다. PROBLEM의 BLOCKED에서 후속 보관을 준비했으면 prepared_from_state=BLOCKED로 복원하고 operation_result=ABORTED를 보존한다.
+    - 반복 complete/cancel은 같은 operationResult와 상태를 반환한다. 취소는 현재 작업의 ABORTED 확인과 원래 기대 버전을 요구한다. 문제는 준비 중 새로 반영한 스냅샷이 기대 버전 이상이고 최신 원천 버전과 같을 때 GENERAL·PUBLIC만 OPEN으로 복원한다. PRIVATE·ARCHIVED는 BLOCKED이며, 최신 스냅샷이 없으면 준비 전 상태로 복원한다. 원천 버전은 감소시키지 않는다.
+    - 이미 완료된 작업은 취소 불가(409 OPERATION_ALREADY_COMPLETED). 스터디 준비로 취소된 시험을 자동 복원하지 않는다.
+    - **응답 조건:** 반복 완료·취소는 같은 결과 반환. 오래된 작업 ID는 409 OPERATION_NOT_CURRENT.
+    - **종결 이력:** 직접 호출·대사·이벤트의 확인 경로를 가드 변경과 함께 저장한다. 사유는 직접 호출에서 받은 경우만 저장한다.
+    - **복구:** C는 PROBLEM PREPARED 1분 초과 건을 5분 주기로 소유 서비스 operation 상태 API로 대사한다. MEMBER·STUDY 작업 상태 조회를 이용한 자동 복구는 이번 배포에서 비활성화한다. 직접 complete/cancel과 소유 상태 이벤트 처리는 유지한다.
+    - COMMITTED는 complete, ABORTED는 cancel, PENDING/조회 실패는 유지·운영 알림. TTL 자동 해제 없음. PROBLEM의 GENERAL 재공개는 현재 작업을 덮어쓰지 않는 더 큰 PUBLIC 이벤트에만 OPEN이며 ARCHIVED는 해제하지 않는다. 미해결 PREPARED의 다른 작업을 PUBLIC 스냅샷만으로 취소하지 않는다. 완료 버전과 전체 스냅샷 버전을 분리한다. 더 최신 전체 스냅샷은 보존하되 완료 버전보다 오래된 공개 스냅샷은 차단을 해제하지 않는다. ARCHIVED는 후속 해제하지 않는다.
+- **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
+
+#### 4.7.5 스터디 시험 상태 조회
+
+- **Method / URI:** `GET /internal/v1/contest/studies/{studyId}/exams`
+- **인증:** study-service.
+- **대응 테이블:** `exams`
+- **설명:** 스터디 시험 상태 조회
+- **요청 헤더:** 없음
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `studyId` | string | Y | — | Path · 식별자 문자열 |
+    | `after` | string | N | — | Query · 불투명 페이지 커서. 생략 시 첫 페이지 |
+    | `size` | integer | N | 20 | Query · 1~100. 기본 20 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `items[].examId` | string | 시험 ID 문자열 |
+    | `items[].status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `items[].startsAt` | string (date-time) | 시작 시각 |
+    | `items[].endsAt` | string (date-time) | 전체 종료 시각 |
+    | `items[].examRevision` | string | 시험 설정 변경 버전 문자열 |
+    | `nextCursor` | string 또는 null | 다음 페이지 커서. 마지막 페이지는 null |
+    | `hasMore` | boolean | 다음 페이지 존재 여부 |
+- **비고:**
+    - **응답 조건:** CLOSED와 FINALIZED를 구분한다.
+    - `examId` 오름차순으로 조회한다. 커서는 `studyId`와 마지막 `examId`에 묶이며, 형식이 잘못되었거나 다른 스터디의 커서는 `COMMON_INVALID_REQUEST`(400)다.
+    - 각 페이지는 요청 시점의 데이터를 조회하며 전체 페이지의 단일 스냅샷은 보장하지 않는다.
+    - 종료 가능 여부는 §4.7.3의 ready로 확정한다.
+- **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
+
+#### 4.7.6 고정 문제 사용 조회
+
+- **Method / URI:** `GET /internal/v1/contest/problems/{problemId}/usages`
+- **인증:** problem-service.
+- **대응 테이블:** `exams`, `exam_problems`, `contests`, `contest_problems`
+- **설명:** 고정 문제 사용 조회
+- **요청 헤더:** 없음
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | string | Y | — | Path · 문제 ID 문자열 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `items[].context` | string | EXAM / CONTEST |
+    | `items[].contextId` | string | 시험·대회 ID 문자열 |
+    | `items[].problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
+    | `items[].status` | string | 해당 참가·접수·문맥의 상태. 본문의 공개·전이 조건 적용 |
+    | `items[].startsAt` | string (date-time) | 시작 시각 |
+    | `items[].endsAt` | string (date-time) | 전체 종료 시각 |
+    | `hasBlockingUsage` | boolean | 예정·진행 중 문제 사용이 존재하는지 |
+- **비고:**
+    - **기준:** 예정·진행 중 사용을 반환한다.
+    - 조회와 비공개·보관 사이 신규 편입 경합은 §4.7.3의 PROBLEM prepare로 막는다. 이 조회는 안내·진단용이며 상태 변경 승인을 대신하지 않는다.
+- **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
+
+#### 4.7.7 힌트 차단 복구 조회
+
+- **Method / URI:** `GET /internal/v1/contest/hint-blocks`
+- **인증:** study-service.
+- **대응 테이블:** `exams`, `exam_problems`, `exam_participants`, `contests`, `contest_problems`, `contest_participants`
+- **설명:** 힌트 차단 복구 조회
+- **요청 헤더:** 없음
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `memberId` | string | Y | — | Query · 회원 ID 문자열 |
+    | `after` | string | N | — | Query · 불투명 페이지 커서. 생략 시 첫 페이지 |
+    | `size` | integer | N | 20 | Query · 1~100. 기본 20 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `items[].context` | string | EXAM / CONTEST |
+    | `items[].contextId` | string | 시험·대회 ID 문자열 |
+    | `items[].participantId` | string | 참가 ID 문자열 |
+    | `items[].memberId` | string | 회원 ID 문자열 |
+    | `items[].participantRevision` | string | 참가 상태 변경 버전 문자열 |
+    | `items[].contextRevision` | string | examRevision / contestRevision 문자열 |
+    | `items[].problemIds` | string[] | 해당 문맥에 고정 편입된 문제 ID 목록 |
+    | `items[].startsAt` | string (date-time) | 시작 시각 |
+    | `items[].endsAt` | string (date-time) | 전체 종료 시각 |
+    | `nextCursor` | string 또는 null | 다음 페이지 커서. 마지막 페이지는 null |
+    | `hasMore` | boolean | 다음 페이지 존재 여부 |
+- **비고:**
+    - **대상:** 활성 등록자 중 CANCELED가 아닌 참가, 시험/대회가 CANCELED/CLOSED/ENDED/FINALIZED가 아닌 문맥. STARTED와 REGISTERED 모두 포함한다.
+    - 개인 수동 종료는 전체 힌트 차단을 해제하지 않는다.
+- **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
+
+#### 4.7.8 제출 공유 스냅샷 조회
+
+- **Method / URI:** `GET /internal/v1/contest/submissions/{context}/{receiptId}/shareable`
+- **인증:** problem-service. 공유 요청 회원 본인 검증.
+- **대응 테이블:** `exams`, `exam_submissions`, `contests`, `contest_submissions`
+- **설명:** 제출 공유 스냅샷 조회
+- **요청 헤더:** 없음
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `context` | string | Y | — | Path · EXAM / CONTEST |
+    | `receiptId` | string | Y | — | Path · C 시험·대회 접수 ID 문자열 |
+    | `memberId` | string | Y | — | Query · 회원 ID 문자열 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+    | `Cache-Control` | `private, no-store` | 응답 캐시 금지 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `context` | string | EXAM / CONTEST |
+    | `contextId` | string | 시험·대회 ID 문자열 |
+    | `receiptId` | string | C 시험·대회 접수 ID 문자열 |
+    | `submissionId` | string | judge 제출 ID 문자열 |
+    | `memberId` | string | 회원 ID 문자열 |
+    | `problemId` | string | 문제 ID 문자열 |
+    | `problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
+    | `language` | string | `java` / `python3` / `cpp` |
+    | `sourceCode` | string | UTF-8 코드. 공통 코드 크기·빈 코드 규칙 적용 |
+    | `verdict` | string 또는 null | 최종 판정. 미산정·공개 제한은 null |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+- **비고:**
+    - **검증:** receiptId는 examSubmissionId/contestSubmissionId, 본인 제출·AC·부모 FINALIZED. 틀리면 SUBMISSION_NOT_SHAREABLE(409), 다른 회원은 403. C의 불변 코드와 고정 회차를 반환한다.
+    - **응답 값:** `verdict=AC`
+    - **보안:** 호출자는 공유 스터디 권한을 별도로 검증하고 코드 스냅샷을 자기 DB에 저장한다.
+    - 타인 코드·숨김 테스트는 반환하지 않는다.
+    - Cache-Control: no-store.
+- **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
+
+#### 4.7.9 확정 결과 스냅샷 조회
+
+- **Method / URI:** `GET /internal/v1/contest/results/{context}/{contextId}`
+- **인증:** 분석 서비스(P3), study-service.
+- **대응 테이블:** `result_snapshots`
+- **설명:** 확정 결과 스냅샷 조회
+- **요청 헤더:** 없음
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `context` | string | Y | — | Path · EXAM / CONTEST |
+    | `contextId` | string | Y | — | Path · 시험·대회 ID 문자열 |
+    | `resultRevision` | string | N | — | Query · 결과 갱신·확정 버전 문자열 |
+    | `after` | string | N | — | Query · 불투명 페이지 커서. 생략 시 첫 페이지 |
+    | `size` | integer | N | 20 | Query · 1~100. 기본 20 |
+- **요청 본문:** 없음
+- **응답 헤더:**
+    
+    
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json` | 응답 본문 형식 |
+- **응답 본문 (200):**
+    
+    
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `context` | string | EXAM / CONTEST |
+    | `contextId` | string | 시험·대회 ID 문자열 |
+    | `resultStatus` | string | FINALIZED |
+    | `resultRevision` | string | 결과 갱신·확정 버전 문자열 |
+    | `finalizedAt` | string (date-time) | 해당 스냅샷 확정 시각 |
+    | `problems` | object[] | 고정 문제 목록. 참가자 결과는 items[].problems에 포함 |
+    | `problems[].problemId` | string | 문제 ID 문자열 |
+    | `problems[].problemRevisionId` | string | 고정 문제 수정 회차 ID 문자열 |
+    | `problems[].score` | string 또는 null | EXAM 배점 문자열. CONTEST는 null |
+    | `items` | object[] | 조회 항목 목록. 하위 행의 필드 적용 |
+    | `items[].memberId` | string | 회원 ID 문자열 |
+    | `items[].participantId` | string | 참가 ID 문자열 |
+    | `items[].isRanked` | boolean | 순위 집계 대상 여부 |
+    | `items[].rank` | integer 또는 null | 공동 순위. 미집계는 null |
+    | `items[].score` | string 또는 null | EXAM 확정 총점 문자열. CONTEST는 null |
+    | `items[].solvedCount` | integer 또는 null | CONTEST 해결 문제 수. EXAM은 null |
+    | `items[].penaltyMinutes` | integer 또는 null | CONTEST 패널티 분. EXAM은 null |
+    | `items[].problems` | object[] | 해당 참가자의 확정 문제별 결과. 미제출 문제도 포함 |
+    | `items[].problems[].problemId` | string | 고정 문제 ID |
+    | `items[].problems[].verdict` | string 또는 null | EXAM 마지막 유효 제출 판정. 미제출·0점 수동 종결은 null |
+    | `items[].problems[].score` | string 또는 null | EXAM 확정 문제 점수. CONTEST는 null |
+    | `items[].problems[].passedCount` | integer 또는 null | EXAM 정상 채점의 통과 수. 미제출·수동 종결·CONTEST는 null |
+    | `items[].problems[].totalCount` | integer 또는 null | EXAM 정상 채점의 테스트 수. 미제출·수동 종결·CONTEST는 null |
+    | `items[].problems[].isSolved` | boolean 또는 null | CONTEST 최초 AC 존재 여부. EXAM은 null |
+    | `items[].problems[].wrongCount` | integer 또는 null | CONTEST 최초 AC 이전 유효 오답 수. EXAM은 null |
+    | `items[].problems[].acceptedAt` | string (date-time) 또는 null | CONTEST 최초 AC 접수 시각. EXAM·미해결은 null |
+    | `nextCursor` | string 또는 null | 다음 페이지 커서. 마지막 페이지는 null |
+    | `hasMore` | boolean | 다음 페이지 존재 여부 |
+- **비고:**
+    - **응답 값:** `resultStatus=FINALIZED`
+    - **기준:** result_snapshots의 같은 버전을 페이지 전체에서 사용한다.
+    - 미확정은 RESULT_NOT_FINALIZED(409), 없는 버전은 RESULT_REVISION_NOT_FOUND(404). 코드·이메일·숨김 케이스 없음. PRACTICE 승급·진행률 집계에 사용하지 않는다.
+- **오류:** 공통 오류 및 §4.7의 해당 조건을 적용한다.
+
+#### 4.7.10 시험 재채점 가능 여부 조회
+
+- **계약 기준:** §3.2.3·부록 A의 기존 호출 경로를 유지한다. 부모 시험의 상태별 허용 여부와 응답 필드는 아래 기준을 적용한다.
+- **Method / URI:** `GET /internal/v1/exams/{examId}/rejudge-eligibility`
+- **인증:** 내부 호출 (judge)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** `exams`
+- **설명:** 실패 EXAM 제출 재채점 전 부모 시험의 결과 확정 여부를 확인한다. 기존 호출 경로를 유지하며, 이 조회 자체로 재채점 작업을 접수하거나 확정을 보류하지 않는다.
+- **요청 파라미터:** `examId` — Path, string, 필수.
+- **응답 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `examId` | string | 조회한 시험 ID |
+    | `status` | string | 부모 시험 상태 |
+    | `eligible` | boolean | IN_PROGRESS·CLOSED이면 true, SCHEDULED·CANCELED·FINALIZED이면 false. 제출의 FAILED·회차·입력 조건은 Judge가 별도로 검증 |
+
+- **실패 시 처리:** 시험 없음은 404 EXAM_NOT_FOUND. 조회 실패는 Judge에서 fail-closed. FINALIZED 후에는 허용하지 않는다(§3.2.3).
+- **응답 필드:** `examId`, `status`, `eligible`만 반환한다. 허용하지 않는 상태도 200·`eligible=false`로 반환하며 별도 거절 사유 필드는 추가하지 않는다.
+- **동시성:** 이 조회는 상태 확인용이며 결과 확정을 막지 않는다. 단순 eligible=true 응답을 §4.6.3의 PENDING 관리자 작업과 같은 확정 방지 수단으로 간주하지 않는다.
+
+### 4.8 내부 API — C가 사용하는 외부 서비스
+
+> 공통 규칙: contest-service 내부 호출. 조회 타임아웃 2초. 검증 실패는 503 `CONTEST_DEPENDENCY_UNAVAILABLE`. 
+재시도: 연결 실패·502/503/504만 최대 2회, 100ms·300ms 지수 백오프.
+> 
+
+#### 4.8.1 문제 선택 (problem)
+
+- **Method / URI:** `GET /internal/v1/problems/summaries?ids={id1}&ids={id2}&purpose={purpose}`
+- **응답 필드:** §2.6.5의 직접 객체 `items`. `problemId`·`isAvailable`과 존재·사용 회차 조건별 필드
+- **비고:** §2.6.5의 `ids`(최대 50개)·`purpose=EXAM/CONTEST`를 지정한다. 누락·`isAvailable=false`는 `EXAM_PROBLEM_NOT_AVAILABLE`(409). 통과 사용 회차·언어·상태 버전을 고정하며 편입은 PROBLEM 가드 잠금 안에서 확정한다. 상태·용도 조건은 §2.6.5를 따른다.
+
+#### 4.8.2 고정 회차 본문 (problem)
+
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content`
+- **비고:** C가 자기 문맥의 참가·열람 권한과 고정 참조를 확인하고 `X-Access-Context`로 호출한다. B는 문제·회차 소속과 자료 연결을 검증한다(§2.6.3). C가 확인한 권한을 B가 C에 다시 질의하지 않는다. 조회 장애 시 503.
+
+#### 4.8.3 고정 회차 이미지 (problem)
+
+- **Method / URI:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}`
+- **비고:** C가 열람 권한과 고정 참조를 확인하고 `X-Access-Context`로 호출한다. B는 문제·회차·본문·이미지 소속을 검증한다(§2.6.4). 이미지 없음·소속 불일치는 404.
+
+#### 4.8.4 채점 상태 대사 (judge)
+
+- **제공 명세:** §3.3.6. 요청·응답과 처리 조건은 해당 절을 따른다.
+
+- **Method / URI:** `GET /internal/v1/judge/submissions/by-receipt?context=&receiptId=`
+- **비고:** `found=true`이면 `context`·`contextId`·`receiptId`·`userId`·`problemId`·`problemRevisionId`·`submittedAt` 대조. 미종결·실패의 `verdict`/`passedCount`/`totalCount`는 `null`.
+
+#### 4.8.5 시험 실패 재처리 (judge)
+
+- **제공 명세:** §3.3.7. 요청·응답과 처리 조건은 해당 절을 따른다.
+
+- **Method / URI:** `POST /internal/v1/judge/submissions/{submissionId}/retry`
+- **요청 필드:** `context`(`EXAM`만), `receiptId`, `expectedJudgeAttempt`, `operationId`, `actorMemberId`, `reason`
+- **응답:** `submissionId`, `judgeAttempt`(목표 회차 = `expectedJudgeAttempt + 1`), `status`(`QUEUED`)
+
+#### 4.8.6 코드 실행 (judge)
+
+- **제공 명세:** §3.3.8. 요청·응답과 처리 조건은 해당 절을 따른다.
+
+- **Method / URI:** `POST /internal/v1/judge/runs`
+- **요청 필드:** `context`, `contextId`, `memberId`, `problemId`, `problemRevisionId`, `language`, `sourceCode`, `customTests[].args`
+- **비고:** §4.7.1 `RUN` 검증 후 공개 예제·사용자 입력만 동기 실행 (30초). 결과 저장·이벤트 발행 없음.
+- **재시도:** `RUN_TIMEOUT`(504)은 §4.8 공통 자동 재시도 대상에서 제외하고 호출자에게 반환한다.
+
+#### 4.8.7 스터디 구성원 조회 (study)
+
+- **Method / URI:** `GET /internal/v1/studies/{studyId}/members`
+- **비고:** 시험 생성·수정 시 `LEADER`·`MANAGER` 역할 검증. `studyStatus = CLOSED`이면 시험 생성·수정 불가.
+
+#### 4.8.8 회원 상태 조회 (member)
+
+- **Method / URI:** `GET /internal/v1/members/{memberId}/status`
+- **비고:** 신규 등록·입장·Draft·제출·Run 전 `ACTIVE` 확인. 이미 접수한 동일 요청 반환·자동 제출·채점 반영·읽기는 소급 취소 안 함.
+- 현재 상태 응답의 `memberId`·`status`·`role`을 확인한다. `sourceVersion`과 `nickname`이 없는 응답으로 회원 복제본을 생성하거나 갱신하지 않는다. 버전과 표시 정보가 함께 제공되면 원천 버전을 비교해 반영한다.
+- `MemberSuspended`는 기존 복제본의 표시 정보를 유지하고 이벤트의 원천 버전이 더 클 때 정지·해제 상태를 갱신한다. 탈퇴한 복제본은 복원하지 않는다. 복제본이 없으면 소비 기록과 ACK를 남기지 않아 최초 회원 정보 반영 뒤 재수신할 수 있다.
+- 시험 생성·설정 변경과 참가·Draft·직접 제출·Run은 기존 회원 복제본도 확인한다. 복제본이 없거나 비활성이면 신규 쓰기·Run을 허용하지 않는다. Judge의 §4.7.1 Run 문맥 검증도 활성 복제본을 요구한다.
+
+#### 4.8.9 외부 작업 상태 대사 (member·study·problem)
+
+- **제공 명세:** member §1.7.3, study §5.7.3, problem §2.6.10. 회원·스터디 요청·응답과 처리 조건은 해당 절을 따른다.
+
+- **Method / URI:** `GET /internal/v1/members/{memberId}/operations/{operationId}`, `GET /internal/v1/studies/{studyId}/operations/{operationId}`, `GET /internal/v1/problems/{problemId}/operations/{operationId}`
+- **응답 필드:** `operationId`, `state`(`PENDING`/`COMMITTED`/`ABORTED`), `sourceVersion`, `resourceStatus`
+- **비고:** 이번 배포에서는 Problem만 자동 조회한다. Member·Study는 작업 상태 조회를 이용한 자동 복구를 비활성화하고 직접 complete/cancel을 유지한다. `COMMITTED` 확인 후 4.7.4 complete, `ABORTED` 확인 후 cancel로 복구. `PENDING`·404·조회 실패는 차단 유지. 없는 작업 404를 자동 취소 근거로 사용하지 않음.
+
+---
+
+## 5. 스터디 (study)
+
+> 작성: 담당 D · 서비스: `study-service`
+> 
+
+### 5.0 개요
+
+| 항목 | 값 |
+| --- | --- |
+| 외부 경로 | `/api/v1/studies/**`, `/api/v1/admin/studies/**` |
+| 내부 경로 | `/internal/v1/studies/**` |
+| 소유 테이블 | 스키마 `study` |
+| 동시성 원칙 | 정원·참여 상한은 카운터 조건부 UPDATE, "진행 중 1건"은 생성 컬럼 + 유일 제약, 상태 전이는 `WHERE status = :expected` 조건부 UPDATE |
+| 이벤트 발행 | 모든 발행은 Outbox(같은 트랜잭션) |
+
+### 5.1 외부 API — 스터디 탐색·조회
+
+#### 5.1.1 스터디 목록 조회
+
+- **Method / URI:** `GET /api/v1/studies`
+- **인증:** 공개
+- **대응 테이블:** `studies`
+- **설명:** 모집 중(`RECRUITING`) 스터디를 조건으로 검색한다. 학습 프로필 없이도 조회할 수 있다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `keyword` | string | N | — | 이름·설명 검색 |
+    | `goal` | string | N | — | 목표 필터 |
+    | `skillLevel` | string | N | — | 대상 레벨 필터 (태그 레벨 집계 방식 확정 시 조정) |
+    | `preferredLanguage` | string | N | — | 선호 언어 필터 (공통 Enum) |
+    | `activeTimeSlot` | string | N | — | 활동 시간대 필터 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 | 최대 100 |
+    
+    허용 정렬 필드: `createdAt`, `memberCount`, `lastActivityAt` (기본 `createdAt,desc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [
+            { "studyId": "12", "name": "코딩테스트 스터디", "goal": "EMPLOYMENT", "skillLevel": "LV2", "preferredLanguage": "java", "activeTimeSlot": "EVENING", "capacity": 10, "memberCount": 5, "status": "RECRUITING", "joinType": "APPROVAL", "lastActivityAt": "2026-09-27T21:10:00+09:00", "createdAt": "2026-09-21T10:00:00+09:00" }
+          ],
+          "page": 0, "size": 20, "totalElements": 42, "totalPages": 3, "hasNext": true
+        }
+      }
+    ```
+    
+    - `goal`·`skillLevel`·`activeTimeSlot` 값 체계는 학습 프로필과 같은 공통 Enum을 쓴다.
+
+#### 5.1.2 스터디 상세
+
+- **Method / URI:** `GET /api/v1/studies/{studyId}`
+- **인증:** 공개 (로그인 시 `myMembership` 포함)
+- **대응 테이블:** `studies`, `study_memberships`, `member_replicas`
+- **설명:** 비구성원도 열람할 수 있다. `CLOSED` 스터디도 조회된다.
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "studyId": "12", "name": "코딩테스트 스터디", "description": "취업 준비 알고리즘 스터디",
+          "goal": "EMPLOYMENT", "skillLevel": "LV2", "preferredLanguage": "java", "activeTimeSlot": "EVENING",
+          "capacity": 10, "memberCount": 5, "status": "RECRUITING", "joinType": "APPROVAL", "isAutoReopen": true,
+          "version": 3,
+          "leader": { "memberId": "1", "nickname": "leader1" },
+          "myMembership": { "membershipId": "55", "status": "APPROVED", "role": "MEMBER" },
+          "createdAt": "2026-09-21T10:00:00+09:00"
+        }
+      }
+    ```
+    
+    - `myMembership`: 비로그인 또는 진행 중 가입(`PENDING`·`APPROVED`)이 없으면 `null`
+    - `version`: 스터디 설정 수정(5.3.1)에 쓰는 낙관적 락 값
+- **에러:**
+    - `STUDY_NOT_FOUND`(404)
+
+#### 5.1.3 내 스터디 목록
+
+- **Method / URI:** `GET /api/v1/studies/me`
+- **인증:** 로그인 필요
+- **대응 테이블:** `study_memberships`, `studies`, `study_member_quotas`
+- **설명:** 본인이 `PENDING`·`APPROVED` 상태인 스터디와 활성 참여 수를 반환한다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `status` | string | N | — | `PENDING` / `APPROVED` |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    
+    허용 정렬 필드: `joinedAt`, `createdAt` (기본 `joinedAt,desc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [ { "studyId": "12", "name": "코딩테스트 스터디", "studyStatus": "ACTIVE", "membershipId": "55", "membershipStatus": "APPROVED", "role": "MEMBER", "joinedAt": "2026-09-22T09:10:00+09:00" } ],
+          "page": 0, "size": 20, "totalElements": 2, "totalPages": 1, "hasNext": false,
+          "activeJoinCount": 2,
+          "activeJoinLimit": 5
+        }
+      }
+    ```
+    
+
+#### 5.1.4 추천 스터디
+
+- **Method / URI:** `GET /api/v1/studies/recommendations`
+- **인증:** 로그인 필요
+- **대응 테이블:** `study_recommendations`, `member_learning_profile_replicas`, `studies`
+- **설명:** 학습 프로필이 있으면 규칙 기반 추천(`PERSONALIZED`), 없거나 결과가 비면 최근 활동순(`POPULAR`)을 반환한다. 추천 결과가 하루보다 오래됐으면 즉시 재계산한다. 이미 속한 스터디와 정원이 찬 스터디는 제외한다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "mode": "PERSONALIZED",
+          "isProfileRequired": false,
+          "content": [ { "studyId": "12", "name": "코딩테스트 스터디", "score": 87.00, "reasons": ["목표 일치", "태그 레벨 비슷함", "선호 언어 같음"], "memberCount": 5, "capacity": 10, "status": "RECRUITING" } ],
+          "page": 0, "size": 20, "totalElements": 8, "totalPages": 1, "hasNext": false
+        }
+      }
+    ```
+    
+    - `mode`: `PERSONALIZED` / `POPULAR`. `POPULAR`이면 `score`는 `null`, `reasons`는 `["최근 활동이 많은 스터디"]`
+    - `isProfileRequired`: 학습 프로필이 없으면 `true` (화면에서 프로필 입력 안내). 프로필이 없어도 오류를 반환하지 않는다.
+
+### 5.2 외부 API — 스터디 생성·가입
+
+#### 5.2.1 스터디 생성
+
+- **Method / URI:** `POST /api/v1/studies`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **대응 테이블:** `studies`, `study_memberships`, `study_member_quotas`, `study_membership_histories`, `outbox_events`
+- **설명:** 스터디를 만들고 생성자를 `LEADER`(`APPROVED`)로 등록한다. 생성자의 참여 상한 카운터를 같은 트랜잭션에서 확보한다.
+- **요청 바디:**
+    
+    ```json
+      { "name": "코딩테스트 스터디", "description": "취업 준비 알고리즘 스터디", "goal": "EMPLOYMENT", "skillLevel": "LV2", "preferredLanguage": "java", "activeTimeSlot": "EVENING", "capacity": 10, "joinType": "APPROVAL", "isAutoReopen": true }
+    ```
+    
+    - `name` 1~200자, `description` 0~500자, `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
+- **응답 (201):**
+    
+    ```json
+      { "success": true, "message": "스터디가 생성되었습니다.", "data": { "studyId": "12" } }
+    ```
+    
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403)
+- **동시성/멱등 보장:**
+    - 트랜잭션 순서 = ① `study_member_quotas` 조건부 UPDATE(`active_count < 5`) ② `studies` INSERT(`member_count = 1`) ③ `study_memberships` INSERT(`LEADER`, `APPROVED`) ④ 이력 INSERT ⑤ `outbox_events` INSERT. ①이 0행이면 전체 롤백.
+- **발행:**
+    - `StudyMemberJoined` — 스터디 생성 시 LEADER 등록
+
+#### 5.2.2 스터디 가입 신청·즉시 가입
+
+- **Method / URI:** `POST /api/v1/studies/{studyId}/memberships`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **Idempotency:** 없음 (중복은 유일 제약으로 `STUDY_ALREADY_APPLIED`)
+- **대응 테이블:** `studies`, `study_memberships`, `study_member_quotas`, `assignment_member_statuses`, `assignment_completions`, `study_membership_histories`, `outbox_events`
+- **설명:** `APPROVAL` 스터디는 `PENDING`(만료 7일), `INSTANT` 스터디는 즉시 `APPROVED`를 만든다. 즉시 가입이면 같은 트랜잭션에서 `SCHEDULED`·`OPEN` 문제집에 편입하고, `OPEN` 문제집은 기존 풀이를 반영한다. 요청 바디는 없다.
+- **응답 (201):**
+    
+    ```json
+      { "success": true, "message": "가입 신청이 완료되었습니다.", "data": { "membershipId": "55", "status": "PENDING", "expiresAt": "2026-10-05T09:00:00+09:00" } }
+    ```
+    
+    - `INSTANT` 스터디: `status: "APPROVED"`, `expiresAt: null`, `message: "스터디에 가입되었습니다."`
+- **에러:**
+    - `STUDY_NOT_FOUND`(404), `STUDY_NOT_RECRUITING`(409), `STUDY_ALREADY_APPLIED`(409), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `STUDY_FULL`(409), `MEMBER_SUSPENDED`(403)
+- **동시성/멱등 보장:**
+    - 중복 신청: 생성 컬럼 `active_member_id` + `uk_study_memberships_study_active_member`
+    - 즉시 가입 확보 순서: ① 회원 카운터 `UPDATE study_member_quotas SET active_count = active_count + 1 WHERE member_id = ? AND active_count < 5` ② 스터디 정원 `UPDATE studies SET member_count = member_count + 1, status = IF(member_count >= capacity, 'ACTIVE', status), version = version + 1 WHERE id = ? AND status = 'RECRUITING' AND member_count < capacity`. MySQL 단일 테이블 UPDATE는 SET을 왼쪽부터 평가하므로 `status` 계산은 증가된 `member_count`를 본다. 어느 쪽이든 0행이면 전체 롤백.
+    - 문제집 편입: `assignment_member_statuses`·`assignment_completions` 유일 제약 upsert. 개설 스케줄러와 동시에 실행돼도 1건만 남는다.
+- **발행:**
+    - `StudyMemberJoined` — 즉시 가입 시
+
+#### 5.2.3 가입 신청 취소·자진 탈퇴
+
+- **Method / URI:** `DELETE /api/v1/studies/{studyId}/memberships/me`
+- **인증:** 로그인 필요
+- **대응 테이블:** `study_memberships`, `studies`, `study_member_quotas`, `study_membership_histories`, `outbox_events`
+- **설명:** `PENDING`이면 `CANCELED`, `APPROVED`이면 `LEFT`로 전이한다. 스터디장은 위임 전에는 탈퇴할 수 없다. 탈퇴해도 문제집 진행 기록은 보존하되 통계에서 제외한다.
+- **응답 (204)**
+- **에러:**
+    - `STUDY_MEMBERSHIP_NOT_FOUND`(404), `STUDY_LEADER_DELEGATION_REQUIRED`(409)
+- **동시성/멱등 보장:**
+    - `UPDATE study_memberships SET status = :next WHERE id = ? AND status = :current`. 0행이면 재조회해 이미 해제됐으면 `STUDY_MEMBERSHIP_NOT_FOUND`.
+    - `LEFT`이면 같은 트랜잭션에서 `member_count − 1`, 회원 카운터 `− 1`. `ACTIVE`이고 `is_auto_reopen = true`이면 `RECRUITING`으로 되돌린다.
+- **발행:**
+    - `StudyMemberLeft` — `LEFT` 전이 시
+
+#### 5.2.4 구성원·대기 신청 목록
+
+- **Method / URI:** `GET /api/v1/studies/{studyId}/memberships`
+- **인증:** 로그인 필요
+- **대응 테이블:** `study_memberships`, `member_replicas`, `member_learning_profile_replicas`
+- **설명:** `status=APPROVED`는 구성원 누구나, `status=PENDING`은 `LEADER`·`MANAGER`만 조회한다. 대기 신청에는 승인 심사용 학습 프로필 공개 항목을 포함한다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `status` | string | N | `APPROVED` | `APPROVED` / `PENDING` |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    
+    허용 정렬 필드: `joinedAt`, `appliedAt` (기본 `APPROVED`: `joinedAt,asc` / `PENDING`: `appliedAt,asc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [
+            { "membershipId": "55", "memberId": "7", "nickname": "user7", "role": "MEMBER", "status": "PENDING",
+              "learningProfile": { "goal": "EMPLOYMENT", "tagLevels": { "해시": "LV2", "그래프": "LV1" }, "preferredLanguages": ["java"] },
+              "appliedAt": "2026-09-28T09:00:00+09:00", "expiresAt": "2026-10-05T09:00:00+09:00", "joinedAt": null }
+          ],
+          "page": 0, "size": 20, "totalElements": 3, "totalPages": 1, "hasNext": false
+        }
+      }
+    ```
+    
+    - `learningProfile`: `PENDING` 조회에서만 채운다. 복제본이 없으면 `null`. 단일 `skillLevel` 대신 태그별 레벨.
+- **에러:**
+    - `STUDY_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403)
+
+#### 5.2.5 가입 신청 승인·거절·강제 탈퇴
+
+- **Method / URI:** `PATCH /api/v1/studies/{studyId}/memberships/{membershipId}`
+- **인증:** 로그인 필요 + 해당 스터디 `LEADER`·`MANAGER`
+- **Idempotency:** 없음 (같은 목표 상태 재요청은 `STUDY_MEMBERSHIP_STATUS_CONFLICT`)
+- **대응 테이블:** `study_memberships`, `studies`, `study_member_quotas`, `assignment_member_statuses`, `assignment_completions`, `study_membership_histories`, `outbox_events`
+- **설명:** `PENDING → APPROVED`(승인), `PENDING → REJECTED`(거절), `APPROVED → REMOVED`(강제 탈퇴, 사유 필수). `MANAGER`는 `LEADER`·다른 `MANAGER`를 강제 탈퇴시킬 수 없다.
+- **요청 바디:**
+    
+    ```json
+      { "status": "APPROVED", "reason": null }
+    ```
+    
+    - `status`: `APPROVED` / `REJECTED` / `REMOVED`. `REMOVED`는 `reason`(1~500자) 필수
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "승인 처리가 완료되었습니다.", "data": { "membershipId": "55", "status": "APPROVED" } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_MEMBERSHIP_NOT_FOUND`(404), `STUDY_MEMBERSHIP_STATUS_CONFLICT`(409), `STUDY_APPLICATION_EXPIRED`(409), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `STUDY_FULL`(409), `STUDY_ALREADY_CLOSED`(409)
+- **동시성/멱등 보장:**
+    - 승인: ① `UPDATE study_memberships SET status='APPROVED' WHERE id=? AND status='PENDING' AND expires_at > now()` — 0행이면 재조회해 만료면 `STUDY_APPLICATION_EXPIRED`, 아니면 `STUDY_MEMBERSHIP_STATUS_CONFLICT` ② 신청자 회원 카운터 확보 ③ 스터디 정원 확보(`status <> 'CLOSED' AND member_count < capacity`) ④ 문제집 편입(upsert). 어느 단계든 실패하면 전체 롤백.
+    - 승인·만료·취소 경합: 모두 `status = 'PENDING'` 조건부 UPDATE이므로 먼저 커밋한 쪽만 반영.
+- **발행:**
+    - 승인 → `StudyMemberJoined` + `StudyApplicationDecided` / 거절 → `StudyApplicationDecided` / 강제 탈퇴 → `StudyMemberLeft`
+
+### 5.3 외부 API — 스터디 운영
+
+#### 5.3.1 스터디 설정 수정
+
+- **Method / URI:** `PATCH /api/v1/studies/{studyId}`
+- **인증:** 로그인 필요 + `LEADER`
+- **대응 테이블:** `studies`
+- **설명:** 바꿀 필드만 보낸다. `APPROVAL → INSTANT`는 대기 신청이 있으면 거절한다. 정원은 현재 구성원 수보다 작게 줄일 수 없다.
+- **요청 바디:**
+    
+    ```json
+      { "description": "새 설명", "joinType": "INSTANT", "capacity": 8, "isAutoReopen": false, "version": 3 }
+    ```
+    
+    - `version`: 스터디 상세 조회(5.1.2)에서 받은 값(낙관적 락)
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "스터디 정보가 수정되었습니다.", "data": { "studyId": "12", "version": 4 } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `STUDY_PENDING_APPLICATIONS_EXIST`(409), `STUDY_CAPACITY_TOO_SMALL`(409), `STUDY_UPDATE_CONFLICT`(409)
+- **동시성/멱등 보장:** `UPDATE studies SET …, version = version + 1 WHERE id = ? AND version = :version AND status <> 'CLOSED' AND member_count <= :newCapacity`. 0행이면 재조회해 원인별 코드로 응답한다. 가입·탈퇴의 카운터 UPDATE도 `version`을 올리므로 조회 후 가입이 일어나면 충돌로 감지된다.
+
+#### 5.3.2 운영진 임명·해제
+
+- **Method / URI:** `PATCH /api/v1/studies/{studyId}/memberships/{membershipId}/role`
+- **인증:** 로그인 필요 + `LEADER`
+- **Idempotency:** 같은 역할로 변경 요청은 변경 없이 200
+- **대응 테이블:** `study_memberships`, `studies`, `study_membership_histories`
+- **요청 바디:**
+    
+    ```json
+      { "role": "MANAGER" }
+    ```
+    
+    - `MANAGER` / `MEMBER`
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "역할이 변경되었습니다.", "data": { "membershipId": "55", "role": "MANAGER" } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_NOT_FOUND`(404), `STUDY_MEMBERSHIP_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `STUDY_LEADER_ROLE_CHANGE_NOT_ALLOWED`(409), `STUDY_MANAGER_LIMIT_EXCEEDED`(409)
+- **동시성/멱등 보장:** `studies.manager_count` 조건부 UPDATE(`manager_count < 2`)로 확보한 뒤 역할을 바꾼다.
+
+#### 5.3.3 스터디장 위임
+
+- **Method / URI:** `POST /api/v1/studies/{studyId}/leader-delegation`
+- **인증:** 로그인 필요 + `LEADER`
+- **대응 테이블:** `study_memberships`, `studies`, `study_membership_histories`
+- **설명:** 현 `LEADER`를 `MANAGER`로, 대상을 `LEADER`로 한 트랜잭션에서 교체한다. 기존 경로(`/delegate-leader`)는 동사형이라 명사형으로 바꿨다.
+- **요청 바디:**
+    
+    ```json
+      { "targetMembershipId": "55" }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "스터디장이 위임되었습니다.", "data": { "leaderMembershipId": "55" } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_MEMBERSHIP_NOT_FOUND`(404) / 대상이 `APPROVED` 구성원이 아님, `STUDY_ALREADY_CLOSED`(409)
+- **동시성/멱등 보장:** ① 현재 스터디장 `UPDATE … SET role='MANAGER' WHERE id=:leaderMembershipId AND role='LEADER'` ② 대상 `UPDATE … SET role='LEADER' WHERE id=:target AND status='APPROVED'`. `leader_key` 유일 인덱스가 문장 단위로 검사되므로 강등 → 승격 순서로 고정한다. 대상이 이미 `MANAGER`였으면 슬롯을 교환해 `manager_count`를 유지한다. 동시 위임 두 건은 ①의 조건으로 하나만 성공한다.
+
+#### 5.3.4 스터디 종료
+
+- **Method / URI:** `POST /api/v1/studies/{studyId}/close`
+- **인증:** 로그인 필요 + `LEADER`
+- **Idempotency:** 이미 종료면 `STUDY_ALREADY_CLOSED`
+- **대응 테이블:** `studies`, `assignments`, `study_memberships`, `study_member_quotas`
+- **설명:** 스터디를 `CLOSED`로 전이한다(불가역). 예정·진행 중 시험이 남아 있으면 종료를 막는다. `CLOSED` 시험이 확정 전이어도 종료를 막지 않으며 채점·확정은 계속된다. 대기 신청은 `CANCELED`, 진행 중 문제집은 `CLOSED`로 전이한다. 구성원 가입은 `APPROVED`로 남겨 읽기 전용 조회를 허용하되, 구성원별 참여 상한 카운터를 1씩 되돌린다.
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "스터디가 종료되었습니다.", "data": { "studyId": "12" } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_ALREADY_CLOSED`(409)
+    - `STUDY_ACTIVE_EXAM_EXISTS`(409) / `SCHEDULED`·`IN_PROGRESS` 시험 존재 (예정 시험 취소 안내)
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **동시성/멱등 보장:** `UPDATE studies SET status='CLOSED' WHERE id=? AND status <> 'CLOSED'`가 먼저 실행되고, 이후 가입 확보 문장은 `status` 조건으로 모두 실패한다.
+- **외부 의존:**
+    - `GET /internal/v1/contest/studies/{studyId}/exams` (contest) — 예정·진행 중 시험 수. 실패 시 fail-closed
+
+### 5.4 외부 API — 문제집·과제
+
+#### 5.4.1 문제집 생성
+
+- **Method / URI:** `POST /api/v1/studies/{studyId}/assignments`
+- **인증:** 로그인 필요 + `LEADER`·`MANAGER`
+- **대응 테이블:** `assignments`, `assignment_problems`
+- **설명:** 문제집을 생성한다. 각 문제의 현재 공개 회차를 `assignment_problems.assigned_revision_id`에 기록한다(표시용, 인정은 `problemId` 기준). 태그 단위 구성을 권장하며 `tagId`로 대표 태그를 지정한다(B-13). `startsAt` 도달 시 스케줄러가 `SCHEDULED → OPEN`으로 전이한다.
+- **요청 바디:**
+    
+    ```json
+      { "title": "10월 1주차 해시", "goal": "해시 집중 풀이", "tagId": "3", "problemIds": ["101", "102", "103"], "isPreSolvedAllowed": true, "startsAt": "2026-10-06T00:00:00+09:00", "deadlineAt": "2026-10-12T23:59:59+09:00" }
+    ```
+    
+    - `problemIds` 1~20개, 중복 불가. `startsAt` 필수, `deadlineAt` 필수(`startsAt`보다 뒤). 과거 `startsAt`이면 다음 스케줄러 회차에 바로 `OPEN`
+- **응답 (201):**
+    
+    ```json
+      { "success": true, "message": "문제집이 생성되었습니다.", "data": { "assignmentId": "30", "status": "SCHEDULED" } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE`(409), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - `GET /internal/v1/problems/summaries?ids=&purpose=ASSIGNMENT` (problem) — 공개 여부·현재 회차·표시 정보. 실패 시 fail-closed
+
+#### 5.4.2 문제집 목록
+
+- **Method / URI:** `GET /api/v1/studies/{studyId}/assignments`
+- **인증:** 로그인 필요 + `APPROVED` 구성원
+- **대응 테이블:** `assignments`, `assignment_member_statuses`
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `status` | string | N | — | `SCHEDULED` / `OPEN` / `CLOSED` |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    
+    허용 정렬 필드: `startsAt`, `deadlineAt` (기본 `startsAt,desc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [ { "assignmentId": "30", "title": "10월 1주차 해시", "tagId": "3", "status": "OPEN", "activeProblemCount": 3, "startsAt": "2026-10-06T00:00:00+09:00", "deadlineAt": "2026-10-12T23:59:59+09:00", "myStatus": { "status": "IN_PROGRESS", "completedCount": 1, "onTimeCount": 1 } } ],
+          "page": 0, "size": 20, "totalElements": 5, "totalPages": 1, "hasNext": false
+        }
+      }
+    ```
+    
+    - `myStatus`: 요청자가 대상이 아니면 `null`
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403)
+
+#### 5.4.3 문제집 상세·진행률
+
+- **Method / URI:** `GET /api/v1/studies/{studyId}/assignments/{assignmentId}`
+- **인증:** 로그인 필요 + `APPROVED` 구성원
+- **대응 테이블:** `assignments`, `assignment_problems`, `assignment_member_statuses`, `assignment_completions`, `member_replicas`
+- **설명:** 문제별 배정 스냅샷과 현재 `APPROVED` 구성원의 진행률을 반환한다. `EXCLUDED` 문제는 목록에 표시하되 진행률 분모에서 뺀다.
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "assignmentId": "30", "title": "10월 1주차 해시", "goal": "해시 집중 풀이", "tagId": "3", "status": "OPEN", "isPreSolvedAllowed": true,
+          "startsAt": "2026-10-06T00:00:00+09:00", "deadlineAt": "2026-10-12T23:59:59+09:00",
+          "problems": [ { "problemId": "101", "assignedRevisionId": "201", "revisionNumber": 3, "title": "최단 경로", "difficulty": 3, "tags": ["그래프"], "status": "ACTIVE", "myCompletionType": "ON_TIME" } ],
+          "memberProgress": [ { "memberId": "7", "nickname": "user7", "status": "IN_PROGRESS", "completedCount": 2, "onTimeCount": 2, "activeProblemCount": 3 } ],
+          "studyStats": { "avgCompletionRate": 0.67, "avgOnTimeRate": 0.50 }
+        }
+      }
+    ```
+    
+    - `problems[].revisionNumber`: `integer` 또는 `null`. 이 기능 이전에 생성된 문제집은 `null`
+    - 진행률 = 인정 문제 수 / `ACTIVE` 문제 수, 기한 내 완료율 = (`PRE_SOLVED` + `ON_TIME`) / `ACTIVE` 문제 수
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_ASSIGNMENT_NOT_FOUND`(404)
+
+#### 5.4.4 후속 문제집 후보
+
+- **Method / URI:** `GET /api/v1/studies/{studyId}/assignments/{assignmentId}/follow-up-candidates`
+- **인증:** 로그인 필요 + `LEADER`·`MANAGER`
+- **대응 테이블:** `assignment_problems`, `assignment_completions`, `assignment_member_statuses`
+- **설명:** `CLOSED` 문제집에서 미해결 구성원이 있는 `ACTIVE` 문제를 미해결 인원 내림차순으로 반환한다. 후속 문제집은 이 결과로 문제집 생성(5.4.1)을 호출해 만든다.
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": null, "data": { "candidates": [ { "problemId": "102", "title": "…", "unsolvedMemberCount": 3 } ] } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_ASSIGNMENT_NOT_FOUND`(404)
+
+### 5.5 외부 API — 커뮤니티
+
+#### 5.5.1 게시글 목록
+
+- **Method / URI:** `GET /api/v1/studies/{studyId}/posts`
+- **인증:** 로그인 필요 + `APPROVED` 구성원
+- **대응 테이블:** `posts`, `member_replicas`
+- **설명:** 고정 게시글을 먼저, 이후 최신순으로 반환한다. `HIDDEN`·`DELETED`는 제외한다.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `isNotice` | boolean | N | — | 공지만 보기 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    
+    허용 정렬 필드: `createdAt` (기본 고정 우선 → `createdAt,desc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [ { "postId": "88", "title": "이번 주 풀이 공유", "authorId": "7", "authorNickname": "user7", "isPinned": false, "isNotice": false, "commentCount": 2, "createdAt": "2026-09-28T10:00:00+09:00" } ],
+          "page": 0, "size": 20, "totalElements": 12, "totalPages": 1, "hasNext": false
+        }
+      }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403)
+
+#### 5.5.2 게시글 작성
+
+- **Method / URI:** `POST /api/v1/studies/{studyId}/posts`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + `APPROVED` 구성원
+- **대응 테이블:** `posts`, `studies`
+- **설명:** 게시글을 작성하고 `studies.last_activity_at`을 갱신한다. 공지(`isNotice`)는 `LEADER`·`MANAGER`만 지정할 수 있다.
+- **요청 바디:**
+    
+    ```json
+      { "title": "이번 주 풀이 공유", "content": "BFS로 풀었습니다...", "isNotice": false }
+    ```
+    
+    - `title` 1~200자, `content` 1자 이상
+- **응답 (201):**
+    
+    ```json
+      { "success": true, "message": "게시글이 작성되었습니다.", "data": { "postId": "88" } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403)
+
+#### 5.5.3 게시글 상세
+
+- **Method / URI:** `GET /api/v1/studies/{studyId}/posts/{postId}`
+- **인증:** 로그인 필요 + `APPROVED` 구성원
+- **대응 테이블:** `posts`, `comments`, `member_replicas`
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "postId": "88", "title": "이번 주 풀이 공유", "content": "BFS로 풀었습니다...", "author": { "memberId": "7", "nickname": "user7" }, "isPinned": false, "isNotice": false,
+          "comments": [ { "commentId": "301", "content": "좋네요", "author": { "memberId": "8", "nickname": "lee" }, "createdAt": "2026-09-28T11:00:00+09:00" } ],
+          "createdAt": "2026-09-28T10:00:00+09:00", "updatedAt": "2026-09-28T10:00:00+09:00"
+        }
+      }
+    ```
+    
+    - 탈퇴 회원은 `nickname: "탈퇴한 사용자"`
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404)
+
+#### 5.5.4 게시글 수정·삭제
+
+- **Method / URI:** `PATCH /api/v1/studies/{studyId}/posts/{postId}`, `DELETE /api/v1/studies/{studyId}/posts/{postId}`
+- **인증:** 로그인 필요 + 작성자 본인
+- **대응 테이블:** `posts`
+- **요청 바디 (PATCH):**
+    
+    ```json
+      { "title": "수정한 제목", "content": "수정한 본문" }
+    ```
+    
+- **응답:** PATCH `200` `{ "postId": "88" }` / DELETE `204` (`status = DELETED`)
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409)
+
+#### 5.5.5 게시글 고정·공지·숨김 (운영진)
+
+- **Method / URI:** `PATCH /api/v1/studies/{studyId}/posts/{postId}/moderation`
+- **인증:** 로그인 필요 + `LEADER`·`MANAGER`
+- **대응 테이블:** `posts`
+- **설명:** 공지·상단 고정 여부와 부적절한 글의 숨김을 변경한다. 기존 경로(`/pin`)를 숨김까지 포함하도록 넓혔다.
+- **요청 바디:**
+    
+    ```json
+      { "isPinned": true, "isNotice": true, "isHidden": false }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "게시글 설정이 변경되었습니다.", "data": { "postId": "88", "isPinned": true, "isNotice": true, "status": "VISIBLE" } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404)
+
+#### 5.5.6 댓글 작성·수정·삭제
+
+- **Method / URI:** `POST /api/v1/studies/{studyId}/posts/{postId}/comments`, `PATCH …/comments/{commentId}`, `DELETE …/comments/{commentId}`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + `APPROVED` 구성원 (수정·삭제는 작성자, 숨김은 운영진이 게시글 고정·공지·숨김 5.5.5와 같은 방식)
+- **대응 테이블:** `comments`
+- **요청 바디 (POST·PATCH):**
+    
+    ```json
+      { "content": "좋네요" }
+    ```
+    
+- **응답:** POST `201` `{ "commentId": "301" }` / PATCH `200` / DELETE `204`
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_COMMENT_NOT_FOUND`(404)
+
+### 5.6 관리자 API
+
+#### 5.6.1 스터디 강제 종료
+
+- **Method / URI:** `POST /api/v1/admin/studies/{studyId}/close`
+- **인증:** `ADMIN`
+- **Idempotency:** 이미 종료면 `STUDY_ALREADY_CLOSED`
+- **대응 테이블:** `studies`, `assignments`, `study_memberships`, `study_member_quotas`, `audit_logs`
+- **설명:** 스터디 종료(5.3.4)와 같은 종료 처리를 하고, 같은 트랜잭션에서 감사 로그에 작업자·사유·변경 전후 상태를 기록한다. 예정·진행 중 시험 조건도 같다.
+- **요청 바디:**
+    
+    ```json
+      { "reason": "운영 정책 위반" }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "스터디가 강제 종료되었습니다.", "data": { "studyId": "12" } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `STUDY_ACTIVE_EXAM_EXISTS`(409)
+
+#### 5.6.2 회원 AC 복제본 재동기화 (P2)
+
+- **Method / URI:** `POST /api/v1/admin/studies/replicas/member-ac/resync`
+- **인증:** `ADMIN`
+- **Idempotency:** 같은 회원에 진행 중 재동기화가 있으면 기존 작업 결과 반환
+- **대응 테이블:** `member_ac_replicas`, `assignment_completions`, `assignment_member_statuses`, `audit_logs`
+- **설명:** 이벤트 유실·DLQ 이후 특정 회원의 AC 복제본을 judge 내부 API로 다시 받아 재구성하고, 진행 중 문제집 완료 기록을 재계산한다.
+- **요청 바디:**
+    
+    ```json
+      { "memberId": "7", "reason": "DLQ 재처리 후 복구" }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "재동기화가 완료되었습니다.", "data": { "memberId": "7", "replicaCount": 58, "recalculatedAssignmentCount": 2 } }
+    ```
+    
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **동시성/멱등 보장:**
+    - 순회 결과와 실시간 `SubmissionJudged`(J1)를 함께 반영한다. 같은 `submissionId`의 같거나 낮은 `judgeAttempt`는 건너뛰고, 순회 결과에 없다는 이유로 동시에 반영된 이벤트의 행을 지우지 않는다.
+    - 순회 중 J1 유실이 확인되면 해당 이벤트를 재전달해 복제본 반영을 확인한다. 유실 범위를 특정할 수 없거나 재전달로 반영을 확인할 수 없으면, 대상 회원의 신규 일반 풀이 접수가 재조회 완료까지 중지되고 진행 중 채점이 모두 종결됐음을 운영 절차로 확인할 수 있을 때 첫 페이지부터 다시 조회한다. 이 전제나 복구 결과를 확인할 수 없으면 재동기화 완료를 보류하고 운영에 알린다.
+- **외부 의존:**
+    - `GET /internal/v1/submissions/accepted?context=PRACTICE&userId=` (judge) — 실패 시 재동기화 중단, 운영 알림
+
+### 5.7 내부 API
+
+#### 5.7.1 스터디 구성원 목록 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/studies/{studyId}/members`
+- **인증:** 내부 호출 (contest)
+- **대응 테이블:** `studies`, `study_memberships`
+- **설명:** contest가 시험 생성·수정 권한(`LEADER`·`MANAGER`, 스터디 `CLOSED` 여부)을 확인할 때 호출한다. 참가 자격은 `StudyMemberJoined`·`StudyMemberLeft` 복제본으로 판단한다.
+- **응답 (200):**
+    
+    ```json
+      { "studyId": "12", "studyStatus": "ACTIVE", "members": [ { "memberId": "1", "membershipId": "40", "role": "LEADER" }, { "memberId": "7", "membershipId": "55", "role": "MEMBER" } ] }
+    ```
+    
+- **실패 시 처리:** contest는 fail-closed (생성 거절)
+
+#### 5.7.2 회원의 스터디 가입 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/studies/memberships`
+- **인증:** 내부 호출 (member)
+- **대응 테이블:** `study_memberships`, `studies`
+- **설명:** 회원 탈퇴 차단(스터디장 여부) 판단용.
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `memberId` | string | Y | — | 회원 ID |
+    | `role` | string | N | — | `LEADER` 등 |
+    | `activeOnly` | boolean | N | true | `CLOSED`가 아닌 스터디의 `APPROVED` 가입만 |
+- **응답 (200):**
+    
+    ```json
+      { "memberId": "7", "items": [ { "studyId": "12", "membershipId": "40", "role": "LEADER", "studyStatus": "ACTIVE" } ] }
+    ```
+    
+
+#### 5.7.3 스터디 종료 작업 상태 조회 (내부)
+
+- **Method / URI:** `GET /internal/v1/studies/{studyId}/operations/{operationId}`
+- **인증:** 내부 호출 (contest)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **설명:** Contest 자원 가드에 사용한 원래 스터디 종료 작업의 확정 여부를 반환한다. 조회로 스터디나 가드 상태를 변경하지 않는다.
+- **요청 파라미터:** `studyId`, `operationId` — 모두 Path, string, 필수.
+- **응답 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `operationId` | string | 조회한 원래 종료 작업 ID |
+    | `state` | string | PENDING / COMMITTED / ABORTED |
+    | `sourceVersion` | string | 원래 작업에 대응하는 원천 상태 순서 값 |
+    | `resourceStatus` | string | 원래 작업에 대응하는 스터디 상태 |
+
+- **실패 시 처리:** 없는 작업은 404. Contest는 `PENDING`·404·조회 실패 시 PREPARED 차단을 유지한다. `COMMITTED`는 §4.7.4 complete, `ABORTED`는 cancel로 복구한다.
+- **대사 기준:** 원래 작업의 결과를 반환한다. 현재 스터디 상태만으로 원래 작업의 성공·취소를 추정하지 않는다.
+
+---
+
+## 6. AI 기능 (ai)
+
+> 작성: 담당 D · 서비스: `study-service` 내부 AI 모듈 (`ai-service` 분리 후보)
+> 
+
+### 6.0 개요
+
+| 항목 | 값 |
+| --- | --- |
+| 외부 경로 | `/api/v1/hint-requests/**` (Gateway 라우팅이 `problems/**`와 겹치지 않도록 별도 리소스) |
+| 처리 방식 | 비동기 — `202 Accepted` → LLM 생성 → `HintReady` 이벤트 → SSE 알림 |
+| 원천 데이터 | 요청·이력·일일 사용량·차단 복제본 = MySQL `study` 스키마 |
+| 캐시 | Redis `hint:cache:{problemRevisionId}:{level}` (TTL 30일, 회차가 키에 있어 새 회차 공개 시 자연 무효화) |
+| 외부 의존 | `problem-service` 힌트 문맥 내부 API(힌트 문맥 조회2.6.6), LLM API (Spring AI) |
+| 에러 코드 | 기존 `STUDY_HINT_*`는 도메인 접두어 규칙에 맞춰 `HINT_*`로 바꿨다 |
+| 운영 조건 | 가드레일과 함께만 운영 활성화, 기능 토글로 즉시 비활성화 가능 |
+
+### 6.1 외부 API — 단계별 힌트
+
+#### 6.1.1 힌트 요청
+
+- **Method / URI:** `POST /api/v1/hint-requests`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **Idempotency:** 같은 `(problemId, level)`에 `REQUESTED`·`GENERATING` 요청이 있으면 그 요청을 반환하고 횟수를 차감하지 않는다. 같은 단계의 `READY`·`FALLBACK`이 이미 있으면 그 결과를 반환하고 차감하지 않는다.
+- **Rate Limit:** 1인 하루 20회 (`hint_daily_usages`, 캐시 적중 포함)
+- **대응 테이블:** `hint_requests`, `hint_daily_usages`, `hint_block_replicas`, `outbox_events`
+- **설명:** 힌트를 비동기로 요청한다. 검증 순서 = ① 문제 문맥 조회(공개 문제·대회 전용 여부, 현재 공개 회차) ② 시험·대회·진단 차단 ③ 단계 순서 ④ 기존 요청 확인 ⑤ 일일 횟수 확보. 캐시 적중이면 즉시 `READY`로 응답한다.
+- **요청 바디:**
+    
+    ```json
+      { "problemId": "101", "level": 1 }
+    ```
+    
+    - `level`: `1`(접근 방향) / `2`(핵심 아이디어) / `3`(풀이 절차)
+- **응답 (202):**
+    
+    ```json
+      { "success": true, "message": "힌트 생성을 요청했습니다.", "data": { "hintRequestId": "300", "status": "REQUESTED", "content": null, "todayUsedCount": 4, "dailyLimit": 20 } }
+    ```
+    
+    - 캐시 적중·기존 결과 반환: `status: "READY"`(또는 `FALLBACK`), `content` 포함
+- **에러:**
+    - `HINT_PROBLEM_NOT_AVAILABLE`(404), `HINT_BLOCKED_DURING_EXAM`(403), `HINT_BLOCKED_DURING_DIAGNOSIS`(403), `HINT_LEVEL_SKIPPED`(409), `HINT_DAILY_LIMIT_EXCEEDED`(429), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `MEMBER_SUSPENDED`(403)
+- **동시성/멱등 보장:**
+    - 중복 요청: 생성 컬럼 `active_level = IF(status IN ('REQUESTED','GENERATING'), level, NULL)` + `uk_hint_requests_member_problem_active_level`. 위반 시 기존 요청을 조회해 반환
+    - 일일 횟수: `UPDATE hint_daily_usages SET used_count = used_count + 1 WHERE member_id = ? AND usage_date = CURRENT_DATE AND used_count < 20` (행이 없으면 먼저 `INSERT … ON DUPLICATE KEY UPDATE`). 요청 INSERT와 같은 트랜잭션
+    - 차단 조회 실패·문맥 조회 실패는 거절(fail-closed)
+- **발행:**
+    - `HintReady` — `READY`·`FALLBACK`·전달 직전 `BLOCKED` 종결 시
+- **외부 의존:**
+    - `GET /internal/v1/problems/{problemId}/hint-context` (problem) — 실패 시 fail-closed
+- **프론트 계약:**
+    - `202` 후 SSE(`/api/v1/notifications/subscribe`)의 `HINT_READY` 알림을 기다린다. 수신 후 힌트 요청 단건(6.1.3)으로 내용을 조회한다. 폴링하지 않는다.
+    - `HintReady`의 `result`가 `BLOCKED`이면 "시험 진행 중이라 힌트를 제공할 수 없음"을 표시한다.
+
+#### 6.1.2 문제별 힌트 이력 조회
+
+- **Method / URI:** `GET /api/v1/hint-requests`
+- **인증:** 로그인 필요 (본인)
+- **대응 테이블:** `hint_requests`, `hint_daily_usages`
+- **설명:** 특정 문제에 대한 본인 힌트 이력(단계 오름차순)과 오늘 사용량을 반환한다. 페이지네이션 없음(단계 3 × 회차 수).
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `problemId` | string | Y | — | 문제 ID |
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "problemId": "101",
+          "hints": [ { "hintRequestId": "300", "level": 1, "status": "READY", "isFallback": false, "content": "이 문제는 그래프 탐색 유형입니다…", "requestedAt": "2026-09-28T10:00:00+09:00", "completedAt": "2026-09-28T10:00:05+09:00" } ],
+          "nextAvailableLevel": 2,
+          "todayUsedCount": 3,
+          "dailyLimit": 20
+        }
+      }
+    ```
+    
+
+#### 6.1.3 힌트 요청 단건
+
+- **Method / URI:** `GET /api/v1/hint-requests/{hintRequestId}`
+- **인증:** 로그인 필요 (본인)
+- **대응 테이블:** `hint_requests`
+- **설명:** SSE `HINT_READY` 수신 후 힌트 내용을 가져온다. `GENERATING`이면 아직 처리 중이다.
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": null, "data": { "hintRequestId": "300", "problemId": "101", "level": 1, "status": "READY", "isFallback": false, "blockedReason": null, "content": "이 문제는 그래프 탐색 유형입니다…", "completedAt": "2026-09-28T10:00:05+09:00" } }
+    ```
+    
+    - `status`: `REQUESTED` / `GENERATING` / `READY` / `FALLBACK` / `BLOCKED`. `BLOCKED`이면 `content`는 `null`, `blockedReason`은 `EXAM` / `DIAGNOSIS` / `DAILY_LIMIT`
+- **에러:**
+    - `HINT_REQUEST_NOT_FOUND`(404)
+
+### 6.2 내부 API — LLM 생성 상태 갱신
+
+#### 6.2.1 힌트 요청 GENERATING 전이
+
+- **Method / URI:** `PATCH /internal/v1/hint-requests/{hintRequestId}/generating`
+- **인증:** 내부 호출 (ai-service), `X-User-Id` 헤더 없음 (결정 기록 2026-10-14 내부 API 무인증)
+- **대응 테이블:** `hint_requests`
+- **설명:** ai-service가 LLM 생성을 시작하기 직전에 호출한다. `REQUESTED → GENERATING` 상태 전이를 시도한다. 허용되지 않는 현재 상태이면 오류를 반환하고 ai-service는 처리를 중단한다.
+- **경로 파라미터:** `hintRequestId` — 힌트 요청 ID
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": null, "data": null }
+    ```
+    
+- **에러:**
+    - `HINT_REQUEST_NOT_FOUND`(404), `HINT_INVALID_STATUS_TRANSITION`(409)
+
+---
+
+## 7. 알림 (notification)
+
+> 작성: 담당 A · 서비스: `notification-service`
+> 
+
+### 7.0 개요
+
+| 항목 | 값 |
+| --- | --- |
+| 외부 경로 | `/api/v1/notifications/**`, `/api/v1/admin/notifications/**` |
+| 소유 테이블 | 스키마 `notification` (`notifications`, `notification_preferences`) |
+| 생성 책임 | 도메인은 이벤트만 발행하고 notification이 수신자·문구·이동 경로를 정한다 |
+| 중복 방지 | `(source_event_id, member_id, type)` 유일 제약 |
+| 채점 알림 범위 | `PRACTICE`만 건별 알림. `EXAM`·`CONTEST`는 결과 확정(`FINALIZED`) 시에만. 채점 실패·재처리 예정은 문맥 무관 |
+| 보관 | 90일 |
+
+#### 알림 유형 (`type`)
+
+| 유형 | 원천 이벤트 | 수신 설정 |
+| --- | --- | --- |
+| `SUBMISSION_JUDGED` | `SubmissionJudged` | 끌 수 없음 |
+| `SUBMISSION_FAILED` | `SubmissionFailed` | 끌 수 없음 |
+| `EXAM_STARTING_SOON` / `EXAM_FINALIZED` / `EXAM_UPDATED` / `EXAM_CANCELED` | 시험 이벤트·시작 임박 스케줄러 | `isExamContestEnabled` |
+| `CONTEST_STARTED` / `CONTEST_FINALIZED` / `CONTEST_CANCELED` | 대회 이벤트 | `isExamContestEnabled` |
+| `STUDY_APPLICATION_DECIDED` | `StudyApplicationDecided` | `isStudyApplicationEnabled` |
+| `ASSIGNMENT_PUBLISHED` / `ASSIGNMENT_DEADLINE_APPROACHING` / `ASSIGNMENT_INCOMPLETE_REPEATED` | 문제집 이벤트 | `isAssignmentEnabled` |
+| `LEVEL_CHANGED` | `TagLevelChanged` (진단 결과·승급·마스터·재채점 하향·쿨타임 해제) | `isLevelChangedEnabled` |
+| `HINT_READY` | `HintReady` | `isHintReadyEnabled` |
+| `GITHUB_SYNC_FAILED` | `GitHubSyncFailed` | `isGithubSyncEnabled` |
+| `SYSTEM_NOTICE` | 관리자 공지 발송 API (`POST /api/v1/admin/notifications/broadcast`) | 끌 수 없음 |
+
+### 7.1 외부 API
+
+#### 7.1.1 실시간 알림 스트림 (SSE)
+
+- **Method / URI:** `GET /api/v1/notifications/subscribe`
+- **인증:** 로그인 필요 (Gateway가 `X-User-Id` 주입)
+- **대응 테이블:** `notifications`
+- **설명:** SSE로 알림을 전달한다(`text/event-stream`). 하트비트 30초, 서버가 60초마다 연결을 정상 종료하며 클라이언트가 재연결한다. 재연결 시 `Last-Event-ID` 이후 최근 24시간 미읽음을 재전송한다. 기존 초안의 하트비트 45초는 정책(30초)에 맞췄다.
+- **요청 헤더:**
+    
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Last-Event-ID` | N | `1024` | 마지막으로 받은 알림 ID |
+- **응답 (200, SSE):**
+    
+    ```
+    event: notification
+    id: 1024
+    data: {"notificationId":"1024","type":"SUBMISSION_JUDGED","title":"채점 완료","content":"1001번 문제 채점이 완료되었습니다. (결과: AC)","linkUrl":"/submissions/91023","createdAt":"2026-10-10T21:03:12.123456+09:00"}
+    
+    event: heartbeat
+    data: {}
+    ```
+    
+
+#### 7.1.2 알림 목록 조회
+
+- **Method / URI:** `GET /api/v1/notifications`
+- **인증:** 로그인 필요
+- **대응 테이블:** `notifications`
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `unreadOnly` | boolean | N | false | 미읽음만 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    
+    허용 정렬 필드: `createdAt` (기본 `createdAt,desc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "unreadCount": 1,
+          "content": [ { "notificationId": "1024", "type": "SUBMISSION_JUDGED", "title": "채점 완료", "content": "1001번 문제 채점이 완료되었습니다. (결과: AC)", "linkUrl": "/submissions/91023", "isRead": false, "createdAt": "2026-10-10T21:03:12.123456+09:00" } ],
+          "page": 0, "size": 20, "totalElements": 1, "totalPages": 1, "hasNext": false
+        }
+      }
+    ```
+    
+
+#### 7.1.3 미읽음 개수 조회
+
+- **Method / URI:** `GET /api/v1/notifications/unread-count`
+- **인증:** 로그인 필요
+- **대응 테이블:** `notifications`
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": null, "data": { "unreadCount": 3 } }
+    ```
+    
+
+#### 7.1.4 알림 단건 읽음 처리
+
+- **Method / URI:** `PATCH /api/v1/notifications/{notificationId}/read`
+- **인증:** 로그인 필요 (본인)
+- **Idempotency:** 이미 읽은 알림은 변경 없이 200
+- **대응 테이블:** `notifications`
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "알림이 읽음 처리되었습니다.", "data": { "unreadCount": 0 } }
+    ```
+    
+- **에러:**
+    - `NOTIFICATION_NOT_FOUND`(404)
+
+#### 7.1.5 알림 전체 읽음 처리
+
+- **Method / URI:** `PATCH /api/v1/notifications/read-all`
+- **인증:** 로그인 필요
+- **대응 테이블:** `notifications`
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "모든 알림을 읽음 처리했습니다.", "data": { "updatedCount": 5, "unreadCount": 0 } }
+    ```
+    
+
+#### 7.1.6 수신 설정 조회·변경
+
+- **Method / URI:** `GET /api/v1/notifications/preferences`, `PATCH /api/v1/notifications/preferences`
+- **인증:** 로그인 필요
+- **대응 테이블:** `notification_preferences`
+- **설명:** 종류별 수신 여부. 행이 없으면 모두 `true`로 응답하고 최초 변경 시 생성한다. 채점 결과는 끌 수 없어 항목이 없다.
+- **요청 바디 (PATCH):**
+    
+    ```json
+      { "isAssignmentEnabled": false }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": null, "data": { "isExamContestEnabled": true, "isStudyApplicationEnabled": true, "isAssignmentEnabled": false, "isLevelChangedEnabled": true, "isHintReadyEnabled": true, "isGithubSyncEnabled": true } }
+    ```
+    
+
+### 7.2 관리자 API
+
+#### 7.2.1 시스템 전역 공지 알림 브로드캐스트
+
+- **Method / URI:** `POST /api/v1/admin/notifications/broadcast`
+- **인증:** `ADMIN`
+- **Idempotency:** N (매 호출 시 신규 공지 발송)
+- **Rate Limit:** 관리자 호출 기준 분당 10회
+- **대응 테이블:** `notifications`
+- **설명:** 시스템 관리자가 발송 시점에 활성화된 SSE 연결 회원(및 발송 관리자)에게 실시간 공지 알림을 브로드캐스트하고, 알림 보관함에 `SYSTEM_NOTICE` 타입으로 저장한다.
+- **요청 헤더:**
+    
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `X-User-Id` | Y | `1` | 관리자 회원 ID |
+    | `X-User-Role` | Y | `ADMIN` | Gateway 검증 관리자 권한 |
+
+- **요청 파라미터:** 없음
+- **요청 바디:**
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `title` | string | Y | 공지 제목 (최대 200자) |
+    | `content` | string | Y | 공지 내용 (최대 500자) |
+    | `linkUrl` | string | N | 공지 상세 또는 이동 경로 URL (최대 500자) |
+
+    ```json
+    {
+      "title": "시스템 정기 점검 안내",
+      "content": "2026년 11월 8일 02:00 ~ 04:00 정기 점검이 진행될 예정입니다.",
+      "linkUrl": "/notices/1"
+    }
+    ```
+
+- **응답 헤더:** 없음
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+    
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `data.notificationType` | string | Y | 알림 유형 (`SYSTEM_NOTICE`) |
+    | `data.title` | string | Y | 공지 제목 |
+    | `data.broadcastedAt` | string | Y | 발송 시각 (ISO 8601, 마이크로초 6자리 및 +09:00 오프셋) |
+    | `data.deliveredSseCount` | int | Y | 실시간 SSE 전송 성공 세션 수 |
+
+    ```json
+    {
+      "success": true,
+      "message": "시스템 공지 알림이 성공적으로 발송되었습니다.",
+      "data": {
+        "notificationType": "SYSTEM_NOTICE",
+        "title": "시스템 정기 점검 안내",
+        "broadcastedAt": "2026-11-07T15:30:00.123456+09:00",
+        "deliveredSseCount": 15
+      }
+    }
+    ```
+
+- **에러:**
+    - `AUTH_ACCESS_DENIED`(403): 관리자(`ADMIN`) 권한이 없는 경우
+    - `COMMON_INVALID_REQUEST`(400): 공지 제목이나 내용이 비어 있거나 글자수 제한을 초과한 경우
+- **동시성/멱등 보장:** 관리자별 호출 건마다 고유 `source_event_id`(`notice-{UUID}`)를 부여해 DB 유일 제약을 만족하며, 회원별로 저장된 Notification 엔티티를 독립적으로 전송한다.
+- **발행:** 없음 (알림 서비스 내부 완결)
+- **외부 의존:** 없음
+- **프론트 계약:** 실시간 SSE 이벤트(`notification`) 수신 시 팝업 토스트를 노출하며, 알림 보관함 목록(`GET /api/v1/notifications`)에서 개별 읽음 처리(`PATCH /api/v1/notifications/{id}/read`)가 가능하다.
+- **비고:** 발송 시점에 SSE로 연결되어 있는 활성 회원 및 관리자 본인에게 알림 행을 생성하고 실시간 전송하며, 오프라인 회원에게는 알림 복제본 테이블이 없어 전송되지 않는다.
+
+---
+
+## 8. GitHub 연동 (integration)
+
+> 작성: 담당 A · 서비스: `integration-service`
+> 
+
+### 8.0 개요
+
+| 항목 | 값 |
+| --- | --- |
+| 외부 경로 | `/api/v1/integrations/github/**` |
+| 소유 테이블 | 스키마 `integration` (`github_connections`, `github_sync_jobs`) |
+| 인가 | 로그인과 분리. GitHub App 설치로 선택한 저장소 1개에만 쓰기 권한 (1주차 결정 대상) |
+| 동기화 대상 | `PRACTICE` AC만. 시험·대회·진단 제출 제외 |
+| 재시도 | 1분 → 5분 → 30분, 최대 5회. Rate Limit은 초기화 시각 이후 |
+| 저장 구조 | `{난이도}/{문제번호}-{문제명}/{언어별 파일}` + `../../../README.md` |
+
+### 8.1 외부 API
+
+#### 8.1.1 GitHub 연동 상태 조회
+
+- **Method / URI:** `GET /api/v1/integrations/github`
+- **인증:** 로그인 필요
+- **대응 테이블:** `github_connections`
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": { "status": "CONNECTED", "githubLogin": "kim-dev", "repositoryOwner": "kim-dev", "repositoryName": "algorithm-solutions", "isAutoCommitEnabled": true, "connectedAt": "2026-10-01T14:20:00.000000+09:00" }
+      }
+    ```
+    
+    - 연동이 없으면 `data: { "status": "NOT_CONNECTED" }`. 설치 ID·토큰은 응답에 포함하지 않는다.
+
+#### 8.1.2 GitHub App 설치 주소 조회
+
+- **Method / URI:** `GET /api/v1/integrations/github/install-url`
+- **인증:** 로그인 필요
+- **대응 테이블:** 없음 (`state`는 Redis, TTL 10분)
+- **설명:** 저장소 1개 선택을 안내하는 GitHub App 설치 주소와 `state`를 반환한다.
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": null, "data": { "installUrl": "https://github.com/apps/resolve-sync/installations/new?state=…" } }
+    ```
+    
+
+#### 8.1.3 GitHub App 설치 완료
+
+- **Method / URI:** `POST /api/v1/integrations/github/install`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단)
+- **대응 테이블:** `github_connections`
+- **설명:** 설치 후 돌려받은 `installationId`를 검증해 회원에 연결하고 대상 저장소 정보를 저장한다. 선택 저장소가 1개가 아니면 거절한다.
+- **요청 바디:**
+    
+    ```json
+      { "installationId": "58291032", "state": "…" }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "GitHub 저장소 연동이 완료되었습니다.", "data": { "status": "CONNECTED", "repositoryName": "algorithm-solutions", "isAutoCommitEnabled": true } }
+    ```
+    
+- **에러:**
+    - `GITHUB_INSTALLATION_INVALID`(400), `GITHUB_REPOSITORY_INVALID`(409), `GITHUB_ALREADY_CONNECTED`(409)
+- **동시성/멱등 보장:** `uk_github_connections_member_id`, `uk_github_connections_installation_id`. `DISCONNECTED` 행이 있으면 같은 행을 `CONNECTED`로 재연결한다.
+
+#### 8.1.4 연동 설정 변경
+
+- **Method / URI:** `PATCH /api/v1/integrations/github`
+- **인증:** 로그인 필요
+- **대응 테이블:** `github_connections`
+- **요청 바디:**
+    
+    ```json
+      { "isAutoCommitEnabled": false }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { "success": true, "message": "연동 설정이 변경되었습니다.", "data": { "isAutoCommitEnabled": false } }
+    ```
+    
+- **에러:**
+    - `GITHUB_NOT_CONNECTED`(404)
+
+#### 8.1.5 GitHub 연동 해제
+
+- **Method / URI:** `DELETE /api/v1/integrations/github`
+- **인증:** 로그인 필요
+- **대응 테이블:** `github_connections`, `github_sync_jobs`
+- **설명:** `DISCONNECTED`로 전이하고 토큰·설치 정보를 파기한다. 대기 중 Sync Job은 `CANCELED`로 전이한다. 이미 커밋된 파일은 삭제하지 않는다.
+- **응답 (204)**
+- **에러:**
+    - `GITHUB_NOT_CONNECTED`(404)
+
+#### 8.1.6 동기화 작업 목록
+
+- **Method / URI:** `GET /api/v1/integrations/github/sync-jobs`
+- **인증:** 로그인 필요
+- **대응 테이블:** `github_sync_jobs`
+- **요청 파라미터:**
+    
+    
+    | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- |
+    | `status` | string | N | — | Sync Job 상태 필터 |
+    | `page` | int | N | 0 |  |
+    | `size` | int | N | 20 |  |
+    
+    허용 정렬 필드: `createdAt` (기본 `createdAt,desc`)
+    
+- **응답 (200):**
+    
+    ```json
+      {
+        "success": true,
+        "message": null,
+        "data": {
+          "content": [ { "syncJobId": "77", "submissionId": "91023", "problemId": "301", "status": "FAILED", "retryCount": 5, "commitSha": null, "errorMessage": "Rate limit exceeded", "createdAt": "…", "updatedAt": "…" } ],
+          "page": 0, "size": 20, "totalElements": 1, "totalPages": 1, "hasNext": false
+        }
+      }
+    ```
+    
+
+#### 8.1.7 수동 동기화 요청
+
+- **Method / URI:** `POST /api/v1/integrations/github/sync-jobs`
+- **인증:** 로그인 필요
+- **Idempotency:** 같은 제출의 작업이 대기·실행 중이면 그 작업을 반환
+- **대응 테이블:** `github_sync_jobs`
+- **설명:** 누락됐거나 연동 전에 맞힌 제출을 다시 커밋하도록 요청한다. `FAILED` 작업은 재시도 횟수를 초기화해 `PENDING`으로 되돌린다. 기존 경로(`/sync/{submissionId}`)의 오타·동사형을 리소스형으로 바꿨다.
+- **요청 바디:**
+    
+    ```json
+      { "submissionId": "91023" }
+    ```
+    
+- **응답 (202):**
+    
+    ```json
+      { "success": true, "message": "GitHub 커밋 작업을 등록했습니다.", "data": { "syncJobId": "77", "submissionId": "91023", "status": "PENDING" } }
+    ```
+    
+- **에러:**
+    - `GITHUB_NOT_CONNECTED`(404), `GITHUB_SYNC_NOT_ALLOWED`(409)
+- **외부 의존:**
+    - `GET /internal/v1/submissions/{submissionId}/accepted/code?memberId=` (judge) — 실행 시점 코드 조회
+- **프론트 계약:**
+    - 최종 실패만 SSE `GITHUB_SYNC_FAILED`로 알린다. 성공 여부는 동기화 작업 목록(8.1.6)으로 확인한다.
+
+---
+
+## 9. 관리자 API 색인
+
+| 서비스 | 절 | API |
+| --- | --- | --- |
+| member | 1.6.1 ~ 1.6.3 | 회원 목록, 정지·해제, 권한 변경 |
+| problem | 2.3.1 ~ 2.3.11, 2.4, 2.5.2 ~ 2.5.4, 2.8.1 | 문제 등록·회차·공개·비공개·보관·검증, 이미지, 태그, 실패 Outbox 재처리 |
+| judge | 3.2.1 ~ 3.2.6 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구, 실패 Outbox 재처리 |
+| contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, 시험 실패 재처리·작업 조회, `FAILED` 0점 확정, 결과 재확정. 시험 운영자 경로는 §4.6.3·§4.6.7 참조 |
+| study | 5.6.1 ~ 5.6.2 | 스터디 강제 종료, AC 복제본 재동기화 |
+| notification | 7.2.1 | 시스템 전역 공지 알림 브로드캐스트 |
+
+---
+
+## 부록
+
+### A. 서비스 간 내부 API 지도
+
+| 제공 서비스 | 이용 서비스 | Method / URI | 용도 | 실패 시 처리 | 작성 |
+| --- | --- | --- | --- | --- | --- |
+| member | judge | `GET /internal/v1/members/{memberId}/tag-levels` | 레벨 접근 제한 | judge: fail-closed | E |
+| member | 각 서비스 | `GET /internal/v1/members/{memberId}/status` | 정지 여부 (복제본 없을 때) | 호출 측 fail-closed | E |
+| problem | judge | `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/validation` | 지정 회차 검증 | 제한 재시도 후 fail-closed, 최신 회차 자동 치환 금지 | B |
+| problem | judge | `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/judging/data` | 고정 회차 채점 데이터 | 제한 재시도, 작업 `RETRY_WAITING` | B |
+| problem | contest, member | `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/content` · `/images/{imageId}` | 고정 회차 본문·이미지 | 503 응답 | B |
+| problem | study, contest | `GET /internal/v1/problems/summaries` | 문제집·시험·대회 문제 선택(회차 고정) | fail-closed (`COMMON_DEPENDENCY_UNAVAILABLE`) | B(제공)·D·C(요청) |
+| problem | study | `GET /internal/v1/problems/{problemId}/hint-context` | 힌트 입력·현재 회차 | fail-closed | B(제공)·D(요청) |
+| problem | member | `GET /internal/v1/problems/diagnosis-candidates` | 진단 출제 | fail-closed | B(제공)·E(요청) |
+| judge | problem | `POST /internal/v1/judge/starter-codes` (§2.7·§3.3.5) | 함수 명세·통과 언어의 기본 코드 | `COMMON_DEPENDENCY_UNAVAILABLE`(503) | B |
+| judge | problem | `GET /internal/v1/judge/validations/{validationId}` | 관리자 검증 진행·최종 판정 조회 | 작업 미생성과 조회 장애 구분(§2.3.11) | B |
+| judge | contest | `GET /internal/v1/submissions/{submissionId}/result` | 결과 대사·이벤트 유실 복구 | 확정 보류 | B |
+| judge | contest, problem | `GET /internal/v1/submissions/{submissionId}/source` | 시험 결과 코드 열람·풀이 공유 스냅샷 | 거절 | B |
+| judge | integration | `GET /internal/v1/submissions/{submissionId}/accepted/code` | GitHub 커밋 | Sync Job 재시도 | B |
+| judge | study, member | `GET /internal/v1/submissions/accepted` | AC 복제본 재동기화 (관리자 절차 전용) | 재동기화 중단, 운영 알림 | B(제공)·D(요청) |
+| contest | problem | `GET /internal/v1/contest/problems/{problemId}/usages` | 문제 비공개·보관 전 시험 사용 확인 | fail-closed | C |
+| contest | member | `GET /internal/v1/contest/members/{memberId}/active-participations` | 탈퇴 차단 확인 | fail-closed | C(제공)·E(요청) |
+| contest | study | `GET /internal/v1/contest/studies/{studyId}/exams` | 스터디 종료 전 시험 확인 (D-1) | fail-closed | C(제공)·D(요청) |
+| contest | judge | `GET /internal/v1/exams/{examId}/rejudge-eligibility` | 재채점 가능 여부 | fail-closed | C(제공)·B(요청) |
+| judge | contest | `GET /internal/v1/judge/submissions/by-receipt` | 원래 접수 기준 채점 대사 (§3.3.6) | 확정 보류·불일치 격리 | B(제공)·C(요청) |
+| judge | contest | `POST /internal/v1/judge/submissions/{submissionId}/retry` | 실패 시험 제출 재처리 (§3.3.7) | 같은 작업 ID로 대사 | B(제공)·C(요청) |
+| judge | contest | `POST /internal/v1/judge/runs` | 시험·대회 공개 예제·사용자 입력 실행 (§3.3.8) | C의 Run 오류 응답 | B(제공)·C(요청) |
+| member | contest | `GET /internal/v1/members/{memberId}/operations/{operationId}` | 탈퇴 작업 확정 여부 (§1.7.3) | PREPARED 차단 유지 | E(제공)·C(요청) |
+| study | contest | `GET /internal/v1/studies/{studyId}/operations/{operationId}` | 종료 작업 확정 여부 (§5.7.3) | PREPARED 차단 유지 | D(제공)·C(요청) |
+| study | contest | `GET /internal/v1/studies/{studyId}/members` | 시험 생성 권한·스터디 상태 확인 | fail-closed (생성 거절) | D |
+| study | member | `GET /internal/v1/studies/memberships` | 탈퇴 차단(스터디장) 확인 | fail-closed | D(제공)·E(요청) |
+
+### B. 이벤트 목록
+
+> 공통 헤더: `eventId`, `eventType`, `schemaVersion`, `occurredAt`, `aggregateId`, `correlationId`다
+순서 값은 페이로드에 도메인 이름(`judgeAttempt`, `examRevision`, `profileVersion`, `membershipId` 등)으로 둔다. 
+모든 ID는 문자열.
+> 
+
+| 이벤트명·버전 | 발행 | 구독 | 경로 | 발행 시점 | 작성 |
+| --- | --- | --- | --- | --- | --- |
+| `ExamSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 시험 제출·자동 제출 접수 트랜잭션 | C |
+| `ContestSubmissionRequested` v1 | contest | judge | SQS `exam-submission-queue` | 대회 제출 접수 트랜잭션 | C |
+| `DiagnosisSubmissionRequested` v1 | member | judge | SQS `exam-submission-queue` | 진단 문항 제출·자동 제출 접수 트랜잭션 | E |
+| `SubmissionJudged` v1 | judge | notification, study, member, integration, problem | SNS 팬아웃 | `PRACTICE` 회차 정상 종결과 결과 커밋 | B |
+| `ExamSubmissionJudged` v1 | judge | contest | SNS 팬아웃 | `EXAM` 회차 정상 종결 | B |
+| `ContestSubmissionJudged` v1 | judge | contest | SNS 팬아웃 | `CONTEST` 회차 정상 종결 | B |
+| `DiagnosisSubmissionJudged` v1 | judge | member | `judge-events` → `member-queue` | `DIAGNOSIS` 회차 정상 종결 | B |
+| `SubmissionFailed` v1 | judge | notification, contest(시험·대회), member(진단) | SNS 팬아웃 | 실행 시도 상한 또는 전체 처리 기한 초과로 `FAILED` | B |
+| `ProblemStateChanged` v2 | problem | study, contest | SNS 팬아웃 | 공개 상태·사용 회차·통과 언어 변경 | B |
+| `ProblemValidationRequested` v1 | problem | judge | 검증 SQS 직접 | 관리자 접수·새 회차 자동 검증 요청 커밋 | B |
+| `ProblemValidationCompleted` v1 | judge | problem | SNS 팬아웃 | 검증 최종 판정·결과 Outbox 커밋 | B |
+| `ExamParticipantRegistered` v1 | contest | study, notification | SNS 팬아웃 | 새 활성 참가 생성. study 차단 복제본 생성·notification 시작 5분 전 알림 예약 | C |
+| `ExamParticipantCanceled` v1 | contest | study, notification | SNS 팬아웃 | 시작 전 참가 취소. study 해당 참가 차단 삭제·notification 시작 임박 예약 무효화 | C |
+| `ExamStarted` v1 | contest | study | SNS 팬아웃 | `IN_PROGRESS` 전이. 힌트 차단 행 진단, 사용자 알림 없음 | C |
+| `ExamClosed` v1 | contest | study | SNS 팬아웃 | 전체 마감 초과 `CLOSED` 전이. 차단 삭제·종단 표식, 사용자 알림 없음 | C |
+| `ExamFinalized` v1 | contest | notification (분석 P3) | SNS 팬아웃 | 최초 확정·재확정. 확정 결과 알림, 분석은 확정 스냅샷 조회 | C |
+| `ExamUpdated` v1 | contest | study, notification | SNS 팬아웃 | `SCHEDULED` 설정 변경. study 차단 갱신·notification 변경 알림과 시작 임박 예약 재설정 | C |
+| `ExamCanceled` v1 | contest | study, notification | SNS 팬아웃 | 시작 전 취소. study 차단 삭제·종단 표식, notification 취소 알림·예약 무효화 | C |
+| `ContestParticipantRegistered` v1 | contest | study | SNS 팬아웃 | 대회 참가 등록 | C |
+| `ContestStarted` / `ContestEnded` / `ContestFinalized` / `ContestCanceled` v1 | contest | study, notification, problem(전용 문제 공개) | SNS 팬아웃 | 대회 상태 전이 | C |
+| `StudyMemberJoined` v1 | study | notification, contest, problem | SNS 팬아웃 | 가입이 `APPROVED`가 되는 트랜잭션 | D |
+| `StudyMemberLeft` v1 | study | notification, contest, problem | SNS 팬아웃 | `LEFT`·`REMOVED` 전이, 회원 탈퇴 전파 | D |
+| `StudyApplicationDecided` v1 | study | notification | SNS 팬아웃 | 승인·거절·만료 | D |
+| `AssignmentPublished` v1 | study | notification | SNS 팬아웃 | 문제집 `SCHEDULED → OPEN` | D |
+| `AssignmentDeadlineApproaching` v1 | study | notification | SNS 팬아웃 | 마감 24시간 전 1회 | D |
+| `AssignmentIncompleteRepeated` v1 (신규 제안) | study | notification | SNS 팬아웃 | 연속 2회 `INCOMPLETE` 멤버 발견 | D |
+| `HintReady` v1 | study(AI) | notification, member(힌트 사용 감점, 확정 필요) | SNS 팬아웃 | 힌트 종결 | D |
+| `LearningProfileUpdated` v1 | member | study | SNS 팬아웃 | 프로필 입력·변경, 태그 레벨 확정·변경 | E |
+| `TagLevelChanged` v1 | member | notification | SNS 팬아웃 | 진단 결과·승급·하향·쿨타임 해제 | E |
+| `MemberWithdrawn` / `MemberSuspended` v1 | member | 전 서비스 | SNS 팬아웃 | 탈퇴·정지·해제 | E |
+| `GitHubSyncFailed` v1 | integration | notification | SNS 팬아웃 | Sync Job 최종 실패 | A |
+- Outbox는 SNS Publish 또는 SQS SendMessage 성공 후 `PUBLISHED`로 기록한다. Consumer는 `processed_events`와 업무 변경을 같은 트랜잭션에 커밋한 뒤 SQS 메시지를 삭제한다. DB 실패 시 삭제하지 않고, 커밋 후 삭제가 실패해 재수신되면 `processed_events` 확인 후 삭제만 한다.
+- SNS 구독 전달 실패 DLQ와 SQS 소비 실패 DLQ를 구분해 관측한다. 재전달 시 업무 `eventId`는 유지한다.
+
+#### 공통 봉투 예시 — `SubmissionJudged` v1
+
+```json
+{
+  "eventId": "8f2c…",
+  "eventType": "SubmissionJudged",
+  "schemaVersion": "v1",
+  "occurredAt": "2026-10-10T21:03:12.123456+09:00",
+  "aggregateId": "91023",
+  "correlationId": "c-7a1…",
+  "submissionId": "91023",
+  "userId": "7",
+  "problemId": "1001",
+  "problemRevisionId": "3",
+  "verdict": "AC",
+  "judgeAttempt": 1,
+  "submittedAt": "2026-10-10T21:02:58.000000+09:00",
+  "passedCount": 20,
+  "totalCount": 20,
+  "maxTimeMs": 312,
+  "maxMemoryKb": 20480,
+  "problemDifficulty": 2,
+  "problemTags": ["해시"]
+}
+```
+
+- 구독 후 처리: problem(풀이 상태), study(AC 복제본·완료 재계산), member(레벨·성취도 재계산), integration(AC면 Sync Job), notification(채점 완료 알림). 모두 `judgeAttempt`가 저장값보다 클 때만 반영한다.
+- `problemTags`: 이름 배열. **member의 `tag_id` 기준 집계를 위해 태그 ID 포함 여부를 확정 필요.**
+
+#### 이벤트 상세 — `ExamSubmissionRequested` v1
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 / 구독 | `contest-service` / `judge-service` (SQS `exam-submission-queue`) |
+| 발행 시점 | 시험 제출·자동 제출 접수 트랜잭션에서 Outbox 기록 |
+| 데이터 | `examSubmissionId`(judge 멱등키), `examId`, `participantId`, `memberId`, `problemId`, `problemRevisionId`, `language`, `sourceCode`, `receivedAt`, `submissionType`(`MANUAL` / `AUTO`) |
+| 실패·중복 처리 | judge는 `processed_events`·`submissions`·`judge_jobs`를 한 트랜잭션에 저장한 뒤 메시지 삭제. `(context, source_submission_id)` 유일 제약 |
+| 구독 후 처리 | `context = EXAM`, `submitted_at = receivedAt`으로 제출 생성. judge 수신 시각으로 마감을 다시 판정하지 않는다 |
+
+```json
+{
+  "eventId": "...", 
+  "eventType": "ExamSubmissionRequested", 
+  "schemaVersion": "v1",
+  "occurredAt": "2026-10-20T20:31:05.000000+09:00", 
+  "aggregateId": "4001", 
+  "correlationId": "...",
+  "examSubmissionId": "4001", 
+  "examId": "55", 
+  "participantId": "411", 
+  "memberId": "7",
+  "problemId": "101", 
+  "problemRevisionId": "201", 
+  "language": "java", 
+  "sourceCode": "class Solution { ... }",
+  "receivedAt": "2026-10-20T20:31:05.000000+09:00", 
+  "submissionType": "MANUAL"
+}
+```
+
+- `ContestSubmissionRequested`는 `examSubmissionId` → `contestSubmissionId`, `examId` → `contestId`로 바꾸고 `submissionType`을 뺀 구조다.
+- 큐 메시지에 코드 본문이 들어가므로 SQS 메시지 크기(256KB) 안에서 64KB 코드 상한이 유지된다.
+
+#### 이벤트 상세 — `StudyMemberJoined` v1
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 / 구독 | `study-service` / notification(가입 알림), contest(참가 자격 복제본), problem(풀이 공유 권한 복제본) |
+| 발행 시점 | 가입이 `APPROVED`가 되는 트랜잭션(즉시 가입·승인) |
+| 데이터 | `studyId`, `membershipId`, `memberId`, `role`, `joinedAt` |
+| 실패·중복 처리 | Outbox 발행 보장. 구독 측은 `eventId`로 중복 무시 |
+| 구독 후 처리 | `(studyId, memberId)` 복제본을 `membershipId` 기준 upsert. 저장된 `membershipId`보다 작은 이벤트는 무시하고, 같은 `membershipId`의 `StudyMemberLeft`가 먼저 왔으면 `Joined`를 무시한다 |
+
+```json
+{
+  "eventId": "8f9d...", 
+  "eventType": "StudyMemberJoined", 
+  "schemaVersion": "v1",
+  "occurredAt": "2026-09-28T10:00:00.000000+09:00", 
+  "aggregateId": "55", 
+  "correlationId": "...",
+  "studyId": "12", 
+  "membershipId": "55", 
+  "memberId": "7", 
+  "role": "MEMBER", 
+  "joinedAt": "2026-09-28T10:00:00.000000+09:00"
+}
+```
+
+#### 이벤트 상세 — `StudyMemberLeft` v1
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 / 구독 | `study-service` / notification(강제 탈퇴 알림), contest·problem(복제본 해제) |
+| 발행 시점 | `LEFT`·`REMOVED` 전이 트랜잭션 |
+| 데이터 | `studyId`, `membershipId`, `memberId`, `reason`(`LEFT` / `REMOVED` / `MEMBER_WITHDRAWN`), `leftAt` |
+| 구독 후 처리 | 같은 `membershipId`이면 해제, 더 작은 `membershipId`면 무시. 시험 시작 후 탈퇴해도 이미 등록한 참가는 유지. |
+
+```json
+{
+  "eventId": "...", 
+  "eventType": "StudyMemberLeft", 
+  "schemaVersion": "v1",
+  "occurredAt": "2026-10-02T12:00:00.000000+09:00", 
+  "aggregateId": "55", 
+  "correlationId": "...",
+  "studyId": "12", 
+  "membershipId": "55", 
+  "memberId": "7", 
+  "reason": "REMOVED", 
+  "leftAt": "2026-10-02T12:00:00.000000+09:00"
+}
+```
+
+#### 이벤트 상세 — `StudyApplicationDecided` v1
+
+| 항목 | 내용 |
+| --- | --- |
+| 데이터 | `studyId`, `membershipId`, `memberId`, `result`(`APPROVED` / `REJECTED` / `EXPIRED`), `decidedAt` |
+| 구독 후 처리 | notification: 신청자에게 결과 알림 |
+
+#### 이벤트 상세 — `AssignmentPublished` / `AssignmentDeadlineApproaching` / `AssignmentIncompleteRepeated` v1
+
+| 이벤트 | 데이터 | 구독 후 처리 |
+| --- | --- | --- |
+| `AssignmentPublished` | `studyId`, `assignmentId`, `title`, `startsAt`, `deadlineAt`, `targetMemberIds` | 대상 구성원에게 문제집 배정 알림 |
+| `AssignmentDeadlineApproaching` | `studyId`, `assignmentId`, `deadlineAt`, `incompleteMemberIds` | 미완료 구성원에게 마감 24시간 전 알림 |
+| `AssignmentIncompleteRepeated` | `studyId`, `assignmentId`, `memberIds`, `recipientMemberIds`(`LEADER`·`MANAGER`) | 운영진에게 연속 미완료 멤버 알림 (자동 강퇴 없음) |
+
+> `AssignmentIncompleteRepeated`는 정책 §7.1 "연속 2회 INCOMPLETE 멤버는 운영진에게 알림"을 위한 신규 이벤트다. 
+**notification 알림 종류 목록(정책 §9.2)에 추가 필요.**
+> 
+
+#### 이벤트 상세 — `HintReady` v1
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 / 구독 | `study-service`(AI 모듈) / notification (member 구독은 확정 필요) |
+| 발행 시점 | 힌트 요청이 `READY`·`FALLBACK`·`BLOCKED`(전달 직전 재확인)로 종결되는 트랜잭션 |
+| 데이터 | `hintRequestId`, `memberId`, `problemId`, `level`, `result` |
+| 구독 후 처리 | notification: 요청자에게 SSE 알림, `result`에 따라 문구 구분. member: `READY`·`FALLBACK`이면 `hint_usage_replicas` 기록(힌트 사용 AC 1/2점) |
+
+```json
+{
+  "eventId": "...", 
+  "eventType": "HintReady", 
+  "schemaVersion": "v1",
+  "occurredAt": "2026-09-28T10:00:05.000000+09:00", 
+  "aggregateId": "300", 
+  "correlationId": "...",
+  "hintRequestId": "300", 
+  "memberId": "7", 
+  "problemId": "101", 
+  "level": 1, 
+  "result": "READY"
+}
+```
+
+- `result`: `READY` | `FALLBACK` | `BLOCKED`
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 / 구독 | `member-service` / notification |
+| 발행 시점 | 레벨 재계산 결과 변경, 진단 `SCORED`, 쿨타임 해제 스케줄러 |
+| 데이터 | `memberId`, `tagId`, `tagName`, `fromLevel`, `toLevel`, `reasonType`(`DIAGNOSIS` / `PROMOTION` / `REJUDGE` / `COOLDOWN_RELEASED`), `diagnosisId` |
+| 구독 후 처리 | `LEVEL_CHANGED` 알림 (정책 문구 예시) |
+
+### C. 상태 전이
+
+> 원본: 정책 및 상태 v1.0의 §10. API에서 자주 쓰는 전이만 요약한다.
+> 
+
+| 대상 | 전이 | 참고 API |
+| --- | --- | --- |
+| 제출 | `QUEUED → JUDGING → COMPLETED`, `JUDGING → RETRY_WAITING → QUEUED`, `→ FAILED`, `FAILED → QUEUED`(재처리), `COMPLETED → QUEUED`(재채점) | 3.1.2, 3.2.3, 3.2.4 |
+| 채점 작업 | `PENDING → RUNNING → SUCCEEDED`, `RUNNING → RETRY_WAITING → PENDING`, `→ FAILED` | 3.2.1, 3.2.5 |
+| 문제 공개 상태 | `PRIVATE ↔ PUBLIC`, `→ ARCHIVED` | 2.3.7 ~ 2.3.9 |
+| 진단 응시 | `IN_PROGRESS → CLOSED → SCORED` | 1.5.1, 1.5.6 |
+| 시험 | `SCHEDULED → IN_PROGRESS → CLOSED → FINALIZED`, `SCHEDULED → CANCELED` | 4.1.4, 4.1.5, 4.2.7, 4.6.5 |
+| 시험 참가자 | `REGISTERED → STARTED → FINISHED`, `→ ABSENT`, `→ CANCELED`(시작 전) | 4.2.1 ~ 4.2.3, 4.2.10 |
+| 시험·대회 제출 | `ACCEPTED → REQUESTED → JUDGED`, `REQUESTED → FAILED` | 4.2.5, 4.2.9, 4.4.7 |
+| 대회 | `SCHEDULED → RUNNING → ENDED → FINALIZED`, `SCHEDULED → CANCELED` | 4.4.8, 4.6.1, 4.6.2, 4.6.6 |
+| 스터디 가입 | `PENDING → APPROVED / REJECTED / CANCELED / EXPIRED`, `APPROVED → LEFT / REMOVED` | 5.2.2, 5.2.3, 5.2.5 |
+| 힌트 요청 | `REQUESTED → GENERATING → READY / FALLBACK / BLOCKED`, `REQUESTED → BLOCKED` | 6.1.1 |
+| GitHub Sync Job | `PENDING → RUNNING → SUCCEEDED`, `→ RETRY_WAITING / RATE_LIMITED → PENDING`, `→ FAILED`, `→ CANCELED` | 8.1.7 |
+
+---
+
+end.

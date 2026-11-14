@@ -1,3 +1,31 @@
 spring:
   application:
     name: ai-service
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:ap-northeast-2}
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      chat:
+        timeout: 15s
+        options:
+          model: gpt-4o-mini
+
+ai:
+  sqs:
+    queue-name: ${AI_SQS_QUEUE_NAME:ai-queue}
+  sns:
+    topic-arn: ${AI_SNS_TOPIC_ARN:}
+  study:
+    base-url: ${STUDY_SERVICE_URL:http://study-service}
+
+logging:
+  pattern:
+    level: "%5p [correlationId=%X{correlationId:-}]"

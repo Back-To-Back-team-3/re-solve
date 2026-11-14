@@ -1,0 +1,128 @@
+groups:
+  - name: re-solve-infrastructure-alerts
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "서비스 인스턴스 중단 감지: {{ $labels.job }}"
+          description: "{{ $labels.job }} ({{ $labels.instance }}) 인스턴스가 1분 이상 응답하지 않습니다."
+
+      - alert: OutboxPendingAccumulation
+        expr: outbox_pending_count > 100
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox Relay 미발행 적체 경보"
+          description: "Outbox 미발행(PENDING) 이벤트 건수가 3분 이상 100건을 초과했습니다. 현재 건수: {{ $value }}"
+
+      - alert: OutboxMetricsStale
+        expr: time() - outbox_metrics_last_success_timestamp_seconds > 120
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox 메트릭 갱신 중단"
+          description: "Outbox PENDING 건수 조회가 2분 이상 성공하지 못했습니다. 적체 경보 값을 신뢰할 수 없습니다."
+
+      - alert: SqsQueueMetricsStale
+        expr: time() - aws_sqs_metrics_last_success_timestamp_seconds > 120
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SQS 큐 메트릭 갱신 중단: {{ $labels.queue }}"
+          description: "SQS 큐 {{ $labels.queue }}의 메트릭 조회가 2분 이상 성공하지 못했습니다. 적체 경보 값을 신뢰할 수 없습니다."
+
+      - alert: SqsQueueAccumulation
+        expr: aws_sqs_messages_visible{queue!~".*-dlq"} > 50
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SQS 큐 대기 메시지 적체 경보: {{ $labels.queue }}"
+          description: "SQS 큐 {{ $labels.queue }}의 대기 메시지가 2분 이상 50건을 초과했습니다. 현재 대기량: {{ $value }}"
+
+      - alert: SqsQueueCriticalAccumulation
+        expr: aws_sqs_messages_visible{queue!~".*-dlq"} > 200
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SQS 큐 대기 메시지 심각 적체 경보: {{ $labels.queue }}"
+          description: "SQS 큐 {{ $labels.queue }}의 대기 메시지가 1분 이상 200건을 초과했습니다. 컨슈머 장애 또는 병목 여부를 확인하세요. 현재 대기량: {{ $value }}"
+
+      - alert: SqsDlqMessagesAccumulation
+        expr: aws_sqs_messages_visible{queue=~".*-dlq"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SQS DLQ 메시지 적체 경보: {{ $labels.queue }}"
+          description: "DLQ {{ $labels.queue }}에 처리 실패 메시지가 유입되었습니다 (건수: {{ $value }}). 즉시 재시도 정책 및 실패 원인을 확인하세요."
+
+      - alert: GithubRateLimitLow
+        expr: github_ratelimit_remaining < 500
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GitHub API Rate Limit 잔여량 부족 경보"
+          description: "GitHub API 잔여 할당량이 500회 미만입니다. 현재 잔여량: {{ $value }}"
+
+      - alert: GithubRateLimitExhausted
+        expr: github_ratelimit_remaining < 50
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "GitHub API Rate Limit 소진 임박 경보"
+          description: "GitHub API 잔여 할당량이 50회 미만으로 소진 직전입니다. 즉시 Sync 작업 상태를 확인하세요. 현재 잔여량: {{ $value }}"
+
+      - alert: HighHttp5xxErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application) / sum(rate(http_server_requests_seconds_count[5m])) by (application) * 100 > 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP 5xx 에러율 기준 초과: {{ $labels.application }}"
+          description: "{{ $labels.application }} 서비스의 HTTP 5xx 에러율이 5분간 1%를 초과했습니다."
+
+      - alert: JudgeJobQueueAccumulation
+        expr: judge_jobs_pending_count > 50
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "채점 작업 대기 건수 적체 경보"
+          description: "채점 대기(PENDING) 작업이 2분 이상 50건을 초과했습니다. 현재 대기량: {{ $value }}건"
+
+      - alert: JudgeJobWaitTimeExceeded
+        expr: scheduler_backlog_oldest_seconds{scheduler=~".*Judge.*"} > 60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "채점 작업 대기 시간 초과 경보"
+          description: "채점 대기열에서 가장 오래된 작업의 대기 시간이 2분 이상 60초를 초과했습니다. 현재 대기 시간: {{ $value }}초"
+
+      - alert: JudgeJobQueueCriticalAccumulation
+        expr: judge_jobs_pending_count > 200
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "채점 작업 대기열 심각 적체 경보"
+          description: "채점 대기 작업이 1분 이상 200건을 초과했습니다. 채점 인스턴스(Judge0) 장애 또는 채점 스케줄러 병목 여부를 확인하세요. 현재 대기량: {{ $value }}"
+
+      - alert: OutboxRelayCriticalAccumulation
+        expr: outbox_pending_count > 500
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox Relay 심각 적체 경보"
+          description: "Outbox 미발행(PENDING) 이벤트가 500건을 초과했습니다. Outbox Relay 워커 및 브로커 상태를 즉시 점검하세요. 현재 건수: {{ $value }}"

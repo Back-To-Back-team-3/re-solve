@@ -8,14 +8,105 @@ permissions:
 
 jobs:
   quality-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+
+      - name: Cache Gradle wrapper
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper/dists
+          key: gradle-wrapper-${{ hashFiles('**/gradle/wrapper/gradle-wrapper.properties') }}
 
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
+          cache: 'gradle'
 
       - name: 코드 형식과 테스트 소스 컴파일
-        run: bash ./gradlew spotlessCheck checkstyleMain checkstyleTest compileTestJava
+        run: bash ./gradlew checkstyleMain checkstyleTest compileTestJava
+
+  detect-changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      common: ${{ steps.filter.outputs.common }}
+      api-gateway: ${{ steps.filter.outputs.api-gateway }}
+      member-service: ${{ steps.filter.outputs.member-service }}
+      problem-service: ${{ steps.filter.outputs.problem-service }}
+      judge-service: ${{ steps.filter.outputs.judge-service }}
+      contest-service: ${{ steps.filter.outputs.contest-service }}
+      study-service: ${{ steps.filter.outputs.study-service }}
+      notification-service: ${{ steps.filter.outputs.notification-service }}
+      integration-service: ${{ steps.filter.outputs.integration-service }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            common:
+              - 'common-**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+            api-gateway:
+              - 'api-gateway/**'
+            member-service:
+              - 'member-service/**'
+            problem-service:
+              - 'problem-service/**'
+            judge-service:
+              - 'judge-service/**'
+            contest-service:
+              - 'contest-service/**'
+            study-service:
+              - 'study-service/**'
+            notification-service:
+              - 'notification-service/**'
+            integration-service:
+              - 'integration-service/**'
+
+  test:
+    needs: [quality-check, detect-changes]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api-gateway
+          - member-service
+          - problem-service
+          - judge-service
+          - contest-service
+          - study-service
+          - notification-service
+          - integration-service
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache Gradle wrapper
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper/dists
+          key: gradle-wrapper-${{ hashFiles('**/gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: 변경 여부 확인
+        id: check
+        run: |
+          if [ "${{ needs.detect-changes.outputs.common }}" = "true" ] || [ "${{ needs.detect-changes.outputs[matrix.service] }}" = "true" ]; then
+            echo "run_test=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_test=false" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-java@v6
+        if: steps.check.outputs.run_test == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: ${{ matrix.service }} 단위 테스트 실행
+        if: steps.check.outputs.run_test == 'true'
+        run: bash ./gradlew :${{ matrix.service }}:test

@@ -1,0 +1,8 @@
+# 로컬 Docker(LocalStack) 전용. judge·problem과 같이 SNS·SQS를 LocalStack으로 보낸다.
+spring:
+  cloud:
+    aws:
+      endpoint: ${LOCALSTACK_ENDPOINT:http://localhost:4566}
+      credentials:
+        access-key: test
+        secret-key: test

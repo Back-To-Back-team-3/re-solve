@@ -143,6 +143,7 @@ re-solve
 ├── frontend/
 ├── nginx/
 ├── config/
+├── docs/                     # 문서 목록·저장 기준: docs/README.md
 ├── .github/
 ├── .env.example
 ├── Dockerfile
@@ -156,6 +157,9 @@ re-solve
 <a id="developer-guide"></a>
 
 ## 🛠️ 개발자 안내
+
+- [Git/GitHub 메뉴얼](docs/guides/git-github.md)
+- [문서 목록과 저장 기준](docs/README.md)
 
 <details>
 <summary><strong>로컬 실행 및 검증</strong></summary>
@@ -208,3 +212,6 @@ docker-compose down
 <a id="related-docs"></a>
 
 ## 📚 관련 문서
+
+- [문서 목록과 저장 기준](docs/README.md)
+- [Git/GitHub 메뉴얼](docs/guides/git-github.md)

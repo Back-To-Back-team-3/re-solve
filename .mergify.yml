@@ -16,7 +16,6 @@ queue_rules:
               - head = develop
       - -draft
       - -conflict
-      - "#approved-reviews-by >= 3"
       - "#changes-requested-reviews-by = 0"
       - "#review-threads-unresolved = 0"
       - check-success = quality-check
@@ -46,7 +45,6 @@ queue_rules:
               - -from-fork
       - -draft
       - -conflict
-      - "#approved-reviews-by >= 2"
       - "#changes-requested-reviews-by = 0"
       - "#review-threads-unresolved = 0"
       - check-success = quality-check

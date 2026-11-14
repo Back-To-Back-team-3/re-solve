@@ -1,3 +1,70 @@
 spring:
   application:
     name: member-service
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  jackson:
+    time-zone: Asia/Seoul
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:ap-northeast-2}
+
+resolve:
+  # 회원 이벤트 SNS 발행 (이벤트 계약 2.1 member-events). 꺼져 있으면 Outbox에 기록만 한다.
+  messaging:
+    enabled: ${MEMBER_MESSAGING_ENABLED:false}
+    topic-arn: ${MEMBER_EVENTS_TOPIC_ARN:}
+    # 진단 채점 요청(M6)을 보낼 judge 큐
+    exam-submission-queue-url: ${EXAM_SUBMISSION_QUEUE_URL:}
+    consumer-enabled: ${MEMBER_EVENTS_CONSUMER_ENABLED:false}
+    queue-url: ${MEMBER_QUEUE_URL:}
+  auth:
+    frontend-origin: ${FRONTEND_ORIGIN:http://localhost:8080}
+    # 로그인 후 이동할 수 있는 프론트 경로(상대 경로 접두어). "/"는 모든 상대 경로를 허용한다.
+    allowed-redirect-paths:
+      - /
+    github:
+      client-id: ${GITHUB_CLIENT_ID:}
+      client-secret: ${GITHUB_CLIENT_SECRET:}
+      redirect-uri: ${GITHUB_REDIRECT_URI:http://localhost:8080/api/v1/auth/github/callback}
+      authorize-uri: https://github.com/login/oauth/authorize
+      token-uri: https://github.com/login/oauth/access_token
+      api-base-uri: https://api.github.com
+    jwt:
+      # HS256 서명 키. Gateway와 같은 값을 쓰며 32바이트 이상이어야 한다.
+      secret: ${JWT_SECRET:}
+      access-token-ttl: 1h
+    refresh-token:
+      ttl: 14d
+      # 교체 직후 이 시간 안에 이전 토큰으로 온 재발급은 재사용으로 보지 않는다 (동시 요청·여러 탭 대응)
+      reuse-grace: 10s
+      cookie-secure: ${REFRESH_COOKIE_SECURE:true}
+    # 개발용 로그인(1.1.6). local·dev에서만 켠다. prod·staging 프로필에서 켜면 기동이 실패한다.
+    dev-login-enabled: ${DEV_LOGIN_ENABLED:false}
+  member:
+    contest-service-url: ${CONTEST_SERVICE_URL:http://contest-service:8080}
+    study-service-url: ${STUDY_SERVICE_URL:http://study-service:8080}
+  skill:
+    problem-service-url: ${PROBLEM_SERVICE_URL:http://problem-service:8080}
+    # 진단 시작 허용. 출제 후보·만료 종료·채점 연동이 배포되기 전에는 false
+    diagnosis-enabled: ${MEMBER_DIAGNOSIS_ENABLED:false}
+    diagnosis-cooldown: 3d
+    # 현재 레벨별 다음 승급 기준 (정책 및 상태 8.3 단계별 승급). 실운영 결과를 보고 조정한다.
+    promotions:
+      LV1:
+        target-level: LV2
+        required-solved-count: 5
+        required-achievement-rate: 60.00
+      LV2:
+        target-level: LV3
+        required-solved-count: 6
+        required-achievement-rate: 70.00
+      LV3:
+        target-level: MASTER
+        required-solved-count: 5
+        required-achievement-rate: 65.00

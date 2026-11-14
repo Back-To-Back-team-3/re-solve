@@ -64,11 +64,12 @@ jobs:
             done
           fi
 
-          body="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          body="$(jq -r '(.issue.body // "") | gsub("(?s)<!--.*?-->"; "")' "$GITHUB_EVENT_PATH")"
+          priority_body="$(awk '/^## / { active = ($0 ~ /^## 🧭 중요도[[:space:]]*$/); next } active { print }' <<< "$body")"
           priority=""
-          for value in Urgent High Medium Low; do
-            if grep -Eq "^- \\[[xX]\\] .* ${value}( |$)" <<< "$body"; then
-              priority="$value"
+          for value in "🌋 Urgent" "🏔 High" "🏕 Medium" "🏝 Low"; do
+            if grep -Eq "^- \\[[xX]\\] ${value}( |$)" <<< "$priority_body"; then
+              priority="${value#* }"
               break
             fi
           done
@@ -87,11 +88,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          issue_url="$(jq -r '.issue.html_url' "$GITHUB_EVENT_PATH")"
-          body="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
+          content_id="$(jq -r '.issue.node_id' "$GITHUB_EVENT_PATH")"
+          body="$(jq -r '(.issue.body // "") | gsub("(?s)<!--.*?-->"; "")' "$GITHUB_EVENT_PATH")"
 
           project_id="$(gh project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq '.id')"
-          item_id="$(gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$issue_url" --format json --jq '.id')"
+          item_id="$(gh api graphql \
+            -f query='mutation($projectId: ID!, $contentId: ID!) { addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) { item { id } } }' \
+            -f projectId="$project_id" -f contentId="$content_id" \
+            --jq '.data.addProjectV2ItemById.item.id')"
           fields_json="$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --limit 100 --format json)"
 
           field_id_for() {
@@ -126,21 +130,27 @@ jobs:
               --field-id "$field_id" --date "$2"
           }
 
-          selected() {
-            printf '%s\n' "$body" | grep -Eq "^- \\[[xX]\\] .* $1( |$)"
+          section() {
+            awk -v heading="$1" '/^## / { line = $0; sub(/[[:space:]]+$/, "", line); active = (line == heading); next } active { print }' <<< "$body"
           }
 
+          selected() {
+            grep -Eq "^- \\[[xX]\\] $2( |$)" <<< "$1"
+          }
+
+          priority_body="$(section '## 🧭 중요도')"
           priority=""
           for value in "🌋 Urgent" "🏔 High" "🏕 Medium" "🏝 Low"; do
-            if selected "${value#* }"; then priority="$value"; break; fi
+            if selected "$priority_body" "$value"; then priority="$value"; break; fi
           done
           if [ -n "$priority" ] && [ -n "$PROJECT_PRIORITY_FIELD" ]; then
             set_choice "$PROJECT_PRIORITY_FIELD" "$priority"
           fi
 
+          size_body="$(section '## 📏 예상 작업 규모')"
           size=""
           for value in "🦑 Large" "🐂 Medium" "🐇 Small" "🦔 Tiny"; do
-            if selected "${value#* }"; then size="$value"; break; fi
+            if selected "$size_body" "$value"; then size="$value"; break; fi
           done
           if [ -n "$size" ] && [ -n "$PROJECT_SIZE_FIELD" ]; then
             set_choice "$PROJECT_SIZE_FIELD" "$size"
@@ -152,7 +162,7 @@ jobs:
           fi
 
           if [ -n "$PROJECT_DUE_DATE_FIELD" ]; then
-            due_date="$(printf '%s\n' "$body" | sed -n '/^## 📅 완료 기한/,/^## /p' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -n 1 || true)"
+            due_date="$(section '## 📅 완료 기한' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -n 1 || true)"
             if [ -n "$due_date" ]; then
               set_date "$PROJECT_DUE_DATE_FIELD" "$due_date"
             fi

@@ -1,0 +1,117 @@
+package com.backtoback.member.skill.service;
+
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.backtoback.member.global.error.MemberErrorCode;
+import com.backtoback.member.global.error.MemberException;
+import com.backtoback.member.member.service.LearningProfileService;
+import com.backtoback.member.member.service.MemberService;
+import com.backtoback.member.skill.client.ProblemTagClient;
+import com.backtoback.member.skill.config.SkillProperties;
+import com.backtoback.member.skill.domain.DiagnosisAttempt;
+import com.backtoback.member.skill.domain.DiagnosisStatus;
+import com.backtoback.member.skill.domain.MemberLevelHistory;
+import com.backtoback.member.skill.domain.MemberTagLevel;
+import com.backtoback.member.skill.repository.DiagnosisAttemptRepository;
+import com.backtoback.member.skill.repository.MemberLevelHistoryRepository;
+import com.backtoback.member.skill.repository.MemberTagLevelRepository;
+import com.backtoback.member.skill.store.PracticeResultStore;
+
+import lombok.RequiredArgsConstructor;
+
+@Service
+@RequiredArgsConstructor
+public class TagLevelService {
+
+    private final MemberTagLevelRepository tagLevelRepository;
+    private final MemberLevelHistoryRepository historyRepository;
+    private final MemberService memberService;
+    private final LearningProfileService learningProfileService;
+    private final ProblemTagClient problemTagClient;
+    private final SkillProperties properties;
+    private final PracticeResultStore practiceResultStore;
+    private final DiagnosisAttemptRepository diagnosisAttemptRepository;
+    private final Clock clock;
+
+    /**
+     * 태그에 진단 없이 진입한다 (API 명세서 1.4.2). {@code LV1}로 시작하고 변경 이력을 남긴다.
+     * 같은 태그의 동시 진입은 {@code uk_member_tag_levels_member_tag}가 막고, 위반 시 {@code LEVEL_ALREADY_ENTERED}로 응답한다.
+     */
+    @Transactional
+    public MemberTagLevel enter(Long memberId, Long tagId) {
+        // 태그 레벨 행의 FK가 회원 행에 공유 잠금을 걸기 전에 먼저 배타 잠금을 잡아, 같은 회원의 동시 진입이 교착되지 않게 한다.
+        memberService.lockActiveMember(memberId);
+        if (tagLevelRepository.existsByMemberIdAndTagId(memberId, tagId)) {
+            throw new MemberException(MemberErrorCode.LEVEL_ALREADY_ENTERED);
+        }
+        if (!problemTagClient.exists(tagId)) {
+            throw new MemberException(MemberErrorCode.LEVEL_TAG_NOT_FOUND);
+        }
+
+        MemberTagLevel tagLevel = MemberTagLevel.enterWithoutDiagnosis(memberId, tagId, LocalDateTime.now(clock));
+        try {
+            tagLevelRepository.saveAndFlush(tagLevel);
+        } catch (DataIntegrityViolationException exception) {
+            throw new MemberException(MemberErrorCode.LEVEL_ALREADY_ENTERED, exception);
+        }
+        historyRepository.save(MemberLevelHistory.entrySkip(tagLevel));
+        learningProfileService.tagLevelsChanged(memberId);
+        return tagLevel;
+    }
+
+    /**
+     * 진입한 태그의 레벨과 진단 응시 가능 여부·다음 승급 기준을 계산한다 (API 명세서 1.4.1).
+     */
+    @Transactional(readOnly = true)
+    public List<TagLevelSummary> getTagLevels(Long memberId) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        Map<Long, List<TagAchievement>> achievements
+            = practiceResultStore
+                .findAchievements(memberId)
+                .stream()
+                .collect(Collectors.groupingBy(TagAchievement::tagId));
+        Map<Long, Long> inProgress
+            = diagnosisAttemptRepository
+                .findAllByMemberIdAndStatus(memberId, DiagnosisStatus.IN_PROGRESS)
+                .stream()
+                .collect(Collectors.toMap(DiagnosisAttempt::getTagId, DiagnosisAttempt::getId));
+        return tagLevelRepository.findAllByMemberIdOrderByTagIdAsc(memberId).stream().map(tagLevel -> {
+            LocalDateTime cooldownEndsAt = cooldownEndsAt(tagLevel, now);
+            Long inProgressDiagnosisId = inProgress.get(tagLevel.getTagId());
+            boolean eligible
+                = tagLevel.getLevel().isDiagnosable() && cooldownEndsAt == null && inProgressDiagnosisId == null;
+            return new TagLevelSummary(
+                tagLevel,
+                eligible,
+                cooldownEndsAt,
+                properties.promotions().get(tagLevel.getLevel()),
+                inProgressDiagnosisId,
+                achievements.getOrDefault(tagLevel.getTagId(), List.of())
+            );
+        }).toList();
+    }
+
+    /**
+     * 진입한 태그의 레벨만 조회한다 (API 명세서 1.7.2, judge의 연습 제출 레벨 확인용). 진입하지 않은 태그는 담지 않는다.
+     */
+    @Transactional(readOnly = true)
+    public List<MemberTagLevel> getEnteredTagLevels(Long memberId) {
+        return tagLevelRepository.findAllByMemberIdOrderByTagIdAsc(memberId);
+    }
+
+    private LocalDateTime cooldownEndsAt(MemberTagLevel tagLevel, LocalDateTime now) {
+        if (tagLevel.getLastDiagnosisEndedAt() == null) {
+            return null;
+        }
+        LocalDateTime endsAt = tagLevel.getLastDiagnosisEndedAt().plus(properties.diagnosisCooldown());
+        return now.isBefore(endsAt) ? endsAt : null;
+    }
+}

@@ -26,6 +26,15 @@ replay_pid*
 *.jks
 *.keystore
 
+# Personal development docs (local only, not committed)
+.personal/
+
+# Skills (local only, not committed)
+.agents/
+**/.claude/skills/
+**/.gemini/
+skills-lock.json
+
 # IntelliJ IDEA
 .idea/
 *.iml
