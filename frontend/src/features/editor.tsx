@@ -1,7 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { Empty } from "@/components/ui";
-import { labels } from "@/services/mock-api";
+import { labelOf, languageLabel } from "@/services/labels";
 import { draftKey, useWorkspace } from "@/stores/workspace";
 import type { Language, Problem } from "@/services/types";
 import { Buffer } from "@/features/editor-buffer";
@@ -61,7 +61,7 @@ export function CodeEditor({
           >
             {languages.map((l) => (
               <option key={l} value={l}>
-                {labels[l]}
+                {labelOf(languageLabel, l)}
               </option>
             ))}
           </select>

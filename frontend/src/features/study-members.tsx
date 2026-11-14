@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { studyApi } from "@/services/api";
+import { rethrowWithMessage, studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import type {
   GoalType,
@@ -90,34 +90,24 @@ export function MembersTab({
           onRefresh();
           router.refresh();
         } catch (err) {
-          const code = (err as { code?: string }).code;
-          throw new Error(
-            code === "STUDY_APPLICATION_EXPIRED"
-              ? "만료된 신청입니다."
-              : code === "STUDY_FULL"
-                ? "정원이 가득 찼습니다."
-                : ((err as { message?: string }).message ?? "오류가 발생했습니다."),
-          );
+          rethrowWithMessage(err, {
+            STUDY_APPLICATION_EXPIRED: "만료된 신청입니다.",
+            STUDY_FULL: "정원이 가득 찼습니다.",
+          });
         }
       },
       "승인했습니다.",
-      false,
     );
   }
 
   async function doReject(membershipId: string) {
     await action(
       async () => {
-        try {
-          await studyApi.rejectMember(studyId, membershipId);
-          onRefresh();
-          router.refresh();
-        } catch (err) {
-          throw new Error(((err as { message?: string }).message ?? "오류가 발생했습니다."));
-        }
+        await studyApi.rejectMember(studyId, membershipId);
+        onRefresh();
+        router.refresh();
       },
       "거절했습니다.",
-      false,
     );
   }
 
@@ -130,18 +120,13 @@ export function MembersTab({
           onRefresh();
           router.refresh();
         } catch (err) {
-          const code = (err as { code?: string }).code;
-          throw new Error(
-            code === "STUDY_LEADER_ROLE_CHANGE_NOT_ALLOWED"
-              ? "스터디장 역할은 위임 메뉴를 이용하세요."
-              : code === "STUDY_MANAGER_LIMIT_EXCEEDED"
-                ? "운영진은 최대 2명까지 가능합니다."
-                : ((err as { message?: string }).message ?? "오류가 발생했습니다."),
-          );
+          rethrowWithMessage(err, {
+            STUDY_LEADER_ROLE_CHANGE_NOT_ALLOWED: "스터디장 역할은 위임 메뉴를 이용하세요.",
+            STUDY_MANAGER_LIMIT_EXCEEDED: "운영진은 최대 2명까지 가능합니다.",
+          });
         }
       },
       "역할이 변경됐습니다.",
-      false,
     );
   }
 

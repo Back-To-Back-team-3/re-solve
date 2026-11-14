@@ -435,8 +435,7 @@ export function ExamCreate() {
               </label>
               {selected.includes(p.problemId) && (
                 <input
-                  className="input"
-                  style={{ width: "5rem" }}
+                  className="input w-20!"
                   type="number"
                   aria-label={`${p.title} 배점`}
                   min={1}

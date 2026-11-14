@@ -14,15 +14,7 @@ import { Pet } from "@/components/pet";
 import { useCatalog } from "@/services/catalog";
 import { ExamRanking } from "./exams-ranking";
 import type { ResultStatus } from "@/services/types";
-
-const VERDICT_LABELS: Record<string, string> = {
-  AC: "맞았습니다",
-  WA: "틀렸습니다",
-  TLE: "시간 초과",
-  CE: "컴파일 오류",
-  MLE: "메모리 초과",
-  RE: "런타임 오류",
-};
+import { labelOf, verdictLabel } from "@/services/labels";
 
 const RESULT_STATUS_LABEL: Record<ResultStatus, string> = {
   HIDDEN: "결과 집계 중",
@@ -145,7 +137,7 @@ function MyResultTab({ id }: { id: string }) {
                 <td>{r.title}</td>
                 <td>
                   <Badge tone={r.verdict === "AC" ? "success" : r.verdict ? "error" : ""}>
-                    {r.verdict ? (VERDICT_LABELS[r.verdict] ?? r.verdict) : "미제출"}
+                    {r.verdict ? labelOf(verdictLabel, r.verdict) : "미제출"}
                   </Badge>
                 </td>
                 <td>

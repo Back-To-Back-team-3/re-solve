@@ -75,6 +75,43 @@ import type {
 
 export type ApiError = { code: string; message: string };
 
+export const NETWORK_ERROR_MESSAGE = "서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.";
+export const SERVER_ERROR_MESSAGE = "일시적인 오류가 발생했어요. 잠시 후 다시 시도해 주세요.";
+export const ACTION_FAILED_MESSAGE = "저장하지 못했습니다. 다시 시도해 주세요.";
+
+export function isApiError(e: unknown): e is ApiError {
+  return (
+    typeof e === "object" && e !== null &&
+    typeof (e as ApiError).code === "string" && typeof (e as ApiError).message === "string"
+  );
+}
+
+/** 토큰 갱신까지 실패해 다시 로그인해야 하는 오류인지 판정한다. */
+export function isUnauthorized(e: unknown): boolean {
+  return isApiError(e) && e.code === "UNAUTHORIZED";
+}
+
+/** 응답 본문이 명세 형식이 아닐 때의 메시지. 5xx는 브라우저·프록시 원문 대신 사용자용 문구로 바꾼다. */
+export function httpErrorMessage(status: number): string {
+  return status >= 500 ? SERVER_ERROR_MESSAGE : `HTTP ${status}`;
+}
+
+/**
+ * 화면별로 다듬은 오류 문구가 있는 코드만 바꿔 던지고, 그 밖의 오류는 그대로 던진다.
+ * 세션 만료(`UNAUTHORIZED`)가 일반 오류로 바뀌면 useAction이 로그인 이동을 하지 못하기 때문이다.
+ */
+export function rethrowWithMessage(err: unknown, messages: Record<string, string>): never {
+  if (isApiError(err) && messages[err.code]) throw new Error(messages[err.code]);
+  throw err;
+}
+
+/** 버튼 동작 실패 토스트 문구. 서버 오류 메시지(에러 코드 표)를 그대로 보여 주고, 알 수 없는 예외만 기본 문구로 바꾼다. */
+export function actionErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (isApiError(e)) return e.message;
+  return ACTION_FAILED_MESSAGE;
+}
+
 type ApiResponse<T> =
   | { success: true; data: T; message?: string }
   | { success: false; error: ApiError };
@@ -120,9 +157,9 @@ async function readApiResponse<T>(res: Response): Promise<T> {
   if (res.status === 204) return undefined as T;
   let json: ApiResponse<T>;
   try { json = await res.json(); }
-  catch { throw { code: "UNKNOWN", message: `HTTP ${res.status}` } satisfies ApiError; }
+  catch { throw { code: "UNKNOWN", message: httpErrorMessage(res.status) } satisfies ApiError; }
   if (!json.success) throw json.error;
-  if (!res.ok) throw { code: "UNKNOWN", message: `HTTP ${res.status}` } satisfies ApiError;
+  if (!res.ok) throw { code: "UNKNOWN", message: httpErrorMessage(res.status) } satisfies ApiError;
   return json.data;
 }
 
@@ -146,11 +183,9 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
   let res: Response;
   try {
     res = await fetch(path, { ...init, credentials: "include", headers });
-  } catch (e) {
-    throw {
-      code: "UNKNOWN",
-      message: e instanceof Error ? e.message : "네트워크 오류",
-    } satisfies ApiError;
+  } catch {
+    // 브라우저의 fetch 실패 원문(예: Failed to fetch)은 영문이라 사용자용 문구로 바꾼다.
+    throw { code: "UNKNOWN", message: NETWORK_ERROR_MESSAGE } satisfies ApiError;
   }
 
   // /auth/token/refresh 자체는 인터셉터에서 제외해 무한 루프를 방지한다.
@@ -161,17 +196,14 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
         method: "POST",
         credentials: "include",
       });
-    } catch (e) {
-      throw {
-        code: "UNKNOWN",
-        message: e instanceof Error ? e.message : "네트워크 오류",
-      } satisfies ApiError;
+    } catch {
+      throw { code: "UNKNOWN", message: NETWORK_ERROR_MESSAGE } satisfies ApiError;
     }
     // 명세상 갱신 인증 실패는 401뿐이다. 그 외 실패는 세션이 남아 있을 수 있어 UNAUTHORIZED로 바꾸지 않는다.
     if (refreshRes.status === 401)
       throw { code: "UNAUTHORIZED", message: "로그인이 필요합니다" } satisfies ApiError;
     if (!refreshRes.ok)
-      throw { code: "UNKNOWN", message: `HTTP ${refreshRes.status}` } satisfies ApiError;
+      throw { code: "UNKNOWN", message: httpErrorMessage(refreshRes.status) } satisfies ApiError;
     const refreshJson = await refreshRes.json().catch(() => null);
     const newToken: string | undefined = refreshJson?.data?.accessToken;
     if (!newToken)

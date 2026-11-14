@@ -21,6 +21,7 @@ import { useResource } from "@/services/hooks";
 import { useCatalog } from "@/services/catalog";
 import { ProblemTable } from "./problem-list";
 import type { SubmissionHistoryItem } from "@/services/types";
+import { judgeStatusLabel, labelOf, verdictLabel } from "@/services/labels";
 
 export function relativeDate(iso: string): string {
   const startOfLocalDay = (d: Date) =>
@@ -33,14 +34,9 @@ export function relativeDate(iso: string): string {
   return `${days}일 전`;
 }
 
-const VERDICT_LABEL: Record<string, string> = {
-  AC: "맞았습니다",
-  WA: "틀렸습니다",
-  TLE: "시간 초과",
-  CE: "컴파일 오류",
-  MLE: "메모리 초과",
-  RE: "런타임 오류",
-};
+function submissionLabel(s: SubmissionHistoryItem) {
+  return s.verdict ? labelOf(verdictLabel, s.verdict) : labelOf(judgeStatusLabel, s.status);
+}
 
 function RecentSubmissions({ items }: { items: SubmissionHistoryItem[] }) {
   const { problems } = useCatalog();
@@ -55,7 +51,7 @@ function RecentSubmissions({ items }: { items: SubmissionHistoryItem[] }) {
             <div className="grow">
               <b>{title}</b>
               <p className="muted">
-                {VERDICT_LABEL[s.verdict ?? ""] ?? s.status} · {relativeDate(s.submittedAt)}
+                {submissionLabel(s)} · {relativeDate(s.submittedAt)}
               </p>
             </div>
           </Link>
@@ -414,7 +410,7 @@ export function DashboardPage() {
                   <div className="grow">
                     <b>{problems.find((p) => p.id === s.problemId)?.title ?? s.problemId}</b>
                     <p className="muted">
-                      {VERDICT_LABEL[s.verdict ?? ""] ?? s.status} · {relativeDate(s.submittedAt)}
+                      {submissionLabel(s)} · {relativeDate(s.submittedAt)}
                     </p>
                   </div>
                 </Link>

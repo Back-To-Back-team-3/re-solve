@@ -9,8 +9,8 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { useRouter, usePathname } from "next/navigation";
-import { getMember, whenAuthReady } from "@/services/api";
+import { useRouter } from "next/navigation";
+import { actionErrorMessage, getMember, isUnauthorized, whenAuthReady } from "@/services/api";
 export function Button({
   children,
   className = "",
@@ -250,16 +250,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 export const useToast = () => useContext(ToastContext);
+/** 현재 화면으로 돌아오도록 경로를 실어 로그인 화면으로 보낸다. */
+export function useLoginRedirect() {
+  const router = useRouter();
+  // 보호 경로 가드(workspace.tsx)와 같게 호출 시점의 경로와 쿼리를 함께 넘겨 돌아왔을 때 화면 상태를 잃지 않게 한다.
+  return () => router.push(`/login?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+}
 export function useAction() {
-  const router = useRouter(),
-    path = usePathname(),
+  const toLogin = useLoginRedirect(),
     toast = useToast();
   return async (fn: () => Promise<unknown>, success?: string, auth = true) => {
     try {
       if (auth) {
         await whenAuthReady();
         if (!getMember()) {
-          router.push(`/login?returnTo=${encodeURIComponent(path)}`);
+          toLogin();
           return false;
         }
       }
@@ -267,11 +272,12 @@ export function useAction() {
       if (success) toast(success);
       return true;
     } catch (e) {
-      toast(
-        e instanceof Error
-          ? e.message
-          : "저장하지 못했습니다. 다시 시도해 주세요.",
-      );
+      // 토큰 갱신까지 실패한 세션 만료는 비로그인 클릭과 같게 원래 경로를 유지해 로그인으로 보낸다.
+      if (isUnauthorized(e)) {
+        toLogin();
+        return false;
+      }
+      toast(actionErrorMessage(e));
       return false;
     }
   };

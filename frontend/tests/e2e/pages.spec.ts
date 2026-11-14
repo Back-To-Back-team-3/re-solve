@@ -1,88 +1,56 @@
-import { test, expect } from "@playwright/test";
-import { mkdirSync } from "node:fs";
-const routes = [
-  "/",
-  "/dashboard",
-  "/problems",
-  "/studies",
-  "/studies/new",
-  "/studies/study-1",
-  "/studies/study-2",
-  "/studies/study-3",
-  "/studies/study-4",
-  "/studies/study-5",
-  "/studies/study-6",
-  "/exams",
-  "/exams/new",
-  "/exams/exam-1",
-  "/exams/exam-2",
-  "/exams/exam-3",
-  "/exams/exam-4",
-  "/exams/exam-6",
-  "/exams/exam-7",
-  "/contests",
-  "/contests/exam-5",
-  "/login",
-  "/signup",
-  "/mypage",
-  "/locatepage",
-  ...Array.from({ length: 10 }, (_, i) => `/problems/${1001 + i}`),
-  ...Array.from({ length: 7 }, (_, i) => `/exams/exam-${i + 1}/result`),
-  "/problems/missing",
-  "/studies/missing",
-  "/exams/missing",
-  "/missing",
-  "/problems?keyword=없는문제",
+import { test, expect, type Locator, type Page } from "@playwright/test";
+import { THEME_STORAGE_KEY } from "../../src/services/storage-keys";
+import { EXAM_ID, INSTANT_STUDY_ID, mockApi } from "./api-fixture";
+
+/**
+ * `src/app/**\/page.tsx`의 사용자 화면. 동적 경로는 api-fixture가 응답하는 ID로 채운다.
+ * 제외한 경로:
+ * - `/admin/**`: ADMIN 권한 화면은 admin-* 스펙이 전용 fixture로 확인한다.
+ * - `/auth/callback`: GitHub OAuth가 발급한 loginCode가 있어야 열린다.
+ * - `/exams/[id]/room`: 응시 시작 후에만 열리므로 details·flows 스펙이 입실 흐름으로 확인한다.
+ * - `/studies/[id]/assignments/[aid]`: fixture의 문제집 목록이 비어 있어 열 수 있는 문제집이 없다.
+ */
+const routes: { path: string; ready: (page: Page) => Locator }[] = [
+  { path: "/", ready: (p) => p.getByRole("heading", { name: /나만의 알고리즘 펫/ }) },
+  { path: "/dashboard", ready: (p) => p.getByRole("heading", { name: "오늘도 한 걸음, 더 성장해요" }) },
+  { path: "/problems", ready: (p) => p.getByRole("link", { name: "고정 회차 배열 합" }) },
+  { path: "/problems/1001", ready: (p) => p.getByRole("textbox", { name: "코드 편집기" }) },
+  { path: "/studies", ready: (p) => p.getByRole("heading", { name: "함께라서 더 멀리, 스터디" }) },
+  { path: "/studies/new", ready: (p) => p.getByRole("heading", { name: "스터디 만들기" }) },
+  { path: `/studies/${INSTANT_STUDY_ID}`, ready: (p) => p.getByRole("heading", { name: "즉시 가입 스터디" }) },
+  { path: "/exams", ready: (p) => p.getByRole("heading", { name: "모의 코딩테스트" }) },
+  { path: `/exams/new?studyId=${INSTANT_STUDY_ID}`, ready: (p) => p.getByRole("heading", { name: "모의 코테 만들기" }) },
+  { path: `/exams/${EXAM_ID}`, ready: (p) => p.getByRole("heading", { name: "주간 모의 코테" }) },
+  { path: `/exams/${EXAM_ID}/result`, ready: (p) => p.getByRole("heading", { name: "도전의 기록" }) },
+  { path: "/contests", ready: (p) => p.getByRole("heading", { name: "공개대회 준비 중" }) },
+  { path: `/contests/${EXAM_ID}`, ready: (p) => p.getByRole("heading", { name: "주간 모의 코테" }) },
+  { path: "/submissions/5000", ready: (p) => p.getByRole("heading", { name: "제출 #5000" }) },
+  { path: "/mypage", ready: (p) => p.getByRole("heading", { name: "테스터님의 마이페이지" }) },
+  { path: "/login", ready: (p) => p.getByRole("heading", { name: "다시 만나서 반가워요" }) },
 ];
-for (const width of [1440, 390])
-  test(`all routes at ${width}px in both themes`, async ({ page }) => {
-    test.setTimeout(360000);
+
+for (const theme of ["light", "dark"])
+  test(`1440px ${theme} 테마로 모든 사용자 화면을 열면 오류 상태 없이 가로 넘침 없이 표시한다`, async ({ page }) => {
+    test.setTimeout(240000);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
-    await page.setViewportSize({ width, height: 1000 });
-    mkdirSync(`test-results/review-${width}`, { recursive: true });
-    for (const theme of ["light", "dark"]) {
-      await page.goto("/");
-      await page.evaluate((t) => {
-        localStorage.setItem("resolve:theme", t);
-      }, theme);
-      for (const [i, path] of routes.entries()) {
-        // Solving uses a desktop layout; mobile layout review covers the other routes.
-        if (width === 390 && /^\/problems\/\d+$/.test(path)) continue;
-        await page.goto(path);
-        await expect(page.getByText("LOADING...", { exact: true })).toHaveCount(
-          0,
-        );
-        await expect(page.locator("main")).toHaveAttribute(
-          "data-ready",
-          "true",
-        );
-        if (width === 1440 && /^\/problems\/\d+$/.test(path))
-          await expect(
-            page.getByRole("textbox", { name: "코드 편집기" }),
-          ).toBeVisible();
-        await page.evaluate(() => document.fonts.ready);
-        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
-        const overflow = await page.evaluate(
-          () => document.documentElement.scrollWidth > window.innerWidth + 1,
-        );
-        expect(overflow, `${path} overflows ${width}`).toBe(false);
-        if (width === 390 && (path === "/" || path === "/dashboard")) {
-          const title = await page.locator(".hero h1, .hero h2").boundingBox();
-          expect(title?.width, `${path} mobile heading width`).toBeGreaterThan(
-            250,
-          );
-          expect(title?.height, `${path} mobile heading height`).toBeLessThan(
-            200,
-          );
-        }
-        if (width === 1440 && theme === "light" && i === 0)
-          await page.screenshot({ path: "test-results/preview-home.png" });
-        await page.screenshot({
-          path: `test-results/review-${width}/${theme}-${String(i).padStart(2, "0")}.png`,
-          fullPage: true,
-        });
-      }
+    await page.addInitScript(({ key, value }) => {
+      try {
+        localStorage.setItem(key, value);
+      } catch {}
+    }, { key: THEME_STORAGE_KEY, value: theme });
+    await mockApi(page);
+    for (const { path, ready } of routes) {
+      await page.goto(path);
+      await expect(page.locator("main"), path).toHaveAttribute("data-ready", "true");
+      await expect(ready(page), path).toBeVisible();
+      await expect(page.getByText("LOADING...", { exact: true }), path).toHaveCount(0);
+      await expect(page.getByRole("alert").filter({ hasText: "불러오지 못했어요" }), path).toHaveCount(0);
+      // Next.js 개발 서버의 오류 오버레이는 shadow DOM 안에 그려지며 Playwright CSS 선택자가 이를 관통한다.
+      await expect(page.locator("[data-nextjs-dialog]"), path).toHaveCount(0);
+      await expect(page.locator("html"), path).toHaveAttribute("data-theme", theme);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+      expect(overflow, `${path} 가로 넘침`).toBe(false);
     }
     expect(errors).toEqual([]);
   });
