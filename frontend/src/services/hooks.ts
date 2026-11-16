@@ -1,6 +1,8 @@
 "use client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiError } from "./api";
+import { connectNotificationStream } from "@/services/notification-stream";
+import { useWorkspace } from "@/stores/workspace";
 
 export function useResource<T>(
   load: () => Promise<T>,
@@ -160,25 +162,15 @@ export function useExamRankingSSE(
 export function useNotificationSSE(
   onNotification: (event: import("./types").SSENotificationEvent) => void,
 ): void {
+  const memberId = useWorkspace((state) => state.member?.memberId);
+  const authReady = useWorkspace((state) => state.authReady);
   const onNotificationRef = useRef(onNotification);
   useLayoutEffect(() => {
     onNotificationRef.current = onNotification;
   });
 
   useEffect(() => {
-    const es = new EventSource("/api/v1/notifications/subscribe", {
-      withCredentials: true,
-    });
-    es.addEventListener("notification", (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data) as import("./types").SSENotificationEvent;
-        onNotificationRef.current(data);
-      } catch {
-        // 파싱 실패 시 무시
-      }
-    });
-    // heartbeat 이벤트는 연결 유지 목적이므로 무시한다.
-    es.addEventListener("heartbeat", () => {});
-    return () => es.close();
-  }, []);
+    if (!authReady || !memberId) return;
+    return connectNotificationStream((event) => onNotificationRef.current(event));
+  }, [authReady, memberId]);
 }
