@@ -51,7 +51,7 @@ class ExamRunControllerTest {
         given(runs.run(any()))
             .willReturn(
                 new ExamRunResponse(
-                    List.of(new ExamRunResponse.Result("CUSTOM", 0, "4", null, 2, 10)),
+                    List.of(new ExamRunResponse.Result("CUSTOM", 0, "4", null, 2, 10, "")),
                     Instant.parse("2026-10-20T11:15:00Z")
                 )
             );

@@ -7,16 +7,17 @@ import { availableProblemLanguages, toEditorProblem } from "@/services/problem-e
 import { labelOf, languageLabel } from "@/services/labels";
 import { useDiagnosis } from "@/stores/diagnosis";
 import { useWorkspace } from "@/stores/workspace";
+import { DiagnosisRun } from "@/features/diagnosis-run";
 import { EditorMonaco } from "@/features/editor-monaco";
 import { ProblemDescription } from "@/features/problem";
-import { Button, Empty, ErrorState, Loading } from "@/components/ui";
+import { Empty, ErrorState, Loading } from "@/components/ui";
 import type { DiagnosisContent, JudgeLanguage } from "@/services/types";
 
 function DiagnosisBuffer({ content, runtimes, disabled, onSubmit, onSave }: {
   content: DiagnosisContent; runtimes: JudgeLanguage[]; disabled: boolean;
   onSubmit: () => void; onSave: () => void;
 }) {
-  const { buffers, ensure, edit, activeProblem } = useDiagnosis();
+  const { detail, buffers, ensure, edit, activeProblem } = useDiagnosis();
   const fontSize = useWorkspace((state) => state.fontSize);
   const setFontSize = useWorkspace((state) => state.setFontSize);
   const languages = availableProblemLanguages(content, runtimes);
@@ -47,12 +48,10 @@ function DiagnosisBuffer({ content, runtimes, disabled, onSubmit, onSave }: {
           readOnly={disabled} onChange={(value) => { if (!disabled) edit(content.problemId, draft.language, value); }} />
       </div>
     </>}
-    <div className="editor-actions">
-      <Button onClick={onSave} disabled={disabled}>지금 저장</Button>
-      <Button className="primary" onClick={onSubmit} disabled={disabled || !draft || !languages.includes(draft.language)}>
-        {buffer?.pending ? "같은 제출 재요청" : "문항 제출"}
-      </Button>
-    </div>
+    <DiagnosisRun key={`${content.problemId}:${draft?.language ?? first}`} diagnosisId={detail.diagnosisId}
+      content={content} language={draft?.language ?? first ?? "java"} sourceCode={draft?.sourceCode ?? ""}
+      disabled={disabled || !first} canSubmit={!!draft && languages.includes(draft.language)} pending={!!buffer?.pending}
+      onSave={onSave} onSubmit={onSubmit} />
   </div>;
 }
 
