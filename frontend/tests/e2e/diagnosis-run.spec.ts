@@ -27,6 +27,32 @@ test("진단 Run은 Member 경로로 실행하며 Draft·제출·종료를 만�
   expect(state.finishes).toBe(0);
 });
 
+test("복원 언어의 런타임이 없으면 Run을 막고 저장과 사용 가능한 언어 전환은 유지한다", async ({ page }) => {
+  const state = await mockDiagnosis(page);
+  state.detail.problems[0].draft = { language: "cpp", sourceCode: "// restored cpp", seq: "1", savedAt: state.detail.serverNow };
+  const requests: string[] = [];
+  await page.route("**/api/v1/diagnoses/120/problems/1001/runs", async (route) => {
+    requests.push(route.request().postDataJSON().language);
+    await route.fulfill({ json: { success: true, data: response } });
+  });
+  await page.goto("/diagnoses/120");
+  await expect(page.getByRole("textbox", { name: "코드 편집기" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "코드 언어" })).toHaveValue("cpp");
+  await expect(page.getByRole("button", { name: "실행", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "문항 제출", exact: true })).toBeDisabled();
+  const editor = page.getByRole("textbox", { name: "코드 편집기" });
+  await editor.press("ControlOrMeta+A");
+  await editor.pressSequentially("// edited cpp");
+  await page.getByRole("button", { name: "지금 저장", exact: true }).click();
+  await expect.poll(() => state.saves.some((save) => save.body.language === "cpp" && save.body.sourceCode === "// edited cpp")).toBe(true);
+  expect(requests).toEqual([]);
+  await page.getByRole("combobox", { name: "코드 언어" }).selectOption("java");
+  await expect(page.getByRole("button", { name: "실행", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "실행", exact: true }).click();
+  await expect(page.getByRole("region", { name: "진단 Run 실행 결과" })).toContainText("실제 반환값: 3");
+  expect(requests).toEqual(["java"]);
+});
+
 test("진단 직접 입력은 최대 10개이며 INT64 JSON 숫자의 원문을 보존한다", async ({ page }) => {
   await mockDiagnosis(page);
   await page.route("**/api/v1/diagnoses/120/problems/1001", (route) => route.fulfill({ json: { success: true, data: {

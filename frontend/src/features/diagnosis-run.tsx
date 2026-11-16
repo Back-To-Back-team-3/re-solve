@@ -30,7 +30,7 @@ export function DiagnosisRun({ diagnosisId, content, language, sourceCode, disab
   }, []);
 
   async function run() {
-    if (running.current || disabled) return;
+    if (running.current || disabled || !canSubmit) return;
     setError(""); setResult(null);
     const invalid = diagnosisCodeError(sourceCode, true);
     if (invalid) { setError(invalid); return; }
@@ -72,7 +72,7 @@ export function DiagnosisRun({ diagnosisId, content, language, sourceCode, disab
         <Button onClick={onSave} disabled={disabled}>지금 저장</Button>
       </div>
       <div className="row wrap">
-        <Button onClick={() => void run()} disabled={disabled || busy}>{busy ? "실행 중…" : "실행"}</Button>
+        <Button onClick={() => void run()} disabled={disabled || busy || !canSubmit}>{busy ? "실행 중…" : "실행"}</Button>
         <Button className="primary" onClick={onSubmit} disabled={disabled || !canSubmit}>
           {pending ? "같은 제출 재요청" : "문항 제출"}
         </Button>
