@@ -72,14 +72,14 @@ test("저장 요청 중 생긴 편집도 이전 저장 성공 후 2초 유휴 �
   await expect.poll(() => state.saves.some((save) => save.body.sourceCode === "// second edit"), { timeout: 4500 }).toBe(true);
 });
 
-test("초기 기본 코드도 실제 저장 응답을 받은 뒤에만 서버 저장 완료로 표시한다", async ({ page }) => {
+test("초기 기본 코드도 서버 저장 요청에 포함한다", async ({ page }) => {
   const state = await mockDiagnosis(page);
   await page.goto("/diagnoses/120");
   await expect(page.getByRole("textbox", { name: "코드 편집기" })).toBeVisible();
   await page.getByRole("button", { name: "지금 저장" }).click();
   await expect.poll(() => state.saves.length).toBeGreaterThan(0);
   expect(state.saves[0].body.sourceCode).toBe("// java starter");
-  await expect(page.getByText("서버 저장 완료", { exact: true })).toBeVisible();
+  await expect.poll(() => state.detail.problems[0].draft?.sourceCode).toBe("// java starter");
 });
 
 test("저장 거절 전에 시작한 오래된 폴링으로 종료하지 않고 새 서버 순번을 조회한다", async ({ page }) => {
