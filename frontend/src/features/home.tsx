@@ -19,7 +19,7 @@ import {
 import { judgeApi, studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import { useCatalog } from "@/services/catalog";
-import { ProblemTable } from "./problem-list";
+import { ProblemTable } from "@/features/problem-table";
 import type { SubmissionHistoryItem } from "@/services/types";
 import { judgeStatusLabel, labelOf, verdictLabel } from "@/services/labels";
 
@@ -102,7 +102,7 @@ export function HomePage() {
               </div>
             )}
             <div className="row wrap">
-              <Go className="secondary" href={`/problems?tag=${hero}`}>
+              <Go className="secondary" href={`/problems?tagIds=${current?.id ?? ""}`}>
                 문제 풀러 가기 <ArrowRight size={16} />
               </Go>
               <Button onClick={() => setModal("diagnosis")}>내 실력 진단</Button>
@@ -194,7 +194,7 @@ export function HomePage() {
                     </Button>
                   ) : (
                     <>
-                      <Go className="small grow" href={`/problems?tag=${t.id}`}>
+                      <Go className="small grow" href={`/problems?tagIds=${t.id}`}>
                         문제 풀기
                       </Go>
                       <Button

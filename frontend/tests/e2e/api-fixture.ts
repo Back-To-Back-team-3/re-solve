@@ -147,7 +147,10 @@ export async function mockApi(page: Page, options: ApiFixtureOptions = {}) {
       return method === "PATCH" ? ok(route, { memberId: member.memberId, nickname: route.request().postDataJSON().nickname })
         : loggedIn ? ok(route, member) : fail(route, 401, "UNAUTHORIZED", "로그인이 필요합니다");
     if (path === "/api/v1/auth/logout") return route.fulfill({ status: 204 });
-    if (path === "/api/v1/members/me/tag-levels") return ok(route, { content: [] });
+    if (path === "/api/v1/members/me/tag-levels") return ok(route, { content: [1, 2].map((id) => ({
+      tagId: String(id), level: "LV2", accessibleMaxDifficulty: 2, achievements: [],
+      diagnosis: { isEligible: true, cooldownEndsAt: null, inProgressDiagnosisId: null }, nextPromotion: null,
+    })) });
     if (path === "/api/v1/notifications/unread-count") return ok(route, { unreadCount: 0 });
     if (path === "/api/v1/notifications") return ok(route, { unreadCount: 0, ...pageOf([]) });
     if (path === "/api/v1/integrations/github") return ok(route, { status: "NOT_CONNECTED" });
