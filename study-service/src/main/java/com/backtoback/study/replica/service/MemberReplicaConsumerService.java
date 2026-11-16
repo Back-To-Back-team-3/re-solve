@@ -34,7 +34,8 @@ public class MemberReplicaConsumerService {
      * 회원 정보 변경을 복제본에 반영한다. 같은 이벤트는 한 번만 처리하고, 순서 값이 같거나 낮은 이벤트와
      * 탈퇴 회원 이벤트는 저장소 조건부 쿼리가 무시한다.
      *
-     * @throws IllegalArgumentException 페이로드가 계약과 다를 때. 롤백 후 재수신을 거쳐 DLQ로 격리된다.
+     * @throws RuntimeException 페이로드가 계약과 다를 때(검증 실패는 {@code IllegalArgumentException}, 헤더 형식 오류는
+     *     페이로드의 {@code toMetadata()} 참고). 롤백 후 재수신을 거쳐 DLQ로 격리된다.
      */
     @Transactional
     public void consumeUpdated(MemberUpdatedPayload payload) {
@@ -72,7 +73,8 @@ public class MemberReplicaConsumerService {
      * 회원 정지·해제를 복제본 상태에 반영한다. 같은 이벤트는 한 번만 처리한다.
      * 복제본이 없는 회원은 닉네임이 없어 행을 만들지 않고 처리 기록만 남긴다. 이후 회원 정보 변경 이벤트의 상태로 반영된다.
      *
-     * @throws IllegalArgumentException 페이로드가 계약과 다를 때. 롤백 후 재수신을 거쳐 DLQ로 격리된다.
+     * @throws RuntimeException 페이로드가 계약과 다를 때(검증 실패는 {@code IllegalArgumentException}, 헤더 형식 오류는
+     *     페이로드의 {@code toMetadata()} 참고). 롤백 후 재수신을 거쳐 DLQ로 격리된다.
      */
     @Transactional
     public void consumeSuspended(MemberSuspendedPayload payload) {

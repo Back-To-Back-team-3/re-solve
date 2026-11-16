@@ -27,8 +27,11 @@ public record MemberSuspendedPayload(
 
     /**
      * 소비 기록 저장용 메타데이터를 만든다. correlationId가 없으면 {@code anonymous}로 대체한다.
+     * 헤더 형식이 계약과 다르면 예외 종류와 관계없이 롤백 후 재수신을 거쳐 DLQ로 격리된다(event-contract.md §1.4 3).
      *
-     * @throws IllegalArgumentException eventId·occurredAt·memberId 형식이 계약과 다를 때
+     * @throws IllegalArgumentException eventId가 UUID v4가 아니거나 memberId·correlationId가 헤더 규칙과 다를 때
+     * @throws java.time.format.DateTimeParseException occurredAt이 ISO-8601 오프셋 시각이 아닐 때
+     * @throws NullPointerException eventId 또는 occurredAt이 없을 때
      */
     public EventMetadata toMetadata() {
         String corrId = (correlationId != null && !correlationId.isBlank()) ? correlationId : ANONYMOUS_CORRELATION_ID;
