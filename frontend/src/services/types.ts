@@ -775,7 +775,7 @@ export interface SSENotificationEvent {
   type: NotificationType;
   title: string;
   content: string;
-  linkUrl: string;
+  linkUrl: string | null;
   createdAt: string;
 }
 
