@@ -269,7 +269,7 @@ export function HomePage() {
             }))}
           />
         </Section>
-        <Section title="최근 제출" href="/mypage">
+        <Section title="최근 제출" href="/mypage?tab=submissions">
           {!authReady ? (
             <Loading />
           ) : memberId ? (
@@ -422,7 +422,7 @@ export function DashboardPage() {
             </div>
           </Section>
         </div>
-        <Section title="최근 제출" href="/mypage">
+        <Section title="최근 제출" href="/mypage?tab=submissions">
           {rSubs.loading ? (
             <Loading />
           ) : rSubs.error ? (

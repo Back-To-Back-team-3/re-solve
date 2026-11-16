@@ -117,10 +117,19 @@ export function MyPage() {
     clearMember = useWorkspace((s) => s.clearMember),
     action = useAction(),
     router = useRouter(),
-    [tab, setTab] = useState("profile"),
+    params = useSearchParams(),
     fontSize = useWorkspace((s) => s.fontSize),
     setFontSize = useWorkspace((s) => s.setFontSize),
     [theme, setTheme] = useState("light");
+
+  const requestedTab = params.get("tab");
+  const tab = requestedTab && ["profile", "skill", "submissions", "github", "settings"].includes(requestedTab)
+    ? requestedTab : "profile";
+  const setTab = (value: string) => {
+    const next = new URLSearchParams(params.toString());
+    next.set("tab", value);
+    router.push(`/mypage?${next.toString()}`, { scroll: false });
+  };
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme ?? "light");
@@ -131,7 +140,7 @@ export function MyPage() {
       <div className="container">
         <Empty
           title="로그인 후 이용해 주세요"
-          action={<Go href="/login?returnTo=%2Fmypage">로그인</Go>}
+          action={<Go href={`/login?returnTo=${encodeURIComponent(`/mypage?tab=${tab}`)}`}>로그인</Go>}
         />
       </div>
     );
