@@ -14,7 +14,7 @@ function isNotification(value: unknown): value is SSENotificationEvent {
     && "type" in value && notificationTypes.some((type) => type === value.type)
     && "title" in value && typeof value.title === "string"
     && "content" in value && typeof value.content === "string"
-    && "linkUrl" in value && typeof value.linkUrl === "string"
+    && "linkUrl" in value && (value.linkUrl === null || typeof value.linkUrl === "string")
     && "createdAt" in value && typeof value.createdAt === "string";
 }
 

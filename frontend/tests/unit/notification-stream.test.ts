@@ -81,3 +81,27 @@ it("잘못된 이벤트 데이터는 화면 콜백에 전달하지 않는다", a
   const receive = vi.fn(); stop = connectNotificationStream(receive);
   await vi.advanceTimersByTimeAsync(0); expect(receive).not.toHaveBeenCalled();
 });
+it.each([null, "/notifications"])("링크가 %s인 공지를 전달하고 완료 ID로 재연결한다", async (linkUrl) => {
+  vi.useFakeTimers();
+  const notice = { ...notification, linkUrl };
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(
+    `id: 42\nevent: notification\ndata: ${JSON.stringify(notice)}\n\n`,
+    { headers: { "Content-Type": "text/event-stream" } },
+  )).mockResolvedValueOnce(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetcher);
+  const receive = vi.fn(); stop = connectNotificationStream(receive);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(receive).toHaveBeenCalledExactlyOnceWith(notice);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(fetcher.mock.calls[1][1].headers["Last-Event-ID"]).toBe("42");
+});
+it.each([123, {}, true, undefined])("링크 타입이 잘못된 공지(%s)는 전달하지 않는다", async (linkUrl) => {
+  vi.useFakeTimers();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+    `event: notification\ndata: ${JSON.stringify({ ...notification, linkUrl })}\n\n`,
+    { headers: { "Content-Type": "text/event-stream" } },
+  )));
+  const receive = vi.fn(); stop = connectNotificationStream(receive);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(receive).not.toHaveBeenCalled();
+});
