@@ -95,7 +95,9 @@ test("이전 문항 Run의 늦은 결과는 전환한 문항에 표시하지 않
   await page.getByRole("button", { name: "실행", exact: true }).click();
   await expect.poll(() => received).toBe(true);
   await page.getByRole("button", { name: /문제 2 · Lv.2/ }).click();
+  const completed = page.waitForResponse("**/api/v1/diagnoses/120/problems/1001/runs");
   release();
+  await (await completed).finished();
   await expect(page.getByRole("heading", { name: "진단 문제 1002" })).toBeVisible();
   await expect(page.getByText("diagnosis debug", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "진단 Run 실행 결과" })).toHaveCount(0);

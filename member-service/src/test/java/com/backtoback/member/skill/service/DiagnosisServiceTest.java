@@ -434,6 +434,7 @@ class DiagnosisServiceTest {
         });
 
         diagnosisRuns.run(memberId, attempt.getId(), 301L, runCommand());
+        then(judgeRuns).should().run(any());
 
         var detail = diagnosisService.getDetail(memberId, attempt.getId());
         assertThat(detail.attempt().getStatus()).isEqualTo(DiagnosisStatus.IN_PROGRESS);
