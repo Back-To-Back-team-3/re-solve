@@ -22,7 +22,10 @@ public record StudyRecommendationResponse(
     // POPULAR 모드는 점수 없이 규칙 추천과 구분되는 근거만 보여준다(API 명세서 5.1.4, 정책 및 상태 §8.2 콜드 스타트).
     private static final List<String> POPULAR_REASONS = List.of("최근 활동이 많은 스터디");
 
-    public static StudyRecommendationResponse popular(PopularStudyRow row) {
+    /**
+     * 콜드 스타트 조회 행을 {@code POPULAR} 항목으로 바꾼다. {@code score}는 {@code null}이다.
+     */
+    public static StudyRecommendationResponse from(PopularStudyRow row) {
         return new StudyRecommendationResponse(
             String.valueOf(row.getStudyId()),
             row.getName(),

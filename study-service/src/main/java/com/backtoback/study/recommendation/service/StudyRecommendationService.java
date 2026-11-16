@@ -42,7 +42,7 @@ public class StudyRecommendationService {
         Page<StudyRecommendationResponse> result
             = studyRecommendationQueryRepository
                 .findPopularStudies(memberId, since, pageable)
-                .map(StudyRecommendationResponse::popular);
+                .map(StudyRecommendationResponse::from);
         boolean isProfileRequired
             = memberLearningProfileReplicaRepository.findAllByMemberIdIn(List.of(memberId)).isEmpty();
         return StudyRecommendationPageResponse.of(RecommendationMode.POPULAR, isProfileRequired, result);
