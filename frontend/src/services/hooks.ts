@@ -174,3 +174,22 @@ export function useNotificationSSE(
     return connectNotificationStream((event) => onNotificationRef.current(event));
   }, [authReady, memberId]);
 }
+
+/** 진단 응시 상태는 알림·재진입·보조 폴링으로 조회하며 쓰기 요청은 화면에서 처리한다. */
+export function useDiagnosisRefresh(refresh: () => Promise<unknown>, done: boolean, enabled: boolean) {
+  const latest = useRef(refresh);
+  useLayoutEffect(() => { latest.current = refresh; });
+  useEffect(() => {
+    if (!enabled || done) return;
+    const poll = () => { void latest.current(); };
+    const timer = setInterval(poll, 5000);
+    const onVisible = () => { if (document.visibilityState === "visible") poll(); };
+    window.addEventListener("resolve:level-changed", poll);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("resolve:level-changed", poll);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [done, enabled]);
+}

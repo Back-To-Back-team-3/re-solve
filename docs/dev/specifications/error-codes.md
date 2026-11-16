@@ -40,7 +40,7 @@ Problem의 기존 오류 코드를 Judge 수동 재처리에도 사용하는 보
 | `LEVEL_TAG_NOT_FOUND` | 404 | 존재하지 않는 태그 |
 | `LEVEL_ALREADY_ENTERED` | 409 | 이미 진입한 태그에 다시 진입 |
 | `LEVEL_PROBLEM_LOCKED` | 403 | 태그 레벨보다 높은 난이도의 연습 제출 |
-| `DIAGNOSIS_NOT_FOUND` | 404 | 진단 응시를 찾을 수 없거나 본인 응시가 아님 |
+| `DIAGNOSIS_NOT_FOUND` | 404 | 진단 응시를 찾을 수 없거나 본인 응시가 아님. 출제 문항·고정 회차 본문 연결 이미지가 없는 경우 포함 |
 | `DIAGNOSIS_NOT_ELIGIBLE` | 409 | 태그 레벨이 `LV3`·`MASTER` |
 | `DIAGNOSIS_COOLDOWN` | 409 | 재응시 쿨타임(3일) 중 |
 | `DIAGNOSIS_ALREADY_IN_PROGRESS` | 409 | 같은 태그에 진행 중 진단 존재 |
