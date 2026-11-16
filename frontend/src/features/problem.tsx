@@ -166,7 +166,7 @@ export function ProblemPage({ id }: { id: string }) {
   if (r.data.problemId !== id) return <Loading />;
   const problem = toEditorProblem(r.data);
   return (
-    <>
+    <div className="solve-room practice-room">
       <div className="exam-bar">
         <Go className="small" href="/problems">
           ← 문제 목록
@@ -186,6 +186,6 @@ export function ProblemPage({ id }: { id: string }) {
           )}
         </ProblemAccessGate>
       </div>
-    </>
+    </div>
   );
 }

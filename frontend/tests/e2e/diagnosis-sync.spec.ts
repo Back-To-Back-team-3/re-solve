@@ -50,3 +50,15 @@ test("창 복귀 동기화는 편집 중인 코드보다 오래된 서버 Draft�
   await response;
   await expect(page.locator(".view-lines")).toContainText("// my current answer");
 });
+
+test("진단 에디터는 입력 가능한 높이로 표시되고 코드를 편집할 수 있다", async ({ page }) => {
+  await mockDiagnosis(page);
+  await page.setViewportSize({ width: 1128, height: 852 });
+  await page.goto("/diagnoses/120");
+  const editor = page.getByRole("textbox", { name: "코드 편집기" });
+  await expect(editor).toBeVisible();
+  await expect.poll(async () => (await page.locator(".monaco-editor").boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(300);
+  await editor.press("ControlOrMeta+A");
+  await editor.pressSequentially("// visible diagnosis answer");
+  await expect(page.locator(".view-lines")).toContainText("// visible diagnosis answer");
+});

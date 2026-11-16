@@ -198,7 +198,7 @@ export function DiagnosisRoom({ userId }: { userId: string }) {
   if (!session.ready) return <Loading />;
   const open = detail.status === "IN_PROGRESS";
   const expired = open && session.remaining === 0;
-  return <>
+  return <div className={open ? "solve-room diagnosis-room" : undefined}>
     <div className="exam-bar row wrap">
       <div><h2>알고리즘 성장 진단</h2><span>진단 #{detail.diagnosisId} · {diagnosisStatusLabel(detail.status)}</span></div>
       <div className="row wrap">
@@ -251,5 +251,5 @@ export function DiagnosisRoom({ userId }: { userId: string }) {
         <Button disabled={session.busy} className="primary" onClick={() => void session.finish().then(() => setConfirm(false))}>저장 후 진단 종료</Button>
       </div>
     </Modal>
-  </>;
+  </div>;
 }
