@@ -21,6 +21,7 @@ import {
 import { judgeApi, memberApi, studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import { useCatalog } from "@/services/catalog";
+import { useWorkspace } from "@/stores/workspace";
 import { ProblemTable } from "@/features/problem-table";
 import type { SubmissionHistoryItem } from "@/services/types";
 import { judgeStatusLabel, labelOf, verdictLabel } from "@/services/labels";
@@ -63,9 +64,17 @@ function RecentSubmissions({ items }: { items: SubmissionHistoryItem[] }) {
   );
 }
 
+function RecentSubmissionsResource() {
+  const r = useResource(() => judgeApi.getMySubmissions(0, 5), "home-submissions");
+  if (r.loading) return <Loading />;
+  if (r.error) return <ErrorState message={r.error.message} retry={r.retry} />;
+  return <RecentSubmissions items={r.data?.content ?? []} />;
+}
+
 export function HomePage() {
   const { tags, problems } = useCatalog();
-  const r = useResource(() => judgeApi.getMySubmissions(0, 5), "home-submissions");
+  const authReady = useWorkspace((state) => state.authReady);
+  const memberId = useWorkspace((state) => state.member?.memberId);
   const toast = useToast();
   const [hero, setHero] = useState(tags[0]?.id ?? ""),
     [screen, setScreen] = useState("pet"),
@@ -261,12 +270,12 @@ export function HomePage() {
           />
         </Section>
         <Section title="최근 제출" href="/mypage">
-          {r.loading ? (
+          {!authReady ? (
             <Loading />
-          ) : r.error ? (
-            <ErrorState message={r.error.message} retry={r.retry} />
+          ) : memberId ? (
+            <RecentSubmissionsResource key={memberId} />
           ) : (
-            <RecentSubmissions items={r.data?.content ?? []} />
+            <p className="muted">로그인하면 최근 제출 내역을 확인할 수 있어요.</p>
           )}
         </Section>
       </div>
