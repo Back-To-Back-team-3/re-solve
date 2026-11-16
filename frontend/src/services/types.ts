@@ -35,6 +35,9 @@ export type AuthTokenResponse = {
   };
 };
 
+// POST /api/v1/members/me/tag-levels §1.4.2
+export type TagEntryResponse = { tagId: string; level: "LV1" };
+
 // GET /api/v1/members/me/tag-levels §1.4.1
 export type TagLevelBand = "GOOD" | "NORMAL" | "WEAK";
 

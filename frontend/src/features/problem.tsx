@@ -15,6 +15,7 @@ import {
   NotFound,
   Tabs,
 } from "@/components/ui";
+import { ProblemAccessGate } from "@/features/problem-access";
 import { CodeEditor } from "./editor";
 import { ProblemSubmissionList, Pager } from "@/features/problem-list";
 import { Board, Note } from "./board";
@@ -171,15 +172,17 @@ export function ProblemPage({ id }: { id: string }) {
       </div>
       <div className="workspace">
         <ProblemDescription key={id} problem={problem} />
-        {runtimes.loading ? <Loading /> : runtimes.error ? (
-          <ErrorState message={runtimes.error.message} retry={runtimes.retry} />
-        ) : (
-          <CodeEditor
-            problem={problem}
-            userId={member?.memberId || "guest"}
-            availableLanguages={availableProblemLanguages(r.data, runtimes.data?.content ?? [])}
-          />
-        )}
+        <ProblemAccessGate problem={problem}>
+          {runtimes.loading ? <Loading /> : runtimes.error ? (
+            <ErrorState message={runtimes.error.message} retry={runtimes.retry} />
+          ) : (
+            <CodeEditor
+              problem={problem}
+              userId={member?.memberId || "guest"}
+              availableLanguages={availableProblemLanguages(r.data, runtimes.data?.content ?? [])}
+            />
+          )}
+        </ProblemAccessGate>
       </div>
     </>
   );
