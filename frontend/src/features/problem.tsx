@@ -84,7 +84,7 @@ export function ProblemDescription({
   ));
   const r = useResource(() => exam || diagnosisId ? Promise.resolve(null) : judgeApi.getSubmissions(problem.id, page), `${problem.id}-subs-${page}-${submissionVersion}`);
   return (
-    <section className="problem-panel stack">
+    <section className={`problem-panel stack${diagnosisId ? " min-h-64 max-h-[calc(100dvh-22rem)] overflow-y-auto overscroll-contain" : ""}`}>
       <div className="row wrap">
         <Badge>Lv. {problem.difficulty}</Badge>
         <Badge tone="accent">
