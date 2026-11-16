@@ -67,6 +67,7 @@ import type {
   SubmissionCreateRequest,
   SubmissionSource,
   TagLevel,
+  TagEntryResponse,
   UnreadCountResponse,
   UpdateNotificationPreferencesRequest,
   UserRole,
@@ -241,6 +242,10 @@ export const memberApi = {
     apiFetch<MemberUpdateResponse>("/api/v1/members/me", {
       method: "PATCH",
       body: JSON.stringify(body),
+    }),
+  enterTag: (tagId: string) =>
+    apiFetch<TagEntryResponse>("/api/v1/members/me/tag-levels", {
+      method: "POST", body: JSON.stringify({ tagId }),
     }),
   getTagLevels: () =>
     apiFetch<{ content: TagLevel[] }>("/api/v1/members/me/tag-levels"),

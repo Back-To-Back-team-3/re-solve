@@ -4,8 +4,9 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Search } from "lucide-react";
 import { useResource } from "@/services/hooks";
+import { ProblemTable } from "@/features/problem-table";
 import { problemApi } from "@/services/api";
-import type { ProblemListItem, SubmissionHistoryItem, Verdict } from "@/services/types";
+import type { SubmissionHistoryItem, Verdict } from "@/services/types";
 import { judgeStatusLabel, labelOf, languageLabel, solvedStatusLabel, verdictLabel } from "@/services/labels";
 import { useCatalog } from "@/services/catalog";
 import {
@@ -16,42 +17,6 @@ import {
   Heading,
   Loading,
 } from "@/components/ui";
-export function ProblemTable({ items }: { items: ProblemListItem[] }) {
-  return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>상태</th>
-            <th>번호</th>
-            <th>문제 제목</th>
-            <th>난이도</th>
-            <th>알고리즘</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((p) => (
-            <tr key={p.problemId}>
-              <td>
-                <Badge tone={p.solvedStatus === "SOLVED" ? "success" : ""}>
-                  {labelOf(solvedStatusLabel, p.solvedStatus)}
-                </Badge>
-              </td>
-              <td className="mono">{p.problemId}</td>
-              <td>
-                <Link href={`/problems/${p.problemId}`}>{p.title}</Link>
-              </td>
-              <td>
-                <Badge>Lv. {p.difficulty}</Badge>
-              </td>
-              <td>{p.tags.map((t) => t.name).join(", ")}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
 function submissionTone(verdict: Verdict | null): string {
   if (!verdict) return "pending";
   if (verdict === "AC") return "success";
@@ -186,6 +151,7 @@ export function ProblemsPage() {
         eyebrow="PROBLEM ARCADE"
         description="한 문제씩 해결하며, 나만의 알고리즘 펫을 키워 보세요."
       />
+      <p>마이페이지의 스킬 탭에서 현재 레벨을 확인하고 진단에 응시할 수 있어요. <Link href="/mypage">진단 테스트로 레벨 올리기</Link></p>
       <form
         className="filters"
         onSubmit={(e) => {
