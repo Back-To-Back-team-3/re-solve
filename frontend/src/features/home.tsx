@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useProblemLevels } from "@/features/problem-access";
 import { ArrowRight, Flame, BookOpen, Trophy } from "lucide-react";
 import { Pet } from "@/components/pet";
 import {
@@ -16,7 +18,7 @@ import {
   Modal,
   useToast,
 } from "@/components/ui";
-import { judgeApi, studyApi } from "@/services/api";
+import { judgeApi, memberApi, studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import { useCatalog } from "@/services/catalog";
 import { ProblemTable } from "@/features/problem-table";
@@ -67,10 +69,39 @@ export function HomePage() {
   const toast = useToast();
   const [hero, setHero] = useState(tags[0]?.id ?? ""),
     [screen, setScreen] = useState("pet"),
-    [modal, setModal] = useState(""),
-    [levels, setLevels] = useState<Record<string, number>>({});
+    [modal, setModal] = useState("");
+  const levels = useProblemLevels();
+  const router = useRouter();
+  const [hatching, setHatching] = useState(false);
+  const [hatchError, setHatchError] = useState("");
+  const levelOf = (tagId: string) => {
+    const level = levels.data?.content.find((item) => item.tagId === tagId)?.level;
+    return level === "MASTER" ? 4 : level === "LV3" ? 3 : level === "LV2" ? 2 : level === "LV1" ? 1 : 0;
+  };
+  async function hatch() {
+    const tagId = modal;
+    setHatching(true);
+    setHatchError("");
+    try {
+      await memberApi.enterTag(tagId);
+      setHero(tagId);
+      setModal("");
+      levels.retry();
+      router.refresh();
+    } catch (failure) {
+      if (typeof failure === "object" && failure !== null && "code" in failure && failure.code === "LEVEL_ALREADY_ENTERED") {
+        setModal("");
+        levels.retry();
+      } else {
+        setHatchError(typeof failure === "object" && failure !== null && "message" in failure && typeof failure.message === "string"
+          ? failure.message : "부화하지 못했습니다. 다시 시도해 주세요.");
+      }
+    } finally { setHatching(false); }
+  }
+  if (levels.error) return <ErrorState message={levels.error.message} retry={levels.retry} />;
+  if (levels.loading) return <Loading />;
   const current = tags.find((t) => t.id === hero) ?? tags[0];
-  const petLevel = current ? levels[current.id] ?? current.level : 0;
+  const petLevel = current ? levelOf(current.id) : 0;
   const stages = ["알", "아기", "어린이", "어른", "마스터"];
   const speech =
     petLevel === 0
@@ -160,7 +191,7 @@ export function HomePage() {
         </div>
         <div className="pet-grid">
           {tags.map((t) => {
-            const level = levels[t.id] ?? t.level;
+            const level = levelOf(t.id);
             return (
               <article
                 className={`card pet-card ${level === 0 ? "egg" : level === 4 ? "master" : ""}`}
@@ -188,8 +219,8 @@ export function HomePage() {
                 </p>
                 <Progress value={level === 0 ? 0 : level * 23} />
                 <div className="row actions">
-                  {level === 0 ? (
-                    <Button className="primary full" onClick={() => setModal(t.id)}>
+                  {level === 0 && !levels.data?.content.some((item) => item.tagId === t.id) ? (
+                    <Button className="primary full" disabled={!levels.memberId} onClick={() => { setHatchError(""); setModal(t.id); }}>
                       알 부화하기
                     </Button>
                   ) : (
@@ -242,12 +273,12 @@ export function HomePage() {
       </div>
       <Modal
         open={!!modal}
-        onOpenChange={() => setModal("")}
+        onOpenChange={() => { if (!hatching) setModal(""); }}
         title={modal === "diagnosis" ? "알고리즘 성장 진단" : "새 친구를 만나볼까요?"}
         description={
           modal === "diagnosis"
             ? "진단은 고정된 예시 결과입니다. 실제 풀이 분석은 진행하지 않습니다."
-            : "부화는 이 화면의 상태만 바꿉니다. 문제는 언제든 자유롭게 풀 수 있어요."
+            : "진단 없이 이 알고리즘을 Lv.1로 시작합니다. 레벨에 맞는 문제를 풀 수 있어요."
         }
       >
         <div className="stack">
@@ -266,15 +297,11 @@ export function HomePage() {
               </p>
             </div>
           </div>
+          {hatchError && <p role="alert" className="error-text">{hatchError}</p>}
           <Button
             className="primary"
-            onClick={() => {
-              if (modal !== "diagnosis") {
-                setLevels({ ...levels, [modal]: 1 });
-                setHero(modal);
-              }
-              setModal("");
-            }}
+            disabled={hatching}
+            onClick={() => modal === "diagnosis" ? setModal("") : void hatch()}
           >
             {modal === "diagnosis" ? "확인" : "부화시키기"}
           </Button>

@@ -299,7 +299,19 @@ test("Draft 저장소 쓰기가 실패해도 편집 중인 코드를 유지하�
 });
 
 test("부화 모달은 닫기 버튼에 포커스를 주고 Esc로 연 버튼에 되돌리며 어두운 테마는 새로고침 후에도 유지한다", async ({ page }) => {
-  await mockApi(page);
+  const entered = new Set<string>();
+  await mockApi(page, { handle: async (route, path, method) => {
+    if (path !== "/api/v1/members/me/tag-levels") return false;
+    if (method === "POST") {
+      const { tagId } = route.request().postDataJSON();
+      entered.add(tagId);
+      await route.fulfill({ status: 201, json: { success: true, data: { tagId, level: "LV1" } } });
+    } else await route.fulfill({ json: { success: true, data: { content: [...entered].map((tagId) => ({
+      tagId, level: "LV1", accessibleMaxDifficulty: 1, achievements: [],
+      diagnosis: { isEligible: true, cooldownEndsAt: null, inProgressDiagnosisId: null }, nextPromotion: null,
+    })) } } });
+    return true;
+  } });
   await page.goto("/");
   const hatch = page.getByRole("button", { name: "알 부화하기" }).first();
   await hatch.click();
