@@ -30,8 +30,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * SQS {@code study-queue}에서 SubmissionJudged 이벤트를 수신하여 소비 서비스에 위임한다
- * (event-contract.md §J1, §1.4 소비 규칙).
+ * SQS {@code study-queue}의 이벤트를 {@code eventType}별 소비 서비스에 위임한다
+ * (event-contract.md §1.4 소비 규칙, §5 서비스별 구독 매트릭스).
+ * 처리 대상이 아닌 이벤트는 소비 기록만 남기고 성공 처리한다. 클래스 이름은 최초 구독 이벤트 기준으로 유지한다.
  */
 @Slf4j
 @Component
