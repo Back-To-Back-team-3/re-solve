@@ -14,6 +14,7 @@ import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -139,6 +140,28 @@ public class DiagnosisService {
     public JsonNode getProblemContent(Long memberId, Long diagnosisId, Long problemId) {
         DiagnosisProblem problem = getProblem(getAttempt(memberId, diagnosisId), problemId);
         return problemDiagnosisClient.content(diagnosisId, problem.getProblemId(), problem.getProblemRevisionId());
+    }
+
+    /**
+     * 본인 진단에 고정된 회차의 이미지를 조회한다(API 명세서 1.5.8).
+     * 원격 호출 중 DB 연결을 보유하지 않도록 권한 조회 트랜잭션을 먼저 종료한다.
+     *
+     * @param memberId 요청 회원 ID
+     * @param diagnosisId 본인 진단 ID
+     * @param problemId 출제 문항 ID
+     * @param imageId 본문 연결 이미지 ID
+     * @return 이미지 MIME과 바이너리
+     * @throws MemberException 응시·문항이 없거나 이미지 ID가 올바르지 않은 경우
+     */
+    public ResponseEntity<byte[]> getProblemImage(Long memberId, Long diagnosisId, Long problemId, Long imageId) {
+        if (imageId <= 0) {
+            throw new MemberException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        }
+        TransactionTemplate readOnly = new TransactionTemplate(transactionTemplate.getTransactionManager());
+        readOnly.setReadOnly(true);
+        DiagnosisProblem problem = readOnly.execute(status -> getProblem(getAttempt(memberId, diagnosisId), problemId));
+        return problemDiagnosisClient
+            .image(diagnosisId, problem.getProblemId(), problem.getProblemRevisionId(), imageId);
     }
 
     /**

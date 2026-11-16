@@ -113,6 +113,31 @@ public class DiagnosisController {
     }
 
     /**
+     * 본인 진단의 고정 회차 이미지를 조회한다(API 명세서 1.5.8).
+     *
+     * @param user Gateway 인증 회원
+     * @param diagnosisId 본인 진단 ID
+     * @param problemId 출제 문항 ID
+     * @param imageId 본문 연결 이미지 ID
+     * @return 캐시를 공유하지 않는 이미지 바이너리
+     */
+    @GetMapping("/{diagnosisId}/problems/{problemId}/images/{imageId}")
+    public ResponseEntity<byte[]> image(
+        @AuthenticationPrincipal GatewayUser user,
+        @PathVariable Long diagnosisId,
+        @PathVariable Long problemId,
+        @PathVariable Long imageId
+    ) {
+        var image = diagnosisService.getProblemImage(memberId(user), diagnosisId, problemId, imageId);
+        return ResponseEntity
+            .ok()
+            .contentType(image.getHeaders().getContentType())
+            .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+            .header("X-Content-Type-Options", "nosniff")
+            .body(image.getBody());
+    }
+
+    /**
      * 1.5.4 진단 Draft 저장
      */
     @PutMapping("/{diagnosisId}/problems/{problemId}/draft")

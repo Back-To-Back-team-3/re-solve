@@ -5,7 +5,7 @@ import Markdown, { defaultUrlTransform } from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useResource } from "@/services/hooks";
-import { contestApi, judgeApi, problemApi } from "@/services/api";
+import { contestApi, diagnosisApi, judgeApi, problemApi } from "@/services/api";
 import type { Problem } from "@/services/types";
 import {
   Badge,
@@ -21,16 +21,16 @@ import { ProblemSubmissionList, Pager } from "@/features/problem-list";
 import { Board, Note } from "./board";
 import { useWorkspace } from "@/stores/workspace";
 import { availableProblemLanguages, toEditorProblem } from "@/services/problem-editor";
-/** 고정 회차·시험 문맥의 권한 검증을 거쳐 이미지 바이너리를 조회한다. (API 명세서 §2.1.3·§4.2.12) */
-function ProblemBodyImage({ problemId, revisionId, imageId, alt, examId }: {
-  problemId: string; revisionId: string; imageId: string; alt: string; examId?: string;
+/** 고정 회차·응시 문맥의 권한 검증을 거쳐 이미지 바이너리를 조회한다. (API 명세서 §1.5.8·§2.1.3·§4.2.12) */
+function ProblemBodyImage({ problemId, revisionId, imageId, alt, examId, diagnosisId }: {
+  problemId: string; revisionId: string; imageId: string; alt: string; examId?: string; diagnosisId?: string;
 }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
     let objectUrl = "";
-    const image = examId ? contestApi.getExamImage(examId, problemId, imageId)
+    const image = diagnosisId ? diagnosisApi.getImage(diagnosisId, problemId, imageId) : examId ? contestApi.getExamImage(examId, problemId, imageId)
       : problemApi.getImage(problemId, revisionId, imageId);
     image.then((blob) => {
       if (!active) return;
@@ -40,23 +40,23 @@ function ProblemBodyImage({ problemId, revisionId, imageId, alt, examId }: {
         && typeof failure.message === "string" ? failure.message : "이미지를 불러오지 못했습니다.");
     });
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [problemId, revisionId, imageId, examId]);
+  }, [problemId, revisionId, imageId, examId, diagnosisId]);
   if (error) return <span className="error-text" role="alert">{alt}: {error}</span>;
   return url ? <Image unoptimized src={url} alt={alt} width={800} height={400} className="h-auto w-auto max-w-full" />
     : <span>이미지 조회 중…</span>;
 }
 
-function ProblemMarkdown({ text, problem, examId }: { text: string; problem: Problem; examId?: string }) {
+function ProblemMarkdown({ text, problem, examId, diagnosisId }: { text: string; problem: Problem; examId?: string; diagnosisId?: string }) {
   const problemId = problem.id;
   const revisionId = problem.problemRevisionId;
   // 시험 타이머 갱신마다 이미지 컴포넌트를 재생성해 인증 요청을 반복하지 않는다.
   const components = useMemo<Components>(() => ({ img: ({ src, alt }) => {
     const match = typeof src === "string" ? /^image:([1-9][0-9]*)$/.exec(src) : null;
-    if (match) return <ProblemBodyImage key={`${problemId}:${revisionId}:${examId}:${match[1]}`}
-      problemId={problemId} revisionId={revisionId} imageId={match[1]} alt={alt ?? "문제 이미지"} examId={examId} />;
+    if (match) return <ProblemBodyImage key={`${problemId}:${revisionId}:${examId}:${diagnosisId}:${match[1]}`}
+      problemId={problemId} revisionId={revisionId} imageId={match[1]} alt={alt ?? "문제 이미지"} examId={examId} diagnosisId={diagnosisId} />;
     return typeof src === "string" && src ? <Image unoptimized src={src} alt={alt ?? "문제 이미지"}
       width={800} height={400} className="h-auto w-auto max-w-full" /> : <span>이미지 주소를 확인해 주세요.</span>;
-  } }), [problemId, revisionId, examId]);
+  } }), [problemId, revisionId, examId, diagnosisId]);
   return <Markdown remarkPlugins={[remarkGfm]} skipHtml
     urlTransform={(url) => /^image:[1-9][0-9]*$/.test(url) ? url : defaultUrlTransform(url)}
     components={components}>{text}</Markdown>;
@@ -66,9 +66,11 @@ export function ProblemDescription({
   problem,
   exam = false,
   examId,
+  diagnosisId,
 }: {
   problem: Problem;
   exam?: boolean;
+  diagnosisId?: string;
   examId?: string;
 }) {
   const [tab, setTab] = useState("description");
@@ -80,7 +82,7 @@ export function ProblemDescription({
     attempt?.problemId === problem.id && attempt.submissionId
       ? [[attempt.submissionId, attempt.result?.status]] : [],
   ));
-  const r = useResource(() => judgeApi.getSubmissions(problem.id, page), `${problem.id}-subs-${page}-${submissionVersion}`);
+  const r = useResource(() => exam || diagnosisId ? Promise.resolve(null) : judgeApi.getSubmissions(problem.id, page), `${problem.id}-subs-${page}-${submissionVersion}`);
   return (
     <section className="problem-panel stack">
       <div className="row wrap">
@@ -91,7 +93,7 @@ export function ProblemDescription({
         <small>#{problem.id}</small>
       </div>
       <h1>{problem.title}</h1>
-      {!exam && (
+      {!exam && !diagnosisId && (
         <Tabs
           value={tab}
           onChange={setTab}
@@ -105,7 +107,7 @@ export function ProblemDescription({
       )}
       {tab === "description" && (
         <div className="markdown">
-          <ProblemMarkdown problem={problem} examId={examId} text={`${problem.description}\n\n## 제한 사항\n${problem.constraints}`} />
+          <ProblemMarkdown problem={problem} examId={examId} diagnosisId={diagnosisId} text={`${problem.description}\n\n## 제한 사항\n${problem.constraints}`} />
           <h2>입출력 예</h2>
           {problem.samples.length > 0 ? (
             <div className="table-wrap">
@@ -125,7 +127,7 @@ export function ProblemDescription({
               </table>
             </div>
           ) : null}
-          <ProblemMarkdown problem={problem} examId={examId} text={problem.examples} />
+          <ProblemMarkdown problem={problem} examId={examId} diagnosisId={diagnosisId} text={problem.examples} />
         </div>
       )}
       {tab === "submissions" &&

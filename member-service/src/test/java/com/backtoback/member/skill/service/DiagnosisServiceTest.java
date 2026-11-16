@@ -2,7 +2,10 @@ package com.backtoback.member.skill.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.never;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -25,11 +28,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -338,6 +344,60 @@ class DiagnosisServiceTest {
         assertThat(diagnosisService.getHistory(memberId, 10L, newestFirst).getContent())
             .extracting(DiagnosisAttempt::getId)
             .containsExactly(first);
+    }
+
+    /** DB 권한 조회를 종료한 뒤 원격 이미지를 호출하고 진단 종료 후에도 고정 회차를 유지하는지 확인한다. */
+    @Test
+    @DisplayName("Lv.0 회원도 본인 진단 이미지를 DB 트랜잭션 밖에서 조회하고 종료 후 같은 회차를 조회한다")
+    void imageReadsOutsideTransaction() {
+        Long memberId = member(9101L, MemberStatus.ACTIVE);
+        given(problemTagClient.findName(21L)).willReturn(Optional.of("태그"));
+        given(problemDiagnosisClient.candidates(21L)).willReturn(CANDIDATES);
+        Long diagnosisId = diagnosisService.start(memberId, 21L).attempt().getId();
+        given(problemDiagnosisClient.image(diagnosisId, 301L, 1001L, 701L)).willAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return ResponseEntity
+                .ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .body(
+                    new byte[] {
+                        1,
+                        2,
+                        3
+            }
+                );
+        });
+
+        assertThat(diagnosisService.getProblemImage(memberId, diagnosisId, 301L, 701L).getBody())
+            .containsExactly(1, 2, 3);
+        diagnosisService.finish(memberId, diagnosisId);
+        assertThat(diagnosisService.getProblemImage(memberId, diagnosisId, 301L, 701L).getBody())
+            .containsExactly(1, 2, 3);
+    }
+
+    /** 다른 회원·다른 문항·잘못된 이미지 ID는 원격 조회 전에 거절되는지 확인한다. */
+    @Test
+    @DisplayName("본인 진단이 아니거나 출제 문항이 아니면 이미지를 호출하지 않고 404를 반환한다")
+    void imageAuthorizationFailsBeforeRemoteCall() {
+        Long memberId = member(9102L, MemberStatus.ACTIVE);
+        Long other = member(9103L, MemberStatus.ACTIVE);
+        given(problemTagClient.findName(22L)).willReturn(Optional.of("태그"));
+        given(problemDiagnosisClient.candidates(22L)).willReturn(CANDIDATES);
+        Long diagnosisId = diagnosisService.start(memberId, 22L).attempt().getId();
+
+        assertError(
+            () -> diagnosisService.getProblemImage(other, diagnosisId, 301L, 701L),
+            MemberErrorCode.DIAGNOSIS_NOT_FOUND
+        );
+        assertError(
+            () -> diagnosisService.getProblemImage(memberId, diagnosisId, 999L, 701L),
+            MemberErrorCode.DIAGNOSIS_NOT_FOUND
+        );
+        assertError(
+            () -> diagnosisService.getProblemImage(memberId, diagnosisId, 301L, 0L),
+            com.backtoback.common.exception.CommonErrorCode.COMMON_INVALID_REQUEST
+        );
+        then(problemDiagnosisClient).should(never()).image(any(), any(), any(), any());
     }
 
     private void assertError(ThrowingCallable call, Object errorCode) {

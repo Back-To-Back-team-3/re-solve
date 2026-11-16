@@ -14,7 +14,7 @@ export function formatProblemType(type: ProblemFunctionParamType): string {
 }
 
 /** 통과 언어·기본 코드·현재 실행 환경이 모두 준비된 언어만 선택한다. */
-export function availableProblemLanguages(problem: ProblemDetail, runtimes: JudgeLanguage[]): Language[] {
+export function availableProblemLanguages(problem: Omit<ProblemDetail, "solvedStatus">, runtimes: JudgeLanguage[]): Language[] {
   return problem.supportedLanguages.filter((language) =>
     problem.starterCodes.some((code) => code.language === language && code.sourceCode.trim().length > 0)
     && runtimes.some((runtime) => runtime.language === language && runtime.enabled),
@@ -22,7 +22,7 @@ export function availableProblemLanguages(problem: ProblemDetail, runtimes: Judg
 }
 
 /** 고정 회차와 기본 코드를 유지하면서 기존 에디터의 표시 모델로 변환한다. */
-export function toEditorProblem(detail: ProblemDetail): Problem {
+export function toEditorProblem(detail: Omit<ProblemDetail, "solvedStatus">): Problem {
   return {
     id: detail.problemId,
     problemRevisionId: detail.problemRevisionId,
