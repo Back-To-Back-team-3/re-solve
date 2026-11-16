@@ -106,7 +106,7 @@ test("저장 거절 전에 시작한 오래된 폴링으로 종료하지 않고 
   await expect(page.getByRole("textbox", { name: "코드 편집기" })).toBeVisible();
   await edit(page, "// local five");
   armed = true;
-  await page.getByRole("button", { name: "진단 상태 새로고침" }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect.poll(() => phase).toBe(1);
   state.detail.problems[0].draft = { language: "java", sourceCode: "// other tab latest", seq: "999", savedAt: state.detail.serverNow };
   await page.getByRole("button", { name: "최종 제출 및 종료" }).click();
