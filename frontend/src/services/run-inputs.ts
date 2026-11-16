@@ -132,10 +132,10 @@ function isFloat32InRange(text: string): boolean {
     && compare(((1n << 128n) - (1n << 103n)).toString(), 0) < 0;
 }
 
-/** 사용자 입력을 선언 타입에 맞춰 직렬화해 최대 다섯 직접 입력을 전송한다. */
-export function runInputs(parameters: RunInputParameter[], rows: RunInputRow[], useSamples: boolean) {
-  if (rows.length > 5 || (!useSamples && !rows.length)) {
-    throw new Error("공개 예제 또는 직접 입력을 선택해 주세요. 직접 입력은 최대 5개입니다.");
+/** 사용자 입력을 선언 타입에 맞춰 직렬화하고 문맥별 직접 입력 상한을 적용한다. */
+export function runInputs(parameters: RunInputParameter[], rows: RunInputRow[], useSamples: boolean, maxCases = 5) {
+  if (rows.length > maxCases || (!useSamples && !rows.length)) {
+    throw new Error(`공개 예제 또는 직접 입력을 선택해 주세요. 직접 입력은 최대 ${maxCases}개입니다.`);
   }
   return rows.map((row, index) => ({
     argumentTexts: Object.fromEntries(parameters.map(({ name, inputType }) => {

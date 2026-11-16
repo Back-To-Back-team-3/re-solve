@@ -862,6 +862,9 @@ body:has(.solve-room) > main {
 .solve-room .editor-toolbar {
   @apply shrink-0;
 }
+.diagnosis-room .results {
+  @apply min-h-0 max-h-[40%] shrink-0 overflow-y-auto overscroll-contain;
+}
 .diagnosis-room .editor-frame {
   @apply h-auto min-h-0 flex-1;
 }

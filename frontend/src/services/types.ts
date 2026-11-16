@@ -888,3 +888,10 @@ export interface AdminJudgeJobDetail {
 // API 명세서 §3.2.5 진행 중 채점 작업 복구
 export type JudgeJobRecoveryRequest = { reason: string };
 export type JudgeJobRecoveryResponse = { judgeJobId: string; status: "RETRY_WAITING" };
+
+/** 진단 Run은 제출 판정을 공개하거나 저장하지 않는다(API 명세서 §1.5.9). */
+export type DiagnosisRunResult = {
+  results: { type: "SAMPLE" | "CUSTOM"; index: number; output: string | null; stdout: string;
+    error: string | null; timeMs: number; memoryKb: number }[];
+  completedAt: string;
+};
