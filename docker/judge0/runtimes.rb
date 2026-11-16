@@ -2,7 +2,7 @@
 @languages.concat([
   {
     id: 91,
-    name: "Java (JDK 17.0.6)",
+    name: "Java (OpenJDK 17.0.6)",
     is_archived: false,
     source_file: "Main.java",
     compile_cmd: "/usr/local/resolve-jdk17/bin/javac %s Main.java",
