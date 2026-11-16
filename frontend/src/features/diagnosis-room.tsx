@@ -16,6 +16,7 @@ export function DiagnosisRoom({ userId }: { userId: string }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [queryError, setQueryError] = useState("");
+  const queryFailed = useRef(false);
   const [storageError, setStorageError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,17 +48,25 @@ export function DiagnosisRoom({ userId }: { userId: string }) {
         clockRef.current = nextClock;
         setClock(nextClock);
       }
+      queryFailed.current = false;
       setQueryError("");
       return true;
     }).catch((failure: unknown) => {
       if (!mounted.current) return false;
       if (isUnauthorized(failure)) { toLogin(); return false; }
-      setQueryError(actionErrorMessage(failure));
+      if (!queryFailed.current) setQueryError(actionErrorMessage(failure));
+      queryFailed.current = true;
       return false;
     }).finally(() => { detailRequest.current = null; });
     detailRequest.current = request;
     return request;
   }
+
+  useEffect(() => {
+    if (!queryError) return;
+    const timer = setTimeout(() => setQueryError(""), 5000);
+    return () => clearTimeout(timer);
+  }, [queryError]);
 
   function deadlinePassed() {
     const detail = store.getState().detail;
@@ -180,10 +189,10 @@ export function DiagnosisRoom({ userId }: { userId: string }) {
   }
   const remaining = Math.max(0, Math.ceil((Date.parse(detail.endsAt) - Date.parse(clock.server) - (now - clock.received)) / 1000));
   async function flush() {
-    try { for (const id of Object.keys(store.getState().buffers)) await saveOne(id); setError(""); }
+    try { for (const id of Object.keys(store.getState().buffers)) await saveOne(id); setError(""); await refresh(); }
     catch (failure) { report(failure); }
   }
-  const session = { ready, remaining, busy, error: error || queryError, storageError, message, submit, finish, refresh, flush };
+  const session = { ready, remaining, busy, error, storageError, message, submit, finish, refresh, flush };
 
   const [confirm, setConfirm] = useState(false);
   if (!session.ready) return <Loading />;
@@ -198,13 +207,17 @@ export function DiagnosisRoom({ userId }: { userId: string }) {
         {open && <Button className="primary" disabled={session.busy || expired} onClick={() => setConfirm(true)}>최종 제출 및 종료</Button>}
       </div>
     </div>
-    <div className="container stack-sm">
+    {queryError && <div role="alert" className="fixed top-6 left-1/2 z-70 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 border-2 bg-surface px-4 py-3 shadow-lg motion-safe:animate-diagnosis-toast">
+      <span>진단 상태를 동기화하지 못했습니다. {queryError}</span>
+      <Button className="small shrink-0" onClick={() => void session.refresh()}>재시도</Button>
+      <Button className="small shrink-0" aria-label="동기화 알림 닫기" onClick={() => setQueryError("")}>닫기</Button>
+    </div>}
+    {(session.storageError || session.error || session.message || expired) && <div className="container stack-sm">
       {session.storageError && <p role="alert" className="error-text">{session.storageError}</p>}
       {session.error && <div role="alert" className="error-text">{session.error}</div>}
       {session.message && <p role="status">{session.message}</p>}
       {expired && <p role="status">제한 시간이 끝났습니다. 서버의 자동 제출·종료 처리를 확인하고 있습니다.</p>}
-      <Button className="small" onClick={() => void session.refresh()}>진단 상태 새로고침</Button>
-    </div>
+    </div>}
     {open ? <div className="exam-workspace">
       <aside className="exam-sidebar stack-sm">
         <h3>진단 문제</h3>

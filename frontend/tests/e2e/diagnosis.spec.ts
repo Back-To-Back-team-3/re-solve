@@ -30,7 +30,7 @@ test("홈에서 진단을 시작해 문항별 저장·제출·종료·결과 조
   expect(state.saves.some((save) => save.id === "1002" && save.body.sourceCode === "// answer two")).toBe(true);
   expect(state.finishes).toBe(1);
   state.detail = { ...state.detail, status: "SCORED", result: { score: 3, resultLevel: "LV2", appliedLevel: "LV2" } };
-  await page.getByRole("button", { name: "진단 상태 새로고침" }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(page.getByText("적용 레벨: LV2", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "코드 편집기" })).toHaveCount(0);
 });
@@ -79,7 +79,7 @@ test("저장 실패 시 진단을 종료하지 않고 원본을 유지해 다시
   await edit(page, "// must save");
   await page.getByRole("button", { name: "최종 제출 및 종료" }).click();
   await page.getByRole("button", { name: "저장 후 진단 종료" }).click();
-  await expect(page.getByText("COMMON_DEPENDENCY_UNAVAILABLE", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "COMMON_DEPENDENCY_UNAVAILABLE" })).toBeVisible();
   expect(state.finishes).toBe(0);
   state.failSave = false;
   await page.getByRole("button", { name: "최종 제출 및 종료" }).click();
@@ -98,7 +98,7 @@ test("제한 시간은 서버 시각으로 계산하고 만료 후 제출하지 
   await expect(page.getByRole("button", { name: "문항 제출", exact: true })).toBeDisabled();
   expect(state.finishes).toBe(0);
   state.detail.status = "CLOSED";
-  await page.getByRole("button", { name: "진단 상태 새로고침" }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(page.getByRole("heading", { name: "채점 결과를 기다리고 있어요" })).toBeVisible();
   expect(state.posts).toHaveLength(0);
 });
@@ -111,7 +111,7 @@ test("응시 중 판정은 숨기고 종료 후 실패 및 확정된 점수만 �
   await expect(page.getByText("진단 결과 레벨: LV3")).toHaveCount(0);
   state.detail = { ...state.detail, status: "SCORED", problems: state.detail.problems.map((problem) => ({ ...problem,
     lastSubmission: { submissionStatus: "FAILED", draftSeq: "1" } })), result: { score: 0, resultLevel: "LV1", appliedLevel: "LV2" } };
-  await page.getByRole("button", { name: "진단 상태 새로고침" }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(page.getByText("진단 결과 레벨: LV1", { exact: true })).toBeVisible();
   await expect(page.getByText("적용 레벨: LV2", { exact: true })).toBeVisible();
   await expect(page.getByText(/채점 장애가 발생했습니다/)).toHaveCount(3);
@@ -175,8 +175,8 @@ test("연속 편집 중에도 10초 이내 서버에 저장하고 상태 조회 
   expect(state.saves.length).toBeGreaterThan(0);
   expect(state.saves[0].body.sourceCode.length).toBeLessThan(code.length);
   state.failDetail = true;
-  await page.getByRole("button", { name: "진단 상태 새로고침" }).click();
-  await expect(page.getByText("COMMON_DEPENDENCY_UNAVAILABLE", { exact: true })).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.getByRole("alert").filter({ hasText: "COMMON_DEPENDENCY_UNAVAILABLE" })).toBeVisible();
   const raw = await readBrowserStorage(page, "re-solve:diagnosis:7:120:1001");
   expect(raw).not.toBeNull();
   expect(JSON.parse(raw!).draft.sourceCode).toBe(code);

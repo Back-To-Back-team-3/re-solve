@@ -184,10 +184,12 @@ export function useDiagnosisRefresh(refresh: () => Promise<unknown>, done: boole
     const poll = () => { void latest.current(); };
     const timer = setInterval(poll, 5000);
     const onVisible = () => { if (document.visibilityState === "visible") poll(); };
+    window.addEventListener("focus", poll);
     window.addEventListener("resolve:level-changed", poll);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(timer);
+      window.removeEventListener("focus", poll);
       window.removeEventListener("resolve:level-changed", poll);
       document.removeEventListener("visibilitychange", onVisible);
     };
