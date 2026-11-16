@@ -171,7 +171,23 @@ export async function apiFetchBlob(path: string): Promise<Blob> {
   return res.blob();
 }
 
+/**
+ * API 명세서 §7.1.1의 SSE 요청에 기존 인증·한 차례 갱신을 적용한다.
+ * 취소 시 갱신 결과를 반영하지 않으며, 최종 401·403은 UNAUTHORIZED로 연결 중단을 알린다.
+ */
+export async function apiFetchStream(path: string, signal: AbortSignal, lastEventId: string): Promise<Response> {
+  const res = await apiRequest(path, {
+    signal,
+    headers: { Accept: "text/event-stream", ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}) },
+  }, false);
+  if (res.status === 401 || res.status === 403)
+    throw { code: "UNAUTHORIZED", message: "알림 연결 권한을 확인해 주세요." } satisfies ApiError;
+  if (!res.ok) await readApiResponse<never>(res);
+  return res;
+}
+
 async function apiRequest(path: string, init: RequestInit | undefined, isRetry: boolean): Promise<Response> {
+  init?.signal?.throwIfAborted();
   const token = tokenGetter?.();
   const headers: Record<string, string> = {
     ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
@@ -196,6 +212,7 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
       refreshRes = await fetch("/api/v1/auth/token/refresh", {
         method: "POST",
         credentials: "include",
+        signal: init?.signal,
       });
     } catch {
       throw { code: "UNKNOWN", message: NETWORK_ERROR_MESSAGE } satisfies ApiError;
@@ -212,6 +229,7 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
         code: "UNKNOWN",
         message: "토큰 갱신 응답을 확인하지 못했습니다",
       } satisfies ApiError;
+    init?.signal?.throwIfAborted();
     accessTokenSetter?.(newToken);
     return apiRequest(path, init, true);
   }
