@@ -36,7 +36,7 @@
 
 ### 1.3 발행 규칙
 
-1. 업무 상태 변경과 `outbox_events` INSERT는 같은 트랜잭션이다. 트랜잭션 밖 직접 발행은 금지한다.
+1. 업무 상태 변경과 `outbox_events` INSERT는 같은 트랜잭션이다. 트랜잭션 밖 직접 발행은 금지한다. 단, M1 관리자 재발행(API 1.6.4)은 업무 상태 변경 없이 Outbox만 기록한다.
 2. Outbox Relay가 1초 주기로 `status = 'PENDING'` 행을 건별 `SELECT … FOR UPDATE SKIP LOCKED`로 선점해 회차당 최대 100건을 시도한다. SNS Publish 또는 SQS SendMessage 후 `PUBLISHED`·`published_at`을 기록한다. Relay는 ShedLock을 쓰지 않으며 건별 트랜잭션·후처리·실패 기록 경계는 스케줄러 §0.2.1을 따른다.
 3. 발행·후처리 실패는 `retry_count + 1`, 5회 초과 시 `FAILED`로 두고 운영 알림을 보낸다. `FAILED → PENDING` 재시도는 관리자 절차다.
 4. 발행 성공 후 `PUBLISHED` 기록 전에 Relay가 죽으면 같은 `eventId`로 다시 발행된다. 이 중복은 소비자 멱등으로 흡수한다(최소 1회 전달).
@@ -237,6 +237,7 @@ flowchart LR
 #### M1 `MemberUpdated` v1
 
 - **발행:** 가입(1.1.2)·닉네임·이미지 변경(1.2.2) 트랜잭션. aggregate = `memberId`. 변경을 반영한 뒤의 `members.profile_version`(가입 시 1)을 `sourceVersion`으로 싣는다.
+- **관리자 재발행 (API 1.6.4):** `WITHDRAWN`이 아닌 회원을 현재 `profile_version` 그대로 새 `eventId`로 발행한다. 이벤트를 놓친 소비자의 복제본 보충용이며, 같은 `sourceVersion`을 가진 소비자는 §1.5에 따라 무시한다. 같은 `eventId`를 다시 보내는 Outbox 재처리와 다르다.
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
@@ -1092,7 +1093,7 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 | `practice_result_replicas` (member) | judge | 동일 API에 판정 무관 조회 필요 → 확장 확정 필요 (B·E) | 관리자 절차 |
 | `hint_block_replicas` (study) | contest | `GET /internal/v1/hint-blocks` (4.7.7) | 관리자·장애 후 |
 | `study_membership_replicas` (contest·problem) | study | 내부 조회 API 미정 → `GET /internal/v1/studies/{studyId}/members`(5.7.1) 재사용 제안 | 관리자 절차 |
-| `member_replicas` (problem·contest·study) | member | `GET /internal/v1/members/{memberId}/status` (1.7.1) | 복제본 없을 때 즉시 보정 |
+| `member_replicas` (problem·contest·study) | member | `GET /internal/v1/members/{memberId}/status` (1.7.1) / `MemberUpdated` 관리자 재발행 (1.6.4) | 복제본 없을 때 즉시 보정 / 기존 회원 보충은 관리자 절차 |
 | `member_learning_profile_replicas` (study) | member | 내부 API 없음 → 다음 `LearningProfileUpdated`까지 대기, 필요 시 추가 (E) | — |
 
 ### 7.3 DLQ 재처리 절차

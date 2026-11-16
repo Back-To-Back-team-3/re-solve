@@ -9,6 +9,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -32,6 +33,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.member.admin.service.AdminMemberService;
+import com.backtoback.member.admin.service.MemberUpdatedRepublishService;
 import com.backtoback.member.global.config.SecurityConfig;
 import com.backtoback.member.global.error.MemberException;
 import com.backtoback.member.member.domain.Member;
@@ -47,6 +49,9 @@ class AdminMemberControllerTest {
 
     @MockitoBean
     private AdminMemberService adminMemberService;
+
+    @MockitoBean
+    private MemberUpdatedRepublishService memberUpdatedRepublishService;
 
     @Test
     @DisplayName("1.6.1 ADMIN은 조건으로 회원 목록을 조회하고 공통 페이지 응답과 +09:00 가입 시각을 받는다")
@@ -206,6 +211,55 @@ class AdminMemberControllerTest {
 
         verify(adminMemberService, never()).changeStatus(any(), any(), any(), any(), any());
         verify(adminMemberService, never()).changeRole(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("1.6.4 재발행은 메시지와 발행 건수를 주고, 집행자 ID·사유·X-Forwarded-For 첫 주소를 서비스에 넘긴다")
+    void republishMemberUpdatedReturnsCount() throws Exception {
+        given(memberUpdatedRepublishService.republishAll(1L, "기존 회원 복제본 보충", "203.0.113.7")).willReturn(42L);
+
+        mockMvc
+            .perform(
+                post("/api/v1/admin/members/member-updated/republish")
+                    .header("X-User-Id", "1")
+                    .header("X-User-Role", "ADMIN")
+                    .header("X-Forwarded-For", "203.0.113.7, 10.0.0.1")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"reason\":\"기존 회원 복제본 보충\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.message").value("회원 정보 이벤트를 다시 발행했습니다."))
+            .andExpect(jsonPath("$.data.publishedCount").value(42));
+    }
+
+    @Test
+    @DisplayName("1.6.4 USER는 403, 사유가 없거나 공백이거나 500자를 넘으면 400이고 서비스를 호출하지 않는다")
+    void republishMemberUpdatedRequiresAdminAndReason() throws Exception {
+        mockMvc
+            .perform(
+                post("/api/v1/admin/members/member-updated/republish")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"reason\":\"사유\"}")
+            )
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("AUTH_ACCESS_DENIED"));
+        for (String body : List.of("{}", "{\"reason\":\" \"}", "{\"reason\":\"" + "가".repeat(501) + "\"}")) {
+            mockMvc
+                .perform(
+                    post("/api/v1/admin/members/member-updated/republish")
+                        .header("X-User-Id", "1")
+                        .header("X-User-Role", "ADMIN")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body)
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("COMMON_INVALID_REQUEST"))
+                .andExpect(jsonPath("$.error.details[0].field").value("reason"));
+        }
+
+        verify(memberUpdatedRepublishService, never()).republishAll(any(), any(), any());
     }
 
     private Member member(Long id, MemberStatus status, MemberRole role) {

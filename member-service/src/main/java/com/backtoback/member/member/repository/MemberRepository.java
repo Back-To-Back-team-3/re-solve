@@ -1,7 +1,9 @@
 package com.backtoback.member.member.repository;
 
+import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -39,4 +41,10 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select m from Member m where m.id = :id")
     Optional<Member> findForUpdateById(Long id);
+
+    /**
+     * 회원 정보 이벤트 재발행 대상 (API 명세서 1.6.4). {@code afterId} 다음 회원부터 ID 순으로 읽는 커서 조회다.
+     */
+    @Query("select m from Member m where m.id > :afterId and m.status <> :excluded order by m.id")
+    List<Member> findRepublishTargets(Long afterId, MemberStatus excluded, Limit limit);
 }
