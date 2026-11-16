@@ -71,7 +71,7 @@ function NotificationDropdown({
   return (
     <Popover.Portal>
       <Popover.Content
-        className="w-80 rounded bg-surface border-2 border-foreground shadow-lg"
+        className="z-30 w-80 rounded bg-surface border-2 border-foreground shadow-lg"
         align="end"
         sideOffset={8}
       >
