@@ -16,8 +16,11 @@ import com.backtoback.study.hint.service.ExamStartedConsumerService;
 import com.backtoback.study.hint.service.HintBlockReplicaConsumerService;
 import com.backtoback.study.hint.service.HintReadyConsumerService;
 import com.backtoback.study.membership.service.MemberWithdrawnConsumerService;
+import com.backtoback.study.replica.event.dto.MemberSuspendedPayload;
+import com.backtoback.study.replica.event.dto.MemberUpdatedPayload;
 import com.backtoback.study.replica.event.dto.MemberWithdrawnPayload;
 import com.backtoback.study.replica.event.dto.SubmissionJudgedPayload;
+import com.backtoback.study.replica.service.MemberReplicaConsumerService;
 import com.backtoback.study.replica.service.SubmissionJudgedConsumerService;
 
 import io.awspring.cloud.sqs.annotation.SqsListener;
@@ -36,6 +39,8 @@ import tools.jackson.databind.ObjectMapper;
 public class SubmissionJudgedEventListener {
 
     private static final String MEMBER_WITHDRAWN_EVENT_TYPE = "MemberWithdrawn";
+    private static final String MEMBER_UPDATED_EVENT_TYPE = "MemberUpdated";
+    private static final String MEMBER_SUSPENDED_EVENT_TYPE = "MemberSuspended";
     private static final String SUPPORTED_EVENT_TYPE = "SubmissionJudged";
     private static final String HINT_READY_EVENT_TYPE = "HintReady";
     private static final String EXAM_PARTICIPANT_REGISTERED_EVENT_TYPE = "ExamParticipantRegistered";
@@ -56,6 +61,7 @@ public class SubmissionJudgedEventListener {
 
     private final ObjectMapper objectMapper;
     private final MemberWithdrawnConsumerService memberWithdrawnConsumerService;
+    private final MemberReplicaConsumerService memberReplicaConsumerService;
     private final SubmissionJudgedConsumerService consumerService;
     private final HintBlockReplicaConsumerService hintBlockReplicaConsumerService;
     private final HintReadyConsumerService hintReadyConsumerService;
@@ -82,6 +88,18 @@ public class SubmissionJudgedEventListener {
             if (MEMBER_WITHDRAWN_EVENT_TYPE.equals(eventType)) {
                 MemberWithdrawnPayload event = objectMapper.treeToValue(payload, MemberWithdrawnPayload.class);
                 memberWithdrawnConsumerService.consume(event);
+                return;
+            }
+
+            if (MEMBER_UPDATED_EVENT_TYPE.equals(eventType)) {
+                MemberUpdatedPayload event = objectMapper.treeToValue(payload, MemberUpdatedPayload.class);
+                memberReplicaConsumerService.consumeUpdated(event);
+                return;
+            }
+
+            if (MEMBER_SUSPENDED_EVENT_TYPE.equals(eventType)) {
+                MemberSuspendedPayload event = objectMapper.treeToValue(payload, MemberSuspendedPayload.class);
+                memberReplicaConsumerService.consumeSuspended(event);
                 return;
             }
 
