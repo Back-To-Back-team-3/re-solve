@@ -84,7 +84,7 @@ export function ProblemDescription({
   ));
   const r = useResource(() => exam || diagnosisId ? Promise.resolve(null) : judgeApi.getSubmissions(problem.id, page), `${problem.id}-subs-${page}-${submissionVersion}`);
   return (
-    <section className={`problem-panel stack${diagnosisId ? " min-h-64 max-h-[calc(100dvh-22rem)] overflow-y-auto overscroll-contain" : ""}`}>
+    <section className="problem-panel stack">
       <div className="row wrap">
         <Badge>Lv. {problem.difficulty}</Badge>
         <Badge tone="accent">
@@ -166,7 +166,7 @@ export function ProblemPage({ id }: { id: string }) {
   if (r.data.problemId !== id) return <Loading />;
   const problem = toEditorProblem(r.data);
   return (
-    <>
+    <div className="solve-room practice-room">
       <div className="exam-bar">
         <Go className="small" href="/problems">
           ← 문제 목록
@@ -186,6 +186,6 @@ export function ProblemPage({ id }: { id: string }) {
           )}
         </ProblemAccessGate>
       </div>
-    </>
+    </div>
   );
 }

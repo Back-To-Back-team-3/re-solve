@@ -2,7 +2,7 @@
 import { useEffect } from "react";
 import { useResource } from "@/services/hooks";
 import { diagnosisApi, judgeApi } from "@/services/api";
-import { isDiagnosisLanguage, compareDiagnosisSeq } from "@/services/diagnosis";
+import { isDiagnosisLanguage } from "@/services/diagnosis";
 import { availableProblemLanguages, toEditorProblem } from "@/services/problem-editor";
 import { labelOf, languageLabel } from "@/services/labels";
 import { useDiagnosis } from "@/stores/diagnosis";
@@ -26,7 +26,6 @@ function DiagnosisBuffer({ content, runtimes, disabled, onSubmit, onSave }: {
   useEffect(() => {
     if (first) ensure(content.problemId, first, content.starterCodes.find((code) => code.language === first)?.sourceCode ?? "");
   }, [content, ensure, first]);
-  const saved = draft && compareDiagnosisSeq(draft.seq, buffer.savedSeq) <= 0;
   return <div className="code-panel">
     <div className="editor-toolbar row wrap">
       <span className="pixel">CODE EDITOR</span>
@@ -47,10 +46,6 @@ function DiagnosisBuffer({ content, runtimes, disabled, onSubmit, onSave }: {
         <EditorMonaco key={`${content.problemId}:${draft.language}`} language={draft.language} code={draft.sourceCode} fontSize={fontSize}
           readOnly={disabled} onChange={(value) => { if (!disabled) edit(content.problemId, draft.language, value); }} />
       </div>
-      <section className="results stack-sm">
-        <p role="status">{saved ? "서버 저장 완료" : "서버 저장 대기"}</p>
-        <p>진단 중에는 판정·힌트를 제공하지 않습니다. 오프라인에서 기한이 지나면 서버에 저장된 마지막 코드로 자동 제출됩니다.</p>
-      </section>
     </>}
     <div className="editor-actions">
       <Button onClick={onSave} disabled={disabled}>지금 저장</Button>
