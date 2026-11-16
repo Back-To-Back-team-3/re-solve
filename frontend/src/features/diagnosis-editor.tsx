@@ -43,7 +43,7 @@ function DiagnosisBuffer({ content, runtimes, disabled, onSubmit, onSave }: {
       </select>
     </div>
     {!first ? <Empty title="실행 가능한 언어가 없어요" description="지원 실행 환경을 확인한 뒤 다시 시도해 주세요." /> : draft && <>
-      <div className="editor-area">
+      <div className="editor-frame">
         <EditorMonaco key={`${content.problemId}:${draft.language}`} language={draft.language} code={draft.sourceCode} fontSize={fontSize}
           readOnly={disabled} onChange={(value) => { if (!disabled) edit(content.problemId, draft.language, value); }} />
       </div>
