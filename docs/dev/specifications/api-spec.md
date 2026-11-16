@@ -993,6 +993,49 @@
     ```
     
 
+#### 1.5.8 진단 문제 본문 이미지 조회
+
+- **Method / URI:** `GET /api/v1/diagnoses/{diagnosisId}/problems/{problemId}/images/{imageId}`
+- **인증:** 로그인 필요 (본인 진단에 출제된 문제)
+- **Idempotency:** 없음 (상태를 변경하지 않는 조회)
+- **Rate Limit:** 없음
+- **대응 테이블:** `diagnosis_attempts`, `diagnosis_problems`
+- **설명:** 본인 진단에 고정된 문제 회차의 본문 이미지를 반환한다. Member는 응시 소유권과 출제 문항을 확인하고, Problem은 그 고정 회차의 본문에 연결된 이미지인지 확인한다. 일반 풀이 레벨 제한은 적용하지 않으며 종료한 본인 진단도 조회할 수 있다. 권한 조회 트랜잭션은 원격 이미지 호출 전에 종료한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `diagnosisId` | Path | string | Y | — | 본인의 진단 ID |
+    | `problemId` | Path | string | Y | — | 해당 진단에 출제된 문제 ID |
+    | `imageId` | Path | string | Y | — | 고정 회차 본문에 연결된 이미지 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `image/png`, `image/jpeg`, `image/webp` | 실제 이미지 MIME |
+    | `Cache-Control` | `private, no-store` | 다른 회원·응시와 캐시를 공유하지 않음 |
+    | `X-Content-Type-Options` | `nosniff` | MIME 추측 방지 |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 이미지 바이너리 (JSON 래퍼·S3 주소 없음)
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 숫자가 아닌 ID 또는 0 이하 이미지 ID
+    - `DIAGNOSIS_NOT_FOUND`(404) / 본인 응시가 아니거나 진단·출제 문항·고정 회차 본문 연결 이미지가 없음
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Problem·저장소 조회 장애, 비정상 상태·MIME·빈 이미지 응답
+- **동시성/멱등 보장:** 진단에 저장된 불변 `problemRevisionId`를 사용한다. 외부 요청에서 회차를 받지 않고 최신 회차로 대체하지 않는다.
+- **발행:** 없음
+- **외부 의존:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}` (problem, §2.6.4) — `X-Access-Context: DIAGNOSIS:{diagnosisId}` 전달. 기존 Problem 진단 클라이언트의 연결·읽기 타임아웃 각 2초를 적용하고 장애는 fail-closed 503으로 처리한다. 내부 404는 `DIAGNOSIS_NOT_FOUND`로 변환한다.
+- **프론트 계약:** §1.5.3의 `image:{imageId}`를 이 API의 인증된 Blob 요청으로 표시한다. 일반 문제·관리자 이미지 경로 또는 내부 API로 우회하지 않는다. 이미지 조회 실패는 해당 이미지에 안내하고 작성 중인 코드는 유지한다.
+- **비고:** 새 회차·공개 상태·회원 레벨 변화와 무관하게 기존 진단의 고정 참조를 유지한다. 내부 경로는 Gateway를 통해 브라우저에 공개하지 않는다.
+
 ### 1.6 관리자 API — 회원
 
 #### 1.6.1 회원 목록 조회
