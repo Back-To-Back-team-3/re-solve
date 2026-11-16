@@ -1,4 +1,6 @@
 import type {
+  DiagnosisContent, DiagnosisDetail, DiagnosisDraftRequest, DiagnosisSaved, DiagnosisReceipt,
+  DiagnosisStarted, DiagnosisFinished, DiagnosisHistory,
   RunCreateRequest, JudgeLanguagesResponse, SubmissionAttemptsResponse, SubmissionTestsResponse,
   JudgeJobRecoveryRequest, JudgeJobRecoveryResponse,
   ProblemValidationRequest, ProblemValidationReceipt, ProblemImageUploaded, AdminProblemFilter, ProblemVisibilityChanged,
@@ -268,10 +270,28 @@ export const memberApi = {
   getTagLevels: () =>
     apiFetch<{ content: TagLevel[] }>("/api/v1/members/me/tag-levels"),
   startDiagnosis: (tagId: string) =>
-    apiFetch<{ diagnosisId: string }>("/api/v1/diagnoses", {
+    apiFetch<DiagnosisStarted>("/api/v1/diagnoses", {
       method: "POST",
       body: JSON.stringify({ tagId }),
     }),
+};
+
+/** 진단 응시는 Member 경로로만 접수하고 일반 풀이 채점 경로와 분리한다. (API 명세서 §1.5) */
+export const diagnosisApi = {
+  start: memberApi.startDiagnosis,
+  getDetail: (id: string) => apiFetch<DiagnosisDetail>(`/api/v1/diagnoses/${id}`, { cache: "no-store" }),
+  getProblem: (id: string, problemId: string) =>
+    apiFetch<DiagnosisContent>(`/api/v1/diagnoses/${id}/problems/${problemId}`),
+  getImage: (id: string, problemId: string, imageId: string) =>
+    apiFetchBlob(`/api/v1/diagnoses/${id}/problems/${problemId}/images/${imageId}`),
+  saveDraft: (id: string, problemId: string, body: DiagnosisDraftRequest) =>
+    apiFetch<DiagnosisSaved>(`/api/v1/diagnoses/${id}/problems/${problemId}/draft`, { method: "PUT", body: JSON.stringify(body) }),
+  submit: (id: string, problemId: string, body: DiagnosisDraftRequest) =>
+    apiFetch<DiagnosisReceipt>(`/api/v1/diagnoses/${id}/problems/${problemId}/submissions`, { method: "POST", body: JSON.stringify(body) }),
+  finish: (id: string) => apiFetch<DiagnosisFinished>(`/api/v1/diagnoses/${id}/finish`, { method: "POST" }),
+  getHistory: (page = 0, tagId?: string) => apiFetch<ServerPage<DiagnosisHistory>>(
+    `/api/v1/diagnoses?page=${page}&size=20${tagId ? `&tagId=${encodeURIComponent(tagId)}` : ""}`,
+  ),
 };
 
 // 문제 태그 API — B 도메인 §2.5.1 (SkillPage 태그 이름 표시용)

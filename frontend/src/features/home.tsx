@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useProblemLevels } from "@/features/problem-access";
@@ -71,6 +71,11 @@ export function HomePage() {
     [screen, setScreen] = useState("pet"),
     [modal, setModal] = useState("");
   const levels = useProblemLevels();
+  useEffect(() => {
+    if (!levels.memberId) return;
+    window.addEventListener("resolve:level-changed", levels.retry);
+    return () => window.removeEventListener("resolve:level-changed", levels.retry);
+  }, [levels.memberId, levels.retry]);
   const router = useRouter();
   const [hatching, setHatching] = useState(false);
   const [hatchError, setHatchError] = useState("");
@@ -136,7 +141,7 @@ export function HomePage() {
               <Go className="secondary" href={`/problems?tagIds=${current?.id ?? ""}`}>
                 문제 풀러 가기 <ArrowRight size={16} />
               </Go>
-              <Button onClick={() => setModal("diagnosis")}>내 실력 진단</Button>
+              <Go href={`/diagnoses${current ? `?tagId=${current.id}` : ""}`}>내 실력 진단</Go>
             </div>
           </div>
           {current && (
@@ -228,15 +233,9 @@ export function HomePage() {
                       <Go className="small grow" href={`/problems?tagIds=${t.id}`}>
                         문제 풀기
                       </Go>
-                      <Button
-                        className="small"
-                        onClick={() => {
-                          setHero(t.id);
-                          setModal("diagnosis");
-                        }}
-                      >
+                      <Go className="small" href={`/diagnoses?tagId=${t.id}`}>
                         진단
-                      </Button>
+                      </Go>
                     </>
                   )}
                 </div>
@@ -274,26 +273,18 @@ export function HomePage() {
       <Modal
         open={!!modal}
         onOpenChange={() => { if (!hatching) setModal(""); }}
-        title={modal === "diagnosis" ? "알고리즘 성장 진단" : "새 친구를 만나볼까요?"}
-        description={
-          modal === "diagnosis"
-            ? "진단은 고정된 예시 결과입니다. 실제 풀이 분석은 진행하지 않습니다."
-            : "진단 없이 이 알고리즘을 Lv.1로 시작합니다. 레벨에 맞는 문제를 풀 수 있어요."
-        }
+        title="새 친구를 만나볼까요?"
+        description="진단 없이 이 알고리즘을 Lv.1로 시작합니다. 레벨에 맞는 문제를 풀 수 있어요."
       >
         <div className="stack">
           <div className="row">
-            <Pet level={modal === "diagnosis" ? petLevel : 0} />
+            <Pet level={0} />
             <div>
               <h3>
-                {modal === "diagnosis"
-                  ? `${current?.pet ?? ""}의 다음 목표`
-                  : tags.find((t) => t.id === modal)?.pet}
+                {tags.find((t) => t.id === modal)?.pet}
               </h3>
               <p>
-                {modal === "diagnosis"
-                  ? "기본기를 잘 쌓고 있어요. 다양한 입력 조건을 연습해 보세요."
-                  : "첫 문제와 함께 성장의 여정을 시작해요."}
+                첫 문제와 함께 성장의 여정을 시작해요.
               </p>
             </div>
           </div>
@@ -301,9 +292,9 @@ export function HomePage() {
           <Button
             className="primary"
             disabled={hatching}
-            onClick={() => modal === "diagnosis" ? setModal("") : void hatch()}
+            onClick={() => void hatch()}
           >
-            {modal === "diagnosis" ? "확인" : "부화시키기"}
+            부화시키기
           </Button>
         </div>
       </Modal>
