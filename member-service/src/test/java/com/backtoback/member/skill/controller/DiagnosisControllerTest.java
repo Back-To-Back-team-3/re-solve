@@ -55,6 +55,81 @@ class DiagnosisControllerTest {
     @MockitoBean
     private DiagnosisService diagnosisService;
 
+    @MockitoBean
+    private com.backtoback.member.skill.service.DiagnosisRunService diagnosisRuns;
+
+    /**
+     * 진단 Run 응답에는 전체 제출 판정·점수 없이 실행 출력만 포함한다.
+     *
+     * @throws Exception MockMvc 요청 처리 실패 시
+     */
+    @Test
+    @DisplayName("진단 Run은 USER의 코드와 직접 입력을 접수하고 출력만 반환한다")
+    void runsWithoutSubmissionVerdict() throws Exception {
+        given(
+            diagnosisRuns
+                .run(
+                    org.mockito.ArgumentMatchers.eq(7L),
+                    org.mockito.ArgumentMatchers.eq(120L),
+                    org.mockito.ArgumentMatchers.eq(301L),
+                    org.mockito.ArgumentMatchers.any()
+                )
+        )
+            .willReturn(
+                new com.backtoback.member.skill.client.JudgeDiagnosisRunClient.RunResult(
+                    List
+                        .of(
+                            new com.backtoback.member.skill.client.JudgeDiagnosisRunClient.TestResult(
+                                "SAMPLE",
+                                0,
+                                "3",
+                                "debug",
+                                null,
+                                2,
+                                1024
+                            )
+                        ),
+                    java.time.Instant.parse("2026-11-16T00:00:00Z")
+                )
+            );
+        mockMvc
+            .perform(
+                post("/api/v1/diagnoses/120/problems/301/runs")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"language\":\"java\",\"sourceCode\":\"code\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.results[0].output").value("3"))
+            .andExpect(jsonPath("$.data.results[0].stdout").value("debug"))
+            .andExpect(jsonPath("$.data.results[0].error").isEmpty())
+            .andExpect(jsonPath("$.data.verdict").doesNotExist())
+            .andExpect(jsonPath("$.data.score").doesNotExist());
+    }
+
+    /**
+     * 10개 초과 입력은 원격 실행 전 요청 검증으로 차단한다.
+     *
+     * @throws Exception MockMvc 요청 처리 실패 시
+     */
+    @Test
+    @DisplayName("직접 입력이 10개를 넘으면 진단 Run 서비스를 호출하지 않는다")
+    void rejectsRunInputOverflow() throws Exception {
+        String tests = "[" + "{\"args\":[1]},".repeat(10) + "{\"args\":[1]}]";
+        mockMvc
+            .perform(
+                post("/api/v1/diagnoses/120/problems/301/runs")
+                    .header("X-User-Id", "7")
+                    .header("X-User-Role", "USER")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"language\":\"java\",\"sourceCode\":\"code\",\"customTests\":" + tests + "}")
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.details[0].reason").value("직접 입력은 최대 10개입니다."));
+        org.mockito.Mockito.verifyNoInteractions(diagnosisRuns);
+    }
+
     /**
      * 본인 이미지 응답의 MIME·비공개 캐시·바이너리를 확인한다.
      *

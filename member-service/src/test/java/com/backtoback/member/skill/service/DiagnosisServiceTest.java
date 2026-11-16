@@ -400,6 +400,98 @@ class DiagnosisServiceTest {
         then(problemDiagnosisClient).should(never()).image(any(), any(), any(), any());
     }
 
+    @Autowired
+    private DiagnosisRunService diagnosisRuns;
+
+    @Autowired
+    private java.time.Clock runClock;
+
+    @MockitoBean
+    private com.backtoback.member.skill.client.JudgeDiagnosisRunClient judgeRuns;
+
+    /** 진단 Run은 레벨 접근 제한 없이 고정 회차만 실행하며 DB 상태를 쓰지 않는다. */
+    @Test
+    @DisplayName("LV0 진단 Run은 트랜잭션 종료 후 고정 회차를 실행하고 Draft·제출·점수·이벤트를 만들지 않는다")
+    void runsWithoutPersistingOrHoldingConnection() {
+        Long memberId = member(9020L, MemberStatus.ACTIVE);
+        given(problemTagClient.findName(3L)).willReturn(Optional.of("태그"));
+        given(problemDiagnosisClient.candidates(3L)).willReturn(CANDIDATES);
+        var attempt = diagnosisService.start(memberId, 3L).attempt();
+        Long outboxBefore = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM outbox_events", Long.class);
+        given(judgeRuns.run(any())).willAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            var request
+                = invocation
+                    .getArgument(0, com.backtoback.member.skill.client.JudgeDiagnosisRunClient.RunRequest.class);
+            assertThat(request.context()).isEqualTo("DIAGNOSIS");
+            assertThat(request.memberId()).isEqualTo(memberId.toString());
+            assertThat(request.contextId()).isEqualTo(attempt.getId().toString());
+            assertThat(request.problemRevisionId()).isEqualTo("1001");
+            return new com.backtoback.member.skill.client.JudgeDiagnosisRunClient.RunResult(
+                List.of(),
+                java.time.Instant.parse("2026-11-16T00:00:00Z")
+            );
+        });
+
+        diagnosisRuns.run(memberId, attempt.getId(), 301L, runCommand());
+
+        var detail = diagnosisService.getDetail(memberId, attempt.getId());
+        assertThat(detail.attempt().getStatus()).isEqualTo(DiagnosisStatus.IN_PROGRESS);
+        assertThat(detail.attempt().getScore()).isNull();
+        assertThat(detail.drafts()).isEmpty();
+        assertThat(detail.lastSubmissions()).isEmpty();
+        assertThat(tagLevelRepository.findByMemberIdAndTagId(memberId, 3L).orElseThrow().getLevel())
+            .isEqualTo(TagLevel.LV0);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM outbox_events", Long.class))
+            .isEqualTo(outboxBefore);
+    }
+
+    /** 본인 응시·출제 문항·응시 기한을 서버에서 확인한다. */
+    @Test
+    @DisplayName("타인·미출제 문항·만료 진단은 Run을 호출하지 않는다")
+    void rejectsInvalidRunContext() {
+        Long memberId = member(9021L, MemberStatus.ACTIVE);
+        Long other = member(9022L, MemberStatus.ACTIVE);
+        given(problemTagClient.findName(3L)).willReturn(Optional.of("태그"));
+        given(problemDiagnosisClient.candidates(3L)).willReturn(CANDIDATES);
+        Long id = diagnosisService.start(memberId, 3L).attempt().getId();
+        assertError(() -> diagnosisRuns.run(other, id, 301L, runCommand()), MemberErrorCode.DIAGNOSIS_NOT_FOUND);
+        assertError(() -> diagnosisRuns.run(memberId, id, 999L, runCommand()), MemberErrorCode.DIAGNOSIS_NOT_FOUND);
+        jdbcTemplate
+            .update(
+                "UPDATE diagnosis_attempts SET ends_at = ? WHERE id = ?",
+                LocalDateTime.now(runClock).minusMinutes(1),
+                id
+            );
+        assertError(() -> diagnosisRuns.run(memberId, id, 301L, runCommand()), MemberErrorCode.DIAGNOSIS_CLOSED);
+        then(judgeRuns).shouldHaveNoInteractions();
+    }
+
+    /** 진행 중 상태라도 정지 회원의 신규 실행은 받지 않는다. */
+    @Test
+    @DisplayName("정지 회원과 종료 진단은 Run을 호출하지 않는다")
+    void rejectsSuspendedOrClosedRun() {
+        Long memberId = member(9023L, MemberStatus.ACTIVE);
+        given(problemTagClient.findName(3L)).willReturn(Optional.of("태그"));
+        given(problemDiagnosisClient.candidates(3L)).willReturn(CANDIDATES);
+        Long id = diagnosisService.start(memberId, 3L).attempt().getId();
+        jdbcTemplate.update("UPDATE members SET status = 'SUSPENDED' WHERE id = ?", memberId);
+        assertError(() -> diagnosisRuns.run(memberId, id, 301L, runCommand()), MemberErrorCode.MEMBER_SUSPENDED);
+        jdbcTemplate.update("UPDATE members SET status = 'ACTIVE' WHERE id = ?", memberId);
+        diagnosisService.finish(memberId, id);
+        assertError(() -> diagnosisRuns.run(memberId, id, 301L, runCommand()), MemberErrorCode.DIAGNOSIS_CLOSED);
+        then(judgeRuns).shouldHaveNoInteractions();
+    }
+
+    /**
+     * 직접 입력 없는 기본 실행 명령을 만든다.
+     *
+     * @return 공개 예제 실행 명령
+     */
+    private DiagnosisRunService.Command runCommand() {
+        return new DiagnosisRunService.Command("java", "class Solution {}", List.of());
+    }
+
     private void assertError(ThrowingCallable call, Object errorCode) {
         assertThatThrownBy(call).isInstanceOf(BusinessException.class).extracting("errorCode").isEqualTo(errorCode);
     }
