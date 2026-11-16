@@ -140,7 +140,7 @@ export function MyPage() {
       <div className="container">
         <Empty
           title="로그인 후 이용해 주세요"
-          action={<Go href="/login?returnTo=%2Fmypage">로그인</Go>}
+          action={<Go href={`/login?returnTo=${encodeURIComponent(`/mypage?tab=${tab}`)}`}>로그인</Go>}
         />
       </div>
     );
