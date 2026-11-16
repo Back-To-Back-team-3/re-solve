@@ -292,9 +292,16 @@ public class NotificationEventProcessor {
         );
     }
 
+    /**
+     * 마이페이지 스킬 탭으로 연결되는 태그 레벨 알림 명세를 생성한다.
+     *
+     * @param payload 태그 레벨 변경 이벤트 페이로드
+     * @return 수신자와 이동 경로를 포함한 알림 명세
+     * @throws IllegalArgumentException 필수 필드가 누락된 경우
+     */
     private NotificationSpec buildTagLevelChangedSpec(JsonNode payload) {
         Long memberId = requireLong(payload, "memberId");
-        String tagId = requireText(payload, "tagId");
+        requireText(payload, "tagId");
         String tagName = requireText(payload, "tagName");
         String toLevel = requireText(payload, "toLevel");
         String reasonType = requireText(payload, "reasonType");
@@ -314,7 +321,7 @@ public class NotificationEventProcessor {
             NotificationType.LEVEL_CHANGED,
             "태그 레벨 알림",
             content,
-            "/me/tag-levels/" + tagId,
+            "/mypage?tab=skill",
             NotificationPreference::isLevelChangedEnabled
         );
     }

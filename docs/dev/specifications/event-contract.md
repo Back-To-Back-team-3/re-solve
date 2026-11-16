@@ -1059,7 +1059,7 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 | `AssignmentPublished` | 항상 | `ASSIGNMENT_PUBLISHED` | `targetMemberIds` | `is_assignment_enabled` | `/studies/{studyId}/assignments/{assignmentId}` |
 | `AssignmentDeadlineApproaching` | 항상 | `ASSIGNMENT_DEADLINE_APPROACHING` | `incompleteMemberIds` | 동일 | 동일 |
 | `AssignmentIncompleteRepeated` | 항상 | `ASSIGNMENT_INCOMPLETE_REPEATED` | `recipientMemberIds` | 동일 | `/studies/{studyId}/manage` |
-| `TagLevelChanged` | 항상 | `LEVEL_CHANGED` | `memberId` | `is_level_changed_enabled` | `/me/tag-levels/{tagId}` |
+| `TagLevelChanged` | 항상 | `LEVEL_CHANGED` | `memberId` | `is_level_changed_enabled` | `/mypage?tab=skill` |
 | `HintReady` | 항상 | `HINT_READY` | `memberId` | `is_hint_ready_enabled` | `/problems/{problemId}?hint={hintRequestId}` |
 | `GitHubSyncFailed` | 항상 | `GITHUB_SYNC_FAILED` | `memberId` | `is_github_sync_enabled` | `/settings/github` |
 - 알림을 만들지 않는 이벤트: `ExamClosed`·`ContestEnded`(종료 알림 없음), `ExamSubmissionJudged`·`ContestSubmissionJudged`(건별 채점 알림 없음), `ExamStarted`(임박 알림으로 대체), `StudyMemberJoined`(승인은 `StudyApplicationDecided`).
