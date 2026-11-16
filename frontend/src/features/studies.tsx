@@ -308,6 +308,7 @@ export function StudyPage({ id }: { id: string }) {
 
   const study = r.data!;
   const myM = study.myMembership;
+  const leaderNickname = study.leader?.nickname ?? "정보 없음";
   const isApproved = myM?.status === "APPROVED";
   const isPending = myM?.status === "PENDING";
   const isLeader = myM?.role === "LEADER";
@@ -406,7 +407,7 @@ export function StudyPage({ id }: { id: string }) {
                   <p className="muted">정원이 차면 자동으로 모집을 재개합니다.</p>
                 )}
                 <p>
-                  <b>스터디장</b> {study.leader.nickname}
+                  <b>스터디장</b> {leaderNickname}
                 </p>
               </div>
               <p>{study.description}</p>
@@ -445,7 +446,7 @@ export function StudyPage({ id }: { id: string }) {
                 상태 <b>{statusLabel}</b>
               </p>
               <p>
-                스터디장 <b>{study.leader.nickname}</b>
+                스터디장 <b>{leaderNickname}</b>
               </p>
               {!myM && study.status === "RECRUITING" && (
                 <Button className="primary full" onClick={handleJoin}>
