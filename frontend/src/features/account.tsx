@@ -117,10 +117,19 @@ export function MyPage() {
     clearMember = useWorkspace((s) => s.clearMember),
     action = useAction(),
     router = useRouter(),
-    [tab, setTab] = useState("profile"),
+    params = useSearchParams(),
     fontSize = useWorkspace((s) => s.fontSize),
     setFontSize = useWorkspace((s) => s.setFontSize),
     [theme, setTheme] = useState("light");
+
+  const requestedTab = params.get("tab");
+  const tab = requestedTab && ["profile", "skill", "submissions", "github", "settings"].includes(requestedTab)
+    ? requestedTab : "profile";
+  const setTab = (value: string) => {
+    const next = new URLSearchParams(params.toString());
+    next.set("tab", value);
+    router.push(`/mypage?${next.toString()}`, { scroll: false });
+  };
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme ?? "light");
