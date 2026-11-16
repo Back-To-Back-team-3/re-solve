@@ -1,5 +1,5 @@
 import type {
-  DiagnosisContent, DiagnosisDetail, DiagnosisDraftRequest, DiagnosisSaved, DiagnosisReceipt,
+  DiagnosisRunResult, DiagnosisContent, DiagnosisDetail, DiagnosisDraftRequest, DiagnosisSaved, DiagnosisReceipt,
   DiagnosisStarted, DiagnosisFinished, DiagnosisHistory,
   RunCreateRequest, JudgeLanguagesResponse, SubmissionAttemptsResponse, SubmissionTestsResponse,
   JudgeJobRecoveryRequest, JudgeJobRecoveryResponse,
@@ -278,6 +278,12 @@ export const memberApi = {
 
 /** 진단 응시는 Member 경로로만 접수하고 일반 풀이 채점 경로와 분리한다. (API 명세서 §1.5) */
 export const diagnosisApi = {
+  // 타입별로 검증한 JSON 원문을 인수 배열에 넣어 INT64를 JS number로 변환하지 않는다.
+  run: (id: string, problemId: string, code: Pick<DiagnosisDraftRequest, "language" | "sourceCode">, customArgumentTexts: string[][]) =>
+    apiFetch<DiagnosisRunResult>(`/api/v1/diagnoses/${id}/problems/${problemId}/runs`, {
+      method: "POST",
+      body: `{"language":${JSON.stringify(code.language)},"sourceCode":${JSON.stringify(code.sourceCode)},"customTests":[${customArgumentTexts.map((args) => `{"args":[${args.join(",")}]}`).join(",")}]}`,
+    }),
   start: memberApi.startDiagnosis,
   getDetail: (id: string) => apiFetch<DiagnosisDetail>(`/api/v1/diagnoses/${id}`, { cache: "no-store" }),
   getProblem: (id: string, problemId: string) =>
