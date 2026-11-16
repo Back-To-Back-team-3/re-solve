@@ -1,6 +1,8 @@
 package com.backtoback.study.recommendation.controller;
 
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -121,7 +123,8 @@ class StudyRecommendationControllerTest {
                         )
                     )
             )
-            .andExpect(jsonPath("$.data.content[0].score").doesNotExist())
+            .andExpect(jsonPath("$.data.content[0]").value(hasKey("score")))
+            .andExpect(jsonPath("$.data.content[0].score").value(nullValue()))
             .andExpect(jsonPath("$.data.content[0].reasons[0]").value("최근 활동이 많은 스터디"))
             .andExpect(jsonPath("$.data.content[0].memberCount").value(2))
             .andExpect(jsonPath("$.data.content[0].capacity").value(10))
