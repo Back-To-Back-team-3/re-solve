@@ -559,7 +559,7 @@ export type StudyDetail = {
   joinType: JoinType;
   isAutoReopen: boolean;
   version: number;
-  leader: { memberId: string; nickname: string };
+  leader: { memberId: string; nickname: string } | null;
   myMembership: {
     membershipId: string;
     status: MembershipStatus;
