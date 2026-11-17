@@ -375,23 +375,31 @@ class GithubSyncJobServiceTest {
     }
 
     @Test
-    @DisplayName("8.1.7 기존 작업이 없고 동일 problemId의 스냅샷도 없으면 잘못된 경로 커밋 방지를 위해 GITHUB_SYNC_NOT_ALLOWED(409) 예외가 발생한다")
-    void requestManualSyncRejectsWhenProblemSnapshotAbsent() {
+    @DisplayName("8.1.7 기존 작업이 없고 동일 problemId의 스냅샷도 없으면 기본 문제명·난이도로 신규 PENDING 작업을 등록한다")
+    void requestManualSyncCreatesPendingJobWithFallbackWhenProblemSnapshotAbsent() {
         GithubConnection connection = createConnection(true);
+        GithubSyncJob createdJob = GithubSyncJob.createPending(connection, 91023L, 301L, "problem-301", 1);
+        ReflectionTestUtils.setField(createdJob, "id", 89L);
 
         given(connectionRepository.findByMemberId(1L)).willReturn(Optional.of(connection));
-        given(syncJobRepository.findBySubmissionIdWithConnection(91023L)).willReturn(Optional.empty());
+        given(syncJobRepository.findBySubmissionIdWithConnection(91023L))
+            .willReturn(Optional.empty())
+            .willReturn(Optional.empty());
+        given(syncJobRepository.findBySubmissionIdWithConnectionForUpdate(91023L)).willReturn(Optional.of(createdJob));
         given(syncJobRepository.findFirstByProblemIdOrderByIdDesc(301L)).willReturn(Optional.empty());
         given(judgeServiceClient.verifyAndGetAcceptedCodeForManualSync(91023L, 1L))
             .willReturn(
                 new AcceptedSubmissionCodeResponse("91023", "301", "java", "class Solution {}", 1, OffsetDateTime.now())
             );
 
-        assertThatThrownBy(() -> syncJobService.requestManualSync(1L, "91023"))
-            .isInstanceOfSatisfying(
-                IntegrationException.class,
-                e -> assertThat(e.getErrorCode()).isEqualTo(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED)
-            );
+        GithubManualSyncResponse response = syncJobService.requestManualSync(1L, "91023");
+
+        assertThat(response.syncJobId()).isEqualTo("89");
+        assertThat(response.submissionId()).isEqualTo("91023");
+        assertThat(response.status()).isEqualTo("PENDING");
+        verify(
+            syncJobRepository
+        ).insertPendingJobIfAbsent(eq(10L), eq(91023L), eq(301L), eq("problem-301"), eq(1), any(LocalDateTime.class));
     }
 
     @Test

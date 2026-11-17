@@ -29,6 +29,32 @@ public class GithubStateStore {
     }
 
     /**
+     * state를 삭제하지 않고 저장된 회원 ID를 조회한다.
+     *
+     * @param state CSRF 방지용 state 값
+     * @return 저장되었던 회원 ID (없거나 만료된 경우 empty)
+     */
+    public Optional<Long> findMemberId(String state) {
+        if (state == null || state.isBlank()) {
+            return Optional.empty();
+        }
+        String value = redisTemplate.opsForValue().get(KEY_PREFIX + state);
+        return parseMemberId(value);
+    }
+
+    /**
+     * state를 삭제한다.
+     *
+     * @param state CSRF 방지용 state 값
+     */
+    public void delete(String state) {
+        if (state == null || state.isBlank()) {
+            return;
+        }
+        redisTemplate.delete(KEY_PREFIX + state);
+    }
+
+    /**
      * state를 조회하면서 삭제한다(1회용 소비).
      *
      * @param state CSRF 방지용 state 값
@@ -39,6 +65,10 @@ public class GithubStateStore {
             return Optional.empty();
         }
         String value = redisTemplate.opsForValue().getAndDelete(KEY_PREFIX + state);
+        return parseMemberId(value);
+    }
+
+    private Optional<Long> parseMemberId(String value) {
         if (value == null || value.isBlank()) {
             return Optional.empty();
         }
