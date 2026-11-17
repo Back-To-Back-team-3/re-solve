@@ -3,9 +3,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { actionErrorMessage, diagnosisApi, isUnauthorized } from "@/services/api";
 import { diagnosisCodeError } from "@/services/diagnosis";
 import { toEditorProblem } from "@/services/problem-editor";
-import { runInputs, type RunTestCase } from "@/services/run-inputs";
+import { runInputs } from "@/services/run-inputs";
 import type { DiagnosisContent, DiagnosisRunResult, Language } from "@/services/types";
 import { Button, Modal, useLoginRedirect } from "@/components/ui";
+import { useWorkspace } from "@/stores/workspace";
+import { useRunInputDraft } from "@/features/editor-run-draft";
 import { EditorRunInputs } from "@/features/editor-run-inputs";
 
 /** 진단 실행은 현재 코드의 스냅샷만 보내며 저장·제출·레벨 갱신을 호출하지 않는다. */
@@ -14,7 +16,11 @@ export function DiagnosisRun({ diagnosisId, content, language, sourceCode, disab
   disabled: boolean; canSubmit: boolean; pending: boolean; onSave: () => void; onSubmit: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<RunTestCase[]>([]);
+  const userId = useWorkspace((state) => state.member?.memberId ?? "guest");
+  const setRunInputs = useWorkspace((state) => state.setPracticeRunInputs);
+  const runInputKey = JSON.stringify([userId, "diagnosis", diagnosisId, content.problemId, content.problemRevisionId]);
+  const { configuration, storageError } = useRunInputDraft(runInputKey);
+  const rows = configuration?.customInputs ?? [];
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<DiagnosisRunResult | null>(null);
   const [error, setError] = useState("");
@@ -80,9 +86,9 @@ export function DiagnosisRun({ diagnosisId, content, language, sourceCode, disab
     </div>
     <Modal open={open} onOpenChange={setOpen} title="테스트 케이스"
       description="공개 예제와 직접 입력만 실행합니다. 실행 결과는 진단 점수·레벨에 반영되지 않습니다.">
-      <EditorRunInputs parameters={parameters} useSamples rows={rows} disabled={busy || disabled}
-        onSamples={() => {}} onRows={setRows} maxCases={10} samplesRequired allowExpectations={false} />
-      <Button className="primary" onClick={() => setOpen(false)}>적용</Button>
+      <EditorRunInputs parameters={parameters} rows={rows} disabled={busy || disabled}
+        onRows={(customInputs) => setRunInputs(runInputKey, { customInputs })}
+        maxCases={10} allowExpectations={false} storageError={storageError} />
     </Modal>
   </>;
 }

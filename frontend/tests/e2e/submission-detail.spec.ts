@@ -27,18 +27,15 @@ test("직접 입력을 검증하고 반환값·기대값·디버그 출력·성�
   expect((workspaceBounds?.y ?? 0) + (workspaceBounds?.height ?? 0))
     .toBeCloseTo((panelBounds?.y ?? 0) + (panelBounds?.height ?? 0), 0);
   await page.getByRole("button", { name: "테스트 케이스 추가하기" }).click();
-  await page.getByLabel("공개 예제 실행").uncheck();
   await page.getByRole("button", { name: "직접 입력 추가" }).click();
-  await page.getByRole("button", { name: "직접 입력 1 items 항목 추가", exact: true }).click();
-  await page.getByRole("button", { name: "적용", exact: true }).click();
-  await page.getByRole("button", { name: "실행", exact: true }).click();
-  await expect(page.getByText("직접 입력 1의 items[1]: 정수를 입력해 주세요.")).toBeVisible();
+  const input = page.getByLabel("직접 입력 1 items", { exact: true });
+  await input.fill('[1,"bad"]');
+  await input.blur();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(input).toHaveAttribute("aria-invalid", "true");
   expect(body).toBeUndefined();
-  await page.getByRole("button", { name: "테스트 케이스 추가하기" }).click();
-  await page.getByLabel("직접 입력 1 items[1]", { exact: true }).fill("1");
-  await page.getByRole("button", { name: "직접 입력 1 items 항목 추가", exact: true }).click();
-  await page.getByLabel("직접 입력 1 items[2]", { exact: true }).fill("2");
-  await page.getByRole("button", { name: "적용", exact: true }).click();
+  await input.fill("[1,2]");
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("button", { name: "실행", exact: true }).click();
   const resultCard = page.getByRole("article", { name: "테스트 1", exact: true });
   await expect(resultCard).toBeVisible();
@@ -47,7 +44,7 @@ test("직접 입력을 검증하고 반환값·기대값·디버그 출력·성�
   await expect(resultCard.getByRole("heading", { name: "디버그 출력" })).toBeVisible();
   await expect(page.getByText("debug output", { exact: true })).toBeVisible();
   await expect(page.getByText("기대값: 없음 (직접 입력)")).toBeVisible();
-  expect(body).toMatchObject({ useSamples: false, customInputs: [{ argumentTexts: { items: "[1,2]" } }] });
+  expect(body).toMatchObject({ useSamples: true, customInputs: [{ argumentTexts: { items: "[1,2]" } }] });
 });
 
 test("제출 목록 페이지 이동과 상세 조회에서 숨김 원문을 렌더링하지 않는다", async ({ page }) => {
@@ -119,20 +116,16 @@ test("타입별 값 입력은 문자열·큰 정수·참거짓을 JSON 작성 �
   });
   await page.goto("/problems/1001");
   await page.getByRole("button", { name: "테스트 케이스 추가하기" }).click();
-  await page.getByLabel("공개 예제 실행").uncheck();
   await page.getByRole("button", { name: "직접 입력 추가", exact: true }).click();
-  await expect(page.getByRole("table", { name: "직접 입력 테스트 케이스" })
-    .getByRole("columnheader")).toHaveText(["#", "message", "number", "enabled", "options", "기대 출력 (선택)", "관리"]);
-  const messageBounds = await page.getByLabel("직접 입력 1 message", { exact: true }).boundingBox();
-  const numberBounds = await page.getByLabel("직접 입력 1 number", { exact: true }).boundingBox();
-  expect(messageBounds?.y).toBe(numberBounds?.y);
+  await expect(page.getByLabel("직접 입력 1 message", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("직접 입력 1 enabled", { exact: true })).toHaveAttribute("type", "text");
   await page.getByLabel("직접 입력 1 message", { exact: true }).fill('hello "world"\n다음 줄');
   await page.getByLabel("직접 입력 1 number", { exact: true }).fill("9007199254740993");
-  await page.getByLabel("직접 입력 1 enabled", { exact: true }).selectOption("true");
-  await page.getByLabel("직접 입력 1 options.label", { exact: true }).fill("a,b");
-  await page.getByRole("button", { name: "적용", exact: true }).click();
+  await page.getByLabel("직접 입력 1 enabled", { exact: true }).fill("true");
+  await page.getByLabel("직접 입력 1 options", { exact: true }).fill('{"label":"a,b"}');
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("button", { name: "실행", exact: true }).click();
-  await expect.poll(() => body).toMatchObject({ useSamples: false, customInputs: [{ argumentTexts: {
+  await expect.poll(() => body).toMatchObject({ useSamples: true, customInputs: [{ argumentTexts: {
     message: JSON.stringify('hello "world"\n다음 줄'), number: "9007199254740993",
     enabled: "true", options: '{"label":"a,b"}',
   } }] });
@@ -151,14 +144,12 @@ test("사용자 기대값은 삭제한 행을 제외하고 실행 시점의 참�
   await page.goto("/problems/1001");
   await page.getByRole("button", { name: "테스트 케이스 추가하기" }).click();
   await page.getByRole("button", { name: "직접 입력 추가", exact: true }).click();
-  await page.getByLabel("직접 입력 1 기대 출력 사용", { exact: true }).check();
   await page.getByLabel("직접 입력 1 기대 출력", { exact: true }).fill("99");
   await page.getByRole("button", { name: "직접 입력 추가", exact: true }).click();
-  await page.getByLabel("직접 입력 2 기대 출력 사용", { exact: true }).check();
   await page.getByLabel("직접 입력 2 기대 출력", { exact: true }).fill("42");
   await page.getByRole("button", { name: "입력 1 삭제", exact: true }).click();
   await expect(page.getByLabel("직접 입력 1 기대 출력", { exact: true })).toHaveValue("42");
-  await page.getByRole("button", { name: "적용", exact: true }).click();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("button", { name: "실행", exact: true }).click();
   const custom = page.getByRole("article", { name: "테스트 2", exact: true });
   await expect(custom).toContainText("사용자 기대값: 42");
@@ -171,12 +162,13 @@ test("사용자 기대값은 삭제한 행을 제외하고 실행 시점의 참�
 
   await page.getByRole("button", { name: "테스트 케이스 추가하기" }).click();
   await page.getByLabel("직접 입력 1 기대 출력", { exact: true }).fill("43");
-  await page.getByRole("button", { name: "적용", exact: true }).click();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
   await expect(custom).toContainText("사용자 기대값: 42");
   await expect(custom).not.toContainText("사용자 기대값: 43");
   await page.getByRole("button", { name: "테스트 케이스 추가하기" }).click();
-  await page.getByLabel("직접 입력 1 기대 출력 사용", { exact: true }).uncheck();
-  await page.getByRole("button", { name: "적용", exact: true }).click();
+  await page.getByLabel("직접 입력 1 기대 출력", { exact: true }).fill("");
+  await expect(page.getByLabel("직접 입력 1 기대 출력", { exact: true })).toHaveAttribute("aria-invalid", "false");
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("button", { name: "실행", exact: true }).click();
   await expect(custom).toContainText("기대값: 없음 (직접 입력)");
   await expect(custom).not.toContainText("사용자 기대값:");
