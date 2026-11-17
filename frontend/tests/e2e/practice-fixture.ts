@@ -33,6 +33,10 @@ export async function mockPracticePage(page: Page, enabled = true) {
       createdAt: "2026-11-13T00:00:00.000000+09:00",
     };
     else if (path === "/api/v1/notifications/unread-count") data = { unreadCount: 0 };
+    else if (path === "/api/v1/members/me/tag-levels") data = { content: [{
+      tagId: "1", level: "LV1", accessibleMaxDifficulty: 1, achievements: [],
+      diagnosis: { isEligible: true, cooldownEndsAt: null, inProgressDiagnosisId: null }, nextPromotion: null,
+    }] };
     else if (path === "/api/v1/problems/1001") data = problemDetail;
     else if (path === "/api/v1/judge/languages") data = { content: [
       { language: "java", displayName: "Java 17", runtimeVersion: "17", enabled },

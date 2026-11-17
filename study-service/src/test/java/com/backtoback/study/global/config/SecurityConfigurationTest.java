@@ -125,13 +125,9 @@ class SecurityConfigurationTest {
     @RestController
     static class ProbeController {
 
-        // GET /api/v1/studies, GET /api/v1/studies/{studyId}, GET /api/v1/studies/me는 StudyController(discovery)가
-        // 실제로 구현해 더 이상 여기서 가짜 응답을 두지 않는다.
-
-        @GetMapping("/api/v1/studies/recommendations")
-        String recommendations() {
-            return "recommendations";
-        }
+        // GET /api/v1/studies, GET /api/v1/studies/{studyId}, GET /api/v1/studies/me는 StudyController(discovery)가,
+        // GET /api/v1/studies/recommendations는 StudyRecommendationController가 실제로 구현해
+        // 더 이상 여기서 가짜 응답을 두지 않는다.
 
         @GetMapping("/api/v1/admin/studies/probe")
         String admin() {

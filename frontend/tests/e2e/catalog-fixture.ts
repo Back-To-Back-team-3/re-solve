@@ -31,7 +31,9 @@ export async function fulfillCatalog(route: Route, path: string): Promise<boolea
   }
   if (path === "/api/v1/problems") {
     const keyword = new URL(route.request().url()).searchParams.get("keyword") ?? "";
-    const content = catalogProblems.filter((p) => p.title.includes(keyword) || p.problemId === keyword);
+    const tagIds = new URL(route.request().url()).searchParams.get("tagIds")?.split(",") ?? [];
+    const content = catalogProblems.filter((p) => (p.title.includes(keyword) || p.problemId === keyword)
+      && (!tagIds.length || p.tags.some((tag) => tagIds.includes(tag.tagId))));
     await route.fulfill({ json: { success: true, message: null, data: {
       content, page: 0, size: 20, totalElements: content.length, totalPages: content.length ? 1 : 0, hasNext: false,
     } } });

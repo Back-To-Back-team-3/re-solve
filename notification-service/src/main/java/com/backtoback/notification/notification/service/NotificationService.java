@@ -1,5 +1,6 @@
 package com.backtoback.notification.notification.service;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 
 import org.springframework.data.domain.Page;
@@ -31,6 +32,7 @@ public class NotificationService {
     private static final String ALLOWED_SORT_PROPERTY = "createdAt";
 
     private final NotificationRepository notificationRepository;
+    private final Clock clock;
 
     /**
      * 회원의 알림 목록을 페이징 조회하고 현재 미읽음 알림 개수를 함께 반환한다 (API 명세서 7.1.2).
@@ -80,7 +82,7 @@ public class NotificationService {
                 .findByIdAndMemberId(notificationId, memberId)
                 .orElseThrow(() -> new NotificationException(NotificationErrorCode.NOTIFICATION_NOT_FOUND));
 
-        notification.markAsRead(LocalDateTime.now());
+        notification.markAsRead(LocalDateTime.now(clock));
 
         long unreadCount = notificationRepository.countByMemberIdAndIsReadFalse(memberId);
         return new UnreadCountResponse(unreadCount);
@@ -94,7 +96,7 @@ public class NotificationService {
      */
     @Transactional
     public NotificationReadAllResponse markAllAsRead(Long memberId) {
-        int updatedCount = notificationRepository.markAllAsRead(memberId, LocalDateTime.now());
+        int updatedCount = notificationRepository.markAllAsRead(memberId, LocalDateTime.now(clock));
         return new NotificationReadAllResponse(updatedCount, 0L);
     }
 

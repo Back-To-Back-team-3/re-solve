@@ -14,6 +14,7 @@ import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.study.membership.dto.StudyCreateRequest;
 import com.backtoback.study.membership.dto.StudyCreateResponse;
+import com.backtoback.study.membership.service.MemberStatusGuard;
 import com.backtoback.study.membership.service.StudyCommandService;
 
 import jakarta.validation.Valid;
@@ -27,10 +28,12 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class StudyCommandController {
 
+    private final MemberStatusGuard memberStatusGuard;
     private final StudyCommandService studyCommandService;
 
     /**
      * 5.2.1 스터디 생성 — 로그인한 회원이 스터디를 만들고 LEADER로 등록된다.
+     * 정지 확인은 member 원격 조회가 있을 수 있어 생성 트랜잭션보다 먼저 수행한다.
      */
     @PostMapping
     public ResponseEntity<ApiResponse<StudyCreateResponse>> createStudy(
@@ -39,6 +42,7 @@ public class StudyCommandController {
     ) {
         Long memberId = Long.parseLong(user.userId());
         String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+        memberStatusGuard.requireNotSuspended(memberId);
         Long studyId = studyCommandService.createStudy(memberId, request, correlationId);
         return ResponseEntity
             .status(HttpStatus.CREATED)

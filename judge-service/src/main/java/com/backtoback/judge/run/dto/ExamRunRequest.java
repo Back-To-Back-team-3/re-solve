@@ -8,7 +8,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import tools.jackson.databind.JsonNode;
 
-/** Contest가 검증한 시험 문맥과 고정 회차의 실행 요청이다. (API 명세서 §3.3.8) */
+/** 호출 서비스가 검증한 시험·진단 문맥과 고정 회차의 실행 요청이다. (API 명세서 §3.3.8) */
 public record ExamRunRequest(
     @NotBlank String context,
     @NotBlank String contextId,

@@ -993,6 +993,152 @@
     ```
     
 
+#### 1.5.8 진단 문제 본문 이미지 조회
+
+- **Method / URI:** `GET /api/v1/diagnoses/{diagnosisId}/problems/{problemId}/images/{imageId}`
+- **인증:** 로그인 필요 (본인 진단에 출제된 문제)
+- **Idempotency:** 없음 (상태를 변경하지 않는 조회)
+- **Rate Limit:** 없음
+- **대응 테이블:** `diagnosis_attempts`, `diagnosis_problems`
+- **설명:** 본인 진단에 고정된 문제 회차의 본문 이미지를 반환한다. Member는 응시 소유권과 출제 문항을 확인하고, Problem은 그 고정 회차의 본문에 연결된 이미지인지 확인한다. 일반 풀이 레벨 제한은 적용하지 않으며 종료한 본인 진단도 조회할 수 있다. 권한 조회 트랜잭션은 원격 이미지 호출 전에 종료한다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `diagnosisId` | Path | string | Y | — | 본인의 진단 ID |
+    | `problemId` | Path | string | Y | — | 해당 진단에 출제된 문제 ID |
+    | `imageId` | Path | string | Y | — | 고정 회차 본문에 연결된 이미지 ID |
+
+- **요청 바디:** 없음
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `image/png`, `image/jpeg`, `image/webp` | 실제 이미지 MIME |
+    | `Cache-Control` | `private, no-store` | 다른 회원·응시와 캐시를 공유하지 않음 |
+    | `X-Content-Type-Options` | `nosniff` | MIME 추측 방지 |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (200):** 이미지 바이너리 (JSON 래퍼·S3 주소 없음)
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 숫자가 아닌 ID 또는 0 이하 이미지 ID
+    - `DIAGNOSIS_NOT_FOUND`(404) / 본인 응시가 아니거나 진단·출제 문항·고정 회차 본문 연결 이미지가 없음
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Problem·저장소 조회 장애, 비정상 상태·MIME·빈 이미지 응답
+- **동시성/멱등 보장:** 진단에 저장된 불변 `problemRevisionId`를 사용한다. 외부 요청에서 회차를 받지 않고 최신 회차로 대체하지 않는다.
+- **발행:** 없음
+- **외부 의존:** `GET /internal/v1/problems/{problemId}/revisions/{revisionId}/images/{imageId}` (problem, §2.6.4) — `X-Access-Context: DIAGNOSIS:{diagnosisId}` 전달. 기존 Problem 진단 클라이언트의 연결·읽기 타임아웃 각 2초를 적용하고 장애는 fail-closed 503으로 처리한다. 내부 404는 `DIAGNOSIS_NOT_FOUND`로 변환한다.
+- **프론트 계약:** §1.5.3의 `image:{imageId}`를 이 API의 인증된 Blob 요청으로 표시한다. 일반 문제·관리자 이미지 경로 또는 내부 API로 우회하지 않는다. 이미지 조회 실패는 해당 이미지에 안내하고 작성 중인 코드는 유지한다.
+- **비고:** 새 회차·공개 상태·회원 레벨 변화와 무관하게 기존 진단의 고정 참조를 유지한다. 내부 경로는 Gateway를 통해 브라우저에 공개하지 않는다.
+
+#### 1.5.9 진단 코드 실행 (Run)
+
+- **Method / URI:** `POST /api/v1/diagnoses/{diagnosisId}/problems/{problemId}/runs`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + 본인의 진행 중 진단에 출제된 문제
+- **Idempotency:** 없음. 재요청은 새 실행이며 Draft·제출 접수 키를 사용하지 않는다.
+- **Rate Limit:** §3.3.8의 `run:{memberId}` 제한을 공유한다. 문맥을 합쳐 회원당 동시 실행 1개이며 초과 시 `RUN_IN_PROGRESS`(429), 실행 종료 후 쿨다운은 없다.
+- **대응 테이블:** `members`, `diagnosis_attempts`, `diagnosis_problems` (권한·고정 회차 조회만). 실행 제한은 Judge의 기존 Redis 레지스트리를 사용한다.
+- **설명:** Member가 회원 상태·본인 응시·출제 문항·`IN_PROGRESS`·서버 시각 기준 종료 전 여부를 확인하고, 진단에 저장된 고정 회차로 공개 예제와 직접 입력만 실행한다. 숨김 테스트는 실행하거나 반환하지 않는다. Run은 Draft·제출·채점 결과를 저장하지 않고 이벤트를 발행하지 않으며, 진단 점수·레벨·성취도·순위·정답 이력에 반영하지 않는다.
+- **요청 헤더:**
+
+    | 헤더 | 필수 | 예시 값 | 설명 |
+    | --- | --- | --- | --- |
+    | `Authorization` | Y | `Bearer <accessToken>` | Gateway 인증 토큰 |
+    | `Content-Type` | Y | `application/json` | 요청 본문 형식 |
+
+- **요청 파라미터:**
+
+    | 파라미터 | 위치 | 타입 | 필수 | 기본값 | 설명 |
+    | --- | --- | --- | --- | --- | --- |
+    | `diagnosisId` | Path | string | Y | — | 본인 진단 ID |
+    | `problemId` | Path | string | Y | — | 해당 진단의 출제 문항 ID |
+
+- **요청 바디:**
+
+    | 필드 | 타입 | 필수 | 설명 |
+    | --- | --- | --- | --- |
+    | `language` | string | Y | `java` / `python3` / `cpp`. 고정 회차가 지원하고 활성화된 언어 |
+    | `sourceCode` | string | Y | UTF-8 코드. 공통 빈 코드·64KiB 상한 적용 |
+    | `customTests` | object[] | N | 직접 입력. 생략 시 공개 예제만 실행하며 최대 10개 (§3.3.8과 동일) |
+    | `customTests[].args` | JSON value[] | Y | 고정 함수 명세의 매개변수 순서에 맞는 인수 배열. 개수·타입 검증 적용 |
+
+    ```json
+    {
+      "language": "java",
+      "sourceCode": "class Solution { public int solution(int a, int b) { return a + b; } }",
+      "customTests": [
+        {
+          "args": [
+            3,
+            5
+          ]
+        }
+      ]
+    }
+    ```
+
+    - 회원·문맥·회차는 요청 본문으로 받지 않는다. Member가 인증 회원과 진단의 불변 `problemRevisionId`를 확정한다.
+- **응답 헤더:**
+
+    | 헤더 | 값 | 설명 |
+    | --- | --- | --- |
+    | `Content-Type` | `application/json; charset=UTF-8` | 응답 본문 형식 |
+
+- **응답 파라미터:** 없음
+- **응답 바디 (200):**
+
+    | 필드 | 타입 | 설명 |
+    | --- | --- | --- |
+    | `results` | object[] | 공개 예제·직접 입력 실행 결과. 숨김 테스트 항목 없음 |
+    | `results[].type` | string | `SAMPLE` / `CUSTOM` |
+    | `results[].index` | integer | 각 입력 목록에서 0부터 시작하는 순번 |
+    | `results[].output` | string 또는 null | 직렬화된 실제 함수 반환값. 반환값을 얻지 못하면 null |
+    | `results[].stdout` | string | 반환값과 분리한 디버그 출력. 없으면 빈 문자열 |
+    | `results[].error` | string 또는 null | 컴파일 메시지 또는 실행 오류. 정상 실행이면 null |
+    | `results[].timeMs` | integer | 실행 시간(ms), §3.3.8과 같은 측정값 변환 |
+    | `results[].memoryKb` | integer | 메모리(KiB), §3.3.8과 같은 측정값 변환 |
+    | `completedAt` | string (date-time) | 실행 완료 시각 |
+
+    ```json
+    {
+      "success": true,
+      "message": null,
+      "data": {
+        "results": [
+          {
+            "type": "CUSTOM",
+            "index": 0,
+            "output": "8",
+            "stdout": "",
+            "error": null,
+            "timeMs": 2,
+            "memoryKb": 1024
+          }
+        ],
+        "completedAt": "2026-10-03T20:21:10.000000+09:00"
+      }
+    }
+    ```
+
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / 잘못된 ID·빈 코드·직접 입력 개수·인수 타입 오류
+    - `MEMBER_SUSPENDED`(403) / 정지 회원의 신규 Run
+    - `DIAGNOSIS_NOT_FOUND`(404) / 본인 진단이 아니거나 해당 진단의 출제 문항이 아님
+    - `DIAGNOSIS_CLOSED`(409) / 종료된 진단 또는 서버 시각이 종료 시각 이상
+    - `UNSUPPORTED_LANGUAGE`(400), `CODE_TOO_LARGE`(413), `SUBMISSION_RUNTIME_UNAVAILABLE`(409) / 기존 실행 언어·코드 크기·고정 실행 환경 검증 실패
+    - `RUN_IN_PROGRESS`(429), `RUN_TIMEOUT`(504) / 회원별 동시 실행 제한 또는 30초 동기 실행 기한 초과
+    - `COMMON_DEPENDENCY_UNAVAILABLE`(503) / Judge·권한 자료 조회 장애. 미확인 상태에서 실행하지 않는다.
+- **동시성/멱등 보장:** 권한 조회 트랜잭션은 Judge 호출 전에 종료한다. 권한 확인 후 응시가 종료되어도 이미 접수된 실행은 30초 기한 안에서 끝날 수 있으나 진단에 반영하지 않는다. 종료·문항 전환 뒤 도착한 이전 Run 응답은 현재 문항 결과를 덮어쓰지 않는다. 동일 요청 재전송도 저장·제출로 처리하지 않는다.
+- **발행:** 없음
+- **외부 의존:** `POST /internal/v1/judge/runs` (§3.3.8). `context=DIAGNOSIS`, `contextId=diagnosisId`와 Member가 확인한 회원·문제·고정 회차를 전달한다. 연결 실패는 503, 동기 실행 전체 기한은 기존 30초이며 짧은 일반 조회 타임아웃으로 실행을 끊지 않는다.
+- **프론트 계약:** 실행과 문항 제출을 별도 버튼·결과로 구분한다. 공개 예제와 직접 입력의 반환값·디버그 출력·실행 오류·시간·메모리만 표시한다. 공개 예제 기대값은 고정 회차의 공개 자료를 사용하고 직접 입력 기대값 자동 비교는 포함하지 않는다. 전체 제출 판정은 기존 진단 종료 후 공개 규칙을 유지한다. Run 실패가 작성 코드·Draft·제출 원본을 지우거나 자동 제출을 발생시키지 않도록 한다.
+- **비고:** 일반 풀이의 회원 레벨 제한은 진단 Run에 적용하지 않는다. 내부 호출은 브라우저에 노출하지 않는다. 응답은 §3.3.8 데이터 객체를 공통 성공 래퍼로 감싼 형식이다.
+
 ### 1.6 관리자 API — 회원
 
 #### 1.6.1 회원 목록 조회
@@ -1103,6 +1249,39 @@
     - `MEMBER_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403) / 본인 권한 변경
 - **동시성/멱등 보장:** 권한 변경은 다음 토큰 발급부터 반영된다(기존 Access Token 만료 대기 최대 1시간).
 
+#### 1.6.4 회원 정보 이벤트 재발행
+
+- **Method / URI:** `POST /api/v1/admin/members/member-updated/republish`
+- **인증:** `ADMIN`
+- **대응 테이블:** `members`(읽기), `outbox_events`, `audit_logs`
+- **설명:** `WITHDRAWN`이 아닌 회원 전원의 `MemberUpdated`를 다시 발행해, 이벤트를 놓친 소비자의 `member_replicas`를 보충한다. 회원 정보는 변경하지 않고 실행 1회당 감사 로그 1건을 남긴다.
+- **요청 바디:**
+    
+    ```json
+      { 
+    	  "reason": "기존 회원 복제본 보충" 
+      }
+    ```
+    
+- **응답 (200):**
+    
+    ```json
+      { 
+    	  "success": true, 
+    	  "message": "회원 정보 이벤트를 다시 발행했습니다.", 
+    	  "data": { 
+    		  "publishedCount": 42 
+    	  } 
+      }
+    ```
+    
+- **에러:**
+    - `COMMON_INVALID_REQUEST`(400) / `reason` 누락·공백·500자 초과
+- **동시성/멱등 보장:** 없음. 반복 실행하면 같은 `sourceVersion`의 이벤트가 다시 나가며 소비자가 무시한다(이벤트 계약 §1.5).
+- **발행:**
+    - `MemberUpdated` — 대상 회원마다 1건. 새 `eventId`, 현재 `profile_version`을 `sourceVersion`으로 싣는다(이벤트 계약 M1 > 관리자 재발행).
+- **비고:** 회원 ID 순으로 500명씩 나눠 청크마다 트랜잭션을 커밋한다. 중간 실패 시 기록된 청크는 유지되며 다시 호출하면 된다.
+
 ### 1.7 내부 API
 
 #### 1.7.1 회원 상태 조회 (내부)
@@ -1169,8 +1348,9 @@
 | 제공 | Method / URI | 요청 | 성공 응답 | 실패 처리 |
 | --- | --- | --- | --- | --- |
 | problem | `GET /internal/v1/tags/{tagId}` | 진입할 태그 ID | `{tagId, name}` | `PROBLEM_TAG_NOT_FOUND`(404)는 `LEVEL_TAG_NOT_FOUND`(404), 그 밖의 응답·통신 오류는 `COMMON_DEPENDENCY_UNAVAILABLE`(503) |
+| judge | `POST /internal/v1/judge/runs` | §1.5.9에서 확인한 DIAGNOSIS 문맥·회원·고정 회차·코드·직접 입력 | §3.3.8 실행 결과 객체 | 실행 중 429·기한 초과 504를 유지하고 조회·통신 장애는 503. 저장·제출로 대체하지 않음 |
 
-- 공통 타임아웃은 2초다.
+- 공통 조회 타임아웃은 2초다. 진단 Run의 동기 실행 전체 기한은 §1.5.9·§3.3.8의 30초이며 일반 조회 타임아웃을 적용하지 않는다.
 
 ---
 
@@ -4197,7 +4377,7 @@
 
 - **Method / URI:** `POST /api/v1/runs`
 - **인증:** 로그인 필요 (`SUSPENDED` 차단)
-- **Rate Limit:** `run:{memberId}` 키로 일반·시험 Run을 합쳐 사용자당 동시에 1개만 허용한다. 초과 시 `RUN_RATE_LIMITED`(429), 종료 후 쿨다운 없이 다음 실행을 허용한다.
+- **Rate Limit:** `run:{memberId}` 키로 일반·시험·대회·진단 Run을 합쳐 사용자당 동시에 1개만 허용한다. 초과 시 `RUN_RATE_LIMITED`(429), 종료 후 쿨다운 없이 다음 실행을 허용한다.
 - **대응 테이블:** 없음 (결과 저장·이벤트 발행 없음)
 - **설명:** 공개 테스트케이스 또는 사용자 직접 입력으로 코드를 실행한다. 제출 이력에 포함하지 않고 Judge0를 동기 호출한다(T2-14).
 - **요청 바디:**
@@ -4707,27 +4887,27 @@
 - **발행:** 새 회차 결과는 `ExamSubmissionJudged`로 전달한다.
 - **비고:** §3.2.3·§3.2.4의 외부 관리자 경로와 구분한다.
 
-#### 3.3.8 시험·대회 코드 실행 (내부)
+#### 3.3.8 시험·대회·진단 코드 실행 (내부)
 
 - **Method / URI:** `POST /internal/v1/judge/runs`
-- **인증:** 내부 호출 (contest)
+- **인증:** 내부 호출 (contest: `EXAM`·`CONTEST`, member: `DIAGNOSIS`)
 - **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
 - **대응 테이블:** 없음. Draft·제출·점수·통계를 저장하거나 이벤트를 발행하지 않는다.
-- **설명:** §4.7.1의 RUN 검증을 거쳐 공개 예제·사용자 입력만 동기 실행한다. 숨김 테스트는 실행하지 않는다.
-- **Rate Limit:** §3.1.8과 같은 `run:{memberId}` 제한을 공유해 일반·시험 Run을 합쳐 사용자당 동시에 1개만 허용한다. 정상 완료·예외 시 소유 토큰이 일치할 때만 해제하며 종료 후 쿨다운은 없다. 중단 회수는 스케줄러 §3.5를 따른다.
+- **설명:** 시험·대회는 §4.7.1의 RUN 검증을 거쳐 공개 예제·사용자 입력만 동기 실행한다. 숨김 테스트는 실행하지 않는다. 진단은 Member가 §1.5.9의 본인 응시·출제 문항·고정 회차·활성 상태·응시 시간을 검증한 요청만 허용하며 Contest 문맥 검증을 호출하지 않는다.
+- **Rate Limit:** §3.1.8과 같은 `run:{memberId}` 제한을 공유해 일반·시험·대회·진단 Run을 합쳐 사용자당 동시에 1개만 허용한다. 정상 완료·예외 시 소유 토큰이 일치할 때만 해제하며 종료 후 쿨다운은 없다. 중단 회수는 스케줄러 §3.5를 따른다.
 - **요청 본문:**
 
     | 필드 | 타입 | 필수 | 설명 |
     | --- | --- | --- | --- |
-    | `context` | string | Y | EXAM / CONTEST |
-    | `contextId / memberId / problemId / problemRevisionId` | string | Y | C가 확인한 문맥·회원·문제·고정 회차 |
+    | `context` | string | Y | EXAM / CONTEST / DIAGNOSIS |
+    | `contextId / memberId / problemId / problemRevisionId` | string | Y | 호출 서비스가 확인한 문맥·회원·문제·고정 회차. `DIAGNOSIS`는 Member가 확정한 `diagnosisId`·인증 회원·출제 문항·불변 회차 |
     | `language` | string | Y | java / python3 / cpp |
     | `sourceCode` | string | Y | 공통 코드 크기·빈 코드 규칙 적용 |
     | `customTests` | object[] | N | 사용자 입력, 최대 10개 |
     | `customTests[].args` | JSON value[] | Y | 사용자 입력 인수 배열 |
 
-- **응답 (200):** §4.2.13·§4.4.11의 실행 결과를 전달한다. `results[]`는 `type`(SAMPLE/CUSTOM), `index`, `output`, `error`, `timeMs`, `memoryKb`를 포함하고 `completedAt`을 반환한다.
-- **실패 시 처리:** 실행 기한 30초, 초과 504 RUN_TIMEOUT. 실행 중 재요청은 429 RUN_IN_PROGRESS. 의존 서비스 장애는 C에서 503으로 처리한다.
+- **응답 (200):** §4.2.13·§4.4.11의 실행 결과를 전달한다. `results[]`는 `type`(SAMPLE/CUSTOM), `index`, `output`, `error`, `timeMs`, `memoryKb`를 포함하고 `completedAt`을 반환한다. 공통 결과 항목에 반환값과 분리한 `stdout`(string, 없으면 빈 문자열)을 추가하며, 진단 외 기존 호출자도 추가 필드를 수용할 수 있도록 한다. 공개 예제·직접 입력의 실행 결과만 반환하고 진단 제출 전체 판정은 반환하지 않는다.
+- **실패 시 처리:** 실행 기한 30초, 초과 504 RUN_TIMEOUT. 실행 중 재요청은 429 RUN_IN_PROGRESS. 의존 서비스 장애는 호출 서비스(Contest 또는 Member)에서 503으로 처리한다.
 - **비고:** §3.1.8의 외부 PRACTICE Run은 customInputs 최대 5개와 다른 입출력 형식을 사용하므로 이 내부 계약과 구분한다.
 
 #### 3.3.9 검증 진행·결과 조회 (내부)
@@ -8116,11 +8296,13 @@
     ```
     
 - **에러:**
-    - `COMMON_INVALID_REQUEST`(400), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403)
+    - `COMMON_INVALID_REQUEST`(400), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **동시성/멱등 보장:**
     - 트랜잭션 순서 = ① `study_member_quotas` 조건부 UPDATE(`active_count < 5`) ② `studies` INSERT(`member_count = 1`) ③ `study_memberships` INSERT(`LEADER`, `APPROVED`) ④ 이력 INSERT ⑤ `outbox_events` INSERT. ①이 0행이면 전체 롤백.
 - **발행:**
     - `StudyMemberJoined` — 스터디 생성 시 LEADER 등록
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.2.2 스터디 가입 신청·즉시 가입
 
@@ -8137,13 +8319,15 @@
     
     - `INSTANT` 스터디: `status: "APPROVED"`, `expiresAt: null`, `message: "스터디에 가입되었습니다."`
 - **에러:**
-    - `STUDY_NOT_FOUND`(404), `STUDY_NOT_RECRUITING`(409), `STUDY_ALREADY_APPLIED`(409), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `STUDY_FULL`(409), `MEMBER_SUSPENDED`(403)
+    - `STUDY_NOT_FOUND`(404), `STUDY_NOT_RECRUITING`(409), `STUDY_ALREADY_APPLIED`(409), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `STUDY_FULL`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **동시성/멱등 보장:**
     - 중복 신청: 생성 컬럼 `active_member_id` + `uk_study_memberships_study_active_member`
     - 즉시 가입 확보 순서: ① 회원 카운터 `UPDATE study_member_quotas SET active_count = active_count + 1 WHERE member_id = ? AND active_count < 5` ② 스터디 정원 `UPDATE studies SET member_count = member_count + 1, status = IF(member_count >= capacity, 'ACTIVE', status), version = version + 1 WHERE id = ? AND status = 'RECRUITING' AND member_count < capacity`. MySQL 단일 테이블 UPDATE는 SET을 왼쪽부터 평가하므로 `status` 계산은 증가된 `member_count`를 본다. 어느 쪽이든 0행이면 전체 롤백.
     - 문제집 편입: `assignment_member_statuses`·`assignment_completions` 유일 제약 upsert. 개설 스케줄러와 동시에 실행돼도 1건만 남는다.
 - **발행:**
     - `StudyMemberJoined` — 즉시 가입 시
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.2.3 가입 신청 취소·자진 탈퇴
 
@@ -8418,6 +8602,21 @@
 - **에러:**
     - `AUTH_ACCESS_DENIED`(403), `STUDY_ASSIGNMENT_NOT_FOUND`(404)
 
+#### 5.4.5 배정 문제 레벨 잠금 예외 확인
+
+- **Method / URI:** `GET /api/v1/studies/me/assigned-problems/{problemId}`
+- **인증:** 로그인 필요
+- **대응 테이블:** `study_memberships`, `studies`, `assignments`, `assignment_problems`, `assignment_member_statuses`
+- **설명:** 로그인 회원에게 이 문제가 배정 문제인지 반환한다. 배정 문제의 조건은 [정책 §8.3 > 문제 접근 제한](../planning/policy-and-state.md#83-태그별-진단레벨-갱신)을 따른다. 프론트는 개인 태그 레벨로 잠금이 계산된 문제에서만 호출한다.
+- **요청 파라미터:** `problemId` — Path, string, 필수.
+- **응답 (200):**
+
+    ```json
+      { "success": true, "message": null, "data": { "problemId": "101", "assigned": true } }
+    ```
+
+- **실패 시 처리:** 배정 문제가 아니거나 없는 문제도 `200` + `assigned: false`로 응답한다. 호출이 실패하면 프론트는 잠금을 유지한다.
+
 ### 5.5 외부 API — 커뮤니티
 
 #### 5.5.1 게시글 목록
@@ -8656,6 +8855,22 @@
 - **실패 시 처리:** 없는 작업은 404. Contest는 `PENDING`·404·조회 실패 시 PREPARED 차단을 유지한다. `COMMITTED`는 §4.7.4 complete, `ABORTED`는 cancel로 복구한다.
 - **대사 기준:** 원래 작업의 결과를 반환한다. 현재 스터디 상태만으로 원래 작업의 성공·취소를 추정하지 않는다.
 
+#### 5.7.4 배정 문제 레벨 잠금 예외 확인 (내부)
+
+- **Method / URI:** `GET /internal/v1/studies/members/{memberId}/assigned-problems/{problemId}`
+- **인증:** 내부 호출 (judge)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** §5.4.5와 같다.
+- **설명:** judge가 Run·연습 제출을 개인 태그 레벨 잠금으로 판정한 경우에만 호출한다. 판정 기준은 §5.4.5와 같다.
+- **요청 파라미터:** `memberId`, `problemId` — 모두 Path, string, 필수.
+- **응답 (200):**
+
+    ```json
+      { "memberId": "7", "problemId": "101", "assigned": true }
+    ```
+
+- **실패 시 처리:** 배정 문제가 아니거나 없는 문제도 `200` + `assigned: false`로 응답한다. judge는 호출 실패 시 fail-closed(잠금 유지)한다.
+
 ---
 
 ## 6. AI 기능 (ai)
@@ -8684,7 +8899,7 @@
 - **Idempotency:** 같은 `(problemId, level)`에 `REQUESTED`·`GENERATING` 요청이 있으면 그 요청을 반환하고 횟수를 차감하지 않는다. 같은 단계의 `READY`·`FALLBACK`이 이미 있으면 그 결과를 반환하고 차감하지 않는다.
 - **Rate Limit:** 1인 하루 20회 (`hint_daily_usages`, 캐시 적중 포함)
 - **대응 테이블:** `hint_requests`, `hint_daily_usages`, `hint_block_replicas`, `outbox_events`
-- **설명:** 힌트를 비동기로 요청한다. 검증 순서 = ① 문제 문맥 조회(공개 문제·대회 전용 여부, 현재 공개 회차) ② 시험·대회·진단 차단 ③ 단계 순서 ④ 기존 요청 확인 ⑤ 일일 횟수 확보. 캐시 적중이면 즉시 `READY`로 응답한다.
+- **설명:** 힌트를 비동기로 요청한다. 검증 순서 = ⓪ 회원 정지 확인 ① 문제 문맥 조회(공개 문제·대회 전용 여부, 현재 공개 회차) ② 시험·대회·진단 차단 ③ 단계 순서 ④ 기존 요청 확인 ⑤ 일일 횟수 확보. 캐시 적중이면 즉시 `READY`로 응답한다.
 - **요청 바디:**
     
     ```json
@@ -8700,7 +8915,7 @@
     
     - 캐시 적중·기존 결과 반환: `status: "READY"`(또는 `FALLBACK`), `content` 포함
 - **에러:**
-    - `HINT_PROBLEM_NOT_AVAILABLE`(404), `HINT_BLOCKED_DURING_EXAM`(403), `HINT_BLOCKED_DURING_DIAGNOSIS`(403), `HINT_LEVEL_SKIPPED`(409), `HINT_DAILY_LIMIT_EXCEEDED`(429), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `MEMBER_SUSPENDED`(403)
+    - `HINT_PROBLEM_NOT_AVAILABLE`(404), `HINT_BLOCKED_DURING_EXAM`(403), `HINT_BLOCKED_DURING_DIAGNOSIS`(403), `HINT_LEVEL_SKIPPED`(409), `HINT_DAILY_LIMIT_EXCEEDED`(429), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403)
 - **동시성/멱등 보장:**
     - 중복 요청: 생성 컬럼 `active_level = IF(status IN ('REQUESTED','GENERATING'), level, NULL)` + `uk_hint_requests_member_problem_active_level`. 위반 시 기존 요청을 조회해 반환
     - 일일 횟수: `UPDATE hint_daily_usages SET used_count = used_count + 1 WHERE member_id = ? AND usage_date = CURRENT_DATE AND used_count < 20` (행이 없으면 먼저 `INSERT … ON DUPLICATE KEY UPDATE`). 요청 INSERT와 같은 트랜잭션
@@ -8708,6 +8923,7 @@
 - **발행:**
     - `HintReady` — `READY`·`FALLBACK`·전달 직전 `BLOCKED` 종결 시
 - **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
     - `GET /internal/v1/problems/{problemId}/hint-context` (problem) — 실패 시 fail-closed
 - **프론트 계약:**
     - `202` 후 SSE(`/api/v1/notifications/subscribe`)의 `HINT_READY` 알림을 기다린다. 수신 후 힌트 요청 단건(6.1.3)으로 내용을 조회한다. 폴링하지 않는다.
@@ -9155,7 +9371,7 @@
 
 | 서비스 | 절 | API |
 | --- | --- | --- |
-| member | 1.6.1 ~ 1.6.3 | 회원 목록, 정지·해제, 권한 변경 |
+| member | 1.6.1 ~ 1.6.4 | 회원 목록, 정지·해제, 권한 변경, 회원 정보 이벤트 재발행 |
 | problem | 2.3.1 ~ 2.3.11, 2.4, 2.5.2 ~ 2.5.4, 2.8.1 | 문제 등록·회차·공개·비공개·보관·검증, 이미지, 태그, 실패 Outbox 재처리 |
 | judge | 3.2.1 ~ 3.2.6 | 채점 작업 조회, 시험 재채점, 실패 재처리, 진행 작업 복구, 실패 Outbox 재처리 |
 | contest | 4.6.1 ~ 4.6.7 | 대회 생성·수정·취소, 시험 실패 재처리·작업 조회, `FAILED` 0점 확정, 결과 재확정. 시험 운영자 경로는 §4.6.3·§4.6.7 참조 |
@@ -9195,6 +9411,7 @@
 | study | contest | `GET /internal/v1/studies/{studyId}/operations/{operationId}` | 종료 작업 확정 여부 (§5.7.3) | PREPARED 차단 유지 | D(제공)·C(요청) |
 | study | contest | `GET /internal/v1/studies/{studyId}/members` | 시험 생성 권한·스터디 상태 확인 | fail-closed (생성 거절) | D |
 | study | member | `GET /internal/v1/studies/memberships` | 탈퇴 차단(스터디장) 확인 | fail-closed | D(제공)·E(요청) |
+| study | judge | `GET /internal/v1/studies/members/{memberId}/assigned-problems/{problemId}` | 배정 문제 레벨 잠금 예외 (§5.7.4) | judge: fail-closed (잠금 유지) | D(제공)·B(요청) |
 
 ### B. 이벤트 목록
 

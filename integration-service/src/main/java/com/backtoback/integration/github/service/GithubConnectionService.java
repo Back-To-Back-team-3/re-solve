@@ -97,8 +97,8 @@ public class GithubConnectionService {
             throw new IntegrationException(IntegrationErrorCode.GITHUB_INSTALLATION_INVALID);
         }
 
-        // 2. state 검증 (1회용 소비)
-        Optional<Long> stateMemberId = githubStateStore.consume(state);
+        // 2. state 사전 검증 (외부 GitHub API 실패 시 재시도 가능하도록 검증만 수행하고 성공 시 삭제)
+        Optional<Long> stateMemberId = githubStateStore.findMemberId(state);
         if (stateMemberId.isEmpty() || !stateMemberId.get().equals(memberId)) {
             throw new IntegrationException(IntegrationErrorCode.GITHUB_INSTALLATION_INVALID);
         }
@@ -154,6 +154,9 @@ public class GithubConnectionService {
                 repositoryName
             );
 
+        // 8. 연동 완료 후 1회용 state 소비
+        githubStateStore.delete(state);
+
         return new GithubInstallResultResponse(
             savedConnection.getStatus().name(),
             savedConnection.getRepositoryName(),
@@ -185,6 +188,7 @@ public class GithubConnectionService {
                 return githubConnectionRepository.findByMemberId(memberId).map(existing -> {
                     if (existing.getStatus() == GithubConnectionStatus.CONNECTED) {
                         existing.disconnect(GithubDisconnectedReason.USER_REQUEST);
+                        githubSyncJobService.cancelPendingJobs(existing.getId(), "GitHub 저장소 재연동에 의한 기존 대기 작업 취소");
                     }
                     existing
                         .reconnect(

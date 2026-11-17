@@ -830,6 +830,53 @@ body:has(.editor-actions) {
 .exam-workspace .workspace {
   grid-template-columns: minmax(290px, 40%) minmax(380px, 1fr);
 }
+body:has(.solve-room) {
+  @apply flex h-dvh flex-col overflow-hidden pb-0;
+}
+body:has(.solve-room) > .header {
+  @apply shrink-0;
+}
+body:has(.solve-room) > main {
+  @apply flex min-h-0 flex-1 flex-col;
+}
+.solve-room {
+  @apply flex min-h-0 flex-1 flex-col pb-32 sm:pb-18;
+}
+.solve-room > .exam-bar,
+.solve-room > .container {
+  @apply shrink-0;
+}
+.diagnosis-room > .exam-workspace {
+  @apply min-h-0 flex-1 overflow-auto;
+}
+.diagnosis-room .workspace {
+  @apply h-full min-h-0 overflow-hidden;
+}
+.solve-room .problem-panel,
+.diagnosis-room .exam-sidebar {
+  @apply min-h-0 overflow-y-auto overscroll-contain;
+}
+.solve-room .code-panel {
+  @apply min-h-0;
+}
+.solve-room .editor-toolbar {
+  @apply shrink-0;
+}
+.diagnosis-room .results {
+  @apply min-h-0 max-h-[40%] shrink-0 overflow-y-auto overscroll-contain;
+}
+.diagnosis-room .editor-frame {
+  @apply h-auto min-h-0 flex-1;
+}
+.practice-room > .workspace {
+  @apply min-h-0 flex-1 overflow-hidden;
+}
+.practice-room .editor-frame {
+  @apply h-auto min-h-24 basis-3/5 grow shrink;
+}
+.practice-room .results {
+  @apply min-h-0 max-h-none basis-2/5 grow shrink overflow-y-auto overscroll-contain;
+}
 .review-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

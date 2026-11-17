@@ -5,7 +5,7 @@ import { Bell, BellOff } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { notificationApi } from "@/services/api";
 import { useNotificationSSE } from "@/services/hooks";
-import type { NotificationItem } from "@/services/types";
+import type { NotificationItem, SSENotificationEvent } from "@/services/types";
 
 export function formatRelativeTime(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
@@ -57,7 +57,7 @@ function NotificationDropdown({
         notificationApi.markRead(item.notificationId).catch(() => {});
       }
       onOpenChange(false);
-      router.push(item.linkUrl);
+      if (item.linkUrl) router.push(item.linkUrl);
     },
     [router, onOpenChange, onUnreadCountChange, unreadCount],
   );
@@ -71,7 +71,7 @@ function NotificationDropdown({
   return (
     <Popover.Portal>
       <Popover.Content
-        className="w-80 rounded bg-surface border-2 border-foreground shadow-lg"
+        className="z-30 w-80 rounded bg-surface border-2 border-foreground shadow-lg"
         align="end"
         sideOffset={8}
       >
@@ -131,7 +131,8 @@ export function NotificationBell() {
       .catch(() => {});
   }, []);
 
-  const handleSSEEvent = useCallback(() => {
+  const handleSSEEvent = useCallback((event: SSENotificationEvent) => {
+    if (event.type === "LEVEL_CHANGED") window.dispatchEvent(new Event("resolve:level-changed"));
     setUnreadCount((prev) => prev + 1);
     if (open) {
       setReloadKey((k) => k + 1);

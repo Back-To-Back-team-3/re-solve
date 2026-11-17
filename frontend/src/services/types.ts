@@ -35,6 +35,9 @@ export type AuthTokenResponse = {
   };
 };
 
+// POST /api/v1/members/me/tag-levels §1.4.2
+export type TagEntryResponse = { tagId: string; level: "LV1" };
+
 // GET /api/v1/members/me/tag-levels §1.4.1
 export type TagLevelBand = "GOOD" | "NORMAL" | "WEAK";
 
@@ -63,6 +66,34 @@ export type TagLevel = {
     requiredAchievementRate: number;
   } | null;
 };
+
+/** 진단 응시·복구 계약. 문항 판정은 응시 중 공개하지 않는다. (API 명세서 §1.5) */
+export type DiagnosisStatus = "IN_PROGRESS" | "CLOSED" | "SCORED";
+export type DiagnosisDraftRequest = { language: Language; sourceCode: string; seq: string };
+export type DiagnosisDraft = DiagnosisDraftRequest & { savedAt: string };
+export type DiagnosisProblem = {
+  problemId: string; problemRevisionId: string; difficulty: number;
+  draft: DiagnosisDraft | null;
+  lastSubmission: { submissionStatus: string; draftSeq: string } | null;
+};
+export type DiagnosisDetail = {
+  diagnosisId: string; tagId: string; status: DiagnosisStatus; endsAt: string; serverNow: string;
+  problems: DiagnosisProblem[];
+  result: { score: number; resultLevel: string; appliedLevel: string } | null;
+};
+export type DiagnosisStarted = {
+  diagnosisId: string; tagId: string; startedAt: string; endsAt: string; serverNow: string;
+  problems: { problemId: string; problemRevisionId: string; difficulty: number; title: string }[];
+};
+export type DiagnosisSaved = { applied: boolean; seq: string; savedAt: string };
+export type DiagnosisReceipt = { diagnosisSubmissionId: string; status: string; receivedAt: string };
+export type DiagnosisFinished = { diagnosisId: string; status: DiagnosisStatus; closedAt: string };
+export type DiagnosisHistory = {
+  diagnosisId: string; tagId: string; status: DiagnosisStatus; score: number | null;
+  resultLevel: string | null; closeReason: string | null; startedAt: string; closedAt: string | null;
+};
+/** 고정 회차 본문은 사용자 풀이 상태를 포함하지 않는다. (API 명세서 §1.5.3·§2.6.3) */
+export type DiagnosisContent = Omit<ProblemDetail, "solvedStatus">;
 
 // GET /api/v1/admin/members §1.6.1 행 단위
 export type AdminMember = {
@@ -559,7 +590,7 @@ export type StudyDetail = {
   joinType: JoinType;
   isAutoReopen: boolean;
   version: number;
-  leader: { memberId: string; nickname: string };
+  leader: { memberId: string; nickname: string } | null;
   myMembership: {
     membershipId: string;
     status: MembershipStatus;
@@ -734,7 +765,7 @@ export interface NotificationItem {
   type: NotificationType;
   title: string;
   content: string;
-  linkUrl: string;
+  linkUrl: string | null;
   isRead: boolean;
   createdAt: string;
 }
@@ -772,7 +803,7 @@ export interface SSENotificationEvent {
   type: NotificationType;
   title: string;
   content: string;
-  linkUrl: string;
+  linkUrl: string | null;
   createdAt: string;
 }
 
@@ -857,3 +888,10 @@ export interface AdminJudgeJobDetail {
 // API 명세서 §3.2.5 진행 중 채점 작업 복구
 export type JudgeJobRecoveryRequest = { reason: string };
 export type JudgeJobRecoveryResponse = { judgeJobId: string; status: "RETRY_WAITING" };
+
+/** 진단 Run은 제출 판정을 공개하거나 저장하지 않는다(API 명세서 §1.5.9). */
+export type DiagnosisRunResult = {
+  results: { type: "SAMPLE" | "CUSTOM"; index: number; output: string | null; stdout: string;
+    error: string | null; timeMs: number; memoryKb: number }[];
+  completedAt: string;
+};

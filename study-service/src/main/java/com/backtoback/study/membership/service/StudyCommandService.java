@@ -23,8 +23,6 @@ import com.backtoback.study.membership.repository.StudyMemberQuotaRepository;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
-import com.backtoback.study.replica.domain.MemberStatus;
-import com.backtoback.study.replica.repository.MemberReplicaRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -41,7 +39,6 @@ public class StudyCommandService {
     private static final String EVENT_TYPE = "StudyMemberJoined";
     private static final String SCHEMA_VERSION = "v1";
 
-    private final MemberReplicaRepository memberReplicaRepository;
     private final StudyMemberQuotaRepository quotaRepository;
     private final StudyRepository studyRepository;
     private final StudyMembershipRepository membershipRepository;
@@ -52,6 +49,7 @@ public class StudyCommandService {
     /**
      * 스터디를 생성하고 생성자를 LEADER(APPROVED)로 등록한다(API 명세서 §5.2.1).
      * 참여 상한 확보와 S1 이벤트 발행은 같은 트랜잭션에서 처리한다.
+     * 정지 회원 확인은 호출 전에 끝나 있어야 한다(member 원격 조회를 트랜잭션 밖에서 하기 위함).
      *
      * @param memberId 스터디를 만드는 회원 ID
      * @param request 생성 요청 바디
@@ -60,13 +58,6 @@ public class StudyCommandService {
      */
     @Transactional
     public Long createStudy(Long memberId, StudyCreateRequest request, String correlationId) {
-        // SUSPENDED 차단: 복제본이 없으면 확인 생략(이벤트 동기화 지연 허용)
-        memberReplicaRepository.findByMemberId(memberId).ifPresent(replica -> {
-            if (replica.getMemberStatus() == MemberStatus.SUSPENDED) {
-                throw new StudyException(StudyErrorCode.MEMBER_SUSPENDED);
-            }
-        });
-
         // ① 참여 상한 카운터: 행 없으면 0으로 생성 → active_count < 5인 경우만 +1
         // WHERE 조건 불충족(active_count >= 5) 시 UPDATE affected_rows=0 — 드라이버 CLIENT_FOUND_ROWS 설정과 무관
         quotaRepository.insertQuotaIfAbsent(memberId);
