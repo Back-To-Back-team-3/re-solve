@@ -294,6 +294,41 @@ class InternalSubmissionQueryControllerTest {
             .andExpect(status().isNotFound());
     }
 
+    @Test
+    @DisplayName("본인 일반 풀이 완료 AC 제출의 정답 코드를 반환하고 미완료·타인·비AC 제출은 404를 반환한다")
+    void returnsAcceptedCodeOnlyForCompletedPracticeAcOwner() throws Exception {
+        var accepted = submission(Submission.Context.PRACTICE, Submission.Status.COMPLETED);
+        var queued = submission(Submission.Context.PRACTICE, Submission.Status.QUEUED);
+        var wrongAnswer = submission(Submission.Context.PRACTICE, Submission.Status.COMPLETED);
+        ReflectionTestUtils.setField(wrongAnswer, "verdict", JudgeVerdict.WA);
+
+        given(submissions.findByIdAndMemberIdAndContext(2002L, 7L, Submission.Context.PRACTICE))
+            .willReturn(Optional.of(accepted))
+            .willReturn(Optional.of(queued))
+            .willReturn(Optional.of(wrongAnswer));
+
+        mvc
+            .perform(get("/internal/v1/submissions/2002/accepted/code").param("memberId", "7"))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(jsonPath("$.submissionId").value("2002"))
+            .andExpect(jsonPath("$.problemId").value("301"))
+            .andExpect(jsonPath("$.language").value("java"))
+            .andExpect(jsonPath("$.sourceCode").value("sample code"))
+            .andExpect(jsonPath("$.judgeAttempt").value(1))
+            .andExpect(jsonPath("$.submittedAt").value("2026-09-28T10:00:00+09:00"))
+            .andExpect(jsonPath("$.data").doesNotHaveJsonPath());
+        mvc
+            .perform(get("/internal/v1/submissions/2002/accepted/code").param("memberId", "7"))
+            .andExpect(status().isNotFound());
+        mvc
+            .perform(get("/internal/v1/submissions/2002/accepted/code").param("memberId", "7"))
+            .andExpect(status().isNotFound());
+        mvc
+            .perform(get("/internal/v1/submissions/2002/accepted/code").param("memberId", "8"))
+            .andExpect(status().isNotFound());
+    }
+
     /**
      * 고정 회차와 기존 결과를 가진 제출 행을 구성한다.
      *
