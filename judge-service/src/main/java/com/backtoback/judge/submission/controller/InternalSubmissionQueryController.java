@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.submission.domain.Submission;
+import com.backtoback.judge.submission.dto.AcceptedSubmissionCodeResponse;
 import com.backtoback.judge.submission.dto.AcceptedSubmissionHistoryResponse;
 import com.backtoback.judge.submission.dto.InternalSubmissionResultResponse;
 import com.backtoback.judge.submission.dto.InternalSubmissionSourceResponse;
@@ -58,6 +59,27 @@ public class InternalSubmissionQueryController {
         long afterId = after == null ? 0L : Long.parseLong(after);
         var history = queries.acceptedHistory(Long.parseLong(userId), afterId, size);
         return ResponseEntity.ok(AcceptedSubmissionHistoryResponse.from(history));
+    }
+
+    /**
+     * GitHub 동기화용 일반 풀이 정답 제출의 원본 코드를 조회한다. (API 명세서 §3.3.3)
+     * 잘못된 식별자는 요청 검증 단계에서 {@code COMMON_INVALID_REQUEST}로 응답한다.
+     *
+     * @param submissionId Judge 제출 ID
+     * @param memberId 연동 회원 ID
+     * @return 캐시할 수 없는 정답 코드 응답
+     * @throws JudgeException {@code SUBMISSION_NOT_FOUND}: 제출이 없거나 본인 일반 풀이 AC 제출이 아닌 경우
+     */
+    @GetMapping("/internal/v1/submissions/{submissionId}/accepted/code")
+    public ResponseEntity<AcceptedSubmissionCodeResponse> acceptedCode(
+        @PathVariable @SubmissionQueryId String submissionId,
+        @RequestParam @SubmissionQueryId String memberId
+    ) {
+        var submission = queries.acceptedCode(Long.parseLong(submissionId), Long.parseLong(memberId));
+        return ResponseEntity
+            .ok()
+            .cacheControl(CacheControl.noStore())
+            .body(AcceptedSubmissionCodeResponse.from(submission));
     }
 
     /**
