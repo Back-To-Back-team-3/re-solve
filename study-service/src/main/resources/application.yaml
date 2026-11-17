@@ -35,6 +35,11 @@ study:
       enabled: true
   judge-client:
     base-url: ${JUDGE_SERVICE_URL:http://judge-service:8080}
+  member-client:
+    base-url: ${MEMBER_SERVICE_URL:http://member-service:8080}
+  events:
+    publish-enabled: ${STUDY_EVENTS_PUBLISH_ENABLED:false}
+    topic-arn: ${STUDY_EVENTS_TOPIC_ARN:}
 
 springdoc:
   api-docs:

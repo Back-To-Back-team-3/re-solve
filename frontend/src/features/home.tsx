@@ -1,6 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useProblemLevels } from "@/features/problem-access";
 import { ArrowRight, Flame, BookOpen, Trophy } from "lucide-react";
 import { Pet } from "@/components/pet";
 import {
@@ -16,10 +18,11 @@ import {
   Modal,
   useToast,
 } from "@/components/ui";
-import { judgeApi, studyApi } from "@/services/api";
+import { judgeApi, memberApi, studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import { useCatalog } from "@/services/catalog";
-import { ProblemTable } from "./problem-list";
+import { useWorkspace } from "@/stores/workspace";
+import { ProblemTable } from "@/features/problem-table";
 import type { SubmissionHistoryItem } from "@/services/types";
 import { judgeStatusLabel, labelOf, verdictLabel } from "@/services/labels";
 
@@ -61,16 +64,58 @@ function RecentSubmissions({ items }: { items: SubmissionHistoryItem[] }) {
   );
 }
 
+function RecentSubmissionsResource() {
+  const r = useResource(() => judgeApi.getMySubmissions(0, 5), "home-submissions");
+  if (r.loading) return <Loading />;
+  if (r.error) return <ErrorState message={r.error.message} retry={r.retry} />;
+  return <RecentSubmissions items={r.data?.content ?? []} />;
+}
+
 export function HomePage() {
   const { tags, problems } = useCatalog();
-  const r = useResource(() => judgeApi.getMySubmissions(0, 5), "home-submissions");
+  const authReady = useWorkspace((state) => state.authReady);
+  const memberId = useWorkspace((state) => state.member?.memberId);
   const toast = useToast();
   const [hero, setHero] = useState(tags[0]?.id ?? ""),
     [screen, setScreen] = useState("pet"),
-    [modal, setModal] = useState(""),
-    [levels, setLevels] = useState<Record<string, number>>({});
+    [modal, setModal] = useState("");
+  const levels = useProblemLevels();
+  useEffect(() => {
+    if (!levels.memberId) return;
+    window.addEventListener("resolve:level-changed", levels.retry);
+    return () => window.removeEventListener("resolve:level-changed", levels.retry);
+  }, [levels.memberId, levels.retry]);
+  const router = useRouter();
+  const [hatching, setHatching] = useState(false);
+  const [hatchError, setHatchError] = useState("");
+  const levelOf = (tagId: string) => {
+    const level = levels.data?.content.find((item) => item.tagId === tagId)?.level;
+    return level === "MASTER" ? 4 : level === "LV3" ? 3 : level === "LV2" ? 2 : level === "LV1" ? 1 : 0;
+  };
+  async function hatch() {
+    const tagId = modal;
+    setHatching(true);
+    setHatchError("");
+    try {
+      await memberApi.enterTag(tagId);
+      setHero(tagId);
+      setModal("");
+      levels.retry();
+      router.refresh();
+    } catch (failure) {
+      if (typeof failure === "object" && failure !== null && "code" in failure && failure.code === "LEVEL_ALREADY_ENTERED") {
+        setModal("");
+        levels.retry();
+      } else {
+        setHatchError(typeof failure === "object" && failure !== null && "message" in failure && typeof failure.message === "string"
+          ? failure.message : "부화하지 못했습니다. 다시 시도해 주세요.");
+      }
+    } finally { setHatching(false); }
+  }
+  if (levels.error) return <ErrorState message={levels.error.message} retry={levels.retry} />;
+  if (levels.loading) return <Loading />;
   const current = tags.find((t) => t.id === hero) ?? tags[0];
-  const petLevel = current ? levels[current.id] ?? current.level : 0;
+  const petLevel = current ? levelOf(current.id) : 0;
   const stages = ["알", "아기", "어린이", "어른", "마스터"];
   const speech =
     petLevel === 0
@@ -102,10 +147,10 @@ export function HomePage() {
               </div>
             )}
             <div className="row wrap">
-              <Go className="secondary" href={`/problems?tag=${hero}`}>
+              <Go className="secondary" href={`/problems?tagIds=${current?.id ?? ""}`}>
                 문제 풀러 가기 <ArrowRight size={16} />
               </Go>
-              <Button onClick={() => setModal("diagnosis")}>내 실력 진단</Button>
+              <Go href={`/diagnoses${current ? `?tagId=${current.id}` : ""}`}>내 실력 진단</Go>
             </div>
           </div>
           {current && (
@@ -160,7 +205,7 @@ export function HomePage() {
         </div>
         <div className="pet-grid">
           {tags.map((t) => {
-            const level = levels[t.id] ?? t.level;
+            const level = levelOf(t.id);
             return (
               <article
                 className={`card pet-card ${level === 0 ? "egg" : level === 4 ? "master" : ""}`}
@@ -188,24 +233,18 @@ export function HomePage() {
                 </p>
                 <Progress value={level === 0 ? 0 : level * 23} />
                 <div className="row actions">
-                  {level === 0 ? (
-                    <Button className="primary full" onClick={() => setModal(t.id)}>
+                  {level === 0 && !levels.data?.content.some((item) => item.tagId === t.id) ? (
+                    <Button className="primary full" disabled={!levels.memberId} onClick={() => { setHatchError(""); setModal(t.id); }}>
                       알 부화하기
                     </Button>
                   ) : (
                     <>
-                      <Go className="small grow" href={`/problems?tag=${t.id}`}>
+                      <Go className="small grow" href={`/problems?tagIds=${t.id}`}>
                         문제 풀기
                       </Go>
-                      <Button
-                        className="small"
-                        onClick={() => {
-                          setHero(t.id);
-                          setModal("diagnosis");
-                        }}
-                      >
+                      <Go className="small" href={`/diagnoses?tagId=${t.id}`}>
                         진단
-                      </Button>
+                      </Go>
                     </>
                   )}
                 </div>
@@ -230,53 +269,41 @@ export function HomePage() {
             }))}
           />
         </Section>
-        <Section title="최근 제출" href="/mypage">
-          {r.loading ? (
+        <Section title="최근 제출" href="/mypage?tab=submissions">
+          {!authReady ? (
             <Loading />
-          ) : r.error ? (
-            <ErrorState message={r.error.message} retry={r.retry} />
+          ) : memberId ? (
+            <RecentSubmissionsResource key={memberId} />
           ) : (
-            <RecentSubmissions items={r.data?.content ?? []} />
+            <p className="muted">로그인하면 최근 제출 내역을 확인할 수 있어요.</p>
           )}
         </Section>
       </div>
       <Modal
         open={!!modal}
-        onOpenChange={() => setModal("")}
-        title={modal === "diagnosis" ? "알고리즘 성장 진단" : "새 친구를 만나볼까요?"}
-        description={
-          modal === "diagnosis"
-            ? "진단은 고정된 예시 결과입니다. 실제 풀이 분석은 진행하지 않습니다."
-            : "부화는 이 화면의 상태만 바꿉니다. 문제는 언제든 자유롭게 풀 수 있어요."
-        }
+        onOpenChange={() => { if (!hatching) setModal(""); }}
+        title="새 친구를 만나볼까요?"
+        description="진단 없이 이 알고리즘을 Lv.1로 시작합니다. 레벨에 맞는 문제를 풀 수 있어요."
       >
         <div className="stack">
           <div className="row">
-            <Pet level={modal === "diagnosis" ? petLevel : 0} />
+            <Pet level={0} />
             <div>
               <h3>
-                {modal === "diagnosis"
-                  ? `${current?.pet ?? ""}의 다음 목표`
-                  : tags.find((t) => t.id === modal)?.pet}
+                {tags.find((t) => t.id === modal)?.pet}
               </h3>
               <p>
-                {modal === "diagnosis"
-                  ? "기본기를 잘 쌓고 있어요. 다양한 입력 조건을 연습해 보세요."
-                  : "첫 문제와 함께 성장의 여정을 시작해요."}
+                첫 문제와 함께 성장의 여정을 시작해요.
               </p>
             </div>
           </div>
+          {hatchError && <p role="alert" className="error-text">{hatchError}</p>}
           <Button
             className="primary"
-            onClick={() => {
-              if (modal !== "diagnosis") {
-                setLevels({ ...levels, [modal]: 1 });
-                setHero(modal);
-              }
-              setModal("");
-            }}
+            disabled={hatching}
+            onClick={() => void hatch()}
           >
-            {modal === "diagnosis" ? "확인" : "부화시키기"}
+            부화시키기
           </Button>
         </div>
       </Modal>
@@ -395,7 +422,7 @@ export function DashboardPage() {
             </div>
           </Section>
         </div>
-        <Section title="최근 제출" href="/mypage">
+        <Section title="최근 제출" href="/mypage?tab=submissions">
           {rSubs.loading ? (
             <Loading />
           ) : rSubs.error ? (

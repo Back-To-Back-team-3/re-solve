@@ -68,6 +68,9 @@ GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 GITHUB_REDIRECT_URI=http://localhost:8080/api/v1/auth/github/callback
 FRONTEND_ORIGIN=http://localhost:8080
+# 프론트엔드(Next.js rewrite 및 Cloudflare Worker 런타임 OAuth 프록시)가 호출하는 API 서버 주소
+# Cloudflare Worker 배포 시 빌드 변수와 Worker 런타임 환경변수 모두 동일한 운영 API 주소로 등록해야 한다.
+API_URL=http://localhost:8080
 JWT_SECRET=
 REFRESH_COOKIE_SECURE=true
 DEV_LOGIN_ENABLED=false
@@ -82,6 +85,10 @@ CONTEST_EVENTS_TOPIC_ARN=
 JUDGE_SUBMISSION_QUEUE_URL=
 CONTEST_EVENTS_ENABLED=false
 CONTEST_QUEUE_URL=
+
+# 📚 스터디 이벤트 (study-service)
+STUDY_EVENTS_PUBLISH_ENABLED=false
+STUDY_EVENTS_TOPIC_ARN=
 
 # 🔗 연동 (integration-service)
 # 필수 값: GitHub Access Token 암호화 키 (AES-256 GCM). Base64로 인코딩된 32바이트 키
@@ -198,6 +205,13 @@ GRAFANA_ADMIN_PASSWORD=
 - `JUDGE_SUBMISSION_QUEUE_URL`은 `ExamSubmissionRequested`를 전달할 Judge 제출 SQS 큐 URL이다.
 - 발행을 활성화하면 두 목적지가 모두 필요하다. 소비 활성화는 기존 `CONTEST_EVENTS_ENABLED`와 `CONTEST_QUEUE_URL`로 설정한다.
 
+### Study 이벤트 발행
+
+- `STUDY_EVENTS_PUBLISH_ENABLED=true`로 공통 Outbox Relay를 활성화한다. 기본값은 `false`다.
+- `STUDY_EVENTS_TOPIC_ARN`은 스터디 가입·탈퇴, 가입 신청 결정, 과제, 힌트 이벤트를 전달할 `study-events` SNS 토픽 ARN이다. 발행을 활성화하면 필수다.
+- 활성화 전에 study 태스크의 토픽 발행 권한과 `contest-queue`·`problem-queue`·`notification-queue`·`ai-queue`의 구독 필터 정책을 확인한다.
+- 활성화하면 그동안 쌓인 `PENDING` Outbox 이벤트가 첫 회차부터 발행된다. 활성화 전에 `outbox_events`의 이벤트 유형·상태별 건수를 확인한다.
+
 ### Contest 시험 순위 캐시
 
 | 환경변수 | 기본값 | 설명 |
@@ -260,6 +274,7 @@ docker compose logs -f api-gateway
 
 - 현재 저장소의 frontend는 연결 확인용 화면이고, 백엔드 기능은 개발 단계다.
 - 위 명령은 로컬 구성 안내이며 전체 기능의 동작 검증을 뜻하지 않는다.
+- 프론트엔드 Cloudflare Worker 배포 시 `/api/v1/auth/github`·`/api/v1/auth/github/callback` Route Handler가 런타임 `process.env.API_URL`을 읽으므로, Cloudflare Worker 런타임 환경변수에도 빌드 변수와 동일한 운영 API 주소를 등록해야 한다.
 
 ---
 

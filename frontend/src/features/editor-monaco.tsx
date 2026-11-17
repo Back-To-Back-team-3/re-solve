@@ -8,8 +8,8 @@ const Monaco = dynamic(() => import("@monaco-editor/react"), {
 });
 loader.config({ paths: { vs: "/monaco/vs" } });
 
-export function EditorMonaco({ code, fontSize, language, onChange }: {
-  code: string; fontSize: number; language: Language; onChange: (value: string) => void;
+export function EditorMonaco({ code, fontSize, language, onChange, readOnly = false }: {
+  readOnly?: boolean; code: string; fontSize: number; language: Language; onChange: (value: string) => void;
 }) {
   function theme(monaco: typeof import("monaco-editor")) {
     const styles = getComputedStyle(document.documentElement);
@@ -31,6 +31,6 @@ export function EditorMonaco({ code, fontSize, language, onChange }: {
       observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
       editor.onDidDispose(() => observer.disconnect());
     }}
-    options={{ editContext: false, fontSize, minimap: { enabled: false }, scrollBeyondLastLine: false,
+    options={{ readOnly, editContext: false, fontSize, minimap: { enabled: false }, scrollBeyondLastLine: false,
       automaticLayout: true, tabSize: 4, padding: { top: 20 }, ariaLabel: "코드 편집기", wordWrap: "on" }} />;
 }

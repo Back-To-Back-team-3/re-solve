@@ -27,6 +27,7 @@ import lombok.NoArgsConstructor;
 public class AuditLog {
 
     public static final String TARGET_MEMBER = "MEMBER";
+    public static final String TARGET_ALL_MEMBERS = "ALL";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -124,5 +125,12 @@ public class AuditLog {
         String clientIp
     ) {
         return new AuditLog(actorId, action, String.valueOf(memberId), beforeState, afterState, reason, clientIp);
+    }
+
+    /**
+     * 특정 회원이 아닌 회원 전체 대상 관리자 작업 기록. 대상 ID는 {@code ALL}이고 전후 상태는 남기지 않는다.
+     */
+    public static AuditLog ofAllMembers(Long actorId, String action, String reason, String clientIp) {
+        return new AuditLog(actorId, action, TARGET_ALL_MEMBERS, null, null, reason, clientIp);
     }
 }

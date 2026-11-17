@@ -16,8 +16,11 @@ import com.backtoback.study.hint.service.ExamStartedConsumerService;
 import com.backtoback.study.hint.service.HintBlockReplicaConsumerService;
 import com.backtoback.study.hint.service.HintReadyConsumerService;
 import com.backtoback.study.membership.service.MemberWithdrawnConsumerService;
+import com.backtoback.study.replica.event.dto.MemberSuspendedPayload;
+import com.backtoback.study.replica.event.dto.MemberUpdatedPayload;
 import com.backtoback.study.replica.event.dto.MemberWithdrawnPayload;
 import com.backtoback.study.replica.event.dto.SubmissionJudgedPayload;
+import com.backtoback.study.replica.service.MemberReplicaConsumerService;
 import com.backtoback.study.replica.service.SubmissionJudgedConsumerService;
 
 import io.awspring.cloud.sqs.annotation.SqsListener;
@@ -27,8 +30,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * SQS {@code study-queue}에서 SubmissionJudged 이벤트를 수신하여 소비 서비스에 위임한다
- * (event-contract.md §J1, §1.4 소비 규칙).
+ * SQS {@code study-queue}의 이벤트를 {@code eventType}별 소비 서비스에 위임한다
+ * (event-contract.md §1.4 소비 규칙, §5 서비스별 구독 매트릭스).
+ * 처리 대상이 아닌 이벤트는 소비 기록만 남기고 성공 처리한다. 클래스 이름은 최초 구독 이벤트 기준으로 유지한다.
  */
 @Slf4j
 @Component
@@ -36,6 +40,8 @@ import tools.jackson.databind.ObjectMapper;
 public class SubmissionJudgedEventListener {
 
     private static final String MEMBER_WITHDRAWN_EVENT_TYPE = "MemberWithdrawn";
+    private static final String MEMBER_UPDATED_EVENT_TYPE = "MemberUpdated";
+    private static final String MEMBER_SUSPENDED_EVENT_TYPE = "MemberSuspended";
     private static final String SUPPORTED_EVENT_TYPE = "SubmissionJudged";
     private static final String HINT_READY_EVENT_TYPE = "HintReady";
     private static final String EXAM_PARTICIPANT_REGISTERED_EVENT_TYPE = "ExamParticipantRegistered";
@@ -56,6 +62,7 @@ public class SubmissionJudgedEventListener {
 
     private final ObjectMapper objectMapper;
     private final MemberWithdrawnConsumerService memberWithdrawnConsumerService;
+    private final MemberReplicaConsumerService memberReplicaConsumerService;
     private final SubmissionJudgedConsumerService consumerService;
     private final HintBlockReplicaConsumerService hintBlockReplicaConsumerService;
     private final HintReadyConsumerService hintReadyConsumerService;
@@ -82,6 +89,18 @@ public class SubmissionJudgedEventListener {
             if (MEMBER_WITHDRAWN_EVENT_TYPE.equals(eventType)) {
                 MemberWithdrawnPayload event = objectMapper.treeToValue(payload, MemberWithdrawnPayload.class);
                 memberWithdrawnConsumerService.consume(event);
+                return;
+            }
+
+            if (MEMBER_UPDATED_EVENT_TYPE.equals(eventType)) {
+                MemberUpdatedPayload event = objectMapper.treeToValue(payload, MemberUpdatedPayload.class);
+                memberReplicaConsumerService.consumeUpdated(event);
+                return;
+            }
+
+            if (MEMBER_SUSPENDED_EVENT_TYPE.equals(eventType)) {
+                MemberSuspendedPayload event = objectMapper.treeToValue(payload, MemberSuspendedPayload.class);
+                memberReplicaConsumerService.consumeSuspended(event);
                 return;
             }
 

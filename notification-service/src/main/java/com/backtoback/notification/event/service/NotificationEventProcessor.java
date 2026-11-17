@@ -292,9 +292,16 @@ public class NotificationEventProcessor {
         );
     }
 
+    /**
+     * 마이페이지 스킬 탭으로 연결되는 태그 레벨 알림 명세를 생성한다.
+     *
+     * @param payload 태그 레벨 변경 이벤트 페이로드
+     * @return 수신자와 이동 경로를 포함한 알림 명세
+     * @throws IllegalArgumentException 필수 필드가 누락된 경우
+     */
     private NotificationSpec buildTagLevelChangedSpec(JsonNode payload) {
         Long memberId = requireLong(payload, "memberId");
-        String tagId = requireText(payload, "tagId");
+        requireText(payload, "tagId");
         String tagName = requireText(payload, "tagName");
         String toLevel = requireText(payload, "toLevel");
         String reasonType = requireText(payload, "reasonType");
@@ -314,7 +321,7 @@ public class NotificationEventProcessor {
             NotificationType.LEVEL_CHANGED,
             "태그 레벨 알림",
             content,
-            "/me/tag-levels/" + tagId,
+            "/mypage?tab=skill",
             NotificationPreference::isLevelChangedEnabled
         );
     }
@@ -381,7 +388,7 @@ public class NotificationEventProcessor {
             NotificationType.ASSIGNMENT_INCOMPLETE_REPEATED,
             "문제집 연속 미완료 발생",
             "스터디 내 연속 2회 과제를 미완료한 구성원이 있습니다.",
-            "/studies/" + studyId + "/manage",
+            "/studies/" + studyId,
             NotificationPreference::isAssignmentEnabled
         );
     }
@@ -470,7 +477,7 @@ public class NotificationEventProcessor {
             NotificationType.CONTEST_FINALIZED,
             "대회 결과 확정",
             content,
-            "/contests/" + contestId + "/standings",
+            "/contests/" + contestId,
             NotificationPreference::isExamContestEnabled
         );
     }
@@ -488,7 +495,7 @@ public class NotificationEventProcessor {
             NotificationType.GITHUB_SYNC_FAILED,
             "GitHub 동기화 실패",
             content,
-            "/settings/github",
+            "/mypage?tab=github",
             NotificationPreference::isGithubSyncEnabled
         );
     }

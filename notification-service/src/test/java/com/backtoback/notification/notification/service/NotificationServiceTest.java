@@ -8,6 +8,9 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -44,7 +47,8 @@ class NotificationServiceTest {
 
     @BeforeEach
     void setUp() {
-        notificationService = new NotificationService(notificationRepository);
+        Clock clock = Clock.fixed(Instant.parse("2026-11-17T12:00:00Z"), ZoneId.of("Asia/Seoul"));
+        notificationService = new NotificationService(notificationRepository, clock);
     }
 
     @Test

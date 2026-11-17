@@ -184,7 +184,7 @@ class RunServiceTest {
             var executor = Executors.newVirtualThreadPerTaskExecutor();
             var heartbeat = Executors.newSingleThreadScheduledExecutor()
         ) {
-            var service = new ExamRunService(examRuns(executor, heartbeat), contexts);
+            var service = new ExamRunService(examRuns(executor, heartbeat), contexts, java.time.Clock.systemUTC());
             var response = service.run(request);
             assertThat(response.completedAt()).isNotNull();
             assertThat(response.results()).satisfiesExactly(sampleResult -> {
@@ -209,6 +209,60 @@ class RunServiceTest {
         org.mockito.Mockito.verifyNoMoreInteractions(assets);
     }
 
+    /** 진단의 고정 회차에서 공개 예제와 직접 입력만 실행하고 내부 결과를 반환한다. */
+    @Test
+    @DisplayName("Member가 검증한 진단 Run은 Contest를 호출하지 않고 공개 예제·직접 입력만 실행한다")
+    void runsDiagnosisSamplesWithoutContest() throws Exception {
+        var contexts = mock(ExamRunContextClient.class);
+        var sample = new Asset("sample", "1", "a".repeat(64));
+        var hidden = new Asset("hidden", "1", "b".repeat(64));
+        prepare(List.of(new TestCase("1", 1, false, hidden), new TestCase("2", 2, true, sample)));
+        when(access.examRunRuntime(301L, 1001L, "python3"))
+            .thenReturn(new JudgeRuntime("python3", 71, "Python", "3.11", null));
+        when(assets.read(sample)).thenReturn(new TestContent(Map.of("a", "1"), "2"));
+        when(client.find("judge-token")).thenReturn(result(3, "2", null), result(3, "4", null));
+        var base = examRequest();
+        var request
+            = new ExamRunRequest(
+                "DIAGNOSIS",
+                base.contextId(),
+                base.memberId(),
+                base.problemId(),
+                base.problemRevisionId(),
+                base.language(),
+                base.sourceCode(),
+                base.customTests()
+            );
+        try (
+            var executor = Executors.newVirtualThreadPerTaskExecutor();
+            var heartbeat = Executors.newSingleThreadScheduledExecutor()
+        ) {
+            var service = new ExamRunService(examRuns(executor, heartbeat), contexts, java.time.Clock.systemUTC());
+            var response = service.run(request);
+            assertThat(response.completedAt()).isNotNull();
+            assertThat(response.results()).satisfiesExactly(sampleResult -> {
+                assertThat(sampleResult.type()).isEqualTo("SAMPLE");
+                assertThat(sampleResult.index()).isZero();
+                assertThat(sampleResult.output()).isEqualTo("2");
+                assertThat(sampleResult.error()).isNull();
+                assertThat(sampleResult.stdout()).isNotNull();
+            }, customResult -> {
+                assertThat(customResult.type()).isEqualTo("CUSTOM");
+                assertThat(customResult.index()).isZero();
+                assertThat(customResult.output()).isEqualTo("4");
+                assertThat(customResult.error()).isNull();
+            });
+        }
+        var order = org.mockito.Mockito.inOrder(locks, contexts, access, data);
+        order.verify(locks).acquire(7L);
+        verifyNoInteractions(contexts);
+        order.verify(access).examRunRuntime(301L, 1001L, "python3");
+        order.verify(data).find(301L, 1001L);
+        order.verify(locks).release(lease);
+        verify(assets).read(sample);
+        org.mockito.Mockito.verifyNoMoreInteractions(assets);
+    }
+
     /** 권한 거절과 의존 장애는 시험 자료 조회 전에 종료한다. */
     @Test
     @DisplayName("시험 권한 확인에 실패하면 실행하지 않고 제한을 해제한다")
@@ -224,7 +278,7 @@ class RunServiceTest {
             var executor = Executors.newVirtualThreadPerTaskExecutor();
             var heartbeat = Executors.newSingleThreadScheduledExecutor()
         ) {
-            var service = new ExamRunService(examRuns(executor, heartbeat), contexts);
+            var service = new ExamRunService(examRuns(executor, heartbeat), contexts, java.time.Clock.systemUTC());
             assertThatThrownBy(() -> service.run(request))
                 .isInstanceOfSatisfying(
                     JudgeException.class,
@@ -251,7 +305,7 @@ class RunServiceTest {
             var executor = Executors.newVirtualThreadPerTaskExecutor();
             var heartbeat = Executors.newSingleThreadScheduledExecutor()
         ) {
-            var service = new ExamRunService(examRuns(executor, heartbeat), contexts);
+            var service = new ExamRunService(examRuns(executor, heartbeat), contexts, java.time.Clock.systemUTC());
             assertThatThrownBy(() -> service.run(examRequest()))
                 .isInstanceOfSatisfying(
                     JudgeException.class,

@@ -123,13 +123,14 @@ class GithubConnectionServiceTest {
             .extracting(e -> ((IntegrationException)e).getErrorCode())
             .isEqualTo(IntegrationErrorCode.GITHUB_INSTALLATION_INVALID);
 
-        verify(githubStateStore, never()).consume(anyString());
+        verify(githubStateStore, never()).findMemberId(anyString());
+        verify(githubStateStore, never()).delete(anyString());
     }
 
     @Test
     @DisplayName("설치 완료 시 state가 유효하지 않으면 GITHUB_INSTALLATION_INVALID 예외가 발생한다")
     void installWithInvalidState() {
-        given(githubStateStore.consume("invalid-state")).willReturn(Optional.empty());
+        given(githubStateStore.findMemberId("invalid-state")).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> githubConnectionService.install(1L, "12345", "invalid-state"))
             .isInstanceOf(IntegrationException.class)
@@ -140,7 +141,7 @@ class GithubConnectionServiceTest {
     @Test
     @DisplayName("설치 완료 시 타 회원이 이미 연결한 installationId이면 GITHUB_ALREADY_CONNECTED 예외가 발생한다")
     void installWithAlreadyConnectedByOtherMember() {
-        given(githubStateStore.consume("valid-state")).willReturn(Optional.of(1L));
+        given(githubStateStore.findMemberId("valid-state")).willReturn(Optional.of(1L));
 
         GithubConnection otherConnection
             = GithubConnection
@@ -167,9 +168,9 @@ class GithubConnectionServiceTest {
     }
 
     @Test
-    @DisplayName("선택된 저장소가 1개가 아니면 GITHUB_REPOSITORY_INVALID 예외가 발생한다")
+    @DisplayName("선택된 저장소가 1개가 아니면 GITHUB_REPOSITORY_INVALID 예외가 발생하고 state는 삭제되지 않는다")
     void installWithInvalidRepositoryCount() {
-        given(githubStateStore.consume("valid-state")).willReturn(Optional.of(1L));
+        given(githubStateStore.findMemberId("valid-state")).willReturn(Optional.of(1L));
         given(githubConnectionRepository.findByInstallationId(12345L)).willReturn(Optional.empty());
         given(githubAppClient.getInstallation(12345L))
             .willReturn(
@@ -204,12 +205,13 @@ class GithubConnectionServiceTest {
             .isInstanceOf(IntegrationException.class)
             .extracting(e -> ((IntegrationException)e).getErrorCode())
             .isEqualTo(IntegrationErrorCode.GITHUB_REPOSITORY_INVALID);
+        verify(githubStateStore, never()).delete(anyString());
     }
 
     @Test
-    @DisplayName("정상 설치 완료 시 토큰을 암호화하여 저장하고 연동 결과를 반환한다")
+    @DisplayName("정상 설치 완료 시 토큰을 암호화하여 저장하고 state를 삭제한 뒤 연동 결과를 반환한다")
     void installSuccess() {
-        given(githubStateStore.consume("valid-state")).willReturn(Optional.of(1L));
+        given(githubStateStore.findMemberId("valid-state")).willReturn(Optional.of(1L));
         given(githubConnectionRepository.findByInstallationId(12345L)).willReturn(Optional.empty());
         given(githubAppClient.getInstallation(12345L))
             .willReturn(
@@ -253,15 +255,16 @@ class GithubConnectionServiceTest {
         assertThat(response.status()).isEqualTo("CONNECTED");
         assertThat(response.repositoryName()).isEqualTo("algorithm-repo");
         assertThat(response.isAutoCommitEnabled()).isTrue();
-        // 암호화기 호출 검증
+        // 암호화기 및 state 삭제 검증
         verify(tokenEncryptor).encrypt("plain-token");
         verify(githubConnectionRepository).save(any(GithubConnection.class));
+        verify(githubStateStore).delete("valid-state");
     }
 
     @Test
     @DisplayName("설치 정보 저장 시 DataIntegrityViolationException이 발생하면 GITHUB_ALREADY_CONNECTED 예외로 변환된다")
     void installWithDataIntegrityViolationThrowsAlreadyConnected() {
-        given(githubStateStore.consume("valid-state")).willReturn(Optional.of(1L));
+        given(githubStateStore.findMemberId("valid-state")).willReturn(Optional.of(1L));
         given(githubConnectionRepository.findByInstallationId(12345L)).willReturn(Optional.empty());
         given(githubAppClient.getInstallation(12345L))
             .willReturn(

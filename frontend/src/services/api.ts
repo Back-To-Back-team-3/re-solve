@@ -1,4 +1,6 @@
 import type {
+  DiagnosisRunResult, DiagnosisContent, DiagnosisDetail, DiagnosisDraftRequest, DiagnosisSaved, DiagnosisReceipt,
+  DiagnosisStarted, DiagnosisFinished, DiagnosisHistory,
   RunCreateRequest, JudgeLanguagesResponse, SubmissionAttemptsResponse, SubmissionTestsResponse,
   JudgeJobRecoveryRequest, JudgeJobRecoveryResponse,
   ProblemValidationRequest, ProblemValidationReceipt, ProblemImageUploaded, AdminProblemFilter, ProblemVisibilityChanged,
@@ -67,6 +69,7 @@ import type {
   SubmissionCreateRequest,
   SubmissionSource,
   TagLevel,
+  TagEntryResponse,
   UnreadCountResponse,
   UpdateNotificationPreferencesRequest,
   UserRole,
@@ -170,7 +173,25 @@ export async function apiFetchBlob(path: string): Promise<Blob> {
   return res.blob();
 }
 
+/**
+ * API 명세서 §7.1.1의 SSE 요청에 기존 인증·한 차례 갱신을 적용한다.
+ * 취소 시 갱신 결과를 반영하지 않으며, 최종 401·403은 UNAUTHORIZED로 연결 중단을 알린다.
+ */
+export async function apiFetchStream(path: string, signal: AbortSignal, lastEventId: string): Promise<Response> {
+  const res = await apiRequest(path, {
+    signal,
+    headers: { Accept: "text/event-stream, application/json", ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}) },
+  }, false);
+  if (res.status === 401 || res.status === 403)
+    throw { code: "UNAUTHORIZED", message: "알림 연결 권한을 확인해 주세요." } satisfies ApiError;
+  if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429)
+    throw { code: "CLIENT_ERROR", message: httpErrorMessage(res.status) } satisfies ApiError;
+  if (!res.ok) await readApiResponse<never>(res);
+  return res;
+}
+
 async function apiRequest(path: string, init: RequestInit | undefined, isRetry: boolean): Promise<Response> {
+  init?.signal?.throwIfAborted();
   const token = tokenGetter?.();
   const headers: Record<string, string> = {
     ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
@@ -195,6 +216,7 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
       refreshRes = await fetch("/api/v1/auth/token/refresh", {
         method: "POST",
         credentials: "include",
+        signal: init?.signal,
       });
     } catch {
       throw { code: "UNKNOWN", message: NETWORK_ERROR_MESSAGE } satisfies ApiError;
@@ -211,6 +233,7 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
         code: "UNKNOWN",
         message: "토큰 갱신 응답을 확인하지 못했습니다",
       } satisfies ApiError;
+    init?.signal?.throwIfAborted();
     accessTokenSetter?.(newToken);
     return apiRequest(path, init, true);
   }
@@ -242,13 +265,41 @@ export const memberApi = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  enterTag: (tagId: string) =>
+    apiFetch<TagEntryResponse>("/api/v1/members/me/tag-levels", {
+      method: "POST", body: JSON.stringify({ tagId }),
+    }),
   getTagLevels: () =>
     apiFetch<{ content: TagLevel[] }>("/api/v1/members/me/tag-levels"),
   startDiagnosis: (tagId: string) =>
-    apiFetch<{ diagnosisId: string }>("/api/v1/diagnoses", {
+    apiFetch<DiagnosisStarted>("/api/v1/diagnoses", {
       method: "POST",
       body: JSON.stringify({ tagId }),
     }),
+};
+
+/** 진단 응시는 Member 경로로만 접수하고 일반 풀이 채점 경로와 분리한다. (API 명세서 §1.5) */
+export const diagnosisApi = {
+  // 타입별로 검증한 JSON 원문을 인수 배열에 넣어 INT64를 JS number로 변환하지 않는다.
+  run: (id: string, problemId: string, code: Pick<DiagnosisDraftRequest, "language" | "sourceCode">, customArgumentTexts: string[][]) =>
+    apiFetch<DiagnosisRunResult>(`/api/v1/diagnoses/${id}/problems/${problemId}/runs`, {
+      method: "POST",
+      body: `{"language":${JSON.stringify(code.language)},"sourceCode":${JSON.stringify(code.sourceCode)},"customTests":[${customArgumentTexts.map((args) => `{"args":[${args.join(",")}]}`).join(",")}]}`,
+    }),
+  start: memberApi.startDiagnosis,
+  getDetail: (id: string) => apiFetch<DiagnosisDetail>(`/api/v1/diagnoses/${id}`, { cache: "no-store" }),
+  getProblem: (id: string, problemId: string) =>
+    apiFetch<DiagnosisContent>(`/api/v1/diagnoses/${id}/problems/${problemId}`),
+  getImage: (id: string, problemId: string, imageId: string) =>
+    apiFetchBlob(`/api/v1/diagnoses/${id}/problems/${problemId}/images/${imageId}`),
+  saveDraft: (id: string, problemId: string, body: DiagnosisDraftRequest) =>
+    apiFetch<DiagnosisSaved>(`/api/v1/diagnoses/${id}/problems/${problemId}/draft`, { method: "PUT", body: JSON.stringify(body) }),
+  submit: (id: string, problemId: string, body: DiagnosisDraftRequest) =>
+    apiFetch<DiagnosisReceipt>(`/api/v1/diagnoses/${id}/problems/${problemId}/submissions`, { method: "POST", body: JSON.stringify(body) }),
+  finish: (id: string) => apiFetch<DiagnosisFinished>(`/api/v1/diagnoses/${id}/finish`, { method: "POST" }),
+  getHistory: (page = 0, tagId?: string) => apiFetch<ServerPage<DiagnosisHistory>>(
+    `/api/v1/diagnoses?page=${page}&size=20${tagId ? `&tagId=${encodeURIComponent(tagId)}` : ""}`,
+  ),
 };
 
 // 문제 태그 API — B 도메인 §2.5.1 (SkillPage 태그 이름 표시용)

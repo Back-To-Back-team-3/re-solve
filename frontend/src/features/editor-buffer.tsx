@@ -251,7 +251,7 @@ export function Buffer({
           <EditorMonaco code={code} language={language} fontSize={fontSize} onChange={edit} />
         )}
       </div>
-      <section className="results stack-sm flex-1">
+      <section className="results stack-sm flex-1 max-h-[50dvh] overflow-y-auto overscroll-contain">
         <h3>실행 결과</h3>
         <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} error={requestError}
           disabled={busy || busyRun} paused={paused} onRetry={() => handleSubmit(true)}
