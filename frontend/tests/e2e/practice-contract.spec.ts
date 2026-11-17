@@ -95,3 +95,18 @@ test("공개 테스트가 없으면 예시 본문의 Markdown 표를 유지한�
   await expect(tables).toHaveCount(1);
   await expect(tables.getByRole("cell")).toHaveText(["[1,2]", "3"]);
 });
+
+test("공개 테스트와 같은 값의 표에 포함된 풀이 이미지를 유지한다", async ({ page }) => {
+  await mockPracticePage(page);
+  await page.route("**/api/v1/problems/1001", (route) => route.fulfill({ json: { success: true, data: {
+    ...problemDetail, examples: "| items | result |\n| --- | --- |\n| `[1,2]` ![풀이 이미지](/solution-image.svg) | 3 |",
+  } } }));
+  await page.route("**/solution-image.svg", (route) => route.fulfill({ contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="green"/></svg>',
+  }));
+  await page.goto("/problems/1001");
+  await expect(page.locator(".problem-panel .markdown table")).toHaveCount(2);
+  const image = page.getByRole("img", { name: "풀이 이미지", exact: true });
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((element) => element instanceof HTMLImageElement && element.naturalWidth > 0)).toBe(true);
+});

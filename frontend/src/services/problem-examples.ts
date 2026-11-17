@@ -14,8 +14,15 @@ function sampleText(text: string): string {
     : value;
 }
 
+function hasOnlySampleText(node: Nodes): boolean {
+  if (node.type === "text" || node.type === "inlineCode") return true;
+  return ["table", "tableRow", "tableCell", "strong", "emphasis", "delete"].includes(node.type)
+    && "children" in node && node.children.every(hasOnlySampleText);
+}
+
 function isSampleTable(table: Table, problem: Problem): boolean {
-  if (!problem.samples.length || table.children.length < 2) return false;
+  // 이미지·링크·각주 등 텍스트 비교에 포함되지 않는 정보를 가진 표는 보존한다.
+  if (!problem.samples.length || table.children.length < 2 || !hasOnlySampleText(table)) return false;
   const structured = problem.samples.every((sample) => sample.argumentTexts !== undefined);
   const columns = structured ? problem.functionSpec.parameters.map(({ name }) => name) : ["입력"];
   const [header, ...rows] = table.children;

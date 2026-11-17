@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Root, Table } from "mdast";
+import type { PhrasingContent, Root, Table } from "mdast";
 import { remarkSampleTables } from "@/services/problem-examples";
 import type { Problem } from "@/services/types";
 
@@ -18,6 +18,18 @@ function table(rows: string[][]): Table {
 }
 
 describe("예시 Markdown 공개 테스트 중복 제거", () => {
+  it.each<PhrasingContent[]>([
+    [{ type: "inlineCode", value: "[1,2]" }, { type: "image", url: "image:1", alt: "풀이" }],
+    [{ type: "inlineCode", value: "[1,2]" }, { type: "imageReference", identifier: "풀이", referenceType: "full" }],
+    [{ type: "link", url: "/explanation", children: [{ type: "inlineCode", value: "[1,2]" }] }],
+    [{ type: "inlineCode", value: "[1,2]" }, { type: "footnoteReference", identifier: "풀이" }],
+  ])("이미지·링크·각주 정보를 가진 표는 공개 테스트와 텍스트가 같아도 보존한다: %j", (...children) => {
+    const original = table([["items", "result"], ["[1,2]", "3"]]);
+    original.children[1].children[0].children = children;
+    const tree: Root = { type: "root", children: [original] };
+    remarkSampleTables(problem)(tree);
+    expect(tree.children).toEqual([original]);
+  });
   it("배열 표시 공백이 다른 공개 예제 표를 제거하고 앞뒤 해설을 보존한다", () => {
     const tree: Root = { type: "root", children: [
       { type: "paragraph", children: [{ type: "text", value: "풀이 과정" }] },
