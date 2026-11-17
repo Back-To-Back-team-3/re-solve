@@ -16,7 +16,7 @@ import {
   setMemberGetter,
   setTokenGetter,
 } from "../services/api";
-import type { RunTestCase } from "@/services/run-inputs";
+import type { RunInputDraft } from "@/services/run-input-draft";
 import type { JudgeJobFilter, JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
 import { Loading } from "../components/ui";
 export interface Draft {
@@ -69,8 +69,10 @@ interface Workspace {
   setJudgeRecoveryReason: (key: string, reason: string) => void;
   viewPages: Record<string, number | undefined>;
   setViewPage: (key: string, page: number) => void;
-  practiceRunInputs: Record<string, { useSamples: boolean; customInputs: RunTestCase[] } | undefined>;
-  setPracticeRunInputs: (key: string, value: Partial<{ useSamples: boolean; customInputs: RunTestCase[] }>) => void;
+  practiceRunInputs: Record<string, (RunInputDraft & { dirty: boolean }) | undefined>;
+  setPracticeRunInputs: (key: string, value: Partial<RunInputDraft>) => void;
+  restorePracticeRunInputs: (key: string, value: RunInputDraft) => void;
+  markPracticeRunInputsSaved: (key: string, snapshot: RunInputDraft) => void;
   submissionAttempts: Record<string, number | undefined>;
   setSubmissionAttempt: (key: string, value: number) => void;
   member: Member | null;
@@ -110,7 +112,12 @@ const createWorkspace = () =>
     setViewPage: (key, page) => set((state) => ({ viewPages: { ...state.viewPages, [key]: page } })),
     practiceRunInputs: {},
     setPracticeRunInputs: (key, value) => set((state) => ({ practiceRunInputs: { ...state.practiceRunInputs,
-      [key]: { useSamples: true, customInputs: [], ...state.practiceRunInputs[key], ...value } } })),
+      [key]: { useSamples: true, customInputs: [], ...state.practiceRunInputs[key], ...value, dirty: true } } })),
+    restorePracticeRunInputs: (key, value) => set((state) => state.practiceRunInputs[key] ? state
+      : { practiceRunInputs: { ...state.practiceRunInputs, [key]: { ...value, dirty: false } } }),
+    // 저장한 스냅샷만 완료 처리해 이후 편집값이나 로그아웃 상태를 덮지 않는다.
+    markPracticeRunInputsSaved: (key, snapshot) => set((state) => state.practiceRunInputs[key] !== snapshot ? state
+      : { practiceRunInputs: { ...state.practiceRunInputs, [key]: { ...snapshot, dirty: false } } }),
     submissionAttempts: {},
     setSubmissionAttempt: (key, value) => set((state) => ({ submissionAttempts: { ...state.submissionAttempts, [key]: value } })),
     practiceSubmissions: {},

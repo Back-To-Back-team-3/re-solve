@@ -8,6 +8,7 @@ import { draftKey, readDraft, saveDraft, useWorkspace, useWorkspaceApi } from "@
 import type { Language, Problem, RunResponse } from "@/services/types";
 import { JudgePoll, EditorResultPanel } from "@/features/editor-results";
 import { EditorMonaco } from "@/features/editor-monaco";
+import { useRunInputDraft } from "@/features/editor-run-draft";
 import { EditorRunInputs } from "@/features/editor-run-inputs";
 import { EditorActions } from "@/features/editor-actions";
 import { EditorSubmissionStatus } from "@/features/editor-submission-status";
@@ -50,12 +51,10 @@ export function Buffer({
     [judgeError, setJudgeError] = useState<string | null>(null),
     [requestError, setRequestError] = useState<string | null>(null);
   const runInputKey = JSON.stringify([userId, examId ?? "practice", problem.id, problem.problemRevisionId]);
-  const runConfiguration = useWorkspace((state) => state.practiceRunInputs[runInputKey]);
+  const { configuration: runConfiguration, storageError: runStorageError } = useRunInputDraft(runInputKey);
   const setRunInputs = useWorkspace((state) => state.setPracticeRunInputs);
-  const useSamples = runConfiguration?.useSamples ?? true;
   const customInputs = runConfiguration?.customInputs ?? [];
-  const setUseSamples = (value: boolean) => setRunInputs(runInputKey, { useSamples: value });
-  const setCustomInputs = (value: RunTestCase[]) => setRunInputs(runInputKey, { customInputs: value });
+  const setCustomInputs = (value: RunTestCase[]) => setRunInputs(runInputKey, { useSamples: true, customInputs: value });
   const submissionKey = JSON.stringify([key, problem.problemRevisionId]);
   const submissions = useWorkspace((state) => state.practiceSubmissions);
   const pending = useWorkspace((state) => state.practiceRequests[submissionKey]);
@@ -172,8 +171,8 @@ export function Buffer({
           problemRevisionId: problem.problemRevisionId,
           language,
           sourceCode: codeRef.current,
-          useSamples: examId ? true : useSamples,
-          customInputs: examId ? [] : runInputs(problem.functionSpec.parameters, customInputs.map((row) => row.arguments), useSamples),
+          useSamples: true,
+          customInputs: examId ? [] : runInputs(problem.functionSpec.parameters, customInputs.map((row) => row.arguments), true),
         }),
       );
     } catch (e) {
@@ -270,9 +269,8 @@ export function Buffer({
       {!examId && <Modal open={testCasesOpen} onOpenChange={setTestCasesOpen}
         title="테스트 케이스" description="공개 예제와 직접 입력한 값으로 실행합니다. 제출 시에는 전체 테스트로 채점합니다.">
         <EditorRunInputs parameters={problem.functionSpec.parameters} returnType={problem.functionSpec.returnInputType}
-          rows={customInputs} useSamples={useSamples} disabled={busy || busyRun}
-          onRows={setCustomInputs} onSamples={setUseSamples} />
-        <Button className="primary" onClick={() => setTestCasesOpen(false)}>적용</Button>
+          rows={customInputs} disabled={busy || busyRun}
+          onRows={setCustomInputs} storageError={runStorageError} />
       </Modal>}
       <Modal
         open={reset}

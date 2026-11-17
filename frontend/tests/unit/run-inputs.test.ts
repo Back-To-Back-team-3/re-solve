@@ -55,13 +55,15 @@ it("실행 대상 누락·6개 입력·잘못된 숫자·범위 초과와 누락
     [{ a: scalar("9223372036854775808") }], false)).toThrow("허용 범위");
 });
 
-it("선택 기대값은 미입력과 빈 문자열을 구분하고 실행 시점의 문자열로 고정한다", () => {
+it("선택 기대값은 빈칸을 미입력으로 처리하고 입력한 값은 실행 시점의 문자열로 고정한다", () => {
   const rows = [{ arguments: {}, expectedOutput: scalar("9007199254740993") }, { arguments: {} }];
   const snapshot = runExpectedOutputs({ kind: "INT64" }, rows);
   expect(snapshot).toEqual(["9007199254740993", null]);
   rows[0].expectedOutput = scalar("10");
   expect(snapshot[0]).toBe("9007199254740993");
-  expect(runExpectedOutputs({ kind: "STRING" }, [{ arguments: {}, expectedOutput: scalar("") }])).toEqual(['""']);
+  expect(runExpectedOutputs({ kind: "STRING" }, [{ arguments: {}, expectedOutput: scalar("") }])).toEqual([null]);
+  expect(runExpectedOutputs({ kind: "INT32" }, [{ arguments: {}, expectedOutput: { kind: "TEXT", text: "" } }])).toEqual([null]);
+  expect(runExpectedOutputs({ kind: "STRING" }, [{ arguments: {}, expectedOutput: scalar(" ") }])).toEqual(['" "']);
   expect(runExpectedOutputs({ kind: "ARRAY", elementType: { kind: "INT32" } },
     [{ arguments: {}, expectedOutput: array() }])).toEqual(["[]"]);
   expect(runExpectedOutputs(undefined, [{ arguments: {} }])).toEqual([null]);
@@ -89,4 +91,63 @@ it("FLOAT32 반올림 경계를 십진 원문으로 판별해 유효한 경계 �
   for (const text of [`${lower}e-150`, `${BigInt(lower) - 1n}e-150`, upper.toString(), (upper + 1n).toString()]) {
     expect(() => runInputs(parameters, [{ a: scalar(text) }], false)).toThrow("표현 범위");
   }
+});
+
+const raw = (text: string): RunInputValue => ({ kind: "TEXT", text });
+const encodeText = (kind: string, text: string) => runInputs([{ name: "value", inputType: { kind } }], [{ value: raw(text) }], false)[0].argumentTexts.value;
+
+it.each([
+  ["INT32", "-2147483648", "-2147483648"], ["INT32", "2147483647", "2147483647"],
+  ["INT64", "-9223372036854775808", "-9223372036854775808"], ["INT64", "9223372036854775807", "9223372036854775807"],
+  ["FLOAT32", "1e-45", "1e-45"], ["FLOAT64", "1.0000000000000001", "1.0000000000000001"],
+  ["BOOLEAN", "false", "false"], ["BOOLEAN", "true", "true"],
+  ["STRING", "32", '"32"'], ["STRING", "", '""'], ["STRING", "  hello\n세계  ", JSON.stringify("  hello\n세계  ")],
+])("%s 텍스트 %s를 선언 타입으로 변환한다", (kind, text, expected) => {
+  expect(encodeText(kind, text)).toBe(expected);
+});
+
+it.each([
+  ["INT32", "2147483648"], ["INT32", "-2147483649"], ["INT64", "9223372036854775808"],
+  ["INT64", "-9223372036854775809"], ["INT64", "1e3"], ["INT32", '"32"'],
+  ["BOOLEAN", "1"], ["BOOLEAN", "True"], ["BOOLEAN", ""], ["FLOAT32", "1e100"], ["FLOAT64", "1e-999"],
+])("%s의 잘못된 텍스트 %s를 자동 변환하지 않는다", (kind, text) => {
+  expect(() => encodeText(kind, text)).toThrow("직접 입력 1의 value");
+});
+
+it("중첩 배열·객체의 큰 정수와 소수 원문을 보존한다", () => {
+  const type = { kind: "OBJECT", properties: {
+    values: { kind: "ARRAY", elementType: { kind: "INT64" } },
+    decimal: { kind: "FLOAT64" }, label: { kind: "STRING" },
+  } };
+  const text = '{"values":[9223372036854775807,-9223372036854775808],"decimal":1.0000000000000001,"label":"32"}';
+  const value = raw(text);
+  expect(runInputs([{ name: "data", inputType: type }], [{ data: value }], false)[0].argumentTexts.data).toBe(text);
+  expect(value).toEqual(raw(text));
+});
+
+it("텍스트 배열의 위치별·반복 타입과 빈 배열을 검증한다", () => {
+  const tuple = { kind: "ARRAY", positionTypes: [{ kind: "INT64" }, { kind: "STRING" }] };
+  const repeated = { kind: "ARRAY", repeatTypes: [{ kind: "INT32" }, { kind: "BOOLEAN" }] };
+  const write = (type: typeof tuple | typeof repeated, text: string) => runInputs([{ name: "data", inputType: type }], [{ data: raw(text) }], false)[0].argumentTexts.data;
+  expect(write(tuple, '[9007199254740993,"text"]')).toBe('[9007199254740993,"text"]');
+  expect(write(repeated, '[]')).toBe('[]');
+  expect(write(repeated, '[1,true,2,false]')).toBe('[1,true,2,false]');
+  for (const text of ['[]', '[1]', '[1,2]', '[null,"text"]']) expect(() => write(tuple, text)).toThrow();
+  expect(() => write(repeated, '[1,true,2]')).toThrow("항목 수");
+});
+
+it("잘못된 JSON·중복 키·필드 집합·중첩 오류를 위치와 함께 거절하고 원문을 유지한다", () => {
+  const type = { kind: "OBJECT", properties: { items: { kind: "ARRAY", elementType: { kind: "INT32" } } } };
+  for (const text of ['{"items":', '{"items":[1,]}', '{"items":[],"items":[]}', '{"items":[],"\\u0069tems":[]}', '{"other":[]}', '{"items":[],"extra":1}']) {
+    const value = raw(text);
+    expect(() => runInputs([{ name: "data", inputType: type }], [{ data: value }], false)).toThrow("직접 입력 1의 data");
+    expect(value).toEqual(raw(text));
+  }
+  expect(() => runInputs([{ name: "data", inputType: type }], [{ data: raw('{"items":[1,"2"]}') }], false)).toThrow("data.items[2]");
+  expect(() => runInputs([{ name: "data", inputType: type }], [{ data: raw('{"items":[2147483648]}') }], false)).toThrow("data.items[1]");
+});
+
+it("모든 타입의 텍스트 기대값은 자동 비교 없이 표시용으로만 변환한다", () => {
+  expect(runExpectedOutputs({ kind: "INT64" }, [{ arguments: {}, expectedOutput: raw("9223372036854775807") }])).toEqual(["9223372036854775807"]);
+  expect(runExpectedOutputs({ kind: "STRING" }, [{ arguments: {}, expectedOutput: raw("hello") }])).toEqual(['"hello"']);
 });
