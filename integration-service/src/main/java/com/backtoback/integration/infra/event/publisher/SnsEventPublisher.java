@@ -38,7 +38,7 @@ public class SnsEventPublisher implements EventPublisher {
         @Autowired(required = false) SnsTemplate snsTemplate,
         ObjectMapper objectMapper,
         @Value(
-            "${infra.aws.sns.default-topic-arn:arn:aws:sns:ap-northeast-2:000000000000:resolve-events}"
+            "${infra.aws.sns.default-topic-arn:arn:aws:sns:ap-northeast-2:000000000000:resolve-domain-events-topic}"
         ) String defaultTopicArn
     ) {
         this.snsTemplate = snsTemplate;
