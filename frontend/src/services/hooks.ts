@@ -1,6 +1,8 @@
 "use client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiError } from "./api";
+import { connectNotificationStream } from "@/services/notification-stream";
+import { useWorkspace } from "@/stores/workspace";
 
 export function useResource<T>(
   load: () => Promise<T>,
@@ -160,25 +162,36 @@ export function useExamRankingSSE(
 export function useNotificationSSE(
   onNotification: (event: import("./types").SSENotificationEvent) => void,
 ): void {
+  const memberId = useWorkspace((state) => state.member?.memberId);
+  const authReady = useWorkspace((state) => state.authReady);
   const onNotificationRef = useRef(onNotification);
   useLayoutEffect(() => {
     onNotificationRef.current = onNotification;
   });
 
   useEffect(() => {
-    const es = new EventSource("/api/v1/notifications/subscribe", {
-      withCredentials: true,
-    });
-    es.addEventListener("notification", (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data) as import("./types").SSENotificationEvent;
-        onNotificationRef.current(data);
-      } catch {
-        // 파싱 실패 시 무시
-      }
-    });
-    // heartbeat 이벤트는 연결 유지 목적이므로 무시한다.
-    es.addEventListener("heartbeat", () => {});
-    return () => es.close();
-  }, []);
+    if (!authReady || !memberId) return;
+    return connectNotificationStream((event) => onNotificationRef.current(event));
+  }, [authReady, memberId]);
+}
+
+/** 진단 응시 상태는 알림·재진입·보조 폴링으로 조회하며 쓰기 요청은 화면에서 처리한다. */
+export function useDiagnosisRefresh(refresh: () => Promise<unknown>, done: boolean, enabled: boolean) {
+  const latest = useRef(refresh);
+  useLayoutEffect(() => { latest.current = refresh; });
+  useEffect(() => {
+    if (!enabled || done) return;
+    const poll = () => { void latest.current(); };
+    const timer = setInterval(poll, 5000);
+    const onVisible = () => { if (document.visibilityState === "visible") poll(); };
+    window.addEventListener("focus", poll);
+    window.addEventListener("resolve:level-changed", poll);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", poll);
+      window.removeEventListener("resolve:level-changed", poll);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [done, enabled]);
 }

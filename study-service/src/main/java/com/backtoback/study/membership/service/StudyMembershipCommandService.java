@@ -31,8 +31,6 @@ import com.backtoback.study.membership.repository.StudyMemberQuotaRepository;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
-import com.backtoback.study.replica.domain.MemberStatus;
-import com.backtoback.study.replica.repository.MemberReplicaRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -53,7 +51,6 @@ public class StudyMembershipCommandService {
     private static final String DECIDED_EVENT_TYPE = "StudyApplicationDecided";
     private static final String SCHEMA_VERSION = "v1";
 
-    private final MemberReplicaRepository memberReplicaRepository;
     private final StudyRepository studyRepository;
     private final StudyMembershipRepository membershipRepository;
     private final StudyMembershipHistoryRepository historyRepository;
@@ -66,18 +63,13 @@ public class StudyMembershipCommandService {
     /**
      * 가입 신청(APPROVAL → PENDING) 또는 즉시 가입(INSTANT → APPROVED)을 처리한다(API 명세서 §5.2.2).
      * INSTANT 가입이면 같은 트랜잭션에서 문제집 편입을 수행한다.
+     * 정지 회원 확인은 호출 전에 끝나 있어야 한다(member 원격 조회를 트랜잭션 밖에서 하기 위함).
      *
      * @throws StudyException STUDY_NOT_FOUND, STUDY_NOT_RECRUITING, STUDY_ALREADY_APPLIED,
-     *     STUDY_JOIN_LIMIT_EXCEEDED, STUDY_FULL, MEMBER_SUSPENDED
+     *     STUDY_JOIN_LIMIT_EXCEEDED, STUDY_FULL
      */
     @Transactional
     public StudyJoinResponse join(Long studyId, Long memberId, String correlationId) {
-        memberReplicaRepository.findByMemberId(memberId).ifPresent(replica -> {
-            if (replica.getMemberStatus() == MemberStatus.SUSPENDED) {
-                throw new StudyException(StudyErrorCode.MEMBER_SUSPENDED);
-            }
-        });
-
         Study study
             = studyRepository.findById(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
 

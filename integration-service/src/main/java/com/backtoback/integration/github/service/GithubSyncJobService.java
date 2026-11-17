@@ -238,20 +238,15 @@ public class GithubSyncJobService {
             Optional<GithubSyncJob> jobOpt = syncJobRepository.findBySubmissionIdWithConnection(submissionId);
 
             if (jobOpt.isEmpty()) {
-                GithubSyncJob problemSnapshot
-                    = syncJobRepository
-                        .findFirstByProblemIdOrderByIdDesc(problemId)
-                        .orElseThrow(() -> new IntegrationException(IntegrationErrorCode.GITHUB_SYNC_NOT_ALLOWED));
+                Optional<GithubSyncJob> problemSnapshotOpt
+                    = syncJobRepository.findFirstByProblemIdOrderByIdDesc(problemId);
+                String problemTitle
+                    = problemSnapshotOpt.map(GithubSyncJob::getProblemTitle).orElse("problem-" + problemId);
+                int problemDifficulty = problemSnapshotOpt.map(GithubSyncJob::getProblemDifficulty).orElse(1);
 
                 GithubSyncJob pendingJob
                     = GithubSyncJob
-                        .createPending(
-                            activeConnection,
-                            submissionId,
-                            problemId,
-                            problemSnapshot.getProblemTitle(),
-                            problemSnapshot.getProblemDifficulty()
-                        );
+                        .createPending(activeConnection, submissionId, problemId, problemTitle, problemDifficulty);
 
                 syncJobRepository
                     .insertPendingJobIfAbsent(

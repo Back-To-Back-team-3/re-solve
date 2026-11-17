@@ -27,14 +27,18 @@ import com.backtoback.member.skill.dto.DiagnosisDraftRequest;
 import com.backtoback.member.skill.dto.DiagnosisDraftResponse;
 import com.backtoback.member.skill.dto.DiagnosisFinishResponse;
 import com.backtoback.member.skill.dto.DiagnosisHistoryItem;
+import com.backtoback.member.skill.dto.DiagnosisRunRequest;
+import com.backtoback.member.skill.dto.DiagnosisRunResponse;
 import com.backtoback.member.skill.dto.DiagnosisStartRequest;
 import com.backtoback.member.skill.dto.DiagnosisStartResponse;
 import com.backtoback.member.skill.dto.DiagnosisSubmitRequest;
 import com.backtoback.member.skill.dto.DiagnosisSubmitResponse;
 import com.backtoback.member.skill.service.DiagnosisCooldownException;
+import com.backtoback.member.skill.service.DiagnosisRunService;
 import com.backtoback.member.skill.service.DiagnosisService;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.JsonNode;
 
@@ -47,6 +51,34 @@ public class DiagnosisController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final DiagnosisService diagnosisService;
+    private final DiagnosisRunService diagnosisRuns;
+
+    /**
+     * 본인 진단의 공개 예제와 직접 입력을 제출 없이 실행한다(API 명세서 §1.5.9).
+     *
+     * @param user 인증된 회원
+     * @param diagnosisId 본인 진단 ID
+     * @param problemId 출제 문항 ID
+     * @param request 현재 코드와 직접 입력
+     * @return 진단 점수에 반영하지 않는 실행 결과
+     * @throws com.backtoback.member.global.error.MemberException 권한·응시 시간 검증 또는 실행에 실패한 경우
+     */
+    @PostMapping("/{diagnosisId}/problems/{problemId}/runs")
+    public ResponseEntity<ApiResponse<DiagnosisRunResponse>> run(
+        @AuthenticationPrincipal GatewayUser user,
+        @PathVariable @Positive(message = "진단 ID는 양수여야 합니다.") Long diagnosisId,
+        @PathVariable @Positive(message = "문제 ID는 양수여야 합니다.") Long problemId,
+        @Valid @RequestBody DiagnosisRunRequest request
+    ) {
+        return ResponseEntity
+            .ok(
+                ApiResponse
+                    .success(
+                        DiagnosisRunResponse
+                            .from(diagnosisRuns.run(memberId(user), diagnosisId, problemId, request.toCommand()))
+                    )
+            );
+    }
 
     /**
      * 1.5.1 진단 시작
@@ -110,6 +142,31 @@ public class DiagnosisController {
     ) {
         return ResponseEntity
             .ok(ApiResponse.success(diagnosisService.getProblemContent(memberId(user), diagnosisId, problemId)));
+    }
+
+    /**
+     * 본인 진단의 고정 회차 이미지를 조회한다(API 명세서 1.5.8).
+     *
+     * @param user Gateway 인증 회원
+     * @param diagnosisId 본인 진단 ID
+     * @param problemId 출제 문항 ID
+     * @param imageId 본문 연결 이미지 ID
+     * @return 캐시를 공유하지 않는 이미지 바이너리
+     */
+    @GetMapping("/{diagnosisId}/problems/{problemId}/images/{imageId}")
+    public ResponseEntity<byte[]> image(
+        @AuthenticationPrincipal GatewayUser user,
+        @PathVariable Long diagnosisId,
+        @PathVariable Long problemId,
+        @PathVariable Long imageId
+    ) {
+        var image = diagnosisService.getProblemImage(memberId(user), diagnosisId, problemId, imageId);
+        return ResponseEntity
+            .ok()
+            .contentType(image.getHeaders().getContentType())
+            .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+            .header("X-Content-Type-Options", "nosniff")
+            .body(image.getBody());
     }
 
     /**

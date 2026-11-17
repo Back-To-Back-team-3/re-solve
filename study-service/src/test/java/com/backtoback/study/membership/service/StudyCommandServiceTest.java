@@ -12,7 +12,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,9 +33,6 @@ import com.backtoback.study.membership.repository.StudyMemberQuotaRepository;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
-import com.backtoback.study.replica.domain.MemberReplica;
-import com.backtoback.study.replica.domain.MemberStatus;
-import com.backtoback.study.replica.repository.MemberReplicaRepository;
 
 /**
  * 스터디 생성 정상·예외 시나리오를 검증한다(API 명세서 §5.2.1).
@@ -47,8 +43,6 @@ class StudyCommandServiceTest {
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 11, 1, 10, 0);
     private static final Instant NOW_INSTANT = NOW.toInstant(ZoneOffset.of("+09:00"));
 
-    @Mock
-    private MemberReplicaRepository memberReplicaRepository;
     @Mock
     private StudyMemberQuotaRepository quotaRepository;
     @Mock
@@ -87,7 +81,6 @@ class StudyCommandServiceTest {
     @DisplayName("정상 요청이면 스터디를 생성하고 studyId를 반환한다")
     void createStudy_success() {
         // given
-        given(memberReplicaRepository.findByMemberId(1L)).willReturn(Optional.empty());
         given(quotaRepository.incrementIfBelowLimit(1L)).willReturn(1);
         given(clock.instant()).willReturn(NOW_INSTANT);
 
@@ -111,25 +104,9 @@ class StudyCommandServiceTest {
     }
 
     @Test
-    @DisplayName("SUSPENDED 회원이면 MEMBER_SUSPENDED 예외를 던진다")
-    void createStudy_suspended_throwsMemberSuspended() {
-        // given
-        MemberReplica replica = MemberReplica.sync(1L, "user1", null, MemberStatus.SUSPENDED, 1L, NOW);
-        given(memberReplicaRepository.findByMemberId(1L)).willReturn(Optional.of(replica));
-
-        // when & then
-        assertThatThrownBy(() -> studyCommandService.createStudy(1L, request, "corr-1"))
-            .isInstanceOfSatisfying(
-                StudyException.class,
-                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.MEMBER_SUSPENDED)
-            );
-    }
-
-    @Test
     @DisplayName("참여 상한 초과이면 STUDY_JOIN_LIMIT_EXCEEDED 예외를 던진다")
     void createStudy_quotaExceeded_throwsLimitExceeded() {
         // given
-        given(memberReplicaRepository.findByMemberId(1L)).willReturn(Optional.empty());
         given(quotaRepository.incrementIfBelowLimit(1L)).willReturn(0);
 
         // when & then

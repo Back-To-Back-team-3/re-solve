@@ -19,6 +19,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -79,6 +81,43 @@ class NotificationEventProcessorTest {
                 examReminderService,
                 clock
             );
+    }
+
+    /**
+     * 모든 태그 레벨 변경 사유의 알림이 스킬 탭으로 연결되는지 검증한다.
+     *
+     * @param reasonType 태그 레벨 변경 사유
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "DIAGNOSIS",
+            "PROMOTION",
+            "REJUDGE",
+            "COOLDOWN_RELEASED"
+        }
+    )
+    @DisplayName("태그 레벨 알림은 마이페이지 스킬 탭으로 연결한다")
+    void processTagLevelChangedLinksToSkillTab(String reasonType) {
+        JsonNode payload = objectMapper.readTree("""
+            {
+              "memberId": "7",
+              "tagId": "2",
+              "tagName": "해시",
+              "toLevel": "LV2",
+              "reasonType": "%s"
+            }
+            """.formatted(reasonType));
+        given(notificationRepository.saveAndFlush(any(Notification.class)))
+            .willAnswer(invocation -> invocation.getArgument(0));
+
+        eventProcessor.process("evt-level-1", "TagLevelChanged", payload);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getMemberId()).isEqualTo(7L);
+        assertThat(captor.getValue().getType()).isEqualTo(NotificationType.LEVEL_CHANGED);
+        assertThat(captor.getValue().getLinkUrl()).isEqualTo("/mypage?tab=skill");
     }
 
     @Test

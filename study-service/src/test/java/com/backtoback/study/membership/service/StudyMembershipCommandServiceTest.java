@@ -41,9 +41,6 @@ import com.backtoback.study.membership.repository.StudyMemberQuotaRepository;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
-import com.backtoback.study.replica.domain.MemberReplica;
-import com.backtoback.study.replica.domain.MemberStatus;
-import com.backtoback.study.replica.repository.MemberReplicaRepository;
 
 /**
  * 스터디 가입 신청·즉시 가입 정상·예외 시나리오를 검증한다(API 명세서 §5.2.2).
@@ -57,8 +54,6 @@ class StudyMembershipCommandServiceTest {
     private static final Long MEMBER_ID = 10L;
     private static final String CORR_ID = "corr-1";
 
-    @Mock
-    private MemberReplicaRepository memberReplicaRepository;
     @Mock
     private StudyRepository studyRepository;
     @Mock
@@ -85,7 +80,6 @@ class StudyMembershipCommandServiceTest {
     @BeforeEach
     void setUp() {
         lenient().when(clock.instant()).thenReturn(NOW_INSTANT);
-        lenient().when(memberReplicaRepository.findByMemberId(MEMBER_ID)).thenReturn(Optional.empty());
         lenient()
             .when(membershipRepository.findByStudyIdAndMemberIdAndStatusIn(any(), any(), any()))
             .thenReturn(Optional.empty());
@@ -220,19 +214,6 @@ class StudyMembershipCommandServiceTest {
             .isInstanceOfSatisfying(
                 StudyException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_FULL)
-            );
-    }
-
-    @Test
-    @DisplayName("정지된 회원이 가입하면 MEMBER_SUSPENDED 예외를 던진다")
-    void join_suspended_throwsMemberSuspended() {
-        MemberReplica replica = MemberReplica.sync(MEMBER_ID, "user1", null, MemberStatus.SUSPENDED, 1L, NOW);
-        given(memberReplicaRepository.findByMemberId(MEMBER_ID)).willReturn(Optional.of(replica));
-
-        assertThatThrownBy(() -> service.join(STUDY_ID, MEMBER_ID, CORR_ID))
-            .isInstanceOfSatisfying(
-                StudyException.class,
-                e -> assertThat(e.getErrorCode()).isEqualTo(StudyErrorCode.MEMBER_SUSPENDED)
             );
     }
 

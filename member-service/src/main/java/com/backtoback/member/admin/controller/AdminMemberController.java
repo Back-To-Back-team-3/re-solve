@@ -9,6 +9,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -22,7 +23,10 @@ import com.backtoback.member.admin.dto.MemberRoleChangeRequest;
 import com.backtoback.member.admin.dto.MemberRoleChangeResponse;
 import com.backtoback.member.admin.dto.MemberStatusChangeRequest;
 import com.backtoback.member.admin.dto.MemberStatusChangeResponse;
+import com.backtoback.member.admin.dto.MemberUpdatedRepublishRequest;
+import com.backtoback.member.admin.dto.MemberUpdatedRepublishResponse;
 import com.backtoback.member.admin.service.AdminMemberService;
+import com.backtoback.member.admin.service.MemberUpdatedRepublishService;
 import com.backtoback.member.member.domain.MemberRole;
 import com.backtoback.member.member.domain.MemberStatus;
 
@@ -44,6 +48,7 @@ public class AdminMemberController {
     private static final int MAX_CLIENT_IP_LENGTH = 45;
 
     private final AdminMemberService adminMemberService;
+    private final MemberUpdatedRepublishService memberUpdatedRepublishService;
 
     /**
      * 1.6.1 회원 목록 조회 — 허용 정렬 필드는 {@code createdAt}뿐이다(기본 {@code createdAt,desc}).
@@ -111,6 +116,21 @@ public class AdminMemberController {
                         .changeRole(actorId(admin), memberId, request.role(), request.reason(), clientIp(httpRequest))
                 );
         return ResponseEntity.ok(ApiResponse.success("권한이 변경되었습니다.", response));
+    }
+
+    /**
+     * 1.6.4 회원 정보 이벤트 재발행 — 탈퇴하지 않은 회원 전원의 {@code MemberUpdated}를 현재 순서 값으로 다시 발행한다.
+     */
+    @PostMapping("/member-updated/republish")
+    public ResponseEntity<ApiResponse<MemberUpdatedRepublishResponse>> republishMemberUpdated(
+        @AuthenticationPrincipal GatewayUser admin,
+        @Valid @RequestBody MemberUpdatedRepublishRequest request,
+        HttpServletRequest httpRequest
+    ) {
+        long publishedCount
+            = memberUpdatedRepublishService.republishAll(actorId(admin), request.reason(), clientIp(httpRequest));
+        return ResponseEntity
+            .ok(ApiResponse.success("회원 정보 이벤트를 다시 발행했습니다.", new MemberUpdatedRepublishResponse(publishedCount)));
     }
 
     // Gateway가 JWT subject(회원 ID 숫자)를 X-User-Id로 전달한다.

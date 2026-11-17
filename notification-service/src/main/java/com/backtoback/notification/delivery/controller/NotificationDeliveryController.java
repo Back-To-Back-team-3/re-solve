@@ -33,7 +33,10 @@ public class NotificationDeliveryController {
      */
     @GetMapping(
         value = "/subscribe",
-        produces = MediaType.TEXT_EVENT_STREAM_VALUE
+        produces = {
+            MediaType.TEXT_EVENT_STREAM_VALUE,
+            MediaType.APPLICATION_JSON_VALUE
+        }
     )
     public ResponseEntity<SseEmitter> subscribe(
         @RequestHeader(name = "X-User-Id") Long memberId,
@@ -45,6 +48,7 @@ public class NotificationDeliveryController {
         SseEmitter emitter = deliveryService.subscribe(memberId, lastEventId);
 
         HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.TEXT_EVENT_STREAM);
         headers.set(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform");
         headers.set(HttpHeaders.CONNECTION, "keep-alive");
         headers.set("X-Accel-Buffering", "no");

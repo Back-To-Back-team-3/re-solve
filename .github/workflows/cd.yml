@@ -37,9 +37,37 @@ env:
   ECS_CLUSTER: "resolve-cluster"
 
 jobs:
+  select-services:
+    name: Select ECS Services
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.targets.outputs.services }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select ECS Services
+        id: targets
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          MANUAL_SERVICE: ${{ inputs.target_service }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            services=$(bash scripts/deploy/select-ecs-services.sh manual "$MANUAL_SERVICE")
+          else
+            services=$(bash scripts/deploy/select-ecs-services.sh push "$BEFORE_SHA" "$GITHUB_SHA")
+          fi
+          printf 'services=%s\n' "$services" >> "$GITHUB_OUTPUT"
+
   build-and-deploy:
     name: Build & Deploy to AWS ECS
+    needs: select-services
+    if: needs.select-services.outputs.services != ''
     runs-on: ubuntu-latest
+    env:
+      TARGET_SERVICES: ${{ needs.select-services.outputs.services }}
 
     steps:
       - name: Checkout Code
@@ -61,12 +89,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # 1. 전체 서비스 Jar 빌드
+      # 1. 배포 대상 서비스 Jar 빌드
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
       - name: Build Spring Boot Jars
-        run: ./gradlew bootJar -x test
+        run: |
+          read -r -a services <<< "$TARGET_SERVICES"
+          tasks=()
+          for service in "${services[@]}"; do
+            tasks+=(":${service}:bootJar")
+          done
+          ./gradlew "${tasks[@]}" -x test
 
       # 2. AWS OIDC 자격 증명 설정
       - name: Configure AWS Credentials via OIDC
@@ -84,30 +118,10 @@ jobs:
       - name: Build, Push to ECR & Update ECS Services
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ inputs.target_tag || 'latest' }}
         run: |
-          ALL_SERVICES=(
-            "api-gateway"
-            "member-service"
-            "problem-service"
-            "judge-service"
-            "contest-service"
-            "study-service"
-            "notification-service"
-            "integration-service"
-            "ai-service"
-            "analytics-service"
-          )
-
-          TARGET="${{ github.event.inputs.target_service || 'all' }}"
-          TAG="${{ github.event.inputs.target_tag || 'latest' }}"
-
-          if [ "$TARGET" == "all" ]; then
-            SERVICES=("${ALL_SERVICES[@]}")
-          else
-            SERVICES=("$TARGET")
-          fi
-
-          for SERVICE in "${SERVICES[@]}"; do
+          read -r -a services <<< "$TARGET_SERVICES"
+          for SERVICE in "${services[@]}"; do
             if [ ! -d "./$SERVICE" ]; then
               echo "⚠️ ./$SERVICE 디렉터리가 없어 건너뜁니다."
               continue

@@ -18,8 +18,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 회원 정보 복제본(ERD 4.4.17 member_replicas). 닉네임·회원 상태 표시에 쓰며,
- * 반영 조건({@code sourceVersion} 비교)은 회원 정보 이벤트 소비 기능 Issue에서 구현한다.
+ * 회원 정보 복제본(ERD 3.5 member_replicas). 닉네임·회원 상태 표시에 쓴다.
+ * 회원 이벤트 반영과 {@code sourceVersion} 비교는 {@code MemberReplicaRepository}의 조건부 쿼리가 한 문장으로 처리한다.
  */
 @Getter
 @Entity
@@ -94,7 +94,7 @@ public class MemberReplica extends BaseTimeEntity {
     }
 
     /**
-     * 회원 1명의 표시 정보 복제본을 만든다. 지연 이벤트 덮어쓰기 방지 비교는 이벤트 소비 기능에서 처리한다(ERD 4.4.17).
+     * 회원 1명의 표시 정보 복제본을 만든다. 지연 이벤트 덮어쓰기 방지 비교는 하지 않으므로 이벤트 반영에는 쓰지 않는다(ERD 3.5).
      */
     public static MemberReplica sync(
         Long memberId,
