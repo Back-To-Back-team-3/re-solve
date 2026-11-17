@@ -68,6 +68,9 @@ GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 GITHUB_REDIRECT_URI=http://localhost:8080/api/v1/auth/github/callback
 FRONTEND_ORIGIN=http://localhost:8080
+# 프론트엔드(Next.js rewrite 및 Cloudflare Worker 런타임 OAuth 프록시)가 호출하는 API 서버 주소
+# Cloudflare Worker 배포 시 빌드 변수와 Worker 런타임 환경변수 모두 동일한 운영 API 주소로 등록해야 한다.
+API_URL=http://localhost:8080
 JWT_SECRET=
 REFRESH_COOKIE_SECURE=true
 DEV_LOGIN_ENABLED=false
@@ -271,6 +274,7 @@ docker compose logs -f api-gateway
 
 - 현재 저장소의 frontend는 연결 확인용 화면이고, 백엔드 기능은 개발 단계다.
 - 위 명령은 로컬 구성 안내이며 전체 기능의 동작 검증을 뜻하지 않는다.
+- 프론트엔드 Cloudflare Worker 배포 시 `/api/v1/auth/github`·`/api/v1/auth/github/callback` Route Handler가 런타임 `process.env.API_URL`을 읽으므로, Cloudflare Worker 런타임 환경변수에도 빌드 변수와 동일한 운영 API 주소를 등록해야 한다.
 
 ---
 
