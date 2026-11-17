@@ -83,6 +83,10 @@ JUDGE_SUBMISSION_QUEUE_URL=
 CONTEST_EVENTS_ENABLED=false
 CONTEST_QUEUE_URL=
 
+# 📚 스터디 이벤트 (study-service)
+STUDY_EVENTS_PUBLISH_ENABLED=false
+STUDY_EVENTS_TOPIC_ARN=
+
 # 🔗 연동 (integration-service)
 # 필수 값: GitHub Access Token 암호화 키 (AES-256 GCM). Base64로 인코딩된 32바이트 키
 # 예: openssl rand -base64 32
@@ -197,6 +201,13 @@ GRAFANA_ADMIN_PASSWORD=
 - `CONTEST_EVENTS_TOPIC_ARN`은 시험 설정·참가·상태·확정 이벤트를 전달할 SNS 토픽 ARN이다.
 - `JUDGE_SUBMISSION_QUEUE_URL`은 `ExamSubmissionRequested`를 전달할 Judge 제출 SQS 큐 URL이다.
 - 발행을 활성화하면 두 목적지가 모두 필요하다. 소비 활성화는 기존 `CONTEST_EVENTS_ENABLED`와 `CONTEST_QUEUE_URL`로 설정한다.
+
+### Study 이벤트 발행
+
+- `STUDY_EVENTS_PUBLISH_ENABLED=true`로 공통 Outbox Relay를 활성화한다. 기본값은 `false`다.
+- `STUDY_EVENTS_TOPIC_ARN`은 스터디 가입·탈퇴, 가입 신청 결정, 과제, 힌트 이벤트를 전달할 `study-events` SNS 토픽 ARN이다. 발행을 활성화하면 필수다.
+- 활성화 전에 study 태스크의 토픽 발행 권한과 `contest-queue`·`problem-queue`·`notification-queue`·`ai-queue`의 구독 필터 정책을 확인한다.
+- 활성화하면 그동안 쌓인 `PENDING` Outbox 이벤트가 첫 회차부터 발행된다. 활성화 전에 `outbox_events`의 이벤트 유형·상태별 건수를 확인한다.
 
 ### Contest 시험 순위 캐시
 
