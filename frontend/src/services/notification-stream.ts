@@ -83,8 +83,15 @@ export function connectNotificationStream(onNotification: (event: SSENotificatio
         reader.releaseLock();
       }
     } catch (error) {
-      // 갱신으로도 인증되지 않으면 반복 요청하지 않고 다음 로그인까지 멈춘다.
-      if (typeof error === "object" && error !== null && "code" in error && error.code === "UNAUTHORIZED") return;
+      // 갱신으로도 인증되지 않거나 재시도할 수 없는 클라이언트 오류면 다음 로그인까지 재연결을 멈춘다.
+      if (
+        typeof error === "object"
+        && error !== null
+        && "code" in error
+        && (error.code === "UNAUTHORIZED" || error.code === "CLIENT_ERROR")
+      ) {
+        return;
+      }
     }
     if (!controller.signal.aborted) timer = setTimeout(() => { void connect(); }, retryMs);
   };

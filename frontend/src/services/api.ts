@@ -180,10 +180,12 @@ export async function apiFetchBlob(path: string): Promise<Blob> {
 export async function apiFetchStream(path: string, signal: AbortSignal, lastEventId: string): Promise<Response> {
   const res = await apiRequest(path, {
     signal,
-    headers: { Accept: "text/event-stream", ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}) },
+    headers: { Accept: "text/event-stream, application/json", ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}) },
   }, false);
   if (res.status === 401 || res.status === 403)
     throw { code: "UNAUTHORIZED", message: "알림 연결 권한을 확인해 주세요." } satisfies ApiError;
+  if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429)
+    throw { code: "CLIENT_ERROR", message: httpErrorMessage(res.status) } satisfies ApiError;
   if (!res.ok) await readApiResponse<never>(res);
   return res;
 }
