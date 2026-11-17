@@ -19,6 +19,7 @@ import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.dto.MembershipDecisionRequest;
 import com.backtoback.study.membership.dto.MembershipDecisionResponse;
 import com.backtoback.study.membership.dto.StudyJoinResponse;
+import com.backtoback.study.membership.service.MemberStatusGuard;
 import com.backtoback.study.membership.service.StudyMembershipCommandService;
 
 import jakarta.validation.Valid;
@@ -32,10 +33,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class StudyMembershipCommandController {
 
+    private final MemberStatusGuard memberStatusGuard;
     private final StudyMembershipCommandService studyMembershipCommandService;
 
     /**
-     * 5.2.2 스터디 가입 신청·즉시 가입.
+     * 5.2.2 스터디 가입 신청·즉시 가입. 정지 확인은 member 원격 조회가 있을 수 있어 가입 트랜잭션보다 먼저 수행한다.
      */
     @PostMapping
     public ResponseEntity<ApiResponse<StudyJoinResponse>> join(
@@ -44,6 +46,7 @@ public class StudyMembershipCommandController {
     ) {
         Long memberId = Long.parseLong(user.userId());
         String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+        memberStatusGuard.requireNotSuspended(memberId);
         StudyJoinResponse response = studyMembershipCommandService.join(studyId, memberId, correlationId);
         String message
             = MembershipStatus.PENDING.name().equals(response.status()) ? "가입 신청이 완료되었습니다." : "스터디에 가입되었습니다.";

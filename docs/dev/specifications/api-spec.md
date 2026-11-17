@@ -8296,11 +8296,13 @@
     ```
     
 - **에러:**
-    - `COMMON_INVALID_REQUEST`(400), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403)
+    - `COMMON_INVALID_REQUEST`(400), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **동시성/멱등 보장:**
     - 트랜잭션 순서 = ① `study_member_quotas` 조건부 UPDATE(`active_count < 5`) ② `studies` INSERT(`member_count = 1`) ③ `study_memberships` INSERT(`LEADER`, `APPROVED`) ④ 이력 INSERT ⑤ `outbox_events` INSERT. ①이 0행이면 전체 롤백.
 - **발행:**
     - `StudyMemberJoined` — 스터디 생성 시 LEADER 등록
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.2.2 스터디 가입 신청·즉시 가입
 
@@ -8317,13 +8319,15 @@
     
     - `INSTANT` 스터디: `status: "APPROVED"`, `expiresAt: null`, `message: "스터디에 가입되었습니다."`
 - **에러:**
-    - `STUDY_NOT_FOUND`(404), `STUDY_NOT_RECRUITING`(409), `STUDY_ALREADY_APPLIED`(409), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `STUDY_FULL`(409), `MEMBER_SUSPENDED`(403)
+    - `STUDY_NOT_FOUND`(404), `STUDY_NOT_RECRUITING`(409), `STUDY_ALREADY_APPLIED`(409), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `STUDY_FULL`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **동시성/멱등 보장:**
     - 중복 신청: 생성 컬럼 `active_member_id` + `uk_study_memberships_study_active_member`
     - 즉시 가입 확보 순서: ① 회원 카운터 `UPDATE study_member_quotas SET active_count = active_count + 1 WHERE member_id = ? AND active_count < 5` ② 스터디 정원 `UPDATE studies SET member_count = member_count + 1, status = IF(member_count >= capacity, 'ACTIVE', status), version = version + 1 WHERE id = ? AND status = 'RECRUITING' AND member_count < capacity`. MySQL 단일 테이블 UPDATE는 SET을 왼쪽부터 평가하므로 `status` 계산은 증가된 `member_count`를 본다. 어느 쪽이든 0행이면 전체 롤백.
     - 문제집 편입: `assignment_member_statuses`·`assignment_completions` 유일 제약 upsert. 개설 스케줄러와 동시에 실행돼도 1건만 남는다.
 - **발행:**
     - `StudyMemberJoined` — 즉시 가입 시
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.2.3 가입 신청 취소·자진 탈퇴
 
@@ -8864,7 +8868,7 @@
 - **Idempotency:** 같은 `(problemId, level)`에 `REQUESTED`·`GENERATING` 요청이 있으면 그 요청을 반환하고 횟수를 차감하지 않는다. 같은 단계의 `READY`·`FALLBACK`이 이미 있으면 그 결과를 반환하고 차감하지 않는다.
 - **Rate Limit:** 1인 하루 20회 (`hint_daily_usages`, 캐시 적중 포함)
 - **대응 테이블:** `hint_requests`, `hint_daily_usages`, `hint_block_replicas`, `outbox_events`
-- **설명:** 힌트를 비동기로 요청한다. 검증 순서 = ① 문제 문맥 조회(공개 문제·대회 전용 여부, 현재 공개 회차) ② 시험·대회·진단 차단 ③ 단계 순서 ④ 기존 요청 확인 ⑤ 일일 횟수 확보. 캐시 적중이면 즉시 `READY`로 응답한다.
+- **설명:** 힌트를 비동기로 요청한다. 검증 순서 = ⓪ 회원 정지 확인 ① 문제 문맥 조회(공개 문제·대회 전용 여부, 현재 공개 회차) ② 시험·대회·진단 차단 ③ 단계 순서 ④ 기존 요청 확인 ⑤ 일일 횟수 확보. 캐시 적중이면 즉시 `READY`로 응답한다.
 - **요청 바디:**
     
     ```json
@@ -8880,7 +8884,7 @@
     
     - 캐시 적중·기존 결과 반환: `status: "READY"`(또는 `FALLBACK`), `content` 포함
 - **에러:**
-    - `HINT_PROBLEM_NOT_AVAILABLE`(404), `HINT_BLOCKED_DURING_EXAM`(403), `HINT_BLOCKED_DURING_DIAGNOSIS`(403), `HINT_LEVEL_SKIPPED`(409), `HINT_DAILY_LIMIT_EXCEEDED`(429), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `MEMBER_SUSPENDED`(403)
+    - `HINT_PROBLEM_NOT_AVAILABLE`(404), `HINT_BLOCKED_DURING_EXAM`(403), `HINT_BLOCKED_DURING_DIAGNOSIS`(403), `HINT_LEVEL_SKIPPED`(409), `HINT_DAILY_LIMIT_EXCEEDED`(429), `COMMON_DEPENDENCY_UNAVAILABLE`(503), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403)
 - **동시성/멱등 보장:**
     - 중복 요청: 생성 컬럼 `active_level = IF(status IN ('REQUESTED','GENERATING'), level, NULL)` + `uk_hint_requests_member_problem_active_level`. 위반 시 기존 요청을 조회해 반환
     - 일일 횟수: `UPDATE hint_daily_usages SET used_count = used_count + 1 WHERE member_id = ? AND usage_date = CURRENT_DATE AND used_count < 20` (행이 없으면 먼저 `INSERT … ON DUPLICATE KEY UPDATE`). 요청 INSERT와 같은 트랜잭션
@@ -8888,6 +8892,7 @@
 - **발행:**
     - `HintReady` — `READY`·`FALLBACK`·전달 직전 `BLOCKED` 종결 시
 - **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
     - `GET /internal/v1/problems/{problemId}/hint-context` (problem) — 실패 시 fail-closed
 - **프론트 계약:**
     - `202` 후 SSE(`/api/v1/notifications/subscribe`)의 `HINT_READY` 알림을 기다린다. 수신 후 힌트 요청 단건(6.1.3)으로 내용을 조회한다. 폴링하지 않는다.

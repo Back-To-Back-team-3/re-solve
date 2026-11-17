@@ -1093,7 +1093,7 @@ notification은 이벤트를 받아 수신자·문구·이동 경로를 직접 �
 | `practice_result_replicas` (member) | judge | 동일 API에 판정 무관 조회 필요 → 확장 확정 필요 (B·E) | 관리자 절차 |
 | `hint_block_replicas` (study) | contest | `GET /internal/v1/hint-blocks` (4.7.7) | 관리자·장애 후 |
 | `study_membership_replicas` (contest·problem) | study | 내부 조회 API 미정 → `GET /internal/v1/studies/{studyId}/members`(5.7.1) 재사용 제안 | 관리자 절차 |
-| `member_replicas` (problem·contest·study) | member | `GET /internal/v1/members/{memberId}/status` (1.7.1) / `MemberUpdated` 관리자 재발행 (1.6.4) | 복제본 없을 때 즉시 보정 / 기존 회원 보충은 관리자 절차 |
+| `member_replicas` (problem·contest·study) | member | `GET /internal/v1/members/{memberId}/status` (1.7.1) / `MemberUpdated` 관리자 재발행 (1.6.4) | 복제본 없을 때 상태만 조회 (상태만 있는 응답으로 복제본 변경 없음) / 기존 회원 보충은 관리자 절차 |
 | `member_learning_profile_replicas` (study) | member | 내부 API 없음 → 다음 `LearningProfileUpdated`까지 대기, 필요 시 추가 (E) | — |
 
 ### 7.3 DLQ 재처리 절차
