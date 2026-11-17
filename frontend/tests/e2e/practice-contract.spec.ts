@@ -14,6 +14,7 @@ test("통과 언어와 활성 실행 환경의 교집합을 선택하고 예제 
   const examples = page.getByRole("table", { name: "입출력 예", exact: true });
   await expect(examples.getByRole("columnheader")).toHaveText(["items", "result"]);
   await expect(examples.getByRole("cell")).toHaveText(["[1,2]", "3"]);
+  await expect(examples.locator("code").first()).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.getByRole("heading", { name: "함수 명세", exact: true })).toHaveCount(0);
   const input = page.getByRole("textbox", { name: "코드 편집기" });
   await expect(input).toBeVisible();
@@ -64,4 +65,33 @@ test("공개 예제 표가 있어도 별도로 작성한 예시 해설 Markdown�
   await expect(page.getByRole("table", { name: "입출력 예", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "예제 풀이 과정", exact: true })).toBeVisible();
   await expect(page.getByText("첫 번째 원소와 두 번째 원소를 더합니다.", { exact: true })).toBeVisible();
+});
+
+test("공개 테스트와 같은 Markdown 표만 제외하고 해설과 다른 표는 유지한다", async ({ page }) => {
+  await mockPracticePage(page);
+  await page.route("**/api/v1/problems/1001", (route) => route.fulfill({ json: { success: true, data: {
+    ...problemDetail, examples: [
+      "### 예제 풀이 과정", "첫 번째 원소와 두 번째 원소를 더합니다.",
+      "| items | result |\n| --- | --- |\n| `[1, 2]` | 3 |",
+      "계산 과정을 확인하세요.", "| 단계 | 합 |\n| --- | --- |\n| 첫 번째 | 1 |",
+    ].join("\n\n"),
+  } } }));
+  await page.goto("/problems/1001");
+  const tables = page.locator(".problem-panel .markdown table");
+  await expect(tables).toHaveCount(2);
+  await expect(page.getByRole("table", { name: "입출력 예", exact: true })).toBeVisible();
+  await expect(tables.nth(1).getByRole("columnheader")).toHaveText(["단계", "합"]);
+  await expect(page.getByText("첫 번째 원소와 두 번째 원소를 더합니다.", { exact: true })).toBeVisible();
+  await expect(page.getByText("계산 과정을 확인하세요.", { exact: true })).toBeVisible();
+});
+
+test("공개 테스트가 없으면 예시 본문의 Markdown 표를 유지한다", async ({ page }) => {
+  await mockPracticePage(page);
+  await page.route("**/api/v1/problems/1001", (route) => route.fulfill({ json: { success: true, data: {
+    ...problemDetail, samples: [], examples: "| items | result |\n| --- | --- |\n| [1,2] | 3 |",
+  } } }));
+  await page.goto("/problems/1001");
+  const tables = page.locator(".problem-panel .markdown table");
+  await expect(tables).toHaveCount(1);
+  await expect(tables.getByRole("cell")).toHaveText(["[1,2]", "3"]);
 });
