@@ -33,3 +33,16 @@ it.each([
   expect(response.headers.get("Location")).toBe(location);
   expect(response.headers.getSetCookie()).toEqual(cookies);
 });
+
+it.each([
+  [start, "https://api.example/backend", "/api/v1/auth/github?redirectPath=%2Fmypage"],
+  [callback, "https://api.example/backend/", "/api/v1/auth/github/callback?code=example&state=example"],
+])("로그인 요청을 전달할 때 API 주소의 경로 접두사를 유지한다", async (handler, apiUrl, path) => {
+  vi.stubEnv("API_URL", apiUrl);
+  const fetchUpstream = vi.fn().mockResolvedValue(new Response(null, { status: 302 }));
+  vi.stubGlobal("fetch", fetchUpstream);
+
+  await handler(new Request(`https://frontend.example${path}`));
+
+  expect(fetchUpstream.mock.calls[0][0]).toEqual(new URL(`https://api.example/backend${path}`));
+});
