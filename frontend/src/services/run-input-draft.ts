@@ -27,7 +27,8 @@ export function readRunInputDraft(key: string): RunInputDraft | null {
 
 export function writeRunInputDraft(key: string, draft: RunInputDraft): boolean {
   try {
-    localStorage.setItem(`re-solve:run-input:${key}`, JSON.stringify(draft));
+    // 미저장 여부 같은 메모리 상태를 복구 데이터에 섞지 않는다.
+    localStorage.setItem(`re-solve:run-input:${key}`, JSON.stringify({ useSamples: draft.useSamples, customInputs: draft.customInputs }));
     return true;
   } catch { return false; }
 }

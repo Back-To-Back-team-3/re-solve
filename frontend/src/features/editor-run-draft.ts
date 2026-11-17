@@ -11,23 +11,25 @@ export function useRunInputDraft(key: string) {
   useEffect(() => {
     if (!api.getState().practiceRunInputs[key]) {
       const draft = readRunInputDraft(key);
-      if (draft) api.getState().setPracticeRunInputs(key, draft);
+      if (draft) api.getState().restorePracticeRunInputs(key, draft);
     }
     let latestDraft = api.getState().practiceRunInputs[key];
-    // 메모리의 초안은 저장 실패 후 남은 값일 수 있으므로 재마운트 시에도 저장을 재시도한다.
-    let dirty = Boolean(latestDraft);
     const unsubscribe = api.subscribe((state, previous) => {
       const next = state.practiceRunInputs[key];
       // 로그아웃은 store를 먼저 비우므로 마지막 편집 스냅샷을 종료 저장까지 유지한다.
       if (next && next !== previous.practiceRunInputs[key]) {
         latestDraft = next;
-        dirty = true;
       }
     });
     const flush = () => {
-      if (!dirty || !latestDraft) return;
-      const saved = writeRunInputDraft(key, latestDraft);
-      if (saved) dirty = false;
+      const snapshot = latestDraft;
+      if (!snapshot?.dirty) return;
+      const saved = writeRunInputDraft(key, snapshot);
+      if (saved) {
+        api.getState().markPracticeRunInputsSaved(key, snapshot);
+        // 로그아웃 뒤 store가 비어 있어도 이미 저장한 스냅샷은 다시 쓰지 않는다.
+        if (latestDraft === snapshot) latestDraft = { ...snapshot, dirty: false };
+      }
       return saved;
     };
     const timer = setInterval(() => {

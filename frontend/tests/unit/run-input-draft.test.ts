@@ -4,6 +4,13 @@ import { readRunInputDraft, writeRunInputDraft } from "@/services/run-input-draf
 afterEach(() => vi.unstubAllGlobals());
 
 describe("직접 입력 자동 저장", () => {
+  it("미저장 상태는 브라우저 복구 데이터에 포함하지 않는다", () => {
+    const setItem = vi.fn();
+    vi.stubGlobal("localStorage", { setItem });
+    const snapshot = { useSamples: true, customInputs: [], dirty: true };
+    expect(writeRunInputDraft("key", snapshot)).toBe(true);
+    expect(setItem).toHaveBeenCalledWith("re-solve:run-input:key", JSON.stringify({ useSamples: true, customInputs: [] }));
+  });
   it("작성 중인 JSON과 큰 정수 원문을 검증·변환 없이 저장하고 복구한다", () => {
     const values = new Map<string, string>();
     vi.stubGlobal("localStorage", {

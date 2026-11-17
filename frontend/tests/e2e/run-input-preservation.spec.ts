@@ -29,6 +29,41 @@ test("언어를 왕복 전환해도 직접 입력·기대값을 유지한다", a
   await expect(page.getByLabel("직접 입력 1 기대 출력", { exact: true })).toHaveValue("7");
 });
 
+test("무편집 탭의 언어 전환은 다른 탭의 최신 저장값을 덮지 않는다", async ({ page, context }) => {
+  await page.clock.install();
+  const second = await context.newPage();
+  for (const tab of [page, second]) {
+    await mockPracticePage(tab);
+    await tab.route("**/api/v1/judge/languages", (route) => route.fulfill({ json: { success: true, data: { content: [
+      { language: "java", displayName: "Java", enabled: true }, { language: "python3", displayName: "Python", enabled: true },
+    ] } } }));
+  }
+  const key = 're-solve:run-input:["7","practice","1001","2001"]';
+  await seedBrowserStorage(page, { [key]: JSON.stringify({ useSamples: true,
+    customInputs: [{ arguments: { items: { kind: "TEXT", text: "[1]" } } }],
+  }) });
+  for (const tab of [page, second]) {
+    await tab.goto("/problems/1001");
+    await tab.getByRole("button", { name: "테스트 케이스 추가하기", exact: true }).click();
+    await expect(tab.getByLabel("직접 입력 1 items", { exact: true })).toHaveValue("[1]");
+  }
+  await second.getByRole("button", { name: "닫기", exact: true }).click();
+  // 초기 저장과 겹치지 않도록 두 탭의 초기 주기를 마친 뒤 언어 전환 후 저장을 제어한다.
+  await page.clock.pauseAt(new Date(Date.now() + 2000));
+  const raw = "[9007199254740993,";
+  await page.getByLabel("직접 입력 1 items", { exact: true }).fill(raw);
+  await page.clock.runFor(1000);
+  expect(await readBrowserStorage(page, key)).toContain(raw);
+  const language = second.getByLabel("코드 언어", { exact: true });
+  await language.selectOption(await language.inputValue() === "java" ? "python3" : "java");
+  await page.clock.runFor(2000);
+  expect(await readBrowserStorage(second, key)).toContain(raw);
+  await page.clock.resume();
+  await page.reload();
+  await page.getByRole("button", { name: "테스트 케이스 추가하기", exact: true }).click();
+  await expect(page.getByLabel("직접 입력 1 items", { exact: true })).toHaveValue(raw);
+});
+
 test("입력 중인 JSON과 기대값을 자동 저장하고 새로고침 후 같은 회차에 복구한다", async ({ page }) => {
   await mockPracticePage(page);
   await page.goto("/problems/1001");
