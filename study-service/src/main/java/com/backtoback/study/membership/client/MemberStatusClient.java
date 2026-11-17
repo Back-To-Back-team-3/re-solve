@@ -1,4 +1,4 @@
-package com.backtoback.study.member.client;
+package com.backtoback.study.membership.client;
 
 import java.net.http.HttpClient;
 
@@ -11,7 +11,7 @@ import org.springframework.web.client.RestClientException;
 
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.study.global.error.StudyException;
-import com.backtoback.study.member.config.MemberClientProperties;
+import com.backtoback.study.membership.config.MemberClientProperties;
 import com.backtoback.study.replica.domain.MemberStatus;
 
 /**

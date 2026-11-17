@@ -4,7 +4,7 @@ import org.springframework.stereotype.Service;
 
 import com.backtoback.study.hint.client.HintContextResponse;
 import com.backtoback.study.hint.dto.HintAcceptResult;
-import com.backtoback.study.member.service.MemberStatusGuard;
+import com.backtoback.study.membership.service.MemberStatusGuard;
 
 import lombok.RequiredArgsConstructor;
 

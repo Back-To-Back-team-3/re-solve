@@ -1,4 +1,4 @@
-package com.backtoback.study.member.client;
+package com.backtoback.study.membership.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

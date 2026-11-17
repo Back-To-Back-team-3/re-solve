@@ -1,4 +1,4 @@
-package com.backtoback.study.member.client;
+package com.backtoback.study.membership.client;
 
 import com.backtoback.study.replica.domain.MemberStatus;
 

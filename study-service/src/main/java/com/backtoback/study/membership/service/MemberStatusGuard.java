@@ -1,4 +1,4 @@
-package com.backtoback.study.member.service;
+package com.backtoback.study.membership.service;
 
 import java.util.Optional;
 
@@ -7,7 +7,7 @@ import org.springframework.stereotype.Service;
 import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
-import com.backtoback.study.member.client.MemberStatusClient;
+import com.backtoback.study.membership.client.MemberStatusClient;
 import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.domain.MemberStatus;
 import com.backtoback.study.replica.repository.MemberReplicaRepository;

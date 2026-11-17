@@ -15,11 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 import com.backtoback.common.api.ApiResponse;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.security.user.GatewayUser;
-import com.backtoback.study.member.service.MemberStatusGuard;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.dto.MembershipDecisionRequest;
 import com.backtoback.study.membership.dto.MembershipDecisionResponse;
 import com.backtoback.study.membership.dto.StudyJoinResponse;
+import com.backtoback.study.membership.service.MemberStatusGuard;
 import com.backtoback.study.membership.service.StudyMembershipCommandService;
 
 import jakarta.validation.Valid;

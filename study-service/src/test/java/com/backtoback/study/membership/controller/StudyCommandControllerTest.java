@@ -30,7 +30,7 @@ import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.common.web.security.user.UserRole;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
-import com.backtoback.study.member.service.MemberStatusGuard;
+import com.backtoback.study.membership.service.MemberStatusGuard;
 import com.backtoback.study.membership.service.StudyCommandService;
 
 /**

@@ -1,4 +1,4 @@
-package com.backtoback.study.member.config;
+package com.backtoback.study.membership.config;
 
 import java.net.URI;
 import java.time.Duration;

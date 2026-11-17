@@ -26,7 +26,7 @@ import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.hint.client.HintContextResponse;
 import com.backtoback.study.hint.domain.HintRequestStatus;
 import com.backtoback.study.hint.dto.HintAcceptResult;
-import com.backtoback.study.member.service.MemberStatusGuard;
+import com.backtoback.study.membership.service.MemberStatusGuard;
 
 /**
  * 힌트 요청의 회원 정지 확인 순서를 검증한다 (API 명세서 6.1.1 검증 순서 ⓪).
