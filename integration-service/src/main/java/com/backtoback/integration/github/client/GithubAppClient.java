@@ -334,10 +334,12 @@ public class GithubAppClient {
      */
     public String createAppJwt() {
         if (properties.getPrivateKey() == null || properties.getPrivateKey().isBlank()) {
-            throw new IllegalStateException("GitHub App Private Key가 설정되지 않았습니다.");
+            log.error("GitHub App Private Key가 설정되지 않았습니다.");
+            throw new IntegrationException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
         if (properties.getAppId() == null || properties.getAppId().isBlank()) {
-            throw new IllegalStateException("GitHub App ID가 설정되지 않았습니다.");
+            log.error("GitHub App ID가 설정되지 않았습니다.");
+            throw new IntegrationException(CommonErrorCode.COMMON_DEPENDENCY_UNAVAILABLE);
         }
 
         try {
