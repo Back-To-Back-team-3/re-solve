@@ -388,7 +388,7 @@ public class NotificationEventProcessor {
             NotificationType.ASSIGNMENT_INCOMPLETE_REPEATED,
             "문제집 연속 미완료 발생",
             "스터디 내 연속 2회 과제를 미완료한 구성원이 있습니다.",
-            "/studies/" + studyId + "/manage",
+            "/studies/" + studyId,
             NotificationPreference::isAssignmentEnabled
         );
     }
@@ -477,7 +477,7 @@ public class NotificationEventProcessor {
             NotificationType.CONTEST_FINALIZED,
             "대회 결과 확정",
             content,
-            "/contests/" + contestId + "/standings",
+            "/contests/" + contestId,
             NotificationPreference::isExamContestEnabled
         );
     }
@@ -495,7 +495,7 @@ public class NotificationEventProcessor {
             NotificationType.GITHUB_SYNC_FAILED,
             "GitHub 동기화 실패",
             content,
-            "/settings/github",
+            "/mypage?tab=github",
             NotificationPreference::isGithubSyncEnabled
         );
     }
