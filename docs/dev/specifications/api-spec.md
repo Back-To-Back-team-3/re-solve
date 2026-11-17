@@ -8602,6 +8602,21 @@
 - **에러:**
     - `AUTH_ACCESS_DENIED`(403), `STUDY_ASSIGNMENT_NOT_FOUND`(404)
 
+#### 5.4.5 배정 문제 레벨 잠금 예외 확인
+
+- **Method / URI:** `GET /api/v1/studies/me/assigned-problems/{problemId}`
+- **인증:** 로그인 필요
+- **대응 테이블:** `study_memberships`, `studies`, `assignments`, `assignment_problems`, `assignment_member_statuses`
+- **설명:** 로그인 회원에게 이 문제가 배정 문제인지 반환한다. 배정 문제의 조건은 [정책 §8.3 > 문제 접근 제한](../planning/policy-and-state.md#83-태그별-진단레벨-갱신)을 따른다. 프론트는 개인 태그 레벨로 잠금이 계산된 문제에서만 호출한다.
+- **요청 파라미터:** `problemId` — Path, string, 필수.
+- **응답 (200):**
+
+    ```json
+      { "success": true, "message": null, "data": { "problemId": "101", "assigned": true } }
+    ```
+
+- **실패 시 처리:** 배정 문제가 아니거나 없는 문제도 `200` + `assigned: false`로 응답한다. 호출이 실패하면 프론트는 잠금을 유지한다.
+
 ### 5.5 외부 API — 커뮤니티
 
 #### 5.5.1 게시글 목록
@@ -8839,6 +8854,22 @@
 
 - **실패 시 처리:** 없는 작업은 404. Contest는 `PENDING`·404·조회 실패 시 PREPARED 차단을 유지한다. `COMMITTED`는 §4.7.4 complete, `ABORTED`는 cancel로 복구한다.
 - **대사 기준:** 원래 작업의 결과를 반환한다. 현재 스터디 상태만으로 원래 작업의 성공·취소를 추정하지 않는다.
+
+#### 5.7.4 배정 문제 레벨 잠금 예외 확인 (내부)
+
+- **Method / URI:** `GET /internal/v1/studies/members/{memberId}/assigned-problems/{problemId}`
+- **인증:** 내부 호출 (judge)
+- **응답 형식:** §0.3에 따라 성공은 데이터 객체를 직접 반환하고 오류는 공통 오류 형식을 사용한다.
+- **대응 테이블:** §5.4.5와 같다.
+- **설명:** judge가 Run·연습 제출을 개인 태그 레벨 잠금으로 판정한 경우에만 호출한다. 판정 기준은 §5.4.5와 같다.
+- **요청 파라미터:** `memberId`, `problemId` — 모두 Path, string, 필수.
+- **응답 (200):**
+
+    ```json
+      { "memberId": "7", "problemId": "101", "assigned": true }
+    ```
+
+- **실패 시 처리:** 배정 문제가 아니거나 없는 문제도 `200` + `assigned: false`로 응답한다. judge는 호출 실패 시 fail-closed(잠금 유지)한다.
 
 ---
 
@@ -9380,6 +9411,7 @@
 | study | contest | `GET /internal/v1/studies/{studyId}/operations/{operationId}` | 종료 작업 확정 여부 (§5.7.3) | PREPARED 차단 유지 | D(제공)·C(요청) |
 | study | contest | `GET /internal/v1/studies/{studyId}/members` | 시험 생성 권한·스터디 상태 확인 | fail-closed (생성 거절) | D |
 | study | member | `GET /internal/v1/studies/memberships` | 탈퇴 차단(스터디장) 확인 | fail-closed | D(제공)·E(요청) |
+| study | judge | `GET /internal/v1/studies/members/{memberId}/assigned-problems/{problemId}` | 배정 문제 레벨 잠금 예외 (§5.7.4) | judge: fail-closed (잠금 유지) | D(제공)·B(요청) |
 
 ### B. 이벤트 목록
 
