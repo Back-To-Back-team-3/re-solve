@@ -69,6 +69,45 @@ test("브라우저 저장 실패를 안내해도 입력 원문은 유지한다",
   await expect(page.getByLabel("직접 입력 1 items", { exact: true })).toHaveValue("[1,");
 });
 
+test("저장 실패 중 언어를 전환해도 저장소 복구 후 추가 편집 없이 원문을 저장한다", async ({ page }) => {
+  await mockPracticePage(page);
+  await page.route("**/api/v1/judge/languages", (route) => route.fulfill({ json: { success: true, data: { content: [
+    { language: "java", displayName: "Java", enabled: true }, { language: "python3", displayName: "Python", enabled: true },
+  ] } } }));
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    let blocked = false;
+    window.addEventListener("test:block-run-storage", () => { blocked = true; });
+    window.addEventListener("test:recover-run-storage", () => { blocked = false; });
+    Storage.prototype.setItem = function (key, value) {
+      if (blocked && key.startsWith("re-solve:run-input:")) throw new DOMException("저장 공간 부족", "QuotaExceededError");
+      original.call(this, key, value);
+    };
+  });
+  const key = 're-solve:run-input:["7","practice","1001","2001"]';
+  await seedBrowserStorage(page, { [key]: JSON.stringify({ useSamples: true,
+    customInputs: [{ arguments: { items: { kind: "TEXT", text: "[1]" } } }],
+  }) });
+  await page.goto("/problems/1001");
+  await page.getByRole("button", { name: "테스트 케이스 추가하기", exact: true }).click();
+  await expect(page.getByLabel("직접 입력 1 items", { exact: true })).toHaveValue("[1]");
+  await page.evaluate(() => window.dispatchEvent(new Event("test:block-run-storage")));
+  const raw = "[9007199254740993,";
+  await page.getByLabel("직접 입력 1 items", { exact: true }).fill(raw);
+  await expect(page.getByRole("alert").filter({ hasText: "브라우저 저장에 실패했습니다" })).toBeVisible();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  const language = page.getByLabel("코드 언어", { exact: true });
+  await language.selectOption(await language.inputValue() === "java" ? "python3" : "java");
+  await page.getByRole("button", { name: "테스트 케이스 추가하기", exact: true }).click();
+  await expect(page.getByLabel("직접 입력 1 items", { exact: true })).toHaveValue(raw);
+  await page.evaluate(() => window.dispatchEvent(new Event("test:recover-run-storage")));
+  await expect.poll(() => readBrowserStorage(page, key), { timeout: 4000 }).toContain(raw);
+  await expect(page.getByRole("alert").filter({ hasText: "브라우저 저장에 실패했습니다" })).toHaveCount(0);
+  await page.reload();
+  await page.getByRole("button", { name: "테스트 케이스 추가하기", exact: true }).click();
+  await expect(page.getByLabel("직접 입력 1 items", { exact: true })).toHaveValue(raw);
+});
+
 test("이전의 공개 예제 제외 선택을 복구해도 공개 예제를 항상 포함해 실행한다", async ({ page }) => {
   await mockPracticePage(page);
   await seedBrowserStorage(page, {

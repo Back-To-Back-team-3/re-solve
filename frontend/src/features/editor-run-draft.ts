@@ -13,8 +13,9 @@ export function useRunInputDraft(key: string) {
       const draft = readRunInputDraft(key);
       if (draft) api.getState().setPracticeRunInputs(key, draft);
     }
-    let dirty = false;
     let latestDraft = api.getState().practiceRunInputs[key];
+    // 메모리의 초안은 저장 실패 후 남은 값일 수 있으므로 재마운트 시에도 저장을 재시도한다.
+    let dirty = Boolean(latestDraft);
     const unsubscribe = api.subscribe((state, previous) => {
       const next = state.practiceRunInputs[key];
       // 로그아웃은 store를 먼저 비우므로 마지막 편집 스냅샷을 종료 저장까지 유지한다.
