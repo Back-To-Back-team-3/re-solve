@@ -623,6 +623,18 @@ export type MembershipCreated = {
   expiresAt: string | null;
 };
 
+// POST /api/v1/studies/{studyId}/assignments (api-spec §5.4.1)
+export type CreateAssignmentRequest = {
+  title: string;
+  goal: string;
+  tagId: string | null;
+  problemIds: string[];
+  isPreSolvedAllowed: boolean;
+  startsAt: string;
+  deadlineAt: string;
+};
+export type AssignmentCreated = { assignmentId: string; status: AssignmentStatus };
+
 // GET /api/v1/studies/{studyId}/assignments 항목 (api-spec §5.4.2)
 export type AssignmentSummary = {
   assignmentId: string;

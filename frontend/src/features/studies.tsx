@@ -428,7 +428,7 @@ export function StudyPage({ id }: { id: string }) {
           {tab === "problems" && (
             <div className="stack">
               {memberGuard ?? (
-                <AssignmentsTab studyId={id} version={version} />
+                <AssignmentsTab studyId={id} version={version} study={study} />
               )}
             </div>
           )}
