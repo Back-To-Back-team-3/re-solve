@@ -47,6 +47,25 @@ public class InternalSubmissionQueryService {
     }
 
     /**
+     * GitHub 동기화용 일반 풀이 정답(AC) 제출 코드를 조회한다. (API 명세서 §3.3.3)
+     *
+     * @param submissionId Judge 제출 ID
+     * @param memberId 요청 회원 ID
+     * @return 소유자·일반 풀이 문맥·완료 상태·AC 판정이 모두 일치하는 제출
+     * @throws JudgeException {@code SUBMISSION_NOT_FOUND}: 제출이 없거나 조건과 일치하지 않는 경우
+     */
+    @Transactional(readOnly = true)
+    public Submission acceptedCode(long submissionId, long memberId) {
+        return submissions
+            .findByIdAndMemberIdAndContext(submissionId, memberId, Submission.Context.PRACTICE)
+            .filter(
+                submission -> submission.getStatus() == Submission.Status.COMPLETED
+                    && submission.getVerdict() == JudgeVerdict.AC
+            )
+            .orElseThrow(() -> new JudgeException(JudgeErrorCode.SUBMISSION_NOT_FOUND));
+    }
+
+    /**
      * 시험·대회·진단 ID가 일치하는 제출의 현재 채점 상태를 조회한다.
      *
      * @param submissionId Judge 제출 ID
