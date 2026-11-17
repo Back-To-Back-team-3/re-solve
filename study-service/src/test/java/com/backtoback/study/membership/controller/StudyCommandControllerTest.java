@@ -4,7 +4,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -25,6 +28,9 @@ import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.security.user.GatewayUser;
 import com.backtoback.common.web.security.user.UserRole;
+import com.backtoback.study.global.error.StudyErrorCode;
+import com.backtoback.study.global.error.StudyException;
+import com.backtoback.study.member.service.MemberStatusGuard;
 import com.backtoback.study.membership.service.StudyCommandService;
 
 /**
@@ -36,11 +42,13 @@ class StudyCommandControllerTest {
 
     private MockMvc mockMvc;
     private StudyCommandService studyCommandService;
+    private MemberStatusGuard memberStatusGuard;
 
     @BeforeEach
     void setUp() {
         studyCommandService = mock(StudyCommandService.class);
-        StudyCommandController controller = new StudyCommandController(studyCommandService);
+        memberStatusGuard = mock(MemberStatusGuard.class);
+        StudyCommandController controller = new StudyCommandController(memberStatusGuard, studyCommandService);
         mockMvc
             = MockMvcBuilders
                 .standaloneSetup(controller)
@@ -99,5 +107,30 @@ class StudyCommandControllerTest {
                 "joinType": "INSTANT",
                 "isAutoReopen": false
             }""")).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("5.2.1 정지 회원이면 생성 서비스를 호출하지 않고 403 MEMBER_SUSPENDED를 반환한다")
+    void createStudy_suspended_returns403() throws Exception {
+        // given
+        willThrow(new StudyException(StudyErrorCode.MEMBER_SUSPENDED)).given(memberStatusGuard).requireNotSuspended(7L);
+
+        // when & then
+        mockMvc
+            .perform(post("/api/v1/studies").contentType(MediaType.APPLICATION_JSON).content("""
+                {
+                    "name": "코딩테스트 스터디",
+                    "description": "설명",
+                    "goal": "EMPLOYMENT",
+                    "skillLevel": "LV2",
+                    "preferredLanguage": "java",
+                    "activeTimeSlot": "EVENING",
+                    "capacity": 5,
+                    "joinType": "INSTANT",
+                    "isAutoReopen": false
+                }"""))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value(StudyErrorCode.MEMBER_SUSPENDED.getCode()));
+        then(studyCommandService).should(never()).createStudy(any(), any(), any());
     }
 }
