@@ -22,6 +22,17 @@ export function AssignmentProblemPicker({ limit, selected, onChange }: {
     <section className="stack-sm" aria-label="문제 선택">
       <h2>문제 선택 ({selected.length}/20)</h2>
       <p className="muted">태그와 개인 레벨에 관계없이 난이도 1~{limit} 문제를 새로 배정할 수 있습니다.</p>
+      <h3>선택한 문제</h3>
+      {selected.length === 0 ? <p className="muted">문제를 1개 이상 선택해 주세요.</p> : (
+        <ul aria-label="선택한 문제 목록" tabIndex={0} className="stack-sm max-h-64 overflow-y-auto overscroll-contain p-1">{selected.map((problem) => (
+          <li className="row between" key={problem.problemId}>
+            <span className="min-w-0 break-words">#{problem.problemId} {problem.title} · Lv. {problem.difficulty}
+              {!isAssignmentDifficultyAllowed(problem.difficulty, limit) && " · 현재 난이도 상한 초과"}</span>
+            <Button type="button" className="small shrink-0" aria-label={`${problem.title} 제거`}
+              onClick={() => onChange(selected.filter((item) => item.problemId !== problem.problemId))}>제거</Button>
+          </li>
+        ))}</ul>
+      )}
       <div className="row">
         <label className="field grow">문제 검색
           <input className="input" value={keyword} placeholder="문제 제목 검색"
@@ -65,17 +76,6 @@ export function AssignmentProblemPicker({ limit, selected, onChange }: {
             <Button type="button" disabled={!results.data.hasNext} onClick={() => setPage(page + 1)}>다음</Button>
           </div>
         </>
-      )}
-      <h3>선택한 문제</h3>
-      {selected.length === 0 ? <p className="muted">문제를 1개 이상 선택해 주세요.</p> : (
-        <ul className="stack-sm">{selected.map((problem) => (
-          <li className="row between" key={problem.problemId}>
-            <span>#{problem.problemId} {problem.title} · Lv. {problem.difficulty}
-              {!isAssignmentDifficultyAllowed(problem.difficulty, limit) && " · 현재 난이도 상한 초과"}</span>
-            <Button type="button" className="small" aria-label={`${problem.title} 제거`}
-              onClick={() => onChange(selected.filter((item) => item.problemId !== problem.problemId))}>제거</Button>
-          </li>
-        ))}</ul>
       )}
     </section>
   );
