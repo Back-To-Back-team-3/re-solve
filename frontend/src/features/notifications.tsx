@@ -57,7 +57,7 @@ function NotificationDropdown({
         notificationApi.markRead(item.notificationId).catch(() => {});
       }
       onOpenChange(false);
-      router.push(item.linkUrl);
+      if (item.linkUrl) router.push(item.linkUrl);
     },
     [router, onOpenChange, onUnreadCountChange, unreadCount],
   );
