@@ -417,6 +417,31 @@ class SubmissionAcceptanceStoreTest {
         verify(dependencies, never()).isAssignedProblem(7, 301);
     }
 
+    /** 배정 조회 중 같은 제출이 접수되면 먼저 저장된 응답을 복원한다. */
+    @Test
+    @DisplayName("Study에서 배정을 확인하지 못해도 같은 제출이 먼저 접수됐다면 최초 202를 복원한다")
+    void replaysSubmissionAcceptedDuringAssignmentLookup() {
+        given(dependencies.levels(7)).willReturn(new MemberTagLevelsResponse("7", List.of()));
+        given(dependencies.isAssignedProblem(7, 301)).willAnswer(invocation -> {
+            store
+                .accept(
+                    7,
+                    "key",
+                    REQUEST.requestHash(),
+                    REQUEST,
+                    NOW,
+                    JAVA,
+                    List.of(new TestCase(501, 1, true), new TestCase(502, 2, false))
+                );
+            return false;
+        });
+
+        var response = acceptance.create(7, "key", REQUEST);
+
+        assertThat(store.findReusable(7, "key", REQUEST.requestHash())).contains(response);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isEqualTo(1);
+    }
+
     /**
      * 외부 응답 오류는 DB 저장 전에 거절한다.
      *
