@@ -40,7 +40,6 @@ export function Buffer({
     [saved, setSaved] = useState("복원 중…"),
     [reset, setReset] = useState(false),
     [testCasesOpen, setTestCasesOpen] = useState(false),
-    [sending, setSending] = useState(false),
     [paused, setPaused] = useState(false),
     [pollVersion, setPollVersion] = useState(0),
     [runResult, setRunResult] = useState<RunResponse | null>(null),
@@ -61,11 +60,12 @@ export function Buffer({
   const setView = useWorkspace((state) => state.setEditorSubmissionView);
   const showSubmission = view?.showSubmission ?? !pending;
   const requestError = view?.requestError ?? null;
+  const sending = !!view?.transportId;
   const activeId = useWorkspace((state) => state.activePracticeSubmissions[submissionKey]);
   const attempt = activeId ? submissions[activeId] : undefined;
   const accepted = Object.values(submissions).flatMap((item) => item?.contextKey === submissionKey ? [item] : []);
   const workspace = useWorkspaceApi();
-  const sendingRef = useRef(false), router = useRouter(), toLogin = useLoginRedirect();
+  const router = useRouter(), toLogin = useLoginRedirect();
   const judgeSubmissionId = attempt?.submissionId ?? null;
   const judgeResult = attempt?.result ?? null;
   const polling = showSubmission && !!judgeSubmissionId && !judgeResult && !paused;
@@ -161,9 +161,7 @@ export function Buffer({
   }
   async function handleRun() {
     persist();
-    setBusyRun(true);
-    setShowRun(true);
-    setView(submissionKey, { requestError: null });
+    setBusyRun(true); setShowRun(true);
     setJudgeError(null);
     setRunResult(null);
     setRunExpectations([]);
@@ -190,7 +188,7 @@ export function Buffer({
     }
   }
   async function handleSubmit(retry = false) {
-    if (sendingRef.current) return;
+    if (workspace.getState().editorSubmissionViews[submissionKey]?.transportId) return;
     persist();
     if (retry && !pending) return;
     const request = retry && pending ? pending : {
@@ -206,37 +204,36 @@ export function Buffer({
     if (retry && isPracticeRequestExpired(request.createdAt, Date.now())) {
       setView(submissionKey, { requestError: expiredPracticeRequestMessage }); return;
     }
-    sendingRef.current = true;
+    const transportId = crypto.randomUUID();
+    const isCurrent = () => workspace.getState().editorSubmissionViews[submissionKey]?.transportId === transportId;
     setShowRun(false);
-    setView(submissionKey, { showSubmission: false });
+    // 전송 식별자는 언어 전환에도 유지하고 로그아웃 시 함께 폐기한다.
+    setView(submissionKey, { showSubmission: false, requestError: null, transportId });
     if (!examId) workspace.getState().setPracticeRequest(submissionKey, request);
-    setRunResult(null);
-    setRunError(null);
-    setJudgeError(null);
-    setView(submissionKey, { requestError: null });
-    setPaused(true);
-    setSending(true);
+    setRunResult(null); setRunError(null); setJudgeError(null); setPaused(true);
     try {
       if (examId) {
         await contestApi.submitExam(examId, { problemId: problem.id, language, sourceCode: codeRef.current, seq: seqRef.current });
+        if (!isCurrent()) return;
+        setView(submissionKey, { requestError: null });
         setSaved("제출 완료");
       } else {
         const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
-        if (!workspace.getState().acceptPracticeSubmission(submissionKey, request, receipt.submissionId)) return;
-        setView(submissionKey, { showSubmission: true });
+        if (!isCurrent() || !workspace.getState().acceptPracticeSubmission(submissionKey, request, receipt.submissionId)) return;
+        setView(submissionKey, { showSubmission: true, requestError: null });
         setPollVersion((value) => value + 1);
         setPaused(false);
       }
       router.refresh();
     } catch (failure) {
+      if (!isCurrent()) return;
       if (isUnauthorized(failure)) return toLogin();
       const message = typeof failure === "object" && failure !== null && "message" in failure
         && typeof failure.message === "string" ? failure.message : "제출에 실패했습니다.";
       if (!examId && workspace.getState().practiceRequests[submissionKey]?.idempotencyKey !== request.idempotencyKey) return;
       setView(submissionKey, { requestError: message });
     } finally {
-      sendingRef.current = false;
-      setSending(false);
+      if (isCurrent()) setView(submissionKey, { transportId: null });
     }
   }
   return (
@@ -261,7 +258,7 @@ export function Buffer({
       <section className="results stack-sm flex-1 max-h-[50dvh] overflow-y-auto overscroll-contain">
         <h3>실행 결과</h3>
         <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} error={requestError}
-          disabled={busy || busyRun} paused={!showSubmission || paused} onRetry={() => handleSubmit(true)}
+          disabled={busy || busyRun} hiddenResult={!showSubmission || showRun} paused={!showSubmission || paused} onRetry={() => handleSubmit(true)}
           onResume={() => { setView(submissionKey, { showSubmission: true }); setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false); }}
           onSelect={(id) => {
             workspace.getState().selectPracticeSubmission(submissionKey, id);

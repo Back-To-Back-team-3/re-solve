@@ -6,9 +6,9 @@ import type { PracticeSubmissionAttempt, PracticeSubmissionRequest } from "@/sto
 import { expiredPracticeRequestMessage, isPracticeRequestExpired, practiceRequestTtlMs } from "@/services/practice-request";
 
 /** 접수 조회와 미접수 재요청을 별도로 안내한다. (API 명세서 §3.1.2·§3.1.3) */
-export function EditorSubmissionStatus({ accepted, selected, pending, error, disabled, paused, onSelect, onResume, onRetry }: {
+export function EditorSubmissionStatus({ accepted, selected, pending, error, disabled, hiddenResult, paused, onSelect, onResume, onRetry }: {
   accepted: PracticeSubmissionAttempt[]; selected: PracticeSubmissionAttempt | undefined;
-  pending: PracticeSubmissionRequest | undefined; error: string | null; disabled: boolean; paused: boolean;
+  pending: PracticeSubmissionRequest | undefined; error: string | null; disabled: boolean; hiddenResult: boolean; paused: boolean;
   onSelect: (id: string) => void; onResume: () => void; onRetry: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
@@ -30,6 +30,7 @@ export function EditorSubmissionStatus({ accepted, selected, pending, error, dis
     {selected && <>
       <Link href={`/submissions/${selected.submissionId}`}>제출 결과 상세</Link>
       <p className="muted">접수된 제출 #{selected.submissionId}</p>
+      {selected.result && hiddenResult && <Button className="small" disabled={disabled} onClick={() => onSelect(selected.submissionId)}>이전 결과 보기</Button>}
       {!selected.result && paused && <Button className="small" disabled={disabled} onClick={onResume}>채점 상태 다시 조회</Button>}
     </>}
     {pending && <>

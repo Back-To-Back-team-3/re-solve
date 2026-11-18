@@ -64,6 +64,7 @@ export interface PracticeSubmissionAttempt {
 
 /** 언어·회차별 결과 화면 선택과 접수 오류를 재마운트 뒤에도 유지한다. */
 interface EditorSubmissionView {
+  transportId: string | null;
   showSubmission: boolean;
   requestError: string | null;
 }
@@ -133,7 +134,7 @@ const createWorkspace = () =>
     activePracticeSubmissions: {},
     editorSubmissionViews: {},
     setEditorSubmissionView: (key, view) => set((state) => ({ editorSubmissionViews: {
-      ...state.editorSubmissionViews, [key]: { showSubmission: true, requestError: null, ...state.editorSubmissionViews[key], ...view },
+      ...state.editorSubmissionViews, [key]: { transportId: null, showSubmission: true, requestError: null, ...state.editorSubmissionViews[key], ...view },
     } })),
     setPracticeRequest: (key, request) => set((state) => ({
       practiceRequests: { ...state.practiceRequests, [key]: request },

@@ -28,6 +28,10 @@ test("초기 안내는 실행·접수 실패 뒤 숨기고 이전 성공 결과�
   await expect(page.getByText("접수 실패", { exact: true })).toBeVisible();
   await expect(page.getByText("AC 정답", { exact: true })).toHaveCount(0);
   await expect(page.getByText("코드를 실행해 보세요", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "이전 결과 보기", exact: true }).click();
+  await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "실행", exact: true }).click();
+  await expect(page.getByText("접수 실패", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "같은 제출 재요청", exact: true }).click();
   await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
   await page.getByLabel("접수된 제출", { exact: true }).selectOption("1");
@@ -69,6 +73,7 @@ test("접수 실패 후 언어를 바꿨다 돌아와도 실패 안내·원본 �
   await editor.press("ControlOrMeta+A"); await editor.pressSequentially("// changed after restore");
   await page.getByRole("button", { name: "같은 제출 재요청", exact: true }).click();
   await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
+  expect(posts[1].key).toBeTruthy();
   expect(posts[2]).toEqual(posts[1]);
   expect(posts[2].body).toMatchObject({ sourceCode: "// original B" });
   await expect(page.getByText("B 접수 실패", { exact: true })).toHaveCount(0);
