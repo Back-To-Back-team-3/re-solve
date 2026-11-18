@@ -2708,7 +2708,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 상태 | 의미 | 전이 |
 | --- | --- | --- |
-| `REQUESTED` | 요청 접수 | → `GENERATING` / `BLOCKED` |
+| `REQUESTED` | 요청 접수 | → `GENERATING` / `FALLBACK`(1분 초과 회수) / `BLOCKED` |
 | `GENERATING` | LLM 생성 중 | → `READY` / `FALLBACK` / `BLOCKED`(전달 직전 재확인) |
 | `READY` | 생성 완료 | 종단 |
 | `FALLBACK` | 폴백 응답 | 종단 |
