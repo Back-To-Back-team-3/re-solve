@@ -105,7 +105,7 @@ export function EditorResultPanel({ busy, sending, submissionFailed, submissionP
   judgeResult: JudgeResult | null; runError: string | null; runResult: RunResponse | null;
 }) {
   if (busy) return <div className="row"><Badge tone="pending">{sending ? "제출 접수 중…" : "채점 중…"}</Badge></div>;
-  if (!showRun && submissionFailed) return <p className="muted">제출 접수를 확인하지 못했습니다. 같은 제출 재요청으로 접수 여부를 확인할 수 있습니다.</p>;
+  if (!showRun && submissionFailed) return <p className="muted">제출 접수를 확인하지 못했습니다. 위 오류 안내를 확인해 주세요.</p>;
   if (showRun) {
     if (busyRun) return <p className="muted">실행 중…</p>;
     if (runError) return <p className="error-text">{runError}</p>;
