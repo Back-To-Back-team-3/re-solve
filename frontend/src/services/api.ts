@@ -1,3 +1,4 @@
+import { withSubmissionTransport } from "@/services/submission-transport";
 import type {
   DiagnosisRunResult, DiagnosisContent, DiagnosisDetail, DiagnosisDraftRequest, DiagnosisSaved, DiagnosisReceipt,
   DiagnosisStarted, DiagnosisFinished, DiagnosisHistory,
@@ -154,8 +155,8 @@ export function whenAuthReady(): Promise<void> {
   return authReady;
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  return readApiResponse<T>(await apiRequest(path, init, false));
+export async function apiFetch<T>(path: string, init?: RequestInit, refreshSignal?: AbortSignal): Promise<T> {
+  return readApiResponse<T>(await apiRequest(path, init, false, refreshSignal));
 }
 
 async function readApiResponse<T>(res: Response): Promise<T> {
@@ -192,7 +193,7 @@ export async function apiFetchStream(path: string, signal: AbortSignal, lastEven
   return res;
 }
 
-async function apiRequest(path: string, init: RequestInit | undefined, isRetry: boolean): Promise<Response> {
+async function apiRequest(path: string, init: RequestInit | undefined, isRetry: boolean, refreshSignal = init?.signal): Promise<Response> {
   init?.signal?.throwIfAborted();
   const token = tokenGetter?.();
   const headers: Record<string, string> = {
@@ -211,6 +212,8 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
     throw { code: "UNKNOWN", message: NETWORK_ERROR_MESSAGE } satisfies ApiError;
   }
 
+  // 로그아웃·응답 대기 만료 뒤 도착한 401로 인증 갱신을 다시 시작하지 않는다.
+  init?.signal?.throwIfAborted();
   // /auth/token/refresh 자체는 인터셉터에서 제외해 무한 루프를 방지한다.
   if (res.status === 401 && !isRetry && !path.includes("/auth/token/refresh")) {
     let refreshRes: Response;
@@ -218,7 +221,7 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
       refreshRes = await fetch("/api/v1/auth/token/refresh", {
         method: "POST",
         credentials: "include",
-        signal: init?.signal,
+        signal: refreshSignal,
       });
     } catch {
       throw { code: "UNKNOWN", message: NETWORK_ERROR_MESSAGE } satisfies ApiError;
@@ -235,9 +238,11 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
         code: "UNKNOWN",
         message: "토큰 갱신 응답을 확인하지 못했습니다",
       } satisfies ApiError;
-    init?.signal?.throwIfAborted();
+    refreshSignal?.throwIfAborted();
     accessTokenSetter?.(newToken);
-    return apiRequest(path, init, true);
+    // 갱신 쿠키·토큰은 반영하되, 접수 기한이 지난 제출을 자동 재전송하지 않는다.
+    init?.signal?.throwIfAborted();
+    return apiRequest(path, init, true, refreshSignal);
   }
 
   return res;
@@ -344,11 +349,12 @@ export const judgeApi = {
       body: JSON.stringify(body),
     }),
   submit: (body: SubmissionCreateRequest, idempotencyKey: string) =>
-    apiFetch<SubmissionReceipt>("/api/v1/submissions", {
+    withSubmissionTransport((signal, refreshSignal) => apiFetch<SubmissionReceipt>("/api/v1/submissions", {
+      signal,
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(body),
-    }),
+    }, refreshSignal)),
   getStatus: (submissionId: string, signal?: AbortSignal) =>
     apiFetch<JudgeResult>(`/api/v1/submissions/${submissionId}`, { signal }),
   getSource: (id: string) => apiFetch<SubmissionSource>(`/api/v1/submissions/${id}/source`, { cache: "no-store" }),
@@ -633,10 +639,11 @@ export const contestApi = {
     }),
 
   submitExam: (examId: string, body: ExamSubmitRequest) =>
-    apiFetch<ExamSubmitResponse>(`/api/v1/exams/${examId}/submissions`, {
+    withSubmissionTransport((signal, refreshSignal) => apiFetch<ExamSubmitResponse>(`/api/v1/exams/${examId}/submissions`, {
+      signal,
       method: "POST",
       body: JSON.stringify(body),
-    }),
+    }, refreshSignal)),
 
   finishExam: (examId: string) =>
     apiFetch<ExamFinishResponse>(`/api/v1/exams/${examId}/finish`, {

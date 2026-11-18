@@ -120,7 +120,7 @@ test("같은 화면에서 제출 접수와 채점 완료를 제출 목록에 반
 });
 
 for (const retry of [false, true]) {
-  test(`언어 전환 후 ${retry ? "같은 요청을 재시도해도" : "새 제출을 보내도"} 늦은 원래 응답이 완료 결과를 덮지 않는다`, async ({ page }) => {
+  test(`언어 전환 후 ${retry ? "같은 요청을 재시도해도" : "새 제출을 보내도"} 전송 중 중복 요청을 막고 실패 뒤 완료 결과를 표시한다`, async ({ page }) => {
     await mockPracticePage(page);
     await seedBrowserStorage(page, { "resolve:editor": JSON.stringify({ language: "java", fontSize: 14 }) });
     await page.route("**/api/v1/judge/languages", (route) => route.fulfill({ json: { success: true, data: {
@@ -133,7 +133,11 @@ for (const retry of [false, true]) {
       requests.push({ key: route.request().headers()["idempotency-key"], body: route.request().postDataJSON() });
       const first = requests.length === 1;
       const id = first || retry ? "2101" : "2102";
-      if (first) await pendingFirst;
+      if (first) {
+        await pendingFirst;
+        await route.fulfill({ status: 503, json: { success: false, error: { code: "COMMON_DEPENDENCY_UNAVAILABLE", message: "원래 요청 실패" } } });
+        return;
+      }
       await route.fulfill({ status: 202, json: { success: true, data: {
         ...receipt, submissionId: id, statusUrl: `/api/v1/submissions/${id}`,
       } } });
@@ -149,6 +153,12 @@ for (const retry of [false, true]) {
     await expect(page.locator(".view-lines")).toContainText("# python starter");
     await page.getByLabel("코드 언어").selectOption("java");
     await expect(page.locator(".view-lines")).toContainText("// java starter");
+    await expect(page.getByRole("button", { name: "같은 제출 재요청", exact: true })).toBeDisabled();
+    await expect(page.getByText("제출 접수 중…", { exact: true })).toBeVisible();
+    await expect(page.getByText("제출 접수를 확인하지 못했습니다. 위 오류 안내를 확인해 주세요.", { exact: true })).toHaveCount(0);
+    expect(requests).toHaveLength(1);
+    releaseFirst();
+    await expect(page.getByText("원래 요청 실패", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: retry ? "같은 제출 재요청" : "현재 코드로 새 제출", exact: true }).click();
     const expectedId = retry ? "2101" : "2102";
     const detail = page.getByRole("link", { name: "제출 결과 상세", exact: true });
@@ -158,12 +168,9 @@ for (const retry of [false, true]) {
     expect(requests[0].key).toBeTruthy();
     if (retry) expect(requests[1]).toEqual(requests[0]);
     else expect(requests[1].key).not.toBe(requests[0].key);
-    const lateResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/submissions" && response.request().method() === "POST");
-    releaseFirst();
-    await (await lateResponse).finished();
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect(detail).toHaveAttribute("href", `/submissions/${expectedId}`);
     await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
     expect(requests).toHaveLength(2);
+    await expect(page.getByText("원래 요청 실패", { exact: true })).toHaveCount(0);
   });
 }
