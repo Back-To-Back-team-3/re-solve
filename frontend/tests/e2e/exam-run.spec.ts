@@ -19,6 +19,7 @@ test("서로 다른 문제·회차 ID의 시험은 Contest Run만 호출하고 �
       error: { code: "EXAM_CLOSED", message: "종료된 시험입니다." } } });
   });
   await page.goto("/exams/42/room");
+  await page.getByLabel("코드 언어").selectOption("java");
   const editor = page.getByRole("textbox", { name: "코드 편집기" });
   await expect(editor).toBeVisible();
   await expect(page.getByText("시험 회차 본문", { exact: true })).toBeVisible();

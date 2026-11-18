@@ -81,7 +81,7 @@ export function Buffer({
     try {
       if (examId) {
         const draft = readExamDraft(examId, problem.id);
-        initial = draft ? { code: draft.code, revisionId: problem.problemRevisionId, savedAt: 0 } : undefined;
+        initial = draft && (!draft.language || draft.language === language) ? { code: draft.code, revisionId: problem.problemRevisionId, savedAt: 0 } : undefined;
         seqRef.current = draft?.seq ?? "1";
       } else initial = initial || readDraft(key) || undefined;
     } catch {

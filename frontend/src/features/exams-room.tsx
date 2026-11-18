@@ -151,7 +151,7 @@ export function ExamRoom({ id }: { id: string }) {
           <ProblemDescription key={problem.id} problem={problem} exam examId={id} />
           <CodeEditor problem={problem} userId={userId} examId={id}
             runDisabled={runtimes.loading || !!runtimes.error}
-            availableLanguages={runtimes.data?.content.filter((item) => item.enabled).map((item) => item.language)} />
+            runLanguages={runtimes.data?.content.filter((item) => item.enabled).map((item) => item.language)} />
         </div>
       </div>
       <Modal

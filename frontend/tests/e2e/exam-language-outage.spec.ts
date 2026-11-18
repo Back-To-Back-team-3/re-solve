@@ -103,3 +103,39 @@ test("언어 조회 대기·재시도 중에도 코드를 유지하고 복구 �
     expect(runs).toBe(1);
   } finally { release(); releaseRetry(); }
 });
+
+test("언어 조회 복구가 작성 언어를 바꾸지 않고 다른 언어로 코드를 복사하지 않는다", async ({ page }) => {
+  const { now, endsAt } = await mockExamRoom(page);
+  await seedBrowserStorage(page, { "resolve:editor": JSON.stringify({ language: "python3", fontSize: 14 }) });
+  let recovered = false;
+  await page.route("**/api/v1/judge/languages", (route) => route.fulfill(recovered ? javaRuntime : languageFailure));
+  const drafts: { language: string; sourceCode: string }[] = [], submissions: unknown[] = [];
+  await page.route("**/api/v1/exams/42/drafts/1001", (route) => {
+    const body = route.request().postDataJSON(); drafts.push(body);
+    return route.fulfill({ json: { success: true, data: {
+      applied: true, serverSeq: body.seq, savedAt: now, personalEndsAt: endsAt, serverNow: now,
+    } } });
+  });
+  await page.route("**/api/v1/exams/42/submissions", (route) => {
+    submissions.push(route.request().postDataJSON());
+    return route.fulfill({ status: 202, json: { success: true, data: {
+      examSubmissionId: "99", status: "RECEIVED", receivedAt: now, draftSeq: "2",
+    } } });
+  });
+  await page.goto("/exams/42/room");
+  const language = page.getByLabel("코드 언어"), editor = page.getByRole("textbox", { name: "코드 편집기" });
+  await expect(editor).toBeVisible(); await expect(language).toHaveValue("python3");
+  await editor.pressSequentially("print(1)");
+  await expect.poll(() => drafts.at(-1)).toMatchObject({ language: "python3", sourceCode: "print(1)" });
+  recovered = true;
+  await page.getByRole("button", { name: "실행 언어 다시 조회", exact: true }).click();
+  await expect(page.getByRole("button", { name: "실행 언어 다시 조회", exact: true })).toHaveCount(0);
+  await expect(language).toHaveValue("python3"); await expect(page.locator(".view-lines")).toContainText("print(1)");
+  await expect(page.getByRole("button", { name: "실행", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "제출", exact: true }).click();
+  await expect(page.getByText("제출 완료", { exact: true })).toBeVisible();
+  expect(submissions).toEqual([{ problemId: "1001", language: "python3", sourceCode: "print(1)", seq: "2" }]);
+  await language.selectOption("java");
+  await expect(page.locator(".view-lines")).not.toContainText("print(1)");
+  await expect(page.getByRole("button", { name: "실행", exact: true })).toBeEnabled();
+});
