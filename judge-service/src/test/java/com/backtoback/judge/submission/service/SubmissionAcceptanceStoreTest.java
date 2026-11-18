@@ -103,6 +103,8 @@ class SubmissionAcceptanceStoreTest {
     @Autowired
     private SubmissionAcceptanceService acceptance;
     @Autowired
+    private SubmissionAccessService access;
+    @Autowired
     private SubmissionAcceptanceStore store;
     @Autowired
     private JdbcTemplate jdbc;
@@ -199,6 +201,7 @@ class SubmissionAcceptanceStoreTest {
         given(dependencies.status(7)).willReturn(new MemberStatusResponse("7", "SUSPENDED"));
         assertThat(acceptance.create(7, "key", REQUEST)).isEqualTo(first);
         verify(dependencies, times(1)).status(7);
+        verify(dependencies, never()).isAssignedProblem(7, 301);
         verify(rate, times(1)).acquire(7, 301);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_jobs", Long.class)).isEqualTo(1);
         assertThatThrownBy(
@@ -368,6 +371,75 @@ class SubmissionAcceptanceStoreTest {
                 exception -> assertThat(exception.getErrorCode().getCode()).isEqualTo("LEVEL_PROBLEM_LOCKED")
             );
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isZero();
+    }
+
+    /** 배정 확인을 받은 회원에게 일반 Run과 제출에서 같은 예외를 적용한다. */
+    @Test
+    @DisplayName("레벨 미달 배정 문제는 일반 Run의 실행 환경 조회와 PRACTICE 제출을 허용한다")
+    void allowsAssignedProblem() {
+        given(dependencies.levels(7)).willReturn(new MemberTagLevelsResponse("7", List.of()));
+        given(dependencies.isAssignedProblem(7, 301)).willReturn(true);
+
+        assertThat(access.runRuntime(7, 301, 1001, "java")).isEqualTo(JAVA);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isZero();
+        var response = acceptance.create(7, "assigned", REQUEST);
+
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT context FROM submissions WHERE id=?",
+                    String.class,
+                    Long.parseLong(response.submissionId())
+                )
+        ).isEqualTo("PRACTICE");
+        verify(dependencies, times(2)).isAssignedProblem(7, 301);
+    }
+
+    /** 배정이 확인되지 않은 레벨 미달 회원의 일반 Run을 거절한다. */
+    @Test
+    @DisplayName("Study에서 배정을 확인하지 못하면 일반 Run은 레벨 잠금을 유지한다")
+    void rejectsRunWhenAssignmentIsUnconfirmed() {
+        given(dependencies.levels(7)).willReturn(new MemberTagLevelsResponse("7", List.of()));
+
+        assertThatThrownBy(() -> access.runRuntime(7, 301, 1001, "java"))
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.LEVEL_PROBLEM_LOCKED)
+            );
+        verify(dependencies).isAssignedProblem(7, 301);
+    }
+
+    /** 레벨이 충분하면 Study 조회 없이 일반 Run을 허용한다. */
+    @Test
+    @DisplayName("레벨 조건을 충족하는 일반 Run은 Study 배정을 조회하지 않는다")
+    void runsWithoutCheckingAssignmentWhenLevelIsSufficient() {
+        assertThat(access.runRuntime(7, 301, 1001, "java")).isEqualTo(JAVA);
+        verify(dependencies, never()).isAssignedProblem(7, 301);
+    }
+
+    /** 배정 조회 중 같은 제출이 접수되면 먼저 저장된 응답을 복원한다. */
+    @Test
+    @DisplayName("Study에서 배정을 확인하지 못해도 같은 제출이 먼저 접수됐다면 최초 202를 복원한다")
+    void replaysSubmissionAcceptedDuringAssignmentLookup() {
+        given(dependencies.levels(7)).willReturn(new MemberTagLevelsResponse("7", List.of()));
+        given(dependencies.isAssignedProblem(7, 301)).willAnswer(invocation -> {
+            store
+                .accept(
+                    7,
+                    "key",
+                    REQUEST.requestHash(),
+                    REQUEST,
+                    NOW,
+                    JAVA,
+                    List.of(new TestCase(501, 1, true), new TestCase(502, 2, false))
+                );
+            return false;
+        });
+
+        var response = acceptance.create(7, "key", REQUEST);
+
+        assertThat(store.findReusable(7, "key", REQUEST.requestHash())).contains(response);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isEqualTo(1);
     }
 
     /**

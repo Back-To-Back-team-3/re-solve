@@ -26,6 +26,9 @@ import com.backtoback.judge.submission.config.SubmissionClientProperties;
 import com.backtoback.judge.submission.dto.ProblemJudgingDataResponse;
 import com.sun.net.httpserver.HttpServer;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import jakarta.validation.Validation;
+
 /** 실제 HTTP 직렬화·추적 전파·응답 장애의 fail-closed 동작을 확인한다. */
 class SubmissionDependencyClientTest {
     private HttpServer server;
@@ -62,7 +65,10 @@ class SubmissionDependencyClientTest {
             context.getBean(RestClientCustomizer.class).customize(builder);
         }
         client
-            = new SubmissionDependencyClient(builder, new SubmissionClientProperties(uri, uri, Duration.ofSeconds(2)));
+            = new SubmissionDependencyClient(
+                builder,
+                new SubmissionClientProperties(uri, uri, uri, Duration.ofSeconds(2))
+            );
     }
 
     /** 서버와 스레드의 상관관계 정보를 정리한다. */
@@ -94,6 +100,110 @@ class SubmissionDependencyClientTest {
         var data = client.data(301, 1001);
         assertThat(data.cases()).containsExactly(new ProblemJudgingDataResponse.TestCase("501", 1, false));
         assertThat(path.get()).isEqualTo("/internal/v1/problems/301/revisions/1001/judging/data");
+    }
+
+    /** 동일한 회원과 문제의 실제 불리언 배정 응답을 확인한다. */
+    @Test
+    @DisplayName("Study가 동일 회원과 문제에 배정을 확인하면 예외를 허용한다")
+    void readsAssignment() {
+        body = """
+            {"memberId":"7","problemId":"301","assigned":true}
+            """;
+        assertThat(client.isAssignedProblem(7, 301)).isTrue();
+        assertThat(path.get()).isEqualTo("/internal/v1/studies/members/7/assigned-problems/301");
+    }
+
+    /**
+     * 일치하지 않는 식별자와 잘못된 배정 플래그는 예외를 허용하지 않는다.
+     *
+     * @param responseBody 배정이 확인되지 않는 Study 응답
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "{\"memberId\":\"7\",\"problemId\":\"301\",\"assigned\":false}",
+            "{\"memberId\":\"8\",\"problemId\":\"301\",\"assigned\":true}",
+            "{\"memberId\":\"7\",\"problemId\":\"302\",\"assigned\":true}",
+            "{\"memberId\":\"7\",\"problemId\":\"301\",\"assigned\":\"true\"}",
+            "{\"memberId\":\"7\",\"problemId\":\"301\"}",
+            "not-json"
+        }
+    )
+    @DisplayName("미배정·식별자 불일치·응답 계약 오류에서는 잠금을 유지한다")
+    void rejectsUnconfirmedAssignment(String responseBody) {
+        body = responseBody;
+        assertThat(client.isAssignedProblem(7, 301)).isFalse();
+    }
+
+    /**
+     * 성공 상태가 200이 아닌 응답에서는 잠금을 유지한다.
+     *
+     * @param responseStatus Study의 HTTP 상태
+     */
+    @ParameterizedTest
+    @ValueSource(
+        ints = {
+            302,
+            404,
+            503
+        }
+    )
+    @DisplayName("Study의 리다이렉트나 오류 응답으로 잠금이 해제되지 않는다")
+    void rejectsAssignmentHttpFailure(int responseStatus) {
+        status = responseStatus;
+        body = """
+            {"memberId":"7","problemId":"301","assigned":true}
+            """;
+        assertThat(client.isAssignedProblem(7, 301)).isFalse();
+    }
+
+    /** 정상 미배정은 허용하고 연속 장애가 발생하면 Study 호출을 차단한다. */
+    @Test
+    @DisplayName("Study 미배정은 장애로 집계하지 않고 연속 실패 뒤에는 호출을 차단한다")
+    void opensCircuitOnAssignmentFailures() {
+        var config = CircuitBreakerConfig.ofDefaults();
+        body = "{\"memberId\":\"7\",\"problemId\":\"301\",\"assigned\":false}";
+        for (int call = 0; call < config.getSlidingWindowSize(); call++) {
+            assertThat(client.isAssignedProblem(7, 301)).isFalse();
+        }
+        body = "{\"memberId\":\"7\",\"problemId\":\"301\",\"assigned\":true}";
+        assertThat(client.isAssignedProblem(7, 301)).isTrue();
+
+        status = 503;
+        for (int call = 0; call < config.getSlidingWindowSize(); call++) {
+            assertThat(client.isAssignedProblem(7, 301)).isFalse();
+        }
+        path.set(null);
+        status = 200;
+        assertThat(client.isAssignedProblem(7, 301)).isFalse();
+        assertThat(path.get()).isNull();
+    }
+
+    /**
+     * HTTP(S) 호스트가 없는 Study 설정은 검증에서 거절한다.
+     *
+     * @param address 유효하지 않은 Study 주소
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "ftp://study-service",
+            "/study-service",
+            "http:/study-service"
+        }
+    )
+    @DisplayName("호스트를 포함한 HTTP(S) 주소만 Study 설정에 허용한다")
+    void rejectsInvalidStudyBaseUrl(String address) {
+        URI internalUrl = URI.create("http://study-service:8080");
+        var properties
+            = new SubmissionClientProperties(internalUrl, internalUrl, URI.create(address), Duration.ofSeconds(2));
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            assertThat(factory.getValidator().validate(properties))
+                .singleElement()
+                .satisfies(
+                    violation -> assertThat(violation.getPropertyPath().toString()).isEqualTo("studyBaseUrlValid")
+                );
+        }
     }
 
     /** Problem 미존재와 다른 서비스 장애를 구분한다. */
