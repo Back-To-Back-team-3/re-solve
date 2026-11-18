@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -42,11 +43,16 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
 
     /**
      * REQUESTED → GENERATING 전이 — REQUESTED 상태인 행만 갱신한다 (api-spec §6.2.1).
+     * 생성 시작 시각은 회수 스케줄러의 대상 판정 기준이다(scheduler §6.1).
+     * 벌크 UPDATE는 Auditing을 거치지 않으므로 updated_at도 함께 기록한다.
      * 반환값 0이면 이미 다른 상태로 전이됐거나 존재하지 않는 행이다.
      */
     @Modifying
-    @Query("UPDATE HintRequest r SET r.status = 'GENERATING' WHERE r.id = :id AND r.status = 'REQUESTED'")
-    int updateStatusToGenerating(@Param("id") Long id);
+    @Query(
+        "UPDATE HintRequest r SET r.status = 'GENERATING', r.generationStartedAt = :now, r.updatedAt = :now"
+            + " WHERE r.id = :id AND r.status = 'REQUESTED'"
+    )
+    int updateStatusToGenerating(@Param("id") Long id, @Param("now") LocalDateTime now);
 
     /**
      * 조건부 완료 갱신 — {@code expectedStatus}인 행만 갱신하여 경쟁 처리를 방지한다 (event-contract §S8).
@@ -82,5 +88,53 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
         @Param("blockedReason") String blockedReason,
         @Param("completedAt") LocalDateTime completedAt,
         @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    /**
+     * 회수 폴백 종결 — 조회 시점 상태({@code expectedStatus})인 행만 FALLBACK(RECOVERED)으로 바꾼다(scheduler §6.1).
+     * 반환값 0이면 그사이 다른 경로로 종결·전이된 행이다.
+     */
+    @Modifying
+    @Query(
+        "UPDATE HintRequest r SET r.status = 'FALLBACK', r.fallback = true, r.fallbackReason = 'RECOVERED',"
+            + " r.content = NULL, r.completedAt = :completedAt, r.updatedAt = :completedAt"
+            + " WHERE r.id = :id AND r.status = :expectedStatus"
+    )
+    int recoverAsFallback(
+        @Param("id") Long id,
+        @Param("expectedStatus") HintRequestStatus expectedStatus,
+        @Param("completedAt") LocalDateTime completedAt
+    );
+
+    /**
+     * 회수 차단 종결 — 조회 시점 상태({@code expectedStatus})인 행만 BLOCKED로 바꾼다(scheduler §6.1).
+     * 반환값 0이면 그사이 다른 경로로 종결·전이된 행이다.
+     */
+    @Modifying
+    @Query(
+        "UPDATE HintRequest r SET r.status = 'BLOCKED', r.blockedReason = :blockedReason,"
+            + " r.completedAt = :completedAt, r.updatedAt = :completedAt"
+            + " WHERE r.id = :id AND r.status = :expectedStatus"
+    )
+    int recoverAsBlocked(
+        @Param("id") Long id,
+        @Param("expectedStatus") HintRequestStatus expectedStatus,
+        @Param("blockedReason") String blockedReason,
+        @Param("completedAt") LocalDateTime completedAt
+    );
+
+    /**
+     * 회수 대상 조회 — 진행 중 상태로 기준 시각이 {@code cutoff} 이하인 요청을 오래된 순으로 가져온다(scheduler §6.1).
+     * 기준 시각은 생성 시작 시각이며, 없으면(생성 대기 또는 시작 시각 기록 전 요청) 요청 시각으로 판단한다.
+     * 별도 인덱스 없이 기존 (status, generation_started_at) 인덱스의 status 접두로 진행 중 행만 좁힌다.
+     */
+    @Query(
+        "SELECT r FROM HintRequest r WHERE r.status IN :statuses"
+            + " AND COALESCE(r.generationStartedAt, r.createdAt) <= :cutoff ORDER BY r.id"
+    )
+    List<HintRequest> findRecoveryTargets(
+        @Param("statuses") List<HintRequestStatus> statuses,
+        @Param("cutoff") LocalDateTime cutoff,
+        Pageable pageable
     );
 }

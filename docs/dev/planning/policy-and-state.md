@@ -859,7 +859,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 문제 진행(`assignment_progress.completion_type`) | `PRE_SOLVED / ON_TIME / LATE` (제출 접수 시각으로 계산, 더 이른 유형 유지, 재채점 시 남은 유효 AC로 재계산하거나 기록 삭제) |
 | 진단 응시(테이블명·상태명 확정 필요) | `IN_PROGRESS → CLOSED`(최종 제출 또는 제한 시간 만료 + 자동 제출) `→ SCORED`(채점 종결 후 레벨 반영). 종료 이후의 저장·제출은 반영하지 않는다 |
 | 태그 레벨(`member_tag_levels`) | `Lv.0 → Lv.1 / Lv.2 / Lv.3 → 마스터`. 진단 재응시로는 하향하지 않고(`max`), 재채점 재계산으로만 하향될 수 있다 |
-| 힌트 요청(`hint_requests`) | `REQUESTED → GENERATING → READY` / `GENERATING → FALLBACK`(타임아웃·장애·가드레일 실패) / `REQUESTED → BLOCKED`(시험·진단 중·제한 초과) / `GENERATING → BLOCKED`(전달 직전 재확인에서 차단, 일일 횟수 미차감) |
+| 힌트 요청(`hint_requests`) | `REQUESTED → GENERATING → READY` / `GENERATING → FALLBACK`(타임아웃·장애·가드레일 실패) / `REQUESTED·GENERATING → FALLBACK`(1분 넘게 멈춘 요청 회수, 스케줄러 §6.1) / `REQUESTED → BLOCKED`(시험·진단 중·제한 초과) / `GENERATING → BLOCKED`(전달 직전 재확인에서 차단, 일일 횟수 미차감) |
 | GitHub 연동(`github_connections`) | `CONNECTED → DISCONNECTED`(해제·권한 만료), `DISCONNECTED → CONNECTED`(재인가) |
 | GitHub Sync Job(`github_sync_jobs`) | `PENDING → RUNNING → SUCCEEDED`, <br>`RUNNING → RETRY_WAITING → PENDING`, <br>`RUNNING → RATE_LIMITED → PENDING`, <br>`RETRY_WAITING → FAILED`(상한 초과), `PENDING / RETRY_WAITING → CANCELED`(연동 해제) |
 | 알림(`notifications`) | `UNREAD → READ` |
