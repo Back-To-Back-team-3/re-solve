@@ -46,7 +46,7 @@ public class SubmissionAccessService {
     ProblemValidationResponse checkProblem(long memberId, long problemId, long revisionId) {
         var validation = dependencies.validation(problemId, revisionId);
         validateProblem(validation, Long.toString(problemId), Long.toString(revisionId));
-        checkLevels(memberId, validation);
+        checkLevels(memberId, problemId, validation);
         return validation;
     }
 
@@ -121,14 +121,15 @@ public class SubmissionAccessService {
     }
 
     /**
-     * 모든 문제 태그의 회원 레벨이 난이도를 충족하는지 검사한다.
+     * 모든 태그의 레벨을 검사하고 미달한 경우에만 Study의 배정 여부를 확인한다.
      *
      * @param memberId 인증 회원 ID
+     * @param problemId 실행 또는 제출할 문제 ID
      * @param value 고정 문제 회차
-     * @throws JudgeException {@code LEVEL_PROBLEM_LOCKED}: 한 개 이상 태그의 회원 레벨이 난이도에 미달한 경우;
+     * @throws JudgeException {@code LEVEL_PROBLEM_LOCKED}: 레벨이 미달하고 배정 여부를 확인하지 못한 경우;
      *     {@code COMMON_DEPENDENCY_UNAVAILABLE}: 내부 레벨 응답이 유효하지 않은 경우
      */
-    private void checkLevels(long memberId, ProblemValidationResponse value) {
+    private void checkLevels(long memberId, long problemId, ProblemValidationResponse value) {
         var response = dependencies.levels(memberId);
         require(
             response != null && Long.toString(memberId).equals(response.memberId()) && response.tagLevels() != null
@@ -146,12 +147,14 @@ public class SubmissionAccessService {
             require(level >= 0 && levels.putIfAbsent(internalId(entry.tagId()), level) == null);
         }
         Set<Long> tags = new HashSet<>();
+        boolean locked = false;
         for (String tag : value.tagIds()) {
             long id = internalId(tag);
             require(tags.add(id));
-            if (levels.getOrDefault(id, 0) < value.difficulty()) {
-                throw new JudgeException(JudgeErrorCode.LEVEL_PROBLEM_LOCKED);
-            }
+            locked |= levels.getOrDefault(id, 0) < value.difficulty();
+        }
+        if (locked && !dependencies.isAssignedProblem(memberId, problemId)) {
+            throw new JudgeException(JudgeErrorCode.LEVEL_PROBLEM_LOCKED);
         }
     }
 
