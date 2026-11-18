@@ -42,11 +42,16 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
 
     /**
      * REQUESTED → GENERATING 전이 — REQUESTED 상태인 행만 갱신한다 (api-spec §6.2.1).
+     * 생성 시작 시각은 회수 스케줄러의 대상 판정 기준이다(scheduler §6.1).
+     * 벌크 UPDATE는 Auditing을 거치지 않으므로 updated_at도 함께 기록한다.
      * 반환값 0이면 이미 다른 상태로 전이됐거나 존재하지 않는 행이다.
      */
     @Modifying
-    @Query("UPDATE HintRequest r SET r.status = 'GENERATING' WHERE r.id = :id AND r.status = 'REQUESTED'")
-    int updateStatusToGenerating(@Param("id") Long id);
+    @Query(
+        "UPDATE HintRequest r SET r.status = 'GENERATING', r.generationStartedAt = :now, r.updatedAt = :now"
+            + " WHERE r.id = :id AND r.status = 'REQUESTED'"
+    )
+    int updateStatusToGenerating(@Param("id") Long id, @Param("now") LocalDateTime now);
 
     /**
      * 조건부 완료 갱신 — {@code expectedStatus}인 행만 갱신하여 경쟁 처리를 방지한다 (event-contract §S8).
