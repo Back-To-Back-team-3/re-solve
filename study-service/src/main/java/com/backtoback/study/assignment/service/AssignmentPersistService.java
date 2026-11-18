@@ -22,7 +22,6 @@ import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.Study;
 import com.backtoback.study.membership.domain.StudyMembership;
-import com.backtoback.study.membership.domain.StudyStatus;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
 
@@ -53,7 +52,9 @@ class AssignmentPersistService {
      * @param request 문제집 생성 요청
      * @param summaryMap 외부 조회로 확보한 배정 회차별 문제 요약
      * @return 생성된 assignmentId
-     * @throws StudyException 스터디가 없거나 종료됐거나 요청자에게 배정 권한이 없는 경우
+     * @throws StudyException 스터디가 없으면 {@code STUDY_NOT_FOUND}, 종료됐으면 {@code STUDY_ALREADY_CLOSED},
+     *     권한이 없으면 {@code AUTH_ACCESS_DENIED}, 수준이 유효하지 않으면 {@code COMMON_INVALID_REQUEST},
+     *     난이도가 상한을 넘으면 {@code STUDY_ASSIGNMENT_DIFFICULTY_EXCEEDED}
      */
     @Transactional
     public Long persist(
@@ -67,7 +68,7 @@ class AssignmentPersistService {
             = studyRepository
                 .findByIdWithLock(studyId)
                 .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
-        if (study.getStatus() == StudyStatus.CLOSED) {
+        if (study.isClosed()) {
             throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
         }
         StudyMembership requester
@@ -76,6 +77,10 @@ class AssignmentPersistService {
                 .orElseThrow(() -> new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED));
         if (requester.getRole() != MembershipRole.LEADER && requester.getRole() != MembershipRole.MANAGER) {
             throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        // 외부 조회 사이 수준이 바뀌어도 잠금으로 확보한 최신 수준과 배정할 회차를 기준으로 검증한다.
+        for (Long problemId : request.problemIds()) {
+            study.validateAssignmentDifficulty(summaryMap.get(problemId).difficulty());
         }
         boolean preSolvedAllowed = Boolean.TRUE.equals(request.isPreSolvedAllowed());
         LocalDateTime startsAt
