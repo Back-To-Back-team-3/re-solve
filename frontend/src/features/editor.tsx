@@ -11,11 +11,13 @@ export function CodeEditor({
   userId,
   examId,
   availableLanguages,
+  runDisabled = false,
 }: {
   problem: Problem;
   userId: string;
   examId?: string;
   availableLanguages?: Language[];
+  runDisabled?: boolean;
 }) {
   const language = useWorkspace((s) => s.language),
     setLanguage = useWorkspace((s) => s.setLanguage),
@@ -86,6 +88,7 @@ export function CodeEditor({
         examId={examId}
         language={selectedLanguage}
         fontSize={fontSize}
+        runDisabled={runDisabled}
       /> : <Empty title="실행 가능한 언어가 없어요" description="지원 실행 환경을 확인한 뒤 다시 시도해 주세요." />}
     </div>
   );

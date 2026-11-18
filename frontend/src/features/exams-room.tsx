@@ -63,16 +63,16 @@ export function ExamRoom({ id }: { id: string }) {
     }
   }, [remaining, personalEndsAt, r.data, id, router]);
 
-  if (r.loading || runtimes.loading)
+  if (r.loading)
     return (
       <div className="container">
         <Loading />
       </div>
     );
-  if (r.error || runtimes.error)
+  if (r.error)
     return (
       <div className="container">
-        <ErrorState message={(r.error ?? runtimes.error)!.message} retry={() => { r.retry(); runtimes.retry(); }} />
+        <ErrorState message={r.error.message} retry={r.retry} />
       </div>
     );
   if (!r.data || r.data.problems.length === 0)
@@ -120,6 +120,12 @@ export function ExamRoom({ id }: { id: string }) {
           </Button>
         </div>
       </div>
+      {runtimes.loading && <p className="container muted" role="status">실행 언어를 확인하고 있습니다. 코드 작성·저장·제출은 계속할 수 있습니다.</p>}
+      {runtimes.error && <div className="container stack-sm" role="alert">
+        <p className="error-text">{runtimes.error.message}</p>
+        <p>코드 작성·저장·제출·종료는 계속할 수 있습니다. 실행 언어를 확인한 뒤 Run을 다시 사용할 수 있습니다.</p>
+        <Button onClick={runtimes.retry}>실행 언어 다시 조회</Button>
+      </div>}
       <div className="exam-workspace">
         <aside className="exam-sidebar stack-sm">
           <h3>시험 문제</h3>
@@ -144,7 +150,8 @@ export function ExamRoom({ id }: { id: string }) {
         <div className="workspace">
           <ProblemDescription key={problem.id} problem={problem} exam examId={id} />
           <CodeEditor problem={problem} userId={userId} examId={id}
-            availableLanguages={runtimes.data?.content.filter((item) => item.enabled).map((item) => item.language) ?? []} />
+            runDisabled={runtimes.loading || !!runtimes.error}
+            availableLanguages={runtimes.data?.content.filter((item) => item.enabled).map((item) => item.language)} />
         </div>
       </div>
       <Modal

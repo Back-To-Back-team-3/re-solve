@@ -22,12 +22,14 @@ export function Buffer({
   examId,
   language,
   fontSize,
+  runDisabled = false,
 }: {
   problem: Problem;
   userId: string;
   examId?: string;
   language: Language;
   fontSize: number;
+  runDisabled?: boolean;
 }) {
   const key = draftKey(userId, problem.id, language, examId),
     setDraft = useWorkspace((s) => s.setDraft),
@@ -164,13 +166,12 @@ export function Buffer({
     timer.current = setTimeout(() => { persist(); persistExam(); }, 500);
   }
   async function handleRun() {
+    if (runDisabled) return;
     persist();
     setBusyRun(true); setShowRun(true);
     setJudgeError(null);
-    setRunResult(null);
-    setExamRunResult(null);
-    setRunExpectations([]);
-    setRunError(null);
+    setRunResult(null); setExamRunResult(null);
+    setRunExpectations([]); setRunError(null);
     try {
       setRunExpectations(examId ? [] : runExpectedOutputs(problem.functionSpec.returnInputType, customInputs));
       if (examId) {
@@ -235,7 +236,7 @@ export function Buffer({
           submissionPaused={showSubmission && !!judgeSubmissionId && !judgeResult && paused} showRun={showRun} busyRun={busyRun} queryError={judgeError}
           judgeResult={showSubmission ? judgeResult : null} runError={runError} runResult={runResult} runExpectations={runExpectations} />}
       </section>
-      <EditorActions saved={examId && view?.acceptedSourceCode === code ? "제출 완료" : saved} ready={ready} busy={busy} busyRun={busyRun}
+      <EditorActions saved={examId && view?.acceptedSourceCode === code ? "제출 완료" : saved} ready={ready} busy={busy} busyRun={busyRun} runDisabled={runDisabled}
         pendingSubmission={!!pending || !!pendingExam || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
         onTestCases={examId ? undefined : () => setTestCasesOpen(true)}
         onRun={handleRun} onSubmit={() => handleSubmit()} />
