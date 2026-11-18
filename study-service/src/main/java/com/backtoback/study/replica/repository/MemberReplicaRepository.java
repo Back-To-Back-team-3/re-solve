@@ -19,9 +19,10 @@ public interface MemberReplicaRepository extends JpaRepository<MemberReplica, Lo
     List<MemberReplica> findAllByMemberIdIn(Collection<Long> memberIds);
 
     /**
-     * 회원 탈퇴 시 복제본을 WITHDRAWN 상태로 갱신하고 표시 정보를 익명화한다. 행이 없으면 삽입한다
+     * 회원 탈퇴 시 복제본을 {@code WITHDRAWN} 상태로 갱신하고 표시 정보를 익명화한다. 행이 없으면 삽입한다
      * (정책 및 상태 §9.4 회원 탈퇴 전파, event-contract.md §M3).
-     * 지연 도착하는 M1·M2 이벤트가 WITHDRAWN을 덮어쓰지 못하도록 source_version도 갱신한다(event-contract.md §1.5).
+     * 지연 도착하는 M1·M2 이벤트가 {@code WITHDRAWN}을 덮어쓰지 못하도록 {@code source_version}도 갱신한다
+     * (event-contract.md §1.5).
      */
     @Modifying(clearAutomatically = true)
     @Query(

@@ -20,7 +20,7 @@ import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.domain.MemberStatus;
 
 /**
- * 회원 복제본 조건부 반영 쿼리 통합 테스트 (event-contract.md §M1·§M2·§1.5, ERD 3.5).
+ * 회원 복제본 조건부 반영 쿼리 통합 테스트 (event-contract.md §M1·§M2·§M3·§1.5, ERD 3.5).
  * 순서 값 비교가 SQL 안에 있어 실제 MySQL로 검증한다.
  */
 @SpringBootTest
