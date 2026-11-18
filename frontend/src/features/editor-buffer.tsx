@@ -23,6 +23,7 @@ export function Buffer({
   language,
   fontSize,
   runDisabled = false,
+  disabled = false,
 }: {
   problem: Problem;
   userId: string;
@@ -30,6 +31,7 @@ export function Buffer({
   language: Language;
   fontSize: number;
   runDisabled?: boolean;
+  disabled?: boolean;
 }) {
   const key = draftKey(userId, problem.id, language, examId),
     setDraft = useWorkspace((s) => s.setDraft),
@@ -166,7 +168,7 @@ export function Buffer({
     timer.current = setTimeout(() => { persist(); persistExam(); }, 500);
   }
   async function handleRun() {
-    if (runDisabled) return;
+    if (disabled || runDisabled) return;
     persist();
     setBusyRun(true); setShowRun(true);
     setJudgeError(null);
@@ -198,6 +200,7 @@ export function Buffer({
     }
   }
   async function handleSubmit(retry = false) {
+    if (disabled) return;
     persist();
     await submitEditorCode({ workspace, submissionKey, problem, language, sourceCode: codeRef.current, seq: seqRef.current, examId, retry,
       onStart: () => { setShowRun(false); setRunResult(null); setRunError(null); setJudgeError(null); setPaused(true); },
@@ -219,7 +222,7 @@ export function Buffer({
       )}
       <div className="editor-frame">
         {ready && (
-          <EditorMonaco code={code} language={language} fontSize={fontSize} onChange={edit} />
+          <EditorMonaco readOnly={disabled} code={code} language={language} fontSize={fontSize} onChange={edit} />
         )}
       </div>
       <section className="results stack-sm flex-1 max-h-[50dvh] overflow-y-auto overscroll-contain">
@@ -236,14 +239,14 @@ export function Buffer({
           submissionPaused={showSubmission && !!judgeSubmissionId && !judgeResult && paused} showRun={showRun} busyRun={busyRun} queryError={judgeError}
           judgeResult={showSubmission ? judgeResult : null} runError={runError} runResult={runResult} runExpectations={runExpectations} />}
       </section>
-      <EditorActions saved={examId && view?.acceptedSourceCode === code ? "제출 완료" : saved} ready={ready} busy={busy} busyRun={busyRun} runDisabled={runDisabled}
+      <EditorActions saved={examId && view?.acceptedSourceCode === code ? "제출 완료" : saved} ready={ready && !disabled} busy={busy} busyRun={busyRun} runDisabled={runDisabled}
         pendingSubmission={!!pending || !!pendingExam || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
         onTestCases={examId ? undefined : () => setTestCasesOpen(true)}
         onRun={handleRun} onSubmit={() => handleSubmit()} />
       {!examId && <Modal open={testCasesOpen} onOpenChange={setTestCasesOpen}
         title="테스트 케이스" description="공개 예제와 직접 입력한 값으로 실행합니다. 제출 시에는 전체 테스트로 채점합니다.">
         <EditorRunInputs parameters={problem.functionSpec.parameters} returnType={problem.functionSpec.returnInputType}
-          rows={customInputs} disabled={busy || busyRun}
+          rows={customInputs} disabled={disabled || busy || busyRun}
           onRows={setCustomInputs} storageError={runStorageError} />
       </Modal>}
       <EditorResetDialog open={reset} onOpenChange={setReset}

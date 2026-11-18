@@ -1,9 +1,9 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Timer } from "lucide-react";
 import { useResource } from "@/services/hooks";
-import { contestApi, judgeApi } from "@/services/api";
+import { actionErrorMessage, contestApi, isUnauthorized, judgeApi } from "@/services/api";
 import {
   Button,
   Empty,
@@ -12,6 +12,7 @@ import {
   Loading,
   Modal,
   Badge,
+  useLoginRedirect,
 } from "@/components/ui";
 import { useWorkspace } from "@/stores/workspace";
 import { ProblemDescription } from "./problem";
@@ -31,6 +32,24 @@ export function ExamRoom({ id }: { id: string }) {
   const [confirm, setConfirm] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const expired = useRef(false);
+  const finishingRef = useRef(false);
+  const [finishError, setFinishError] = useState("");
+  const toLogin = useLoginRedirect();
+  const finish = useCallback(async () => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    setFinishing(true); setFinishError(""); setConfirm(false);
+    try {
+      const result = await contestApi.finishExam(id);
+      if (result.status !== "FINISHED") throw new Error("응시 종료 상태를 확인하지 못했습니다. 다시 시도해 주세요.");
+      router.replace(`/exams/${id}/result`);
+    } catch (failure) {
+      if (isUnauthorized(failure)) { toLogin(); return; }
+      setFinishError(actionErrorMessage(failure));
+    } finally {
+      finishingRef.current = false; setFinishing(false);
+    }
+  }, [id, router, toLogin]);
 
   useEffect(() => {
     if (!r.data) return;
@@ -46,7 +65,7 @@ export function ExamRoom({ id }: { id: string }) {
   const remaining = personalEndsAt
     ? Math.max(
         0,
-        Math.floor(
+        Math.ceil(
           (new Date(personalEndsAt).getTime() - (now + offset)) / 1000,
         ),
       )
@@ -56,12 +75,9 @@ export function ExamRoom({ id }: { id: string }) {
     if (!personalEndsAt || !r.data) return;
     if (remaining === 0 && !expired.current) {
       expired.current = true;
-      contestApi
-        .finishExam(id)
-        .catch(() => {})
-        .finally(() => router.replace(`/exams/${id}/result`));
+      void finish();
     }
-  }, [remaining, personalEndsAt, r.data, id, router]);
+  }, [remaining, personalEndsAt, r.data, finish]);
 
   if (r.loading)
     return (
@@ -93,14 +109,6 @@ export function ExamRoom({ id }: { id: string }) {
   const problem = uiProblems.find((p) => p.id === activeProblemId)!;
   const userId = member?.memberId ?? "";
 
-  async function finish() {
-    setFinishing(true);
-    try {
-      await contestApi.finishExam(id);
-    } catch {}
-    router.push(`/exams/${id}/result`);
-    setFinishing(false);
-  }
 
   return (
     <>
@@ -115,7 +123,7 @@ export function ExamRoom({ id }: { id: string }) {
             {String(Math.floor(remaining / 60)).padStart(2, "0")}:
             {String(remaining % 60).padStart(2, "0")}
           </span>
-          <Button className="primary" onClick={() => setConfirm(true)}>
+          <Button className="primary" disabled={finishing} onClick={() => setConfirm(true)}>
             응시 종료
           </Button>
         </div>
@@ -125,6 +133,10 @@ export function ExamRoom({ id }: { id: string }) {
         <p className="error-text">{runtimes.error.message}</p>
         <p>코드 작성·저장·제출·종료는 계속할 수 있습니다. 실행 언어를 확인한 뒤 Run을 다시 사용할 수 있습니다.</p>
         <Button onClick={runtimes.retry}>실행 언어 다시 조회</Button>
+      </div>}
+      {finishError && <div className="container stack-sm" role="alert">
+        <p className="error-text">{finishError}</p>
+        <Button disabled={finishing} onClick={() => void finish()}>응시 종료 재시도</Button>
       </div>}
       <div className="exam-workspace">
         <aside className="exam-sidebar stack-sm">
@@ -151,6 +163,7 @@ export function ExamRoom({ id }: { id: string }) {
           <ProblemDescription key={problem.id} problem={problem} exam examId={id} />
           <CodeEditor problem={problem} userId={userId} examId={id}
             runDisabled={runtimes.loading || !!runtimes.error}
+            disabled={finishing || remaining === 0}
             runLanguages={runtimes.data?.content.filter((item) => item.enabled).map((item) => item.language)} />
         </div>
       </div>
