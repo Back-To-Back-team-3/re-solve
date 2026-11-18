@@ -5,7 +5,7 @@ import { Button, Modal, useLoginRedirect } from "@/components/ui";
 import { contestApi, isUnauthorized, judgeApi } from "@/services/api";
 import { runInputs, runExpectedOutputs, type RunTestCase } from "@/services/run-inputs";
 import { draftKey, readDraft, saveDraft, useWorkspace, useWorkspaceApi } from "@/stores/workspace";
-import type { Language, Problem, RunResponse } from "@/services/types";
+import type { ExamRunResponse, Language, Problem, RunResponse } from "@/services/types";
 import { JudgePoll, EditorResultPanel } from "@/features/editor-results";
 import { EditorMonaco } from "@/features/editor-monaco";
 import { useRunInputDraft } from "@/features/editor-run-draft";
@@ -43,7 +43,7 @@ export function Buffer({
     [sending, setSending] = useState(false),
     [paused, setPaused] = useState(false),
     [pollVersion, setPollVersion] = useState(0),
-    [runResult, setRunResult] = useState<RunResponse | null>(null),
+    [runResult, setRunResult] = useState<ExamRunResponse | RunResponse | null>(null),
     [runExpectations, setRunExpectations] = useState<(string | null)[]>([]),
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
@@ -164,17 +164,19 @@ export function Buffer({
     setRunExpectations([]);
     setRunError(null);
     try {
-      setRunExpectations(examId ? [] : runExpectedOutputs(problem.functionSpec.returnInputType, customInputs));
-      setRunResult(
-        await judgeApi.run({
+      if (examId) {
+        setRunResult(await contestApi.runExam(examId, problem.id, { language, sourceCode: codeRef.current }));
+      } else {
+        setRunExpectations(runExpectedOutputs(problem.functionSpec.returnInputType, customInputs));
+        setRunResult(await judgeApi.run({
           problemId: problem.id,
           problemRevisionId: problem.problemRevisionId,
           language,
           sourceCode: codeRef.current,
           useSamples: true,
-          customInputs: examId ? [] : runInputs(problem.functionSpec.parameters, customInputs.map((row) => row.arguments), true),
-        }),
-      );
+          customInputs: runInputs(problem.functionSpec.parameters, customInputs.map((row) => row.arguments), true),
+        }));
+      }
     } catch (e) {
       // 세션 만료는 결과 영역 문구가 아니라 버튼 동작(useAction)과 같게 로그인으로 보낸다.
       if (isUnauthorized(e)) return toLogin();

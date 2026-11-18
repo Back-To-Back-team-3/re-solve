@@ -242,6 +242,16 @@ export interface ExamProblemsResponse {
   personalEndsAt: string;
 }
 
+/** 시험의 고정 문제 회차에서 공개 예제를 실행할 코드다(§4.2.13). */
+export type ExamRunRequest = { language: Language; sourceCode: string };
+
+/** 시험 Run의 입력별 출력·오류와 실행 측정값이다(§4.2.13). */
+export type ExamRunResponse = {
+  results: { type: "SAMPLE" | "CUSTOM"; index: number; output: string | null; error: string | null;
+    timeMs: number; memoryKb: number }[];
+  completedAt: string;
+};
+
 export interface DraftSaveRequest {
   language: Language;
   sourceCode: string;

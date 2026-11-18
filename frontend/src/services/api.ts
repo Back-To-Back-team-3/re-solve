@@ -28,6 +28,8 @@ import type {
   ExamDetail,
   ExamFinishResponse,
   ExamProblemsResponse,
+  ExamRunRequest,
+  ExamRunResponse,
   ExamStartResponse,
   ExamSubmitRequest,
   ExamSubmitResponse,
@@ -625,6 +627,13 @@ export const contestApi = {
 
   getExamProblems: (examId: string) =>
     apiFetch<ExamProblemsResponse>(`/api/v1/exams/${examId}/problems`),
+
+  /** 시험과 문제 ID로 공개 예제 실행을 요청한다. */
+  runExam: (examId: string, problemId: string, body: ExamRunRequest) =>
+    apiFetch<ExamRunResponse>(`/api/v1/exams/${examId}/problems/${problemId}/runs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   saveDraft: (examId: string, problemId: string, body: DraftSaveRequest) =>
     apiFetch<DraftSaveResponse>(`/api/v1/exams/${examId}/drafts/${problemId}`, {

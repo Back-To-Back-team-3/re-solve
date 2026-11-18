@@ -4,7 +4,7 @@ import { Badge, Empty } from "@/components/ui";
 import { judgeStatusLabel, labelOf, verdictLabel } from "@/services/labels";
 import { judgeApi } from "@/services/api";
 import { usePollUntil } from "@/services/hooks";
-import type { JudgeResult, RunResponse } from "@/services/types";
+import type { ExamRunResponse, JudgeResult, RunResponse } from "@/services/types";
 
 export function JudgePoll({
   submissionId,
@@ -99,16 +99,37 @@ export function RunResult({ result, expectations = [] }: { result: RunResponse; 
 }
 
 
+/** 시험 API가 반환한 출력과 입력별 오류를 표시한다. */
+function ExamRunResult({ result }: { result: ExamRunResponse }) {
+  return (
+    <div className="stack-sm" aria-label="테스트별 실행 결과">
+      {result.results.map((item) => (
+        <article className="card stack-sm min-w-0" key={`${item.type}:${item.index}`}>
+          <div className="row between wrap">
+            <h4>테스트 {item.index + 1} <small className="muted">· {item.type === "SAMPLE" ? "공개 예제" : "직접 입력"}</small></h4>
+            <Badge tone={item.error ? "error" : ""}>{item.error ? "실행 오류" : "실행 완료"}</Badge>
+          </div>
+          {item.error
+            ? <pre className="error-text whitespace-pre-wrap [overflow-wrap:anywhere]">{item.error}</pre>
+            : <pre className="mono whitespace-pre-wrap [overflow-wrap:anywhere]">실제 반환값: {item.output ?? "—"}</pre>}
+          <p className="muted">실행 시간: {item.timeMs}ms · 메모리: {item.memoryKb}KiB</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export function EditorResultPanel({ busy, showRun, busyRun, queryError, judgeResult, runError, runResult, runExpectations }: {
   busy: boolean; showRun: boolean; busyRun: boolean; queryError: string | null;
   runExpectations?: (string | null)[];
-  judgeResult: JudgeResult | null; runError: string | null; runResult: RunResponse | null;
+  judgeResult: JudgeResult | null; runError: string | null; runResult: ExamRunResponse | RunResponse | null;
 }) {
   if (busy) return <div className="row"><Badge tone="pending">채점 중…</Badge></div>;
   if (showRun) {
     if (busyRun) return <p className="muted">실행 중…</p>;
     if (runError) return <p className="error-text">{runError}</p>;
-    if (runResult) return <RunResult result={runResult} expectations={runExpectations} />;
+    if (runResult) return "completedAt" in runResult
+      ? <ExamRunResult result={runResult} /> : <RunResult result={runResult} expectations={runExpectations} />;
   } else {
     if (queryError) return <p className="error-text">{queryError}</p>;
     if (judgeResult) return <JudgeResultView result={judgeResult} />;

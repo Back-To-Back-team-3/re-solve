@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mockPracticePage } from "./practice-fixture";
 import { readBrowserStorage, seedBrowserStorage } from "./storage-fixture";
 
-test("시험 에디터의 Draft 복원·자동 저장·제출은 일반 풀이 경로와 분리한다", async ({ page }) => {
+test("시험 에디터의 Draft 복원·자동 저장·Run·제출은 일반 풀이 경로와 분리한다", async ({ page }) => {
   await mockPracticePage(page);
   await seedBrowserStorage(page, {
     "resolve:editor": JSON.stringify({ language: "java", fontSize: 14 }),
@@ -15,9 +15,20 @@ test("시험 에디터의 Draft 복원·자동 저장·제출은 일반 풀이 �
     serverNow: now, personalEndsAt: endsAt,
   } } }));
   const drafts: unknown[] = [];
+  const runs: unknown[] = [];
   const submissions: unknown[] = [];
   let practicePosts = 0;
   await page.route("**/api/v1/submissions", (route) => { practicePosts++; return route.abort(); });
+  await page.route("**/api/v1/runs", (route) => { practicePosts++; return route.abort(); });
+  // 고정 회차 조회는 서버 책임이므로 시험 Run에는 문제 ID만 전달한다.
+  await page.route("**/api/v1/exams/42/problems/1001/runs", (route) => {
+    expect(route.request().method()).toBe("POST");
+    runs.push(route.request().postDataJSON());
+    return route.fulfill({ json: { success: true, data: { completedAt: now, results: [
+      { type: "SAMPLE", index: 0, output: "3", error: null, timeMs: 2, memoryKb: 1024 },
+      { type: "SAMPLE", index: 1, output: null, error: "실행 시간 초과", timeMs: 1000, memoryKb: 1024 },
+    ] } } });
+  });
   await page.route("**/api/v1/exams/42/drafts/1001", (route) => {
     expect(route.request().method()).toBe("PUT");
     drafts.push(route.request().postDataJSON());
@@ -43,6 +54,11 @@ test("시험 에디터의 Draft 복원·자동 저장·제출은 일반 풀이 �
   await expect.poll(() => drafts.length).toBeGreaterThan(0);
   expect(drafts.at(-1)).toEqual({ language: "java", sourceCode: "// exam edited", seq: "7" });
   await expect.poll(async () => JSON.parse(await readBrowserStorage(page, "re-solve:editor:draft:exam:42:1001") ?? "{}").seq).toBe("8");
+  await page.getByRole("button", { name: "실행", exact: true }).click();
+  await expect(page.getByText("실제 반환값: 3", { exact: true })).toBeVisible();
+  await expect(page.getByText("실행 시간 초과", { exact: true })).toBeVisible();
+  expect(runs).toEqual([{ language: "java", sourceCode: "// exam edited" }]);
+  expect(submissions).toHaveLength(0);
   await page.getByRole("button", { name: "제출", exact: true }).click();
   await expect(page.getByText("제출 완료", { exact: true })).toBeVisible();
   expect(submissions).toEqual([{ problemId: "1001", language: "java", sourceCode: "// exam edited", seq: "8" }]);
