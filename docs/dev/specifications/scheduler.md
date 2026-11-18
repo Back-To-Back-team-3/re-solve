@@ -980,7 +980,7 @@
 > 작성: 담당 D · 서비스: `study-service` AI 모듈 (레포의 `ai-service` 모듈 분리 여부는 미정, API 6장 표기 "`ai-service` 후보")
 > 
 
-**검토 메모 (v1.0 통합):** 정정 — 6.1 `REQUESTED` 회수 조건은 `generation_started_at`이 NULL이라 기존 인덱스를 못 쓰므로 `idx_hint_requests_status_created_at(status, created_at)` 추가를 ERD에 요청. 회수 시 진단 중 차단(`blocked_reason = DIAGNOSIS`)도 재확인 대상에 포함(판정 경로 확정 후). `hint_daily_usages` 정리 배치(6.3)를 추가했다.
+**검토 메모 (v1.0 통합):** 정정 — 6.1 `REQUESTED` 회수 조건은 `generation_started_at`이 NULL이라 요청 시각(`created_at`)으로 판정한다. 진행 중 행은 적어 별도 인덱스 없이 기존 `(status, generation_started_at)` 인덱스의 `status` 접두로 좁힌다. 회수 시 진단 중 차단(`blocked_reason = DIAGNOSIS`)도 재확인 대상에 포함(판정 경로 확정 후). `hint_daily_usages` 정리 배치(6.3)를 추가했다.
 
 - `HintGenerationTimeoutScheduler` — 1분, 생성 도중 멈춘 요청을 폴백으로 회수
 - `HintBlockReplicaCleanupScheduler` — 매일 05:00, 종료 1일 지난 차단 복제본 정리
@@ -999,7 +999,7 @@
 | 잠금 | ShedLock `HintGenerationTimeoutScheduler`, `lockAtMostFor = 50초` |
 | 한 회차 처리량 | 최대 100건 |
 | 트랜잭션 경계 | 1건당 1트랜잭션 |
-| 대상 조회 | ① `status = 'GENERATING' AND generation_started_at <= now() - INTERVAL 1 MINUTE` / `idx_hint_requests_status_generation_started_at` ② `status = 'REQUESTED' AND created_at <= now() - INTERVAL 1 MINUTE` / `idx_hint_requests_status_created_at`(추가 요청) |
+| 대상 조회 | `status IN ('REQUESTED','GENERATING') AND COALESCE(generation_started_at, created_at) <= :now - 1분`, `id` 순. 기준 시각은 생성 시작 시각이고, 없으면(`REQUESTED` 또는 시작 시각 기록 전 `GENERATING`) 요청 시각이다. 경계와 같은 시각도 포함 / `idx_hint_requests_status_generation_started_at`의 `status` 접두 |
 | 상태 전이 | `GENERATING·REQUESTED → FALLBACK`(`fallback_reason = RECOVERED`) 또는 `→ BLOCKED`(재확인 결과 시험·진단 중) |
 | 발행 이벤트 | `HintReady`(`result = FALLBACK` 또는 `BLOCKED`) |
 | 지표 | 회수 건수, 그중 BLOCKED 건수 |
