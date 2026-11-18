@@ -113,7 +113,43 @@ class MemberReplicaRepositoryTest {
         MemberReplica replica = repository.findByMemberId(MEMBER_ID).orElseThrow();
         assertThat(replica.getMemberStatus()).isEqualTo(MemberStatus.WITHDRAWN);
         assertThat(replica.getSourceVersion()).isEqualTo(5L);
-        assertThat(replica.getNickname()).isNotEqualTo("되살아난 닉네임");
+        assertThat(replica.getNickname()).isEqualTo(MemberReplica.WITHDRAWN_NICKNAME);
+        assertThat(replica.getProfileImageUrl()).isNull();
+    }
+
+    @Test
+    @DisplayName("복제본이 없는 회원의 탈퇴를 반영하면 익명화한 탈퇴 복제본을 새로 만든다")
+    void upsertWithdrawn_noReplica_insertsAnonymized() {
+        // when
+        repository.upsertWithdrawn(MEMBER_ID, 5L, SYNCED_AT);
+
+        // then
+        MemberReplica replica = repository.findByMemberId(MEMBER_ID).orElseThrow();
+        assertThat(replica.getNickname()).isEqualTo(MemberReplica.WITHDRAWN_NICKNAME);
+        assertThat(replica.getProfileImageUrl()).isNull();
+        assertThat(replica.getMemberStatus()).isEqualTo(MemberStatus.WITHDRAWN);
+        assertThat(replica.getSourceVersion()).isEqualTo(5L);
+        assertThat(replica.getSyncedAt()).isEqualTo(SYNCED_AT);
+    }
+
+    @Test
+    @DisplayName("닉네임과 프로필 이미지가 있는 회원의 탈퇴를 반영하면 표시 정보를 익명화하고 순서 값을 갱신한다")
+    void upsertWithdrawn_existingReplica_anonymizes() {
+        // given
+        repository.upsertFromMemberUpdated(MEMBER_ID, "닉네임", "https://img/1.png", "ACTIVE", 1L, SYNCED_AT);
+
+        // when
+        repository.upsertWithdrawn(MEMBER_ID, 2L, LATER_SYNCED_AT);
+
+        // then
+        List<MemberReplica> replicas = repository.findAllByMemberIdIn(List.of(MEMBER_ID));
+        assertThat(replicas).hasSize(1);
+        MemberReplica replica = replicas.get(0);
+        assertThat(replica.getNickname()).isEqualTo(MemberReplica.WITHDRAWN_NICKNAME);
+        assertThat(replica.getProfileImageUrl()).isNull();
+        assertThat(replica.getMemberStatus()).isEqualTo(MemberStatus.WITHDRAWN);
+        assertThat(replica.getSourceVersion()).isEqualTo(2L);
+        assertThat(replica.getSyncedAt()).isEqualTo(LATER_SYNCED_AT);
     }
 
     @Test
