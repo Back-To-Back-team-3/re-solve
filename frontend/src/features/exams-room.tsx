@@ -3,8 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Timer } from "lucide-react";
 import { useResource } from "@/services/hooks";
-import { contestApi } from "@/services/api";
-import type { ExamProblem, Language, Problem } from "@/services/types";
+import { contestApi, judgeApi } from "@/services/api";
 import {
   Button,
   Empty,
@@ -16,27 +15,12 @@ import {
 } from "@/components/ui";
 import { useWorkspace } from "@/stores/workspace";
 import { ProblemDescription } from "./problem";
+import { toEditorExamProblem } from "@/services/exam-problem";
 import { CodeEditor } from "./editor";
-
-function toUIProblem(ep: ExamProblem): Problem {
-  return {
-    id: ep.problemId,
-    problemRevisionId: ep.problemId,
-    title: ep.title,
-    difficulty: 0,
-    tags: [],
-    description: ep.body,
-    constraints: "",
-    examples: "",
-    functionSpec: { name: "solution", parameters: [], returnType: "" },
-    starterCodes: { java: "", python3: "", cpp: "" } as Record<Language, string>,
-    samples: [],
-  };
-}
-
 
 export function ExamRoom({ id }: { id: string }) {
   const r = useResource(() => contestApi.getExamProblems(id), id);
+  const runtimes = useResource(judgeApi.getLanguages, "exam-languages");
   const router = useRouter();
   const member = useWorkspace((s) => s.member);
   const active = useWorkspace((s) => s.activeProblems[id]);
@@ -79,16 +63,16 @@ export function ExamRoom({ id }: { id: string }) {
     }
   }, [remaining, personalEndsAt, r.data, id, router]);
 
-  if (r.loading)
+  if (r.loading || runtimes.loading)
     return (
       <div className="container">
         <Loading />
       </div>
     );
-  if (r.error)
+  if (r.error || runtimes.error)
     return (
       <div className="container">
-        <ErrorState message={r.error.message} retry={r.retry} />
+        <ErrorState message={(r.error ?? runtimes.error)!.message} retry={() => { r.retry(); runtimes.retry(); }} />
       </div>
     );
   if (!r.data || r.data.problems.length === 0)
@@ -102,7 +86,7 @@ export function ExamRoom({ id }: { id: string }) {
       </div>
     );
 
-  const uiProblems = r.data.problems.map(toUIProblem);
+  const uiProblems = r.data.problems.map(toEditorExamProblem);
   const activeProblemId = uiProblems.some((p) => p.id === active)
     ? active
     : uiProblems[0].id;
@@ -159,7 +143,8 @@ export function ExamRoom({ id }: { id: string }) {
         </aside>
         <div className="workspace">
           <ProblemDescription key={problem.id} problem={problem} exam examId={id} />
-          <CodeEditor problem={problem} userId={userId} examId={id} />
+          <CodeEditor problem={problem} userId={userId} examId={id}
+            availableLanguages={runtimes.data?.content.filter((item) => item.enabled).map((item) => item.language) ?? []} />
         </div>
       </div>
       <Modal

@@ -29,6 +29,7 @@ import type {
   ExamDetail,
   ExamFinishResponse,
   ExamProblemsResponse,
+  ExamRunResponse,
   ExamStartResponse,
   ExamSubmitRequest,
   ExamSubmitResponse,
@@ -631,6 +632,13 @@ export const contestApi = {
 
   getExamProblems: (examId: string) =>
     apiFetch<ExamProblemsResponse>(`/api/v1/exams/${examId}/problems`),
+
+  runExam: (examId: string, problemId: string, code: Pick<DraftSaveRequest, "language" | "sourceCode">, customArgumentTexts: string[][] = []) =>
+    apiFetch<ExamRunResponse>(`/api/v1/exams/${examId}/problems/${problemId}/runs`, {
+      method: "POST",
+      // 검증한 숫자 원문을 인수 배열에 넣어 INT64 정밀도를 보존한다.
+      body: `{"language":${JSON.stringify(code.language)},"sourceCode":${JSON.stringify(code.sourceCode)},"customTests":[${customArgumentTexts.map((args) => `{"args":[${args.join(",")}]}`).join(",")}]}`,
+    }),
 
   saveDraft: (examId: string, problemId: string, body: DraftSaveRequest) =>
     apiFetch<DraftSaveResponse>(`/api/v1/exams/${examId}/drafts/${problemId}`, {

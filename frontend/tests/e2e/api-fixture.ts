@@ -246,9 +246,10 @@ export async function mockApi(page: Page, options: ApiFixtureOptions = {}) {
       return ok(route, { serverNow: serverNow() });
     }
     if (path === `/api/v1/exams/${EXAM_ID}/problems`) return ok(route, {
-      serverNow: serverNow(), personalEndsAt: examEndsAt,
-      problems: problems.map((p) => ({ problemId: p.problemId, title: p.title, body: p.description, score: "100",
-        languages: ["java", "python3"] })),
+      examId: EXAM_ID, serverNow: serverNow(), personalEndsAt: examEndsAt,
+      problems: problems.map((p, index) => ({ problemId: p.problemId, problemRevisionId: p.problemRevisionId,
+        revisionNumber: p.revisionNumber, title: p.title, body: p.description, score: "100.00", displayOrder: index + 1,
+        functionSpec: p.functionSpec, executionLimits: p.executionLimits, sampleTests: p.samples, imageIds: [] })),
     } satisfies ExamProblemsResponse);
     if (path.startsWith(`/api/v1/exams/${EXAM_ID}/drafts/`)) {
       const body = route.request().postDataJSON() as { seq: string };
