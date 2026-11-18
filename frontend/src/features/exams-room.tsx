@@ -44,6 +44,7 @@ export function ExamRoom({ id }: { id: string }) {
       const result = await contestApi.finishExam(id);
       if (result.status !== "FINISHED") throw new Error("응시 종료 상태를 확인하지 못했습니다. 다시 시도해 주세요.");
       router.replace(`/exams/${id}/result`);
+      router.refresh();
     } catch (failure) {
       if (isUnauthorized(failure)) { toLogin(); return; }
       setFinishError(actionErrorMessage(failure));
