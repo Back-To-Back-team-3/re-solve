@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 from tempfile import TemporaryDirectory
+from uuid import UUID
 
 
 MIGRATION = Path(__file__).resolve().parents[1] / (
@@ -49,13 +50,33 @@ def object_version(aws, bucket, key, digest, size, destination):
     return version
 
 
-def connection_sql(rows):
-    """검증한 시드만 갱신하고 전부 연결됐을 때 트랜잭션을 커밋한다."""
+def require_login_path(login_path):
+    """기본 로그인 경로로 대체되지 않도록 지정한 그룹의 존재를 확인한다."""
+    output = subprocess.check_output(
+        ["mysql_config_editor", "print", f"--login-path={login_path}"], text=True,
+    )
+    if f"[{login_path}]" not in output.splitlines():
+        raise ValueError("지정한 MySQL 로그인 경로가 없습니다.")
+
+
+def connection_sql(rows, database, server_uuid):
+    """같은 연결에서 대상 DB를 확인한 후 시드 참조 전체를 연결한다."""
     values = ",\n".join(
         f"('{key}', '{digest}', {size}, CONVERT(X'{version.encode('utf-8').hex()}' USING utf8mb4))"
         for key, digest, size, version in rows
     )
+    expected_database = database.encode("utf-8").hex()
+    expected_uuid = str(UUID(server_uuid))
     return f"""
+CREATE TEMPORARY TABLE seed_test_target_check (
+    matched INT NOT NULL CHECK (matched = 1)
+) ENGINE=InnoDB;
+INSERT INTO seed_test_target_check
+SELECT IF(
+    BINARY DATABASE() = X'{expected_database}' AND LOWER(@@server_uuid) = '{expected_uuid}',
+    1, 0
+);
+
 CREATE TEMPORARY TABLE seed_test_versions (
     object_key VARCHAR(500) COLLATE utf8mb4_0900_bin PRIMARY KEY,
     sha256 CHAR(64) COLLATE utf8mb4_0900_bin NOT NULL,
@@ -95,19 +116,24 @@ COMMIT;
 
 
 def main():
-    """대상 버킷을 검증하고 로그인 경로와 DB를 지정한 경우에만 연결한다."""
+    """S3 버전을 검증하고 DB 대상 정보가 모두 지정된 경우에만 연결한다."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--mysql-login-path")
     parser.add_argument("--database")
+    parser.add_argument("--mysql-server-uuid")
     args = parser.parse_args()
-    if bool(args.mysql_login_path) != bool(args.database):
-        parser.error("--mysql-login-path와 --database는 함께 지정해야 합니다.")
+    db_target = (args.mysql_login_path, args.database, args.mysql_server_uuid)
+    if any(value is not None for value in db_target) and not all(db_target):
+        parser.error("--mysql-login-path, --database, --mysql-server-uuid는 함께 지정해야 합니다.")
 
     aws = ["aws", "--profile", args.profile, "--region", args.region, "--output", "json", "--no-cli-pager"]
     try:
+        if args.database:
+            UUID(args.mysql_server_uuid)
+            require_login_path(args.mysql_login_path)
         with TemporaryDirectory() as directory:
             target = Path(directory) / "seed-test.json"
             rows = [
@@ -119,7 +145,7 @@ def main():
             subprocess.run(
                 ["mysql", "--no-defaults", f"--login-path={args.mysql_login_path}",
                  f"--database={args.database}", "--batch", "--skip-force", "--skip-reconnect"],
-                input=connection_sql(rows), text=True, check=True,
+                input=connection_sql(rows, args.database, args.mysql_server_uuid), text=True, check=True,
             )
             print(f"시드 테스트 {len(rows)}개의 DB 버전 참조를 확인했습니다.")
     except (OSError, ValueError, subprocess.CalledProcessError) as error:

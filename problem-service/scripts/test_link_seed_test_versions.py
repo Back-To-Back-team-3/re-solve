@@ -14,6 +14,7 @@ SPEC = importlib.util.spec_from_file_location(
 )
 seed = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(seed)
+SERVER_UUID = "103dfab0-98e1-11ef-8201-0242ac120002"
 
 
 class LinkSeedTestVersionsTest(unittest.TestCase):
@@ -58,9 +59,28 @@ class LinkSeedTestVersionsTest(unittest.TestCase):
     def test_checks_all_rows_before_commit_without_overwriting_versions(self):
         """누락된 참조만 수정하고 전체 연결 확인이 커밋보다 앞선다."""
         version = "a'\\b"
-        sql = seed.connection_sql([("test-cases/1.json", "0" * 64, 3, version)])
+        sql = seed.connection_sql([("test-cases/1.json", "0" * 64, 3, version)], "problem_db", SERVER_UUID)
         self.assertIn("asset.object_version IS NULL", sql)
         self.assertIn(f"X'{version.encode().hex()}'", sql)
         self.assertNotIn(version, sql)
         self.assertIn("CHECK (matched = 150)", sql)
         self.assertLess(sql.index("INSERT INTO seed_test_version_check"), sql.index("COMMIT"))
+
+    def test_login_path_must_be_the_named_group(self):
+        """기본 그룹만 보이는 경우에는 지정한 경로로 연결하지 않는다."""
+        with patch.object(seed.subprocess, "check_output", return_value="[client]\nuser = dev\n") as editor:
+            with self.assertRaisesRegex(ValueError, "지정한 MySQL 로그인 경로"):
+                seed.require_login_path("problem-target")
+            editor.assert_called_once_with(
+                ["mysql_config_editor", "print", "--login-path=problem-target"], text=True,
+            )
+        with patch.object(seed.subprocess, "check_output", return_value="[problem-target]\nuser = operator\n"):
+            seed.require_login_path("problem-target")
+
+    def test_sql_checks_the_write_session_before_updates(self):
+        """대상 DB 이름과 서버 UUID 검증이 시드 갱신보다 앞선다."""
+        sql = seed.connection_sql([("test-cases/1.json", "0" * 64, 3, "version-1")], "problem_db", SERVER_UUID)
+        self.assertIn(f"BINARY DATABASE() = X'{'problem_db'.encode().hex()}'", sql)
+        self.assertIn(f"LOWER(@@server_uuid) = '{SERVER_UUID}'", sql)
+        self.assertIn("CHECK (matched = 1)", sql)
+        self.assertLess(sql.index("INSERT INTO seed_test_target_check"), sql.index("UPDATE problem_test_assets"))
