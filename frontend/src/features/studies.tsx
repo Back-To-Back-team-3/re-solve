@@ -29,6 +29,7 @@ import {
 import { Pet } from "@/components/pet";
 import { useQuery, Pager } from "./problem-list";
 import { MembersTab } from "./study-members";
+import { ExamsPage } from "@/features/exams";
 import { AssignmentsTab } from "./study-assignments";
 const goalLabel: Record<GoalType, string> = {
   EMPLOYMENT: "취업 준비",
@@ -381,6 +382,7 @@ export function StudyPage({ id }: { id: string }) {
               { id: "intro", label: "소개" },
               { id: "members", label: "구성원" },
               { id: "problems", label: "주간 문제집" },
+              { id: "exams", label: "모의 코딩테스트" },
             ]}
           />
           {tab === "intro" && (
@@ -432,6 +434,8 @@ export function StudyPage({ id }: { id: string }) {
               )}
             </div>
           )}
+          {tab === "exams" && (memberGuard ?? <ExamsPage studyId={id}
+            canCreate={study.status !== "CLOSED" && (isLeader || myM?.role === "MANAGER")} />)}
         </section>
         <div className="stack">
           <Section title="스터디 안내">
