@@ -12,6 +12,7 @@ import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.submission.config.SubmissionClientProperties;
+import com.backtoback.judge.submission.dto.AssignedProblemResponse;
 import com.backtoback.judge.submission.dto.MemberStatusResponse;
 import com.backtoback.judge.submission.dto.MemberTagLevelsResponse;
 import com.backtoback.judge.submission.dto.ProblemJudgingDataResponse;
@@ -22,6 +23,8 @@ import com.backtoback.judge.submission.dto.ProblemValidationResponse;
 public class SubmissionDependencyClient {
     private final RestClient problem;
     private final RestClient member;
+    /** 레벨 잠금 예외를 확인하는 Study 클라이언트다. */
+    private final RestClient study;
 
     /**
      * 공통 상관관계 ID 전파를 유지하는 제한 시간 기반 클라이언트를 생성한다.
@@ -40,6 +43,7 @@ public class SubmissionDependencyClient {
         factory.setReadTimeout(properties.timeout());
         problem = builder.clone().baseUrl(properties.problemBaseUrl().toString()).requestFactory(factory).build();
         member = builder.clone().baseUrl(properties.memberBaseUrl().toString()).requestFactory(factory).build();
+        study = builder.clone().baseUrl(properties.studyBaseUrl().toString()).requestFactory(factory).build();
     }
 
     /**
@@ -98,6 +102,30 @@ public class SubmissionDependencyClient {
      */
     public MemberTagLevelsResponse levels(long memberId) {
         return get(member, "/internal/v1/members/" + memberId + "/tag-levels", MemberTagLevelsResponse.class, false);
+    }
+
+    /**
+     * Study가 같은 회원과 문제의 배정을 확인한 경우에만 레벨 잠금 예외를 허용한다. (API 명세서 §5.7.4)
+     *
+     * @param memberId 인증 회원 ID
+     * @param problemId 실행 또는 제출할 문제 ID
+     * @return 배정이 확인되면 true, 미배정·응답 불일치·조회 실패면 false
+     */
+    public boolean isAssignedProblem(long memberId, long problemId) {
+        try {
+            var response
+                = study
+                    .get()
+                    .uri("/internal/v1/studies/members/{memberId}/assigned-problems/{problemId}", memberId, problemId)
+                    .retrieve()
+                    .toEntity(AssignedProblemResponse.class);
+            var body = response.getBody();
+            return response.getStatusCode().value() == 200 && body != null
+                && Long.toString(memberId).equals(body.memberId()) && Long.toString(problemId).equals(body.problemId())
+                && body.assigned() != null && body.assigned().isBoolean() && body.assigned().booleanValue();
+        } catch (RestClientException exception) {
+            return false;
+        }
     }
 
     /**

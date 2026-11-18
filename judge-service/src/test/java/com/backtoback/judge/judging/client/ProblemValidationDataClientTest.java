@@ -70,7 +70,10 @@ class ProblemValidationDataClientTest {
             context.getBean(RestClientCustomizer.class).customize(builder);
         }
         client
-            = new ProblemValidationDataClient(builder, new SubmissionClientProperties(uri, uri, Duration.ofSeconds(2)));
+            = new ProblemValidationDataClient(
+                builder,
+                new SubmissionClientProperties(uri, uri, uri, Duration.ofSeconds(2))
+            );
     }
 
     /** 서버와 스레드 추적 정보를 정리한다. */

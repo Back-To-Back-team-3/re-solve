@@ -103,6 +103,8 @@ class SubmissionAcceptanceStoreTest {
     @Autowired
     private SubmissionAcceptanceService acceptance;
     @Autowired
+    private SubmissionAccessService access;
+    @Autowired
     private SubmissionAcceptanceStore store;
     @Autowired
     private JdbcTemplate jdbc;
@@ -199,6 +201,7 @@ class SubmissionAcceptanceStoreTest {
         given(dependencies.status(7)).willReturn(new MemberStatusResponse("7", "SUSPENDED"));
         assertThat(acceptance.create(7, "key", REQUEST)).isEqualTo(first);
         verify(dependencies, times(1)).status(7);
+        verify(dependencies, never()).isAssignedProblem(7, 301);
         verify(rate, times(1)).acquire(7, 301);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM judge_jobs", Long.class)).isEqualTo(1);
         assertThatThrownBy(
@@ -368,6 +371,28 @@ class SubmissionAcceptanceStoreTest {
                 exception -> assertThat(exception.getErrorCode().getCode()).isEqualTo("LEVEL_PROBLEM_LOCKED")
             );
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isZero();
+    }
+
+    /** 배정 확인을 받은 회원에게 일반 Run과 제출에서 같은 예외를 적용한다. */
+    @Test
+    @DisplayName("레벨 미달 배정 문제는 일반 Run의 실행 환경 조회와 PRACTICE 제출을 허용한다")
+    void allowsAssignedProblem() {
+        given(dependencies.levels(7)).willReturn(new MemberTagLevelsResponse("7", List.of()));
+        given(dependencies.isAssignedProblem(7, 301)).willReturn(true);
+
+        assertThat(access.runRuntime(7, 301, 1001, "java")).isEqualTo(JAVA);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM submissions", Long.class)).isZero();
+        var response = acceptance.create(7, "assigned", REQUEST);
+
+        assertThat(
+            jdbc
+                .queryForObject(
+                    "SELECT context FROM submissions WHERE id=?",
+                    String.class,
+                    Long.parseLong(response.submissionId())
+                )
+        ).isEqualTo("PRACTICE");
+        verify(dependencies, times(2)).isAssignedProblem(7, 301);
     }
 
     /**
