@@ -22,6 +22,8 @@ test("서로 다른 문제·회차 ID의 시험은 Contest Run만 호출하고 �
   const editor = page.getByRole("textbox", { name: "코드 편집기" });
   await expect(editor).toBeVisible();
   await expect(page.getByText("시험 회차 본문", { exact: true })).toBeVisible();
+  await expect(page.locator(".problem-panel table")).toHaveCount(1);
+  await expect(page.getByText("예시 해설은 유지합니다.", { exact: true })).toBeVisible();
   await editor.pressSequentially("// exam run");
   await page.getByRole("button", { name: "실행", exact: true }).click();
   const result = page.getByLabel("시험 Run 실행 결과");
