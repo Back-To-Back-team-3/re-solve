@@ -39,3 +39,43 @@ for (const edited of [false, true]) {
     expect(assignmentReads).toBe(0);
   });
 }
+
+test("입력을 완료한 뒤 검색을 재시도해도 시험은 명시적 생성 버튼으로만 등록한다", async ({ page }) => {
+  await mockPracticePage(page);
+  await page.route("**/api/v1/studies/2", (route) => route.fulfill({ json: { success: true, data: {
+    studyId: "2", name: "새 스터디", status: "ACTIVE", myMembership: { role: "LEADER", status: "APPROVED" },
+  } } }));
+  let searches = 0;
+  await page.route("**/api/v1/problems?**", (route) => {
+    if (new URL(route.request().url()).searchParams.get("keyword") !== "재시도") return route.fallback();
+    searches++;
+    if (searches === 1) return route.fulfill({ status: 503, json: { success: false,
+      error: { code: "COMMON_DEPENDENCY_UNAVAILABLE", message: "검색 실패" } } });
+    return route.fallback();
+  });
+  const creations: unknown[] = [];
+  await page.route("**/api/v1/studies/2/exams", (route) => {
+    creations.push(route.request().postDataJSON());
+    return route.fulfill({ status: 201, json: { success: true, data: { examId: "55" } } });
+  });
+  await page.goto("/exams/new?studyId=2");
+  await page.getByLabel("시험 이름", { exact: true }).fill("재시도 확인 시험");
+  const start = new Date(Date.now() + 3600000);
+  const localDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  await page.getByLabel("시작 일시").fill(localDate(start));
+  await page.getByLabel("종료 일시").fill(localDate(new Date(start.getTime() + 3600000)));
+  await page.getByRole("button", { name: / 선택$/ }).first().click();
+  await page.getByLabel("문제 검색", { exact: true }).fill("재시도");
+  await page.getByRole("button", { name: "검색", exact: true }).click();
+  await expect(page.getByText("검색 실패", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await expect(page.getByText("검색 결과가 없습니다.", { exact: true })).toBeVisible();
+  expect(searches).toBe(2);
+  expect(creations).toHaveLength(0);
+  await expect(page).toHaveURL(/\/exams\/new\?studyId=2$/);
+  await expect(page.getByLabel("시험 이름", { exact: true })).toHaveValue("재시도 확인 시험");
+  await expect(page.getByRole("table", { name: "선택한 시험 문제" }).getByRole("textbox")).toHaveValue("100.00");
+  await page.getByRole("button", { name: "시험 생성", exact: true }).click();
+  await expect(page).toHaveURL(/\/exams\/55$/);
+  expect(creations).toHaveLength(1);
+});
