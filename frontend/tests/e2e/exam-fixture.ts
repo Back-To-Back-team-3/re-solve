@@ -1,8 +1,10 @@
 import type { Page } from "@playwright/test";
 import { mockPracticePage, problemDetail } from "./practice-fixture";
+import { seedBrowserStorage } from "./storage-fixture";
 
 export async function mockExamRoom(page: Page, durationMs = 3600000) {
   await mockPracticePage(page);
+  await seedBrowserStorage(page, { "resolve:editor": JSON.stringify({ language: "java", fontSize: 14 }) });
   const now = new Date().toISOString();
   const endsAt = new Date(Date.now() + durationMs).toISOString();
   await page.route("**/api/v1/exams/42/problems", (route) => route.fulfill({ json: { success: true, data: {
