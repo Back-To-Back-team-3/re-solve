@@ -24,5 +24,3 @@ export function toEditorExamProblem(ep: ExamProblem): Problem {
     })),
   };
 }
-
-
