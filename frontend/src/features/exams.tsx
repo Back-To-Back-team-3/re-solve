@@ -36,9 +36,11 @@ const serverTone = (s: ExamStatusServer) =>
 export function ExamsPage({
   contest = false,
   studyId,
+  canCreate = false,
 }: {
   contest?: boolean;
   studyId?: string;
+  canCreate?: boolean;
 }) {
   const searchParams = useSearchParams();
   const status = searchParams.get("status") || "all";
@@ -98,7 +100,7 @@ export function ExamsPage({
         title="모의 코딩테스트"
         eyebrow="MOCK EXAM"
         description="시간 안에 생각을 코드로. 꾸준한 연습을 실전 감각으로 바꿔 보세요."
-        action={
+        action={canCreate &&
           <Go className="primary" href={`/exams/new?studyId=${studyId}`}>
             <Plus size={18} />
             시험 만들기
