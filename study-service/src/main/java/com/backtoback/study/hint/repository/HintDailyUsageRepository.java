@@ -1,6 +1,7 @@
 package com.backtoback.study.hint.repository;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -36,5 +37,21 @@ public interface HintDailyUsageRepository extends JpaRepository<HintDailyUsage, 
     Optional<Integer> findUsedCountByMemberIdAndUsageDate(
         @Param("memberId") Long memberId,
         @Param("usageDate") LocalDate usageDate
+    );
+
+    /**
+     * 일일 사용 횟수 1회 반환 — 차단으로 회수한 요청의 차감을 되돌린다(scheduler §6.1, 정책 §8.1 ⑤).
+     * 0 미만이 되지 않도록 {@code used_count > 0}인 행만 갱신하며, 반환값 0이면 되돌릴 횟수가 없다.
+     */
+    @Modifying
+    @Query(
+        nativeQuery = true,
+        value = "UPDATE hint_daily_usages SET used_count = used_count - 1, updated_at = :updatedAt"
+            + " WHERE member_id = :memberId AND usage_date = :usageDate AND used_count > 0"
+    )
+    int decrementIfPositive(
+        @Param("memberId") Long memberId,
+        @Param("usageDate") LocalDate usageDate,
+        @Param("updatedAt") LocalDateTime updatedAt
     );
 }

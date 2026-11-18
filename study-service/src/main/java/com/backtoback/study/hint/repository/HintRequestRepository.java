@@ -88,4 +88,37 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
         @Param("completedAt") LocalDateTime completedAt,
         @Param("updatedAt") LocalDateTime updatedAt
     );
+
+    /**
+     * 회수 폴백 종결 — 조회 시점 상태({@code expectedStatus})인 행만 FALLBACK(RECOVERED)으로 바꾼다(scheduler §6.1).
+     * 반환값 0이면 그사이 다른 경로로 종결·전이된 행이다.
+     */
+    @Modifying
+    @Query(
+        "UPDATE HintRequest r SET r.status = 'FALLBACK', r.fallback = true, r.fallbackReason = 'RECOVERED',"
+            + " r.content = NULL, r.completedAt = :completedAt, r.updatedAt = :completedAt"
+            + " WHERE r.id = :id AND r.status = :expectedStatus"
+    )
+    int recoverAsFallback(
+        @Param("id") Long id,
+        @Param("expectedStatus") HintRequestStatus expectedStatus,
+        @Param("completedAt") LocalDateTime completedAt
+    );
+
+    /**
+     * 회수 차단 종결 — 조회 시점 상태({@code expectedStatus})인 행만 BLOCKED로 바꾼다(scheduler §6.1).
+     * 반환값 0이면 그사이 다른 경로로 종결·전이된 행이다.
+     */
+    @Modifying
+    @Query(
+        "UPDATE HintRequest r SET r.status = 'BLOCKED', r.blockedReason = :blockedReason,"
+            + " r.completedAt = :completedAt, r.updatedAt = :completedAt"
+            + " WHERE r.id = :id AND r.status = :expectedStatus"
+    )
+    int recoverAsBlocked(
+        @Param("id") Long id,
+        @Param("expectedStatus") HintRequestStatus expectedStatus,
+        @Param("blockedReason") String blockedReason,
+        @Param("completedAt") LocalDateTime completedAt
+    );
 }
