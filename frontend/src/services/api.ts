@@ -17,6 +17,7 @@ import type {
   ProblemSaved,
   ValidationProgress,
   AssignmentDetail,
+  AssignedProblemResponse,
   CreateAssignmentRequest,
   AssignmentCreated,
   AssignmentStatus,
@@ -471,6 +472,8 @@ export const adminApi = {
 
 // 스터디 API (§5)
 export const studyApi = {
+  getAssignedProblem: (problemId: string) =>
+    apiFetch<AssignedProblemResponse>(`/api/v1/studies/me/assigned-problems/${problemId}`, { cache: "no-store" }),
   create: (body: {
     name: string;
     description: string;

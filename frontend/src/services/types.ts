@@ -650,6 +650,12 @@ export type CreateAssignmentRequest = {
 };
 export type AssignmentCreated = { assignmentId: string; status: AssignmentStatus };
 
+// GET /api/v1/studies/me/assigned-problems/{problemId} (api-spec §5.4.5)
+export type AssignedProblemResponse = {
+  problemId: string;
+  assigned: boolean;
+};
+
 // GET /api/v1/studies/{studyId}/assignments 항목 (api-spec §5.4.2)
 export type AssignmentSummary = {
   assignmentId: string;
