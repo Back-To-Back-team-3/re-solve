@@ -48,9 +48,7 @@ export function Buffer({
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
     [showRun, setShowRun] = useState(false),
-    [showSubmission, setShowSubmission] = useState(true),
-    [judgeError, setJudgeError] = useState<string | null>(null),
-    [requestError, setRequestError] = useState<string | null>(null);
+    [judgeError, setJudgeError] = useState<string | null>(null);
   const runInputKey = JSON.stringify([userId, examId ?? "practice", problem.id, problem.problemRevisionId]);
   const { configuration: runConfiguration, storageError: runStorageError } = useRunInputDraft(runInputKey);
   const setRunInputs = useWorkspace((state) => state.setPracticeRunInputs);
@@ -59,6 +57,10 @@ export function Buffer({
   const submissionKey = JSON.stringify([key, problem.problemRevisionId]);
   const submissions = useWorkspace((state) => state.practiceSubmissions);
   const pending = useWorkspace((state) => state.practiceRequests[submissionKey]);
+  const view = useWorkspace((state) => state.editorSubmissionViews[submissionKey]);
+  const setView = useWorkspace((state) => state.setEditorSubmissionView);
+  const showSubmission = view?.showSubmission ?? !pending;
+  const requestError = view?.requestError ?? null;
   const activeId = useWorkspace((state) => state.activePracticeSubmissions[submissionKey]);
   const attempt = activeId ? submissions[activeId] : undefined;
   const accepted = Object.values(submissions).flatMap((item) => item?.contextKey === submissionKey ? [item] : []);
@@ -66,7 +68,7 @@ export function Buffer({
   const sendingRef = useRef(false), router = useRouter(), toLogin = useLoginRedirect();
   const judgeSubmissionId = attempt?.submissionId ?? null;
   const judgeResult = attempt?.result ?? null;
-  const polling = !!judgeSubmissionId && !judgeResult && !paused;
+  const polling = showSubmission && !!judgeSubmissionId && !judgeResult && !paused;
   const busy = sending || polling;
   useEffect(() => {
     let initial: typeof memory | undefined = memory;
@@ -161,7 +163,7 @@ export function Buffer({
     persist();
     setBusyRun(true);
     setShowRun(true);
-    setRequestError(null);
+    setView(submissionKey, { requestError: null });
     setJudgeError(null);
     setRunResult(null);
     setRunExpectations([]);
@@ -202,16 +204,16 @@ export function Buffer({
       },
     };
     if (retry && isPracticeRequestExpired(request.createdAt, Date.now())) {
-      setRequestError(expiredPracticeRequestMessage); return;
+      setView(submissionKey, { requestError: expiredPracticeRequestMessage }); return;
     }
     sendingRef.current = true;
     setShowRun(false);
-    setShowSubmission(false);
+    setView(submissionKey, { showSubmission: false });
     if (!examId) workspace.getState().setPracticeRequest(submissionKey, request);
     setRunResult(null);
     setRunError(null);
     setJudgeError(null);
-    setRequestError(null);
+    setView(submissionKey, { requestError: null });
     setPaused(true);
     setSending(true);
     try {
@@ -221,7 +223,7 @@ export function Buffer({
       } else {
         const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
         if (!workspace.getState().acceptPracticeSubmission(submissionKey, request, receipt.submissionId)) return;
-        setShowSubmission(true);
+        setView(submissionKey, { showSubmission: true });
         setPollVersion((value) => value + 1);
         setPaused(false);
       }
@@ -230,7 +232,8 @@ export function Buffer({
       if (isUnauthorized(failure)) return toLogin();
       const message = typeof failure === "object" && failure !== null && "message" in failure
         && typeof failure.message === "string" ? failure.message : "제출에 실패했습니다.";
-      setRequestError(message);
+      if (!examId && workspace.getState().practiceRequests[submissionKey]?.idempotencyKey !== request.idempotencyKey) return;
+      setView(submissionKey, { requestError: message });
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -258,14 +261,14 @@ export function Buffer({
       <section className="results stack-sm flex-1 max-h-[50dvh] overflow-y-auto overscroll-contain">
         <h3>실행 결과</h3>
         <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} error={requestError}
-          disabled={busy || busyRun} paused={paused} onRetry={() => handleSubmit(true)}
-          onResume={() => { setShowSubmission(true); setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false); }}
+          disabled={busy || busyRun} paused={!showSubmission || paused} onRetry={() => handleSubmit(true)}
+          onResume={() => { setView(submissionKey, { showSubmission: true }); setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false); }}
           onSelect={(id) => {
             workspace.getState().selectPracticeSubmission(submissionKey, id);
-            setShowSubmission(true);
+            setView(submissionKey, { showSubmission: true });
             setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false);
           }} />
-        <EditorResultPanel busy={busy} sending={sending} submissionFailed={!showSubmission && !!requestError}
+        <EditorResultPanel busy={busy} sending={sending} submissionFailed={!showSubmission && (!!pending || !!requestError)}
           submissionPaused={showSubmission && !!judgeSubmissionId && !judgeResult && paused} showRun={showRun} busyRun={busyRun} queryError={judgeError}
           judgeResult={showSubmission ? judgeResult : null} runError={runError} runResult={runResult} runExpectations={runExpectations} />
       </section>
