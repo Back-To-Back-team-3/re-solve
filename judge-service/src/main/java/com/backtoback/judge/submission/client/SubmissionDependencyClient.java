@@ -18,6 +18,9 @@ import com.backtoback.judge.submission.dto.MemberTagLevelsResponse;
 import com.backtoback.judge.submission.dto.ProblemJudgingDataResponse;
 import com.backtoback.judge.submission.dto.ProblemValidationResponse;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+
 /** 고정 회차와 회원 검증 응답을 조회하며 장애 시 접수를 허용하지 않는다. (API 명세서 §3.1.2) */
 @Component
 public class SubmissionDependencyClient {
@@ -25,6 +28,8 @@ public class SubmissionDependencyClient {
     private final RestClient member;
     /** 레벨 잠금 예외를 확인하는 Study 클라이언트다. */
     private final RestClient study;
+    /** Study 배정 조회의 응답 오류와 통신 장애를 집계한다. */
+    private final CircuitBreaker studyCircuitBreaker = CircuitBreaker.ofDefaults("assignedProblem");
 
     /**
      * 공통 상관관계 ID 전파를 유지하는 제한 시간 기반 클라이언트를 생성한다.
@@ -113,19 +118,34 @@ public class SubmissionDependencyClient {
      */
     public boolean isAssignedProblem(long memberId, long problemId) {
         try {
-            var response
-                = study
-                    .get()
-                    .uri("/internal/v1/studies/members/{memberId}/assigned-problems/{problemId}", memberId, problemId)
-                    .retrieve()
-                    .toEntity(AssignedProblemResponse.class);
-            var body = response.getBody();
-            return response.getStatusCode().value() == 200 && body != null
-                && Long.toString(memberId).equals(body.memberId()) && Long.toString(problemId).equals(body.problemId())
-                && body.assigned() != null && body.assigned().isBoolean() && body.assigned().booleanValue();
-        } catch (RestClientException exception) {
+            return studyCircuitBreaker.executeSupplier(() -> fetchAssignedProblem(memberId, problemId));
+        } catch (RestClientException | CallNotPermittedException exception) {
             return false;
         }
+    }
+
+    /**
+     * Study의 정상 미배정 응답과 응답 계약 오류를 구분한다.
+     *
+     * @param memberId 인증 회원 ID
+     * @param problemId 실행 또는 제출할 문제 ID
+     * @return 배정 여부
+     * @throws RestClientException 배정 조회가 실패하거나 응답이 계약을 충족하지 않는 경우
+     */
+    private boolean fetchAssignedProblem(long memberId, long problemId) {
+        var response
+            = study
+                .get()
+                .uri("/internal/v1/studies/members/{memberId}/assigned-problems/{problemId}", memberId, problemId)
+                .retrieve()
+                .toEntity(AssignedProblemResponse.class);
+        var body = response.getBody();
+        if (response.getStatusCode().value() != 200 || body == null || !Long.toString(memberId).equals(body.memberId())
+            || !Long.toString(problemId).equals(body.problemId()) || body.assigned() == null
+            || !body.assigned().isBoolean()) {
+            throw new RestClientException("Invalid Study assigned problem response");
+        }
+        return body.assigned().booleanValue();
     }
 
     /**

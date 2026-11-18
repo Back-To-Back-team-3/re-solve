@@ -395,6 +395,28 @@ class SubmissionAcceptanceStoreTest {
         verify(dependencies, times(2)).isAssignedProblem(7, 301);
     }
 
+    /** 배정이 확인되지 않은 레벨 미달 회원의 일반 Run을 거절한다. */
+    @Test
+    @DisplayName("Study에서 배정을 확인하지 못하면 일반 Run은 레벨 잠금을 유지한다")
+    void rejectsRunWhenAssignmentIsUnconfirmed() {
+        given(dependencies.levels(7)).willReturn(new MemberTagLevelsResponse("7", List.of()));
+
+        assertThatThrownBy(() -> access.runRuntime(7, 301, 1001, "java"))
+            .isInstanceOfSatisfying(
+                JudgeException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(JudgeErrorCode.LEVEL_PROBLEM_LOCKED)
+            );
+        verify(dependencies).isAssignedProblem(7, 301);
+    }
+
+    /** 레벨이 충분하면 Study 조회 없이 일반 Run을 허용한다. */
+    @Test
+    @DisplayName("레벨 조건을 충족하는 일반 Run은 Study 배정을 조회하지 않는다")
+    void runsWithoutCheckingAssignmentWhenLevelIsSufficient() {
+        assertThat(access.runRuntime(7, 301, 1001, "java")).isEqualTo(JAVA);
+        verify(dependencies, never()).isAssignedProblem(7, 301);
+    }
+
     /**
      * 외부 응답 오류는 DB 저장 전에 거절한다.
      *

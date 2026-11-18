@@ -26,6 +26,9 @@ import com.backtoback.judge.submission.config.SubmissionClientProperties;
 import com.backtoback.judge.submission.dto.ProblemJudgingDataResponse;
 import com.sun.net.httpserver.HttpServer;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import jakarta.validation.Validation;
+
 /** 실제 HTTP 직렬화·추적 전파·응답 장애의 fail-closed 동작을 확인한다. */
 class SubmissionDependencyClientTest {
     private HttpServer server;
@@ -152,6 +155,55 @@ class SubmissionDependencyClientTest {
             {"memberId":"7","problemId":"301","assigned":true}
             """;
         assertThat(client.isAssignedProblem(7, 301)).isFalse();
+    }
+
+    /** 정상 미배정은 허용하고 연속 장애가 발생하면 Study 호출을 차단한다. */
+    @Test
+    @DisplayName("Study 미배정은 장애로 집계하지 않고 연속 실패 뒤에는 호출을 차단한다")
+    void opensCircuitOnAssignmentFailures() {
+        var config = CircuitBreakerConfig.ofDefaults();
+        body = "{\"memberId\":\"7\",\"problemId\":\"301\",\"assigned\":false}";
+        for (int call = 0; call < config.getSlidingWindowSize(); call++) {
+            assertThat(client.isAssignedProblem(7, 301)).isFalse();
+        }
+        body = "{\"memberId\":\"7\",\"problemId\":\"301\",\"assigned\":true}";
+        assertThat(client.isAssignedProblem(7, 301)).isTrue();
+
+        status = 503;
+        for (int call = 0; call < config.getSlidingWindowSize(); call++) {
+            assertThat(client.isAssignedProblem(7, 301)).isFalse();
+        }
+        path.set(null);
+        status = 200;
+        assertThat(client.isAssignedProblem(7, 301)).isFalse();
+        assertThat(path.get()).isNull();
+    }
+
+    /**
+     * HTTP(S) 호스트가 없는 Study 설정은 검증에서 거절한다.
+     *
+     * @param address 유효하지 않은 Study 주소
+     */
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "ftp://study-service",
+            "/study-service",
+            "http:/study-service"
+        }
+    )
+    @DisplayName("호스트를 포함한 HTTP(S) 주소만 Study 설정에 허용한다")
+    void rejectsInvalidStudyBaseUrl(String address) {
+        URI internalUrl = URI.create("http://study-service:8080");
+        var properties
+            = new SubmissionClientProperties(internalUrl, internalUrl, URI.create(address), Duration.ofSeconds(2));
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            assertThat(factory.getValidator().validate(properties))
+                .singleElement()
+                .satisfies(
+                    violation -> assertThat(violation.getPropertyPath().toString()).isEqualTo("studyBaseUrlValid")
+                );
+        }
     }
 
     /** Problem 미존재와 다른 서비스 장애를 구분한다. */
