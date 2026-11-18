@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import type { ExamProblemsResponse } from "@/services/types";
 import { Timer } from "lucide-react";
 import { useResource } from "@/services/hooks";
 import { actionErrorMessage, contestApi, isUnauthorized, judgeApi } from "@/services/api";
@@ -28,7 +29,7 @@ export function ExamRoom({ id }: { id: string }) {
   const setActive = useWorkspace((s) => s.setActive);
 
   const [now, setNow] = useState(() => Date.now());
-  const [offset, setOffset] = useState(0);
+  const [clock, setClock] = useState<{ source: ExamProblemsResponse; offset: number } | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const expired = useRef(false);
@@ -53,7 +54,7 @@ export function ExamRoom({ id }: { id: string }) {
 
   useEffect(() => {
     if (!r.data) return;
-    setOffset(new Date(r.data.serverNow).getTime() - Date.now());
+    setClock({ source: r.data, offset: new Date(r.data.serverNow).getTime() - Date.now() });
   }, [r.data]);
 
   useEffect(() => {
@@ -66,18 +67,18 @@ export function ExamRoom({ id }: { id: string }) {
     ? Math.max(
         0,
         Math.ceil(
-          (new Date(personalEndsAt).getTime() - (now + offset)) / 1000,
+          (new Date(personalEndsAt).getTime() - (now + (clock?.offset ?? 0))) / 1000,
         ),
       )
     : 0;
 
   useEffect(() => {
-    if (!personalEndsAt || !r.data) return;
+    if (!personalEndsAt || !r.data || clock?.source !== r.data) return;
     if (remaining === 0 && !expired.current) {
       expired.current = true;
       void finish();
     }
-  }, [remaining, personalEndsAt, r.data, finish]);
+  }, [remaining, personalEndsAt, r.data, clock, finish]);
 
   if (r.loading)
     return (

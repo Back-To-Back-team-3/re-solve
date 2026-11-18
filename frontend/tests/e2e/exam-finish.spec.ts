@@ -46,3 +46,16 @@ test("200 응답이어도 FINISHED가 아니면 결과로 이동하지 않는다
   await expect(page.getByText(/응시 종료 상태를 확인하지 못했습니다/)).toBeVisible();
   await expect(page).toHaveURL(/\/room$/);
 });
+
+test("브라우저와 서버 시각이 달라도 서버 보정 전에 응시를 종료하지 않는다", async ({ page }) => {
+  await mockExamRoom(page, 3600000, Date.parse("2020-01-01T00:00:00Z"));
+  await page.clock.install();
+  let finishes = 0;
+  await page.route("**/api/v1/exams/42/finish", (route) => { finishes++; return route.abort(); });
+  await page.goto("/exams/42/room");
+  await expect(page.getByRole("textbox", { name: "코드 편집기" })).toBeVisible();
+  await page.clock.fastForward(5000);
+  await expect(page.getByRole("button", { name: "실행", exact: true })).toBeEnabled();
+  await expect(page).toHaveURL(/\/room$/);
+  expect(finishes).toBe(0);
+});
