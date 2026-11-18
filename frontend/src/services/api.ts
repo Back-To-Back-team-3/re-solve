@@ -16,6 +16,8 @@ import type {
   ProblemSaved,
   ValidationProgress,
   AssignmentDetail,
+  CreateAssignmentRequest,
+  AssignmentCreated,
   AssignmentStatus,
   AssignmentSummary,
   AuthTokenResponse,
@@ -566,6 +568,11 @@ export const studyApi = {
     apiFetch<void>(`/api/v1/studies/${studyId}/leader-delegation`, {
       method: "POST",
       body: JSON.stringify({ targetMembershipId }),
+    }),
+  createAssignment: (studyId: string, body: CreateAssignmentRequest) =>
+    apiFetch<AssignmentCreated>(`/api/v1/studies/${studyId}/assignments`, {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
   getAssignments: (studyId: string, params: { status?: AssignmentStatus; page?: number; size?: number } = {}) => {
     const q = new URLSearchParams();
