@@ -30,10 +30,11 @@ repositories {
 }
 
 dependencies {
-    // 공통 모듈 (응답·예외·추적, JPA 감사, 이벤트 Outbox)
+    // 공통 모듈 (응답·예외·추적, JPA 감사, 이벤트 Outbox, 스케줄러 잠금·이벤트 기록 정리)
     implementation project(':common-web')
     implementation project(':common-jpa')
     implementation project(':common-event')
+    implementation project(':common-scheduling')
 
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
