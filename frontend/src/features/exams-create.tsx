@@ -49,6 +49,7 @@ export function ExamCreate() {
             problems: examCreateProblems(selected),
           });
           router.push(`/exams/${result.examId}`);
+          router.refresh();
         }, "모의 코테를 만들었습니다.");
       } finally { sending.current = false; setBusy(false); }
     }}>
