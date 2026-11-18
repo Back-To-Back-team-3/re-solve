@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -33,6 +34,7 @@ import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.Study;
 import com.backtoback.study.membership.domain.StudyMembership;
+import com.backtoback.study.membership.domain.StudyStatus;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
 
@@ -118,6 +120,22 @@ class AssignmentPersistServiceTest {
                     .persist(STUDY_ID, MEMBER_ID, request, Map.of(PROBLEM_ID, availableItem(PROBLEM_ID)))
             );
         verify(assignmentRepository).save(any());
+    }
+
+    /** 잠금 취득 시 이미 종료된 스터디에는 저장하지 않는지 검증한다. */
+    @Test
+    @DisplayName("외부 조회 후 잠근 스터디가 종료 상태이면 문제집을 저장하지 않는다")
+    void persist_rejectsClosedStudyUnderLock() {
+        Study study = mock(Study.class);
+        given(study.getStatus()).willReturn(StudyStatus.CLOSED);
+        given(studyRepository.findByIdWithLock(STUDY_ID)).willReturn(Optional.of(study));
+
+        assertThatThrownBy(() -> persistService.persist(STUDY_ID, MEMBER_ID, request, Map.of()))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                ex -> assertThat(ex.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_ALREADY_CLOSED)
+            );
+        verifyNoInteractions(membershipRepository, assignmentRepository, assignmentProblemRepository);
     }
 
     @Test
