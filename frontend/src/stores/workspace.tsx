@@ -18,7 +18,7 @@ import {
 } from "../services/api";
 import { cancelSubmissionRequests } from "@/services/submission-transport";
 import type { RunInputDraft } from "@/services/run-input-draft";
-import type { JudgeJobFilter, JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
+import type { ExamSubmitRequest, JudgeJobFilter, JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
 import { Loading } from "../components/ui";
 export interface Draft {
   code: string;
@@ -89,6 +89,8 @@ interface Workspace {
   authReady: boolean;
   drafts: Record<string, Draft>;
   practiceSubmissions: Record<string, PracticeSubmissionAttempt | undefined>;
+  examRequests: Record<string, ExamSubmitRequest | undefined>;
+  setExamRequest: (key: string, request: ExamSubmitRequest | undefined) => void;
   practiceRequests: Record<string, PracticeSubmissionRequest | undefined>;
   activePracticeSubmissions: Record<string, string | undefined>;
   editorSubmissionViews: Record<string, EditorSubmissionView | undefined>;
@@ -132,6 +134,8 @@ const createWorkspace = () =>
     submissionAttempts: {},
     setSubmissionAttempt: (key, value) => set((state) => ({ submissionAttempts: { ...state.submissionAttempts, [key]: value } })),
     practiceSubmissions: {},
+    examRequests: {},
+    setExamRequest: (key, request) => set((state) => ({ examRequests: { ...state.examRequests, [key]: request } })),
     practiceRequests: {},
     activePracticeSubmissions: {},
     editorSubmissionViews: {},
@@ -169,7 +173,7 @@ const createWorkspace = () =>
     fontSize: 14,
     activeProblems: {},
     setMember: (member) => set({ member }),
-    clearMember: () => { cancelSubmissionRequests(); set({ judgeJobFilter: { sort: "updatedAt,desc" }, judgeRecoveryReasons: {}, viewPages: {}, practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, practiceRequests: {}, activePracticeSubmissions: {}, editorSubmissionViews: {} }); },
+    clearMember: () => { cancelSubmissionRequests(); set({ judgeJobFilter: { sort: "updatedAt,desc" }, judgeRecoveryReasons: {}, viewPages: {}, practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, examRequests: {}, practiceRequests: {}, activePracticeSubmissions: {}, editorSubmissionViews: {} }); },
     setAccessToken: (accessToken) => set({ accessToken }),
     setAuthReady: (authReady) => set({ authReady }),
     setDraft: (key, d) => set((s) => ({ drafts: { ...s.drafts, [key]: d } })),

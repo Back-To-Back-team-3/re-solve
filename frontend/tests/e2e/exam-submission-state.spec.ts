@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { seedBrowserStorage, readBrowserStorage } from "./storage-fixture";
+import { submissionResponseTimeoutMs } from "@/services/submission-transport";
+import type { ExamSubmitRequest } from "@/services/types";
 import { mockPracticePage, problemDetail } from "./practice-fixture";
 
 async function mockExam(page: Page) {
@@ -47,7 +50,7 @@ test("시험 제출 전송은 언어 전환 후에도 중복되지 않고 실패
     expect(posts).toBe(1);
     release();
     await expect(page.getByText("시험 접수 실패", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "제출", exact: true }).click();
+    await page.getByRole("button", { name: "현재 코드로 새 제출", exact: true }).click();
     await expect(page.getByText("제출 완료", { exact: true })).toBeVisible();
     await expect(page.getByText("시험 접수 실패", { exact: true })).toHaveCount(0);
     expect(posts).toBe(2);
@@ -113,3 +116,51 @@ test("언어를 바꿨다 돌아와도 시험 제출 성공을 표시하고 이�
     await expect(page.getByText("제출 완료", { exact: true })).toHaveCount(0);
   } finally { release(); }
 });
+
+
+for (const retryOriginal of [true, false]) {
+  test(`늦은 자동 저장 응답 뒤 ${retryOriginal ? "재요청은 최초 순번·본문을 유지한다" : "새 제출은 최신 순번·코드를 사용한다"}`, async ({ page }) => {
+    const now = await mockExam(page);
+    const key = "re-solve:editor:draft:exam:42:1001";
+    await seedBrowserStorage(page, { [key]: JSON.stringify({ language: "java", code: "// initial", seq: "7" }),
+      "re-solve:editor:settings": JSON.stringify({ language: "java", fontSize: 14 }) });
+    let releaseDraft = () => {}, releaseSubmit = () => {}, draftStarted = false;
+    const heldDraft = new Promise<void>((resolve) => { releaseDraft = resolve; });
+    const heldSubmit = new Promise<void>((resolve) => { releaseSubmit = resolve; });
+    await page.route("**/api/v1/exams/42/drafts/1001", async (route) => {
+      draftStarted = true; await heldDraft;
+      return route.fulfill({ json: { success: true, data: { applied: true,
+        serverSeq: route.request().postDataJSON().seq, savedAt: now, serverNow: now } } });
+    });
+    const posts: ExamSubmitRequest[] = [];
+    const receipts = new Set<string>();
+    await page.route("**/api/v1/exams/42/submissions", async (route) => {
+      const body: ExamSubmitRequest = route.request().postDataJSON();
+      posts.push(body); receipts.add(body.seq);
+      if (posts.length === 1) { await heldSubmit; return route.abort().catch(() => {}); }
+      return route.fulfill({ status: 202, json: { success: true, data: {
+        examSubmissionId: "99", status: "ACCEPTED", receivedAt: now, draftSeq: body.seq,
+      } } });
+    });
+    try {
+      await page.goto("/exams/42/room");
+      const editor = page.getByRole("textbox", { name: "코드 편집기" });
+      await expect(editor).toBeVisible();
+      await editor.pressSequentially("// A");
+      await expect.poll(() => draftStarted).toBe(true);
+      await page.getByRole("button", { name: "제출", exact: true }).click();
+      await expect.poll(() => posts.length).toBe(1); expect(posts[0].seq).toBe("7");
+      releaseDraft();
+      await expect.poll(async () => JSON.parse((await readBrowserStorage(page, key))!).seq).toBe("8");
+      const aborted = page.waitForEvent("requestfailed", { predicate: (request) => new URL(request.url()).pathname === "/api/v1/exams/42/submissions", timeout: submissionResponseTimeoutMs + 10_000 });
+      await aborted;
+      await expect(page.getByText("제출 접수 여부를 확인하지 못했습니다. 다시 시도해 주세요.", { exact: true })).toBeVisible();
+      await editor.pressSequentially("// B");
+      await page.getByRole("button", { name: retryOriginal ? "같은 제출 재요청" : "현재 코드로 새 제출", exact: true }).click();
+      await expect.poll(() => posts.length).toBe(2);
+      await expect(page.getByRole("button", { name: "같은 제출 재요청", exact: true })).toHaveCount(0);
+      if (retryOriginal) { expect(posts[1]).toEqual(posts[0]); expect(receipts.size).toBe(1); }
+      else { expect(BigInt(posts[1].seq)).toBeGreaterThan(7n); expect(posts[1].sourceCode).toContain("// B"); expect(receipts.size).toBe(2); }
+    } finally { releaseDraft(); releaseSubmit(); }
+  });
+}
