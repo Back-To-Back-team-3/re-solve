@@ -8,6 +8,7 @@ import type {
   AssignmentStatus,
   AssignmentSummary,
   CompletionType,
+  StudyDetail,
 } from "@/services/types";
 import {
   Badge,
@@ -19,6 +20,7 @@ import {
   Section,
   Tabs,
 } from "@/components/ui";
+import { canCreateAssignment } from "@/features/study-assignment-policy";
 import { Pager } from "./problem-list";
 
 const itemStatusTone: Record<AssignmentItemStatus, string> = {
@@ -239,9 +241,11 @@ export function AssignmentDetail({
 export function AssignmentsTab({
   studyId,
   version,
+  study,
 }: {
   studyId: string;
   version: number;
+  study: StudyDetail;
 }) {
   const [assignTab, setAssignTab] = useState<AssignmentStatus>("OPEN");
   const [page, setPage] = useState(0);
@@ -258,6 +262,9 @@ export function AssignmentsTab({
 
   return (
     <div className="stack">
+      {canCreateAssignment(study) && (
+        <Go href={`/studies/${studyId}/assignments/new`}>문제집 만들기</Go>
+      )}
       <Tabs
         value={assignTab}
         onChange={handleTabChange}
@@ -274,7 +281,7 @@ export function AssignmentsTab({
       {!assignments.loading && !assignments.error && assignments.data && (
         <>
           {assignments.data.content.length === 0 ? (
-            <Empty title={emptyTitle[assignTab]} description="스터디 운영 화면에서 문제집을 만들 수 있습니다." />
+            <Empty title={emptyTitle[assignTab]} description={canCreateAssignment(study) ? "문제집 만들기에서 새 문제집을 등록해 보세요." : "등록된 문제집이 여기에 표시됩니다."} />
           ) : (
             assignments.data.content.map((a) => (
               <AssignmentCard key={a.assignmentId} studyId={studyId} a={a} />

@@ -504,6 +504,8 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 
 | 항목 | 정책 |
 | --- | --- |
+| 신규 배정 난이도 | 스터디 실력 수준은 태그와 무관한 문제집 신규 배정 난이도 상한이다. `LV1`은 1, `LV2`는 1~2, `LV3`는 1~3을 허용한다. 저장 트랜잭션에서 스터디 행을 잠근 뒤 최신 수준과 배정 회차의 난이도를 검증한다. 수준을 낮춰도 이미 배정된 문제는 유지한다. 리더의 개인 태그 레벨은 검증하지 않는다. |
+| 허용 수준 | 스터디 실력 수준은 `LV1`~`LV3`만 허용한다. 생성·수정 요청의 그 외 값은 거절한다. 구형 데이터는 `LV0`→`LV1`, `MASTER`→`LV3`로 정규화하며, 그 외 값은 신규 배정 시 거절한다. 배정 요청이 데이터를 임의 변경하지 않는다. |
 | 구성 | 문제집은 `scope = GENERAL`·`visibility = PUBLIC` 문제 1개 이상으로 구성하며, 태그 단위로 묶는다(태그 기준은 §4와 동일). 기본 주 5문제, 스터디별로 조정한다. 생성 시점에 문제 선택 API가 반환한 `problemRevisionId`를 `assignment_problems.assigned_revision_id`에 기록한다. 기록한 회차는 배정 당시 문제를 확인·표시하는 용도이며, 진행 인정은 `problem_id` 기준으로 회차와 무관하게 판정한다. |
 | 문제 비공개 전환 | 문제집에 포함된 문제가 `PRIVATE`로 전환되면 해당 문제를 `EXCLUDED`로 표시하고 진행률 분모에서 제외한다. 이미 인정된 기록은 삭제하지 않는다. 다시 `PUBLIC`이 되면 `ACTIVE`로 복귀한다. 전환은 `ProblemStateChanged` 이벤트로 반영한다. |
 | 기간 | 시작 시각은 필수, 마감 시각은 선택이다. 마감을 지정할 때 기본값은 시작 + 7일이다. 마감이 없으면 기간 제한 없이 진행한다. |
@@ -857,7 +859,7 @@ level = max(진단 결과들)  → 단계별 승급 기준을 차례로 적용  
 | 문제 진행(`assignment_progress.completion_type`) | `PRE_SOLVED / ON_TIME / LATE` (제출 접수 시각으로 계산, 더 이른 유형 유지, 재채점 시 남은 유효 AC로 재계산하거나 기록 삭제) |
 | 진단 응시(테이블명·상태명 확정 필요) | `IN_PROGRESS → CLOSED`(최종 제출 또는 제한 시간 만료 + 자동 제출) `→ SCORED`(채점 종결 후 레벨 반영). 종료 이후의 저장·제출은 반영하지 않는다 |
 | 태그 레벨(`member_tag_levels`) | `Lv.0 → Lv.1 / Lv.2 / Lv.3 → 마스터`. 진단 재응시로는 하향하지 않고(`max`), 재채점 재계산으로만 하향될 수 있다 |
-| 힌트 요청(`hint_requests`) | `REQUESTED → GENERATING → READY` / `GENERATING → FALLBACK`(타임아웃·장애·가드레일 실패) / `REQUESTED → BLOCKED`(시험·진단 중·제한 초과) / `GENERATING → BLOCKED`(전달 직전 재확인에서 차단, 일일 횟수 미차감) |
+| 힌트 요청(`hint_requests`) | `REQUESTED → GENERATING → READY` / `GENERATING → FALLBACK`(타임아웃·장애·가드레일 실패) / `REQUESTED·GENERATING → FALLBACK`(1분 넘게 멈춘 요청 회수, 스케줄러 §6.1) / `REQUESTED → BLOCKED`(시험·진단 중·제한 초과) / `GENERATING → BLOCKED`(전달 직전 재확인에서 차단, 일일 횟수 미차감) |
 | GitHub 연동(`github_connections`) | `CONNECTED → DISCONNECTED`(해제·권한 만료), `DISCONNECTED → CONNECTED`(재인가) |
 | GitHub Sync Job(`github_sync_jobs`) | `PENDING → RUNNING → SUCCEEDED`, <br>`RUNNING → RETRY_WAITING → PENDING`, <br>`RUNNING → RATE_LIMITED → PENDING`, <br>`RETRY_WAITING → FAILED`(상한 초과), `PENDING / RETRY_WAITING → CANCELED`(연동 해제) |
 | 알림(`notifications`) | `UNREAD → READ` |

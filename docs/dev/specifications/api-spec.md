@@ -4398,6 +4398,7 @@
     ```
     
     - `customInputs` 최대 5개, 함수 명세로 타입 검증
+    - 프론트엔드 일반 문제 풀이 화면은 공개 예제를 항상 포함해 `useSamples: true`로 요청하고, 직접 입력은 추가 실행한다. 공개 예제 제외 선택 UI는 제공하지 않는다.
 - **응답 (200):**
     
     ```json
@@ -8156,7 +8157,7 @@
     | --- | --- | --- | --- | --- |
     | `keyword` | string | N | — | 이름·설명 검색 |
     | `goal` | string | N | — | 목표 필터 |
-    | `skillLevel` | string | N | — | 대상 레벨 필터 (태그 레벨 집계 방식 확정 시 조정) |
+    | `skillLevel` | string | N | — | 스터디 실력 수준 필터 (`LV1` / `LV2` / `LV3`). 값을 검증하지 않고 저장된 수준과 정확히 일치하는 스터디만 반환한다 |
     | `preferredLanguage` | string | N | — | 선호 언어 필터 (공통 Enum) |
     | `activeTimeSlot` | string | N | — | 활동 시간대 필터 |
     | `page` | int | N | 0 |  |
@@ -8179,7 +8180,7 @@
       }
     ```
     
-    - `goal`·`skillLevel`·`activeTimeSlot` 값 체계는 학습 프로필과 같은 공통 Enum을 쓴다.
+    - `goal`·`activeTimeSlot` 값 체계는 학습 프로필과 같은 공통 Enum을 쓴다. `skillLevel`은 [정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준을 따른다.
 
 #### 5.1.2 스터디 상세
 
@@ -8288,7 +8289,7 @@
       { "name": "코딩테스트 스터디", "description": "취업 준비 알고리즘 스터디", "goal": "EMPLOYMENT", "skillLevel": "LV2", "preferredLanguage": "java", "activeTimeSlot": "EVENING", "capacity": 10, "joinType": "APPROVAL", "isAutoReopen": true }
     ```
     
-    - `name` 1~200자, `description` 0~500자, `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
+    - `name` 1~200자, `description` 0~500자, `skillLevel` `LV1` / `LV2` / `LV3`([정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준), `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
 - **응답 (201):**
     
     ```json
@@ -8296,7 +8297,7 @@
     ```
     
 - **에러:**
-    - `COMMON_INVALID_REQUEST`(400), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+    - `COMMON_INVALID_REQUEST`(400, 필수값 누락·길이 초과, `skillLevel`이 `LV1`~`LV3`이 아님), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **동시성/멱등 보장:**
     - 트랜잭션 순서 = ① `study_member_quotas` 조건부 UPDATE(`active_count < 5`) ② `studies` INSERT(`member_count = 1`) ③ `study_memberships` INSERT(`LEADER`, `APPROVED`) ④ 이력 INSERT ⑤ `outbox_events` INSERT. ①이 0행이면 전체 롤백.
 - **발행:**
@@ -8516,6 +8517,8 @@
     ```
     
     - `problemIds` 1~20개, 중복 불가. `startsAt` 필수, `deadlineAt` 필수(`startsAt`보다 뒤). 과거 `startsAt`이면 다음 스케줄러 회차에 바로 `OPEN`
+    - 저장 직전 스터디 행을 잠근 상태에서 종료 여부·요청자 권한·신규 배정 난이도를 재확인한다. 난이도 상한은 정책 및 상태 §7.1을 따른다.
+    - 난이도 초과는 `STUDY_ASSIGNMENT_DIFFICULTY_EXCEEDED`(409), 스터디 수준이 `LV1`~`LV3` 이외이면 `COMMON_INVALID_REQUEST`(400)로 거절하며 문제집을 저장하지 않는다.
 - **응답 (201):**
     
     ```json
@@ -8523,7 +8526,7 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE`(409), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `STUDY_ASSIGNMENT_DIFFICULTY_EXCEEDED`(409), `STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE`(409), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **외부 의존:**
     - `GET /internal/v1/problems/summaries?ids=&purpose=ASSIGNMENT` (problem) — 공개 여부·현재 회차·표시 정보. 실패 시 fail-closed
 

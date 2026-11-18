@@ -4,6 +4,7 @@ import Image from "next/image";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { remarkSampleTables } from "@/services/problem-examples";
 import { useResource } from "@/services/hooks";
 import { contestApi, diagnosisApi, judgeApi, problemApi } from "@/services/api";
 import type { Problem } from "@/services/types";
@@ -46,7 +47,9 @@ function ProblemBodyImage({ problemId, revisionId, imageId, alt, examId, diagnos
     : <span>이미지 조회 중…</span>;
 }
 
-function ProblemMarkdown({ text, problem, examId, diagnosisId }: { text: string; problem: Problem; examId?: string; diagnosisId?: string }) {
+function ProblemMarkdown({ text, problem, examId, diagnosisId, deduplicateSamples = false }: {
+  text: string; problem: Problem; examId?: string; diagnosisId?: string; deduplicateSamples?: boolean;
+}) {
   const problemId = problem.id;
   const revisionId = problem.problemRevisionId;
   // 시험 타이머 갱신마다 이미지 컴포넌트를 재생성해 인증 요청을 반복하지 않는다.
@@ -57,7 +60,7 @@ function ProblemMarkdown({ text, problem, examId, diagnosisId }: { text: string;
     return typeof src === "string" && src ? <Image unoptimized src={src} alt={alt ?? "문제 이미지"}
       width={800} height={400} className="h-auto w-auto max-w-full" /> : <span>이미지 주소를 확인해 주세요.</span>;
   } }), [problemId, revisionId, examId, diagnosisId]);
-  return <Markdown remarkPlugins={[remarkGfm]} skipHtml
+  return <Markdown remarkPlugins={deduplicateSamples ? [remarkGfm, [remarkSampleTables, problem]] : [remarkGfm]} skipHtml
     urlTransform={(url) => /^image:[1-9][0-9]*$/.test(url) ? url : defaultUrlTransform(url)}
     components={components}>{text}</Markdown>;
 }
@@ -111,7 +114,7 @@ export function ProblemDescription({
           <h2>입출력 예</h2>
           {problem.samples.length > 0 ? (
             <div className="table-wrap">
-              <table className="my-0!" aria-label="입출력 예">
+              <table className="my-0! [&_code]:bg-transparent!" aria-label="입출력 예">
                 <thead><tr>
                   {(structuredSamples ? parameterNames : ["입력"]).map((name) => <th scope="col" key={name}>{name}</th>)}
                   <th scope="col">result</th>
@@ -127,7 +130,7 @@ export function ProblemDescription({
               </table>
             </div>
           ) : null}
-          <ProblemMarkdown problem={problem} examId={examId} diagnosisId={diagnosisId} text={problem.examples} />
+          <ProblemMarkdown problem={problem} examId={examId} diagnosisId={diagnosisId} text={problem.examples} deduplicateSamples />
         </div>
       )}
       {tab === "submissions" &&

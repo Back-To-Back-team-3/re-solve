@@ -87,6 +87,10 @@ test("스터디를 만들고 승인 가입 스터디에 신청·취소하며 중
     },
   });
   await page.goto("/studies/new");
+  await expect(page.getByLabel("실력 수준")).toHaveValue("LV1");
+  await expect(page.getByLabel("실력 수준").locator("option")).toHaveText([
+    "LV1 · 초급", "LV2 · 중급", "LV3 · 고급",
+  ]);
   await page.getByLabel("스터디 이름").fill("검증용 스터디");
   await page.getByLabel("스터디 소개").fill("함께 알고리즘 문제를 매일 연습하는 스터디입니다.");
   await page.getByLabel("학습 목표").selectOption("STUDY");
@@ -97,7 +101,7 @@ test("스터디를 만들고 승인 가입 스터디에 신청·취소하며 중
   await page.getByRole("button", { name: "스터디 생성", exact: true }).click();
   expect((await created).postDataJSON()).toEqual({
     name: "검증용 스터디", description: "함께 알고리즘 문제를 매일 연습하는 스터디입니다.", goal: "STUDY",
-    skillLevel: "LV0", preferredLanguage: "java", activeTimeSlot: "MORNING", capacity: 4,
+    skillLevel: "LV1", preferredLanguage: "java", activeTimeSlot: "MORNING", capacity: 4,
     joinType: "APPROVAL", isAutoReopen: false,
   });
   await expect(page).toHaveURL(/\/studies\/13$/);

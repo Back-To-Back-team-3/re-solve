@@ -1,5 +1,9 @@
 package com.backtoback.study.hint.service;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,10 +21,12 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class HintCommandService {
 
+    private final Clock clock;
     private final HintRequestRepository hintRequestRepository;
 
     /**
      * REQUESTED → GENERATING 전이 (api-spec §6.2.1).
+     * 전이 시각을 생성 시작 시각으로 기록해 회수 스케줄러가 멈춘 요청을 판정할 수 있게 한다.
      * 대상 행이 없거나 이미 REQUESTED가 아니면 {@link HintInvalidStatusTransitionException}을 던진다.
      */
     @Transactional
@@ -28,7 +34,8 @@ public class HintCommandService {
         if (!hintRequestRepository.existsById(hintRequestId)) {
             throw new StudyException(StudyErrorCode.HINT_REQUEST_NOT_FOUND);
         }
-        int updated = hintRequestRepository.updateStatusToGenerating(hintRequestId);
+        LocalDateTime now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
+        int updated = hintRequestRepository.updateStatusToGenerating(hintRequestId, now);
         if (updated == 0) {
             throw new HintInvalidStatusTransitionException();
         }

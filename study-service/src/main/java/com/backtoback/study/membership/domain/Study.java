@@ -2,7 +2,10 @@ package com.backtoback.study.membership.domain;
 
 import java.time.LocalDateTime;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.jpa.entity.BaseTimeEntity;
+import com.backtoback.study.global.error.StudyErrorCode;
+import com.backtoback.study.global.error.StudyException;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -183,6 +186,35 @@ public class Study extends BaseTimeEntity {
             joinType,
             autoReopen
         );
+    }
+
+    /**
+     * 신규 활동을 만들 수 없는 종료 상태인지 확인한다.
+     *
+     * @return 종료 상태이면 {@code true}
+     */
+    public boolean isClosed() {
+        return status == StudyStatus.CLOSED;
+    }
+
+    /**
+     * 새 문제집에 배정할 문제의 난이도가 스터디 수준 상한을 충족하는지 검증한다.
+     * 기존 배정은 재검증하지 않으며 개인 태그 레벨과 무관하게 판단한다.
+     *
+     * @param difficulty 배정 회차의 문제 난이도
+     * @throws StudyException 수준이 {@code LV1}~{@code LV3}이 아니면 {@code COMMON_INVALID_REQUEST},
+     *     난이도가 허용 범위를 벗어나면 {@code STUDY_ASSIGNMENT_DIFFICULTY_EXCEEDED}
+     */
+    public void validateAssignmentDifficulty(int difficulty) {
+        int maximum = switch (skillLevel == null ? "" : skillLevel) {
+            case "LV1" -> 1;
+            case "LV2" -> 2;
+            case "LV3" -> 3;
+            default -> throw new StudyException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        };
+        if (difficulty < 1 || difficulty > maximum) {
+            throw new StudyException(StudyErrorCode.STUDY_ASSIGNMENT_DIFFICULTY_EXCEEDED);
+        }
     }
 
     /** 가입이 APPROVED가 된 회원을 memberCount에 반영한다(정책 및 상태 §7 정원 검증). */

@@ -428,7 +428,7 @@ export function StudyPage({ id }: { id: string }) {
           {tab === "problems" && (
             <div className="stack">
               {memberGuard ?? (
-                <AssignmentsTab studyId={id} version={version} />
+                <AssignmentsTab studyId={id} version={version} study={study} />
               )}
             </div>
           )}
@@ -542,12 +542,10 @@ export function StudyCreate() {
           </label>
           <label className="field">
             실력 수준
-            <select className="input" name="skillLevel" required>
-              <option value="LV0">LV0 · 입문</option>
+            <select className="input" name="skillLevel" defaultValue="LV1" required>
               <option value="LV1">LV1 · 초급</option>
               <option value="LV2">LV2 · 중급</option>
               <option value="LV3">LV3 · 고급</option>
-              <option value="MASTER">MASTER</option>
             </select>
           </label>
           <label className="field">
