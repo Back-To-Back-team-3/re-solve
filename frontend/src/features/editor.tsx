@@ -13,6 +13,7 @@ export function CodeEditor({
   availableLanguages,
   runLanguages,
   runDisabled = false,
+  disabled = false,
 }: {
   problem: Problem;
   userId: string;
@@ -20,6 +21,7 @@ export function CodeEditor({
   availableLanguages?: Language[];
   runLanguages?: Language[];
   runDisabled?: boolean;
+  disabled?: boolean;
 }) {
   const language = useWorkspace((s) => s.language),
     setLanguage = useWorkspace((s) => s.setLanguage),
@@ -93,6 +95,7 @@ export function CodeEditor({
         language={selectedLanguage}
         fontSize={fontSize}
         runDisabled={runDisabled || (runLanguages !== undefined && !runLanguages.includes(selectedLanguage))}
+        disabled={disabled}
       /> : <Empty title="실행 가능한 언어가 없어요" description="지원 실행 환경을 확인한 뒤 다시 시도해 주세요." />}
     </div>
   );
