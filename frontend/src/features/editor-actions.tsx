@@ -16,7 +16,7 @@ export function EditorActions({ saved, ready, busy, busyRun, runDisabled = false
       )}
     </div>
     <div className="row">
-      <Button className="small" aria-label="코드 초기화" onClick={onReset}><RotateCcw size={15} /></Button>
+      <Button className="small" aria-label="코드 초기화" disabled={!ready || busy || busyRun} onClick={onReset}><RotateCcw size={15} /></Button>
       <Button className="small" disabled={runDisabled || busyRun || busy || !ready} onClick={onRun}><Play size={14} />실행</Button>
       <Button className="small primary" disabled={busy || busyRun || !ready} onClick={onSubmit}>
         <Send size={14} />{busy ? "채점 중…" : pendingSubmission ? "현재 코드로 새 제출" : "제출"}
