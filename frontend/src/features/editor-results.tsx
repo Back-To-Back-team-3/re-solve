@@ -99,12 +99,13 @@ export function RunResult({ result, expectations = [] }: { result: RunResponse; 
 }
 
 
-export function EditorResultPanel({ busy, showRun, busyRun, queryError, judgeResult, runError, runResult, runExpectations }: {
-  busy: boolean; showRun: boolean; busyRun: boolean; queryError: string | null;
+export function EditorResultPanel({ busy, sending, submissionFailed, submissionPaused, showRun, busyRun, queryError, judgeResult, runError, runResult, runExpectations }: {
+  busy: boolean; sending?: boolean; submissionFailed?: boolean; submissionPaused?: boolean; showRun: boolean; busyRun: boolean; queryError: string | null;
   runExpectations?: (string | null)[];
   judgeResult: JudgeResult | null; runError: string | null; runResult: RunResponse | null;
 }) {
-  if (busy) return <div className="row"><Badge tone="pending">채점 중…</Badge></div>;
+  if (busy) return <div className="row"><Badge tone="pending">{sending ? "제출 접수 중…" : "채점 중…"}</Badge></div>;
+  if (!showRun && submissionFailed) return <p className="muted">제출 접수를 확인하지 못했습니다. 같은 제출 재요청으로 접수 여부를 확인할 수 있습니다.</p>;
   if (showRun) {
     if (busyRun) return <p className="muted">실행 중…</p>;
     if (runError) return <p className="error-text">{runError}</p>;
@@ -112,6 +113,7 @@ export function EditorResultPanel({ busy, showRun, busyRun, queryError, judgeRes
   } else {
     if (queryError) return <p className="error-text">{queryError}</p>;
     if (judgeResult) return <JudgeResultView result={judgeResult} />;
+    if (submissionPaused) return <p className="muted">채점 상태 조회가 중단되었습니다. 다시 조회해 주세요.</p>;
   }
   return <Empty title="코드를 실행해 보세요" description="공개 예제 실행 또는 전체 제출을 선택할 수 있어요." />;
 }

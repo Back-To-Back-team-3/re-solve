@@ -48,6 +48,7 @@ export function Buffer({
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
     [showRun, setShowRun] = useState(false),
+    [showSubmission, setShowSubmission] = useState(true),
     [judgeError, setJudgeError] = useState<string | null>(null),
     [requestError, setRequestError] = useState<string | null>(null);
   const runInputKey = JSON.stringify([userId, examId ?? "practice", problem.id, problem.problemRevisionId]);
@@ -160,6 +161,8 @@ export function Buffer({
     persist();
     setBusyRun(true);
     setShowRun(true);
+    setRequestError(null);
+    setJudgeError(null);
     setRunResult(null);
     setRunExpectations([]);
     setRunError(null);
@@ -203,6 +206,7 @@ export function Buffer({
     }
     sendingRef.current = true;
     setShowRun(false);
+    setShowSubmission(false);
     if (!examId) workspace.getState().setPracticeRequest(submissionKey, request);
     setRunResult(null);
     setRunError(null);
@@ -217,6 +221,7 @@ export function Buffer({
       } else {
         const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
         if (!workspace.getState().acceptPracticeSubmission(submissionKey, request, receipt.submissionId)) return;
+        setShowSubmission(true);
         setPollVersion((value) => value + 1);
         setPaused(false);
       }
@@ -254,13 +259,15 @@ export function Buffer({
         <h3>실행 결과</h3>
         <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} error={requestError}
           disabled={busy || busyRun} paused={paused} onRetry={() => handleSubmit(true)}
-          onResume={() => { setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false); }}
+          onResume={() => { setShowSubmission(true); setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false); }}
           onSelect={(id) => {
             workspace.getState().selectPracticeSubmission(submissionKey, id);
+            setShowSubmission(true);
             setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false);
           }} />
-        <EditorResultPanel busy={busy} showRun={showRun} busyRun={busyRun} queryError={judgeError}
-          judgeResult={judgeResult} runError={runError} runResult={runResult} runExpectations={runExpectations} />
+        <EditorResultPanel busy={busy} sending={sending} submissionFailed={!showSubmission && !!requestError}
+          submissionPaused={showSubmission && !!judgeSubmissionId && !judgeResult && paused} showRun={showRun} busyRun={busyRun} queryError={judgeError}
+          judgeResult={showSubmission ? judgeResult : null} runError={runError} runResult={runResult} runExpectations={runExpectations} />
       </section>
       <EditorActions saved={saved} ready={ready} busy={busy} busyRun={busyRun}
         pendingSubmission={!!pending || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
