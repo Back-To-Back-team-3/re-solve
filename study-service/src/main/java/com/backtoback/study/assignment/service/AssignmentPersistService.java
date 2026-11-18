@@ -20,6 +20,7 @@ import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
 import com.backtoback.study.membership.domain.MembershipRole;
 import com.backtoback.study.membership.domain.MembershipStatus;
+import com.backtoback.study.membership.domain.Study;
 import com.backtoback.study.membership.domain.StudyMembership;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
 import com.backtoback.study.membership.repository.StudyRepository;
@@ -46,8 +47,14 @@ class AssignmentPersistService {
      * Assignment와 AssignmentProblem 목록을 단일 트랜잭션으로 저장한다(ERD §4.5.5·§4.5.6).
      * 저장 전 스터디 행 쓰기 잠금 취득 후 요청자 권한을 재확인한다(scheduler.md §5.0 잠금 순서 ②→④).
      *
+     * @param studyId 스터디 식별자
+     * @param requestMemberId 요청 회원 식별자
+     * @param request 문제집 생성 요청
+     * @param summaryMap 외부 조회로 확보한 배정 회차별 문제 요약
      * @return 생성된 assignmentId
-     * @throws StudyException STUDY_NOT_FOUND, AUTH_ACCESS_DENIED
+     * @throws StudyException 스터디가 없으면 {@code STUDY_NOT_FOUND}, 종료됐으면 {@code STUDY_ALREADY_CLOSED},
+     *     권한이 없으면 {@code AUTH_ACCESS_DENIED}, 수준이 유효하지 않으면 {@code COMMON_INVALID_REQUEST},
+     *     난이도가 상한을 넘으면 {@code STUDY_ASSIGNMENT_DIFFICULTY_EXCEEDED}
      */
     @Transactional
     public Long persist(
@@ -57,13 +64,23 @@ class AssignmentPersistService {
         Map<Long, ProblemSummaryItem> summaryMap
     ) {
         // 멤버 제거 경로와 같은 순서(studies → study_memberships)로 잠금을 취득해 교착을 방지한다(scheduler.md §5.0).
-        studyRepository.findByIdWithLock(studyId).orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        Study study
+            = studyRepository
+                .findByIdWithLock(studyId)
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_NOT_FOUND));
+        if (study.isClosed()) {
+            throw new StudyException(StudyErrorCode.STUDY_ALREADY_CLOSED);
+        }
         StudyMembership requester
             = membershipRepository
                 .findByStudyIdAndMemberIdAndStatusWithLock(studyId, requestMemberId, MembershipStatus.APPROVED)
                 .orElseThrow(() -> new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED));
         if (requester.getRole() != MembershipRole.LEADER && requester.getRole() != MembershipRole.MANAGER) {
             throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
+        // 외부 조회 사이 수준이 바뀌어도 잠금으로 확보한 최신 수준과 배정할 회차를 기준으로 검증한다.
+        for (Long problemId : request.problemIds()) {
+            study.validateAssignmentDifficulty(summaryMap.get(problemId).difficulty());
         }
         boolean preSolvedAllowed = Boolean.TRUE.equals(request.isPreSolvedAllowed());
         LocalDateTime startsAt
