@@ -8157,7 +8157,7 @@
     | --- | --- | --- | --- | --- |
     | `keyword` | string | N | — | 이름·설명 검색 |
     | `goal` | string | N | — | 목표 필터 |
-    | `skillLevel` | string | N | — | 대상 레벨 필터 (태그 레벨 집계 방식 확정 시 조정) |
+    | `skillLevel` | string | N | — | 스터디 실력 수준 필터 (`LV1` / `LV2` / `LV3`). 그 외 값은 일치하는 스터디가 없어 빈 목록을 반환한다 |
     | `preferredLanguage` | string | N | — | 선호 언어 필터 (공통 Enum) |
     | `activeTimeSlot` | string | N | — | 활동 시간대 필터 |
     | `page` | int | N | 0 |  |
@@ -8180,7 +8180,7 @@
       }
     ```
     
-    - `goal`·`skillLevel`·`activeTimeSlot` 값 체계는 학습 프로필과 같은 공통 Enum을 쓴다.
+    - `goal`·`activeTimeSlot` 값 체계는 학습 프로필과 같은 공통 Enum을 쓴다. `skillLevel`은 [정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준을 따른다.
 
 #### 5.1.2 스터디 상세
 
@@ -8289,7 +8289,7 @@
       { "name": "코딩테스트 스터디", "description": "취업 준비 알고리즘 스터디", "goal": "EMPLOYMENT", "skillLevel": "LV2", "preferredLanguage": "java", "activeTimeSlot": "EVENING", "capacity": 10, "joinType": "APPROVAL", "isAutoReopen": true }
     ```
     
-    - `name` 1~200자, `description` 0~500자, `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
+    - `name` 1~200자, `description` 0~500자, `skillLevel` `LV1` / `LV2` / `LV3`([정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준), `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
 - **응답 (201):**
     
     ```json
@@ -8297,7 +8297,7 @@
     ```
     
 - **에러:**
-    - `COMMON_INVALID_REQUEST`(400), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+    - `COMMON_INVALID_REQUEST`(400, 필수값 누락·길이 초과, `skillLevel`이 `LV1`~`LV3`이 아님), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **동시성/멱등 보장:**
     - 트랜잭션 순서 = ① `study_member_quotas` 조건부 UPDATE(`active_count < 5`) ② `studies` INSERT(`member_count = 1`) ③ `study_memberships` INSERT(`LEADER`, `APPROVED`) ④ 이력 INSERT ⑤ `outbox_events` INSERT. ①이 0행이면 전체 롤백.
 - **발행:**
