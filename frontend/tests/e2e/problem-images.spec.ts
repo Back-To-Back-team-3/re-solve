@@ -45,7 +45,10 @@ test("시험 본문 이미지는 일반·관리자 경로 대신 입장 권한�
   await mockPracticePage(page);
   const now = new Date().toISOString();
   await page.route("**/api/v1/exams/42/problems", (route) => route.fulfill({ json: { success: true, data: {
-    problems: [{ problemId: "1001", title: "시험 문제", body: "![시험 도형](image:701)", score: "100", languages: ["java"] }],
+    examId: "42", problems: [{ problemId: "1001", problemRevisionId: "9001", revisionNumber: 2,
+      title: "시험 문제", body: "![시험 도형](image:701)", score: "100.00", displayOrder: 1,
+      functionSpec: problemDetail.functionSpec, executionLimits: problemDetail.executionLimits,
+      sampleTests: problemDetail.samples, imageIds: ["701"] }],
     serverNow: now, personalEndsAt: new Date(Date.now() + 3600000).toISOString(),
   } } }));
   let requests = 0;

@@ -3,8 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Timer } from "lucide-react";
 import { useResource } from "@/services/hooks";
-import { contestApi } from "@/services/api";
-import type { ExamProblem, Language, Problem } from "@/services/types";
+import { contestApi, judgeApi } from "@/services/api";
 import {
   Button,
   Empty,
@@ -16,27 +15,12 @@ import {
 } from "@/components/ui";
 import { useWorkspace } from "@/stores/workspace";
 import { ProblemDescription } from "./problem";
+import { toEditorExamProblem } from "@/services/exam-problem";
 import { CodeEditor } from "./editor";
-
-function toUIProblem(ep: ExamProblem): Problem {
-  return {
-    id: ep.problemId,
-    problemRevisionId: ep.problemId,
-    title: ep.title,
-    difficulty: 0,
-    tags: [],
-    description: ep.body,
-    constraints: "",
-    examples: "",
-    functionSpec: { name: "solution", parameters: [], returnType: "" },
-    starterCodes: { java: "", python3: "", cpp: "" } as Record<Language, string>,
-    samples: [],
-  };
-}
-
 
 export function ExamRoom({ id }: { id: string }) {
   const r = useResource(() => contestApi.getExamProblems(id), id);
+  const runtimes = useResource(judgeApi.getLanguages, "exam-languages");
   const router = useRouter();
   const member = useWorkspace((s) => s.member);
   const active = useWorkspace((s) => s.activeProblems[id]);
@@ -102,7 +86,7 @@ export function ExamRoom({ id }: { id: string }) {
       </div>
     );
 
-  const uiProblems = r.data.problems.map(toUIProblem);
+  const uiProblems = r.data.problems.map(toEditorExamProblem);
   const activeProblemId = uiProblems.some((p) => p.id === active)
     ? active
     : uiProblems[0].id;
@@ -136,6 +120,12 @@ export function ExamRoom({ id }: { id: string }) {
           </Button>
         </div>
       </div>
+      {runtimes.loading && <p className="container muted" role="status">실행 언어를 확인하고 있습니다. 코드 작성·저장·제출은 계속할 수 있습니다.</p>}
+      {runtimes.error && <div className="container stack-sm" role="alert">
+        <p className="error-text">{runtimes.error.message}</p>
+        <p>코드 작성·저장·제출·종료는 계속할 수 있습니다. 실행 언어를 확인한 뒤 Run을 다시 사용할 수 있습니다.</p>
+        <Button onClick={runtimes.retry}>실행 언어 다시 조회</Button>
+      </div>}
       <div className="exam-workspace">
         <aside className="exam-sidebar stack-sm">
           <h3>시험 문제</h3>
@@ -159,7 +149,9 @@ export function ExamRoom({ id }: { id: string }) {
         </aside>
         <div className="workspace">
           <ProblemDescription key={problem.id} problem={problem} exam examId={id} />
-          <CodeEditor problem={problem} userId={userId} examId={id} />
+          <CodeEditor problem={problem} userId={userId} examId={id}
+            runDisabled={runtimes.loading || !!runtimes.error}
+            runLanguages={runtimes.data?.content.filter((item) => item.enabled).map((item) => item.language)} />
         </div>
       </div>
       <Modal

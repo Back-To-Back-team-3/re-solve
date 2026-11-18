@@ -89,10 +89,8 @@ export function ProblemDescription({
   return (
     <section className="problem-panel stack">
       <div className="row wrap">
-        <Badge>Lv. {problem.difficulty}</Badge>
-        <Badge tone="accent">
-          {problem.tags[0]?.name}
-        </Badge>
+        {!exam && <><Badge>Lv. {problem.difficulty}</Badge>
+          <Badge tone="accent">{problem.tags[0]?.name}</Badge></>}
         <small>#{problem.id}</small>
       </div>
       <h1>{problem.title}</h1>
@@ -108,7 +106,9 @@ export function ProblemDescription({
           ]}
         />
       )}
-      {tab === "description" && (
+      {tab === "description" && exam ? <div className="markdown">
+        <ProblemMarkdown problem={problem} examId={examId} text={problem.description} />
+      </div> : tab === "description" && (
         <div className="markdown">
           <ProblemMarkdown problem={problem} examId={examId} diagnosisId={diagnosisId} text={`${problem.description}\n\n## 제한 사항\n${problem.constraints}`} />
           <h2>입출력 예</h2>
