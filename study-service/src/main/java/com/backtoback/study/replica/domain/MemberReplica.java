@@ -35,6 +35,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class MemberReplica extends BaseTimeEntity {
 
+    /** 탈퇴 회원의 익명화 표시 이름(정책 및 상태 §9.4 회원 탈퇴 전파, ERD 3.5 {@code nickname}). */
+    public static final String WITHDRAWN_NICKNAME = "탈퇴한 사용자";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

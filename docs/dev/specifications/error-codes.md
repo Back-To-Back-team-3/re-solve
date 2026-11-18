@@ -148,6 +148,7 @@ Problem의 기존 오류 코드를 Judge 수동 재처리에도 사용하는 보
 | `STUDY_UPDATE_CONFLICT` | 409 | 스터디 설정 동시 수정 충돌 (`version` 불일치) |
 | `STUDY_ASSIGNMENT_NOT_FOUND` | 404 | 문제집을 찾을 수 없음 |
 | `STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE` | 409 | 문제집에 넣을 문제가 `GENERAL`·`PUBLIC`이 아님 |
+| `STUDY_ASSIGNMENT_DIFFICULTY_EXCEEDED` | 409 | 스터디 수준에서 배정할 수 없는 문제 난이도 |
 | `STUDY_POST_NOT_FOUND` | 404 | 게시글을 찾을 수 없음 |
 | `STUDY_COMMENT_NOT_FOUND` | 404 | 댓글을 찾을 수 없음 |
 | `HINT_PROBLEM_NOT_AVAILABLE` | 404 | 힌트 대상이 아닌 문제 (비공개·대회 전용·정책 §8.1의 임시 힌트 입력 크기 초과) |

@@ -1,61 +1,41 @@
 "use client";
-import { Button } from "@/components/ui";
-import { createRunInput, runArrayItemType, type RunInputValue } from "@/services/run-inputs";
+import { useId, useState, type ChangeEvent } from "react";
+import { runEditText, runInputError, runInputExample, type RunInputValue } from "@/services/run-inputs";
 import type { ProblemFunctionParamType } from "@/services/types";
 
-export function EditorRunValue({ name, type, value, onChange, hideLabel = false }: {
-  name: string; hideLabel?: boolean; type: ProblemFunctionParamType; value: RunInputValue; onChange: (value: RunInputValue) => void;
+const typeLabel: Record<string, string> = {
+  INT32: "정수 (32비트)", INT64: "정수 (64비트)", FLOAT32: "실수 (32비트)", FLOAT64: "실수 (64비트)",
+  STRING: "문자열", BOOLEAN: "참·거짓", ARRAY: "배열 · JSON", OBJECT: "객체 · JSON",
+};
+
+export function runValueTypeLabel(type: ProblemFunctionParamType): string {
+  return typeLabel[type.kind] ?? type.kind;
+}
+
+/** 모든 타입을 원문으로 편집하고 선언 타입의 오류를 필드 옆에 표시한다. */
+export function EditorRunValue({ name, type, value, onChange, hintId, optional = false }: {
+  name: string; type: ProblemFunctionParamType; value: RunInputValue; hintId?: string; optional?: boolean;
+  onChange: (value: RunInputValue) => void;
 }) {
-  if (type.kind === "ARRAY" && value.kind === "ARRAY") {
-    const step = type.repeatTypes?.length ?? 1;
-    const additions = type.repeatTypes ?? (type.elementType ? [type.elementType] : []);
-    return <fieldset className="card stack-sm min-w-0">
-      <legend className={hideLabel ? "sr-only" : undefined}>{name} · 목록</legend>
-      {value.items.length === 0 && <small className="muted">아직 항목이 없어요. 빈 목록으로 실행할 수도 있어요.</small>}
-      {value.items.map((item, index) => {
-        const itemType = runArrayItemType(type, index);
-        return itemType && <div className="stack-sm" key={index}>
-          <EditorRunValue name={`${name}[${index + 1}]`} type={itemType} value={item}
-            onChange={(next) => onChange({ kind: "ARRAY", items: value.items.map((current, i) => i === index ? next : current) })} />
-          {!type.positionTypes && (index + 1) % step === 0 && <Button type="button" className="small"
-            onClick={() => onChange({ kind: "ARRAY", items: value.items.filter((_, i) => i < index + 1 - step || i > index) })}>
-            {type.repeatTypes ? `${name} 묶음 ${(index + 1) / step} 삭제` : `${name} 항목 ${index + 1} 삭제`}
-          </Button>}
-        </div>;
-      })}
-      {!type.positionTypes && additions.length > 0 && <Button type="button"
-        onClick={() => onChange({ kind: "ARRAY", items: [...value.items, ...additions.map(createRunInput)] })}>
-        {name} {type.repeatTypes ? "묶음" : "항목"} 추가
-      </Button>}
-    </fieldset>;
-  }
-  if (type.kind === "OBJECT" && value.kind === "OBJECT") {
-    return <fieldset className="card stack-sm min-w-0">
-      <legend className={hideLabel ? "sr-only" : undefined}>{name} · 항목별 입력</legend>
-      {Object.entries(type.properties ?? {}).map(([key, child]) => <EditorRunValue key={key}
-        name={`${name}.${key}`} type={child} value={value.fields[key]}
-        onChange={(next) => onChange({ kind: "OBJECT", fields: { ...value.fields, [key]: next } })} />)}
-    </fieldset>;
-  }
-  if (value.kind !== "SCALAR") return null;
-  const update = (text: string) => onChange({ kind: "SCALAR", text });
-  if (type.kind === "BOOLEAN") {
-    return <label className="field"><span className={hideLabel ? "sr-only" : undefined}>{name}</span>
-      <select className="input min-w-0" aria-label={name} value={value.text} onChange={(event) => update(event.target.value)}>
-        <option value="false">거짓 (false)</option><option value="true">참 (true)</option>
-      </select>
-    </label>;
-  }
-  if (type.kind === "STRING") {
-    return <label className="field"><span className={hideLabel ? "sr-only" : undefined}>{name}</span>
-      <textarea className="input min-w-0" aria-label={name} placeholder="문자열을 그대로 입력하세요 (따옴표 불필요)"
-        value={value.text} onChange={(event) => update(event.target.value)} />
-    </label>;
-  }
-  const integer = type.kind === "INT32" || type.kind === "INT64";
-  return <label className="field"><span className={hideLabel ? "sr-only" : undefined}>{name}</span>
-    <input className="input mono min-w-0" aria-label={name} type="text" inputMode={integer ? "numeric" : "decimal"}
-      placeholder={integer ? "정수 입력 · 예: 123" : "숫자 입력 · 예: 1.5"}
-      value={value.text} onChange={(event) => update(event.target.value)} />
-  </label>;
+  const id = useId();
+  const [touched, setTouched] = useState(false);
+  const text = runEditText(type, value);
+  const error = touched && !(optional && text === "") ? runInputError(type, value, name) : null;
+  const multiline = ["ARRAY", "OBJECT", "STRING"].includes(type.kind);
+  const control = {
+    id, "aria-label": name, "aria-invalid": !!error,
+    "aria-describedby": [hintId, error ? `${id}-error` : undefined].filter(Boolean).join(" ") || undefined,
+    className: "input mono min-w-0 w-full", value: text, placeholder: runInputExample(type),
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setTouched(true);
+      onChange({ kind: "TEXT", text: event.target.value });
+    },
+  };
+  return <div className="min-w-0 space-y-2">
+    <div className="min-w-0 space-y-1">
+      {multiline ? <textarea {...control} className={`${control.className} min-h-0! resize-y`} rows={1} />
+        : <input {...control} type="text" inputMode={type.kind.startsWith("INT") ? "numeric" : type.kind.startsWith("FLOAT") ? "decimal" : "text"} />}
+      {error && <p id={`${id}-error`} role="alert" className="error-text text-sm [overflow-wrap:anywhere]">{error}</p>}
+    </div>
+  </div>;
 }

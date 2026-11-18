@@ -2310,7 +2310,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `name` | VARCHAR(200) | Y | 스터디 이름 |
 | `description` | VARCHAR(500) | N | 설명. NULL 허용: 선택 입력 |
 | `goal` | VARCHAR(30) | Y | 목표 (취업·학습 등 Enum) |
-| `skill_level` | VARCHAR(30) | Y | 대상 레벨 (Enum). 태그 레벨 집계 방식 확정 시 조정 |
+| `skill_level` | VARCHAR(30) | Y | 스터디 실력 수준 `LV1` / `LV2` / `LV3`. [정책 및 상태 > 7.1](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준 |
 | `preferred_language` | VARCHAR(30) | Y | 선호 언어 (공통 모듈 Enum) |
 | `active_time_slot` | VARCHAR(30) | Y | 활동 시간대 (Enum) |
 | `capacity` | INT | Y | 정원 2~10 (스터디장 포함) |
@@ -2330,7 +2330,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | 이름 | 컬럼 | 설명 |
 | --- | --- | --- |
 | `idx_studies_status_created_at` | `(status, created_at)` | 모집 중 목록 기본 정렬 |
-| `idx_studies_status_skill_level` | `(status, skill_level)` | 대상 레벨 필터 |
+| `idx_studies_status_skill_level` | `(status, skill_level)` | 스터디 실력 수준 필터 |
 | `idx_studies_status_last_activity_at` | `(status, last_activity_at)` | 추천 콜드 스타트 |
 
 **상태값**
@@ -2708,7 +2708,7 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 
 | 상태 | 의미 | 전이 |
 | --- | --- | --- |
-| `REQUESTED` | 요청 접수 | → `GENERATING` / `BLOCKED` |
+| `REQUESTED` | 요청 접수 | → `GENERATING` / `FALLBACK`(1분 초과 회수) / `BLOCKED` |
 | `GENERATING` | LLM 생성 중 | → `READY` / `FALLBACK` / `BLOCKED`(전달 직전 재확인) |
 | `READY` | 생성 완료 | 종단 |
 | `FALLBACK` | 폴백 응답 | 종단 |
@@ -3283,9 +3283,10 @@ study-service/src/main/resources/db/migration/
   V17__ai_create_hint_requests.sql
   V18__ai_create_hint_daily_usages.sql
   V19__ai_create_hint_block_replicas.sql
-  V20__recommendation_create_study_recommendations.sql  (D-9-1 착수 시)
-  V21__community_create_posts.sql        (P2 착수 시)
-  V22__community_create_comments.sql     (P2 착수 시)
+  V20__study_update_studies.sql          (스터디 실력 수준 정규화 구현 시)
+  V21__recommendation_create_study_recommendations.sql  (D-9-1 착수 시)
+  V22__community_create_posts.sql        (P2 착수 시)
+  V23__community_create_comments.sql     (P2 착수 시)
 ```
 
 ### 7.6 Notification (`notification-service`)

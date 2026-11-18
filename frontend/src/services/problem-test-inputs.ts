@@ -19,26 +19,8 @@ export function readProblemTests(fn: FunctionSpec, tests: ProblemWriteContent["t
   })) };
 }
 
-/** JSON.parse가 덮어쓰는 중복 키도 중첩 객체별로 검출한다. 문법은 먼저 검증한다. */
-function validateJson(text: string) {
-  try { JSON.parse(text); } catch { throw new Error("유효한 JSON을 입력해 주세요."); }
-  const tokens = text.match(/"(?:\\.|[^"\\])*"|[{}\[\]:,]/g) ?? [];
-  const stack: (Set<string> | null)[] = [];
-  tokens.forEach((token, index) => {
-    if (token === "{") stack.push(new Set());
-    else if (token === "[") stack.push(null);
-    else if (token === "}" || token === "]") stack.pop();
-    else if (token.startsWith('"') && tokens[index + 1] === ":") {
-      const key: string = JSON.parse(token);
-      const keys = stack.at(-1);
-      if (keys?.has(key)) throw new Error(`객체 필드 ${key}가 중복됩니다.`);
-      keys?.add(key);
-    }
-  });
-}
-
 function readValue(type: ProblemFunctionParamType, text: string, name: string) {
-  try { validateJson(text); return readRunInput(type, text); }
+  try { return readRunInput(type, text); }
   catch (failure) { throw new Error(`${name}: ${failure instanceof Error ? failure.message : "값을 확인해 주세요."}`); }
 }
 

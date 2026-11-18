@@ -1,12 +1,35 @@
 import type { ProblemFunctionParamType } from "@/services/types";
 
 export type RunInputValue =
+  | { kind: "TEXT"; text: string }
   | { kind: "SCALAR"; text: string }
   | { kind: "ARRAY"; items: RunInputValue[] }
   | { kind: "OBJECT"; fields: Record<string, RunInputValue> };
 export type RunInputRow = Record<string, RunInputValue>;
 export type RunTestCase = { arguments: RunInputRow; expectedOutput?: RunInputValue };
 export type RunInputParameter = { name: string; inputType?: ProblemFunctionParamType };
+
+/** 편집 중 원문은 구조화하거나 Number로 변환하지 않는다. */
+export function createRunText(type: ProblemFunctionParamType): RunInputValue {
+  return { kind: "TEXT", text: type.kind === "ARRAY" ? "[]" : type.kind === "OBJECT" ? "{}" : type.kind === "BOOLEAN" ? "false" : "" };
+}
+
+/** 기존 구조화 입력도 현재 값 그대로 텍스트 편집기로 표시한다. */
+export function runEditText(type: ProblemFunctionParamType, value: RunInputValue): string {
+  return value.kind === "TEXT" || value.kind === "SCALAR" ? value.text : encode(type, value, "값");
+}
+
+/** 실제 선언 구조에 맞는 예시를 표시하며 요청 값으로 사용하지 않는다. */
+export function runInputExample(type: ProblemFunctionParamType): string {
+  if (type.kind === "ARRAY") {
+    const children = type.positionTypes ?? type.repeatTypes ?? (type.elementType ? [type.elementType] : []);
+    return `[${children.map((child) => child.kind === "STRING" ? JSON.stringify("문자열") : runInputExample(child)).join(", ")}]`;
+  }
+  if (type.kind === "OBJECT") return `{${Object.entries(type.properties ?? {}).map(([key, child]) =>
+    `${JSON.stringify(key)}: ${child.kind === "STRING" ? JSON.stringify("문자열") : runInputExample(child)}`).join(", ")}}`;
+  return type.kind === "STRING" ? "문자열을 그대로 입력하세요 (따옴표 불필요)"
+    : type.kind === "BOOLEAN" ? "true" : type.kind.startsWith("FLOAT") ? "3.14" : "123";
+}
 
 /** 위치가 고정된 배열·객체의 필드는 미리 만들고 가변 배열은 빈 값으로 시작한다. */
 export function createRunInput(type: ProblemFunctionParamType): RunInputValue {
@@ -27,8 +50,28 @@ export function runArrayItemType(type: ProblemFunctionParamType, index: number) 
     ?? (type.repeatTypes?.length ? type.repeatTypes[index % type.repeatTypes.length] : undefined);
 }
 
+/** JSON.parse가 덮어쓰는 중복 키를 중첩 객체별로 검출한다. 문법은 먼저 검증한다. */
+function validateJson(text: string) {
+  try { JSON.parse(text); } catch { throw new Error("유효한 JSON을 입력해 주세요."); }
+  const tokens = text.match(/"(?:\\.|[^"\\])*"|[{}\[\]:,]/g) ?? [];
+  const stack: (Set<string> | null)[] = [];
+  tokens.forEach((token, index) => {
+    if (token === "{") stack.push(new Set());
+    else if (token === "[") stack.push(null);
+    else if (token === "}" || token === "]") stack.pop();
+    else if (token.startsWith('"') && tokens[index + 1] === ":") {
+      const key: string = JSON.parse(token);
+      const keys = stack.at(-1);
+      if (keys?.has(key)) throw new Error(`객체 필드 ${key}가 중복됩니다.`);
+      keys?.add(key);
+    }
+  });
+}
+
 /** 기존 JSON 텍스트를 정밀도 손실 없이 타입별 폼 값으로 복원한다. */
-export function readRunInput(type: ProblemFunctionParamType, text: string): RunInputValue {
+export function readRunInput(type: ProblemFunctionParamType, text: string, name = "값"): RunInputValue {
+  try { validateJson(text); }
+  catch (failure) { throw new Error(`${name}: ${failure instanceof Error ? failure.message : "JSON을 확인해 주세요."}`); }
   const original: unknown = JSON.parse(text);
   const preserved: unknown = JSON.parse(text.replace(
     /"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
@@ -36,28 +79,30 @@ export function readRunInput(type: ProblemFunctionParamType, text: string): RunI
   ));
   const object = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
-  function read(spec: ProblemFunctionParamType, value: unknown, raw: unknown): RunInputValue {
+  function read(spec: ProblemFunctionParamType, value: unknown, raw: unknown, path: string): RunInputValue {
     if (spec.kind === "ARRAY" && Array.isArray(value) && Array.isArray(raw)) {
       if (spec.positionTypes && value.length !== spec.positionTypes.length
-        || spec.repeatTypes && value.length % spec.repeatTypes.length !== 0) throw new Error("배열 항목 수를 확인해 주세요.");
+        || spec.repeatTypes && value.length % spec.repeatTypes.length !== 0) throw new Error(`${path}: 배열 항목 수를 확인해 주세요.`);
       return { kind: "ARRAY", items: value.map((item, index) => {
         const child = runArrayItemType(spec, index);
         if (!child) throw new Error("배열 타입을 확인해 주세요.");
-        return read(child, item, raw[index]);
+        return read(child, item, raw[index], `${path}[${index + 1}]`);
       }) };
     }
     if (spec.kind === "OBJECT" && object(value) && object(raw)) {
       const properties = Object.entries(spec.properties ?? {});
-      if (properties.length !== Object.keys(value).length) throw new Error("객체 필드를 확인해 주세요.");
-      return { kind: "OBJECT", fields: Object.fromEntries(properties.map(([key, child]) => [key, read(child, value[key], raw[key])])) };
+      if (properties.length !== Object.keys(value).length || properties.some(([key]) => !Object.hasOwn(value, key))) {
+        throw new Error(`${path}: 객체 필드를 확인해 주세요.`);
+      }
+      return { kind: "OBJECT", fields: Object.fromEntries(properties.map(([key, child]) => [key, read(child, value[key], raw[key], `${path}.${key}`)])) };
     }
     if ((spec.kind === "STRING" && typeof value === "string") || (spec.kind === "BOOLEAN" && typeof value === "boolean")
       || (["INT32", "INT64", "FLOAT32", "FLOAT64"].includes(spec.kind) && typeof value === "number")) {
       return { kind: "SCALAR", text: String(raw) };
     }
-    throw new Error("기존 테스트 값과 함수 명세의 타입이 다릅니다.");
+    throw new Error(`${path}: 함수 명세의 ${spec.kind} 타입에 맞는 값을 입력해 주세요.`);
   }
-  return read(type, original, preserved);
+  return read(type, original, preserved, name);
 }
 
 /** 관리자 테스트 등 단일 값 입력도 실행 폼과 같은 규칙으로 직렬화한다. */
@@ -65,9 +110,20 @@ export function runInputText(type: ProblemFunctionParamType, value: RunInputValu
   return encode(type, value, name);
 }
 
+/** 원문을 변경하지 않고 필드별 파싱·검증 결과를 조회한다. */
+export function runInputError(type: ProblemFunctionParamType, value: RunInputValue, name: string): string | null {
+  try { encode(type, value, name); return null; }
+  catch (failure) { return failure instanceof Error ? failure.message : `${name}: 값을 확인해 주세요.`; }
+}
+
 /** 문자열은 이스케이프하고 숫자는 원문 정밀도를 보존해 API용 JSON으로 변환한다. */
 function encode(type: ProblemFunctionParamType, value: RunInputValue | undefined, path: string): string {
   const invalid = (message: string): never => { throw new Error(`${path}: ${message}`); };
+  if (value?.kind === "TEXT") {
+    const parsed = type.kind === "ARRAY" || type.kind === "OBJECT"
+      ? readRunInput(type, value.text, path) : { kind: "SCALAR" as const, text: value.text };
+    return encode(type, parsed, path);
+  }
   if (type.kind === "ARRAY" && value?.kind === "ARRAY") {
     if (type.positionTypes && value.items.length !== type.positionTypes.length) return invalid("항목 수를 확인해 주세요.");
     if (type.repeatTypes && value.items.length % type.repeatTypes.length !== 0) return invalid("항목 묶음을 확인해 주세요.");
@@ -84,7 +140,7 @@ function encode(type: ProblemFunctionParamType, value: RunInputValue | undefined
   if (value?.kind !== "SCALAR") return invalid("값을 입력해 주세요.");
   if (type.kind === "STRING") return JSON.stringify(value.text);
   if (type.kind === "BOOLEAN") {
-    if (value.text !== "true" && value.text !== "false") return invalid("참 또는 거짓을 선택해 주세요.");
+    if (value.text !== "true" && value.text !== "false") return invalid("true 또는 false를 입력해 주세요.");
     return value.text;
   }
   const text = value.text.trim();
@@ -148,7 +204,8 @@ export function runInputs(parameters: RunInputParameter[], rows: RunInputRow[], 
 /** 실행 시점의 선택적 기대값을 API에 보내지 않고 표시용 JSON으로 고정한다. */
 export function runExpectedOutputs(type: ProblemFunctionParamType | undefined, rows: RunTestCase[]): (string | null)[] {
   return rows.map((row, index) => {
-    if (!row.expectedOutput) return null;
+    if (!row.expectedOutput || ((row.expectedOutput.kind === "TEXT" || row.expectedOutput.kind === "SCALAR")
+      && row.expectedOutput.text === "")) return null;
     if (!type) throw new Error("기대 출력의 타입 정보를 확인할 수 없습니다.");
     return encode(type, row.expectedOutput, `직접 입력 ${index + 1}의 기대 출력`);
   });
