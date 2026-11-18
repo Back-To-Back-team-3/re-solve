@@ -21,7 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 1분 넘게 멈춘 힌트 요청 1건을 회수한다(scheduler §6.1).
- * 전달 직전과 같은 차단 재확인을 거쳐 BLOCKED 또는 FALLBACK(RECOVERED)으로 종결하고 HintReady를 Outbox에 기록한다.
+ * 호출자가 트랜잭션 밖에서 확인한 차단 사유에 따라 BLOCKED 또는 FALLBACK(RECOVERED)으로 종결하고 HintReady를 Outbox에 기록한다.
  * 조건부 UPDATE가 0행이면 그사이 ai 응답·생성 시작으로 상태가 바뀐 것이므로 아무것도 하지 않는다.
  */
 @Slf4j
@@ -36,7 +36,6 @@ public class HintRecoveryService {
     private final Clock clock;
     private final HintRequestRepository hintRequestRepository;
     private final HintDailyUsageRepository hintDailyUsageRepository;
-    private final HintBlockCheckService hintBlockCheckService;
     private final OutboxEventWriter outboxEventWriter;
 
     /** 회수 1건의 처리 결과 — 스케줄러 지표 집계에 쓴다. */
@@ -46,19 +45,18 @@ public class HintRecoveryService {
 
     /**
      * 조회 시점 상태 그대로인 요청만 종결한다. 건마다 독립 트랜잭션이라 1건 실패가 다른 건에 번지지 않는다.
+     * 차단 재확인은 조회 실패가 이 트랜잭션을 롤백 전용으로 만들지 않도록 호출자가 트랜잭션 밖에서 먼저 수행한다.
      *
      * @param target 회수 대상으로 조회한 요청(조회 시점 상태를 조건부 UPDATE 기대값으로 쓴다)
+     * @param blockedReason 차단이면 {@code EXAM} 또는 {@code DIAGNOSIS}, 차단이 아니면 빈 값
      * @param correlationId HintReady에 실을 추적 ID
      * @return 종결 결과. 이미 다른 경로로 바뀐 요청이면 {@link Result#SKIPPED}
      */
     @Transactional
-    public Result recover(HintRequest target, String correlationId) {
+    public Result recover(HintRequest target, Optional<String> blockedReason, String correlationId) {
         OffsetDateTime completedAt
             = OffsetDateTime.now(clock.withZone(ClockConfiguration.SERVICE_ZONE)).truncatedTo(ChronoUnit.MICROS);
         LocalDateTime completedAtLocal = completedAt.toLocalDateTime();
-
-        Optional<String> blockedReason
-            = hintBlockCheckService.findBlockedReason(target.getMemberId(), target.getProblemId());
 
         if (blockedReason.isPresent()) {
             int updated

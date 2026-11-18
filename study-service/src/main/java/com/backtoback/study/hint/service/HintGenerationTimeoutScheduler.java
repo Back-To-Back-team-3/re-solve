@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -40,6 +41,7 @@ public class HintGenerationTimeoutScheduler {
     private static final String CORRELATION_PREFIX = "sched-HintGenerationTimeoutScheduler-";
 
     private final HintRecoveryService hintRecoveryService;
+    private final HintBlockCheckService hintBlockCheckService;
     private final HintRequestRepository hintRequestRepository;
     private final Clock clock;
     private final MeterRegistry meterRegistry;
@@ -77,7 +79,10 @@ public class HintGenerationTimeoutScheduler {
         for (HintRequest target : targets) {
             String correlationId = CORRELATION_PREFIX + UUID.randomUUID();
             try {
-                HintRecoveryService.Result result = hintRecoveryService.recover(target, correlationId);
+                // 차단 판정은 트랜잭션 밖에서 먼저 한다. 조회 실패가 회수 트랜잭션을 롤백 전용으로 만들지 않게 한다.
+                Optional<String> blockedReason
+                    = hintBlockCheckService.findBlockedReason(target.getMemberId(), target.getProblemId());
+                HintRecoveryService.Result result = hintRecoveryService.recover(target, blockedReason, correlationId);
                 countResult(result);
             } catch (Exception e) {
                 log.error("힌트 요청 회수 실패. hintRequestId={}, correlationId={}", target.getId(), correlationId, e);

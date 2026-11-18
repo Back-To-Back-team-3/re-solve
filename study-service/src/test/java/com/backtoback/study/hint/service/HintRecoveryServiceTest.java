@@ -35,7 +35,7 @@ import com.backtoback.study.hint.repository.HintDailyUsageRepository;
 import com.backtoback.study.hint.repository.HintRequestRepository;
 
 /**
- * 멈춘 힌트 요청 회수 단위 테스트 (scheduler §6.1, 정책 §8.1 ⑤⑥, event-contract S8).
+ * 멈춘 힌트 요청 회수 단위 테스트 (scheduler §6.1, 정책 §8.1 ⑤, event-contract S8).
  */
 @ExtendWith(MockitoExtension.class)
 class HintRecoveryServiceTest {
@@ -53,9 +53,6 @@ class HintRecoveryServiceTest {
     private HintDailyUsageRepository hintDailyUsageRepository;
 
     @Mock
-    private HintBlockCheckService hintBlockCheckService;
-
-    @Mock
     private OutboxEventWriter outboxEventWriter;
 
     private HintRecoveryService hintRecoveryService;
@@ -63,23 +60,16 @@ class HintRecoveryServiceTest {
     @BeforeEach
     void setUp() {
         hintRecoveryService
-            = new HintRecoveryService(
-                FIXED_CLOCK,
-                hintRequestRepository,
-                hintDailyUsageRepository,
-                hintBlockCheckService,
-                outboxEventWriter
-            );
+            = new HintRecoveryService(FIXED_CLOCK, hintRequestRepository, hintDailyUsageRepository, outboxEventWriter);
     }
 
     @Test
     @DisplayName("차단이 아니면 FALLBACK으로 회수하고 HintReady(FALLBACK, isCached=false)를 기록한다")
     void recover_notBlocked_fallbackAndPublish() {
         HintRequest target = target(HintRequestStatus.GENERATING);
-        given(hintBlockCheckService.findBlockedReason(10L, 20L)).willReturn(Optional.empty());
         given(hintRequestRepository.recoverAsFallback(1L, HintRequestStatus.GENERATING, NOW)).willReturn(1);
 
-        HintRecoveryService.Result result = hintRecoveryService.recover(target, CORRELATION_ID);
+        HintRecoveryService.Result result = hintRecoveryService.recover(target, Optional.empty(), CORRELATION_ID);
 
         assertThat(result).isEqualTo(HintRecoveryService.Result.FALLBACK);
         HintReadyPayload payload = capturePayload();
@@ -96,10 +86,9 @@ class HintRecoveryServiceTest {
     @DisplayName("REQUESTED 요청도 조회 시점 상태를 기대값으로 FALLBACK 회수한다")
     void recover_requested_usesRequestedAsExpectedStatus() {
         HintRequest target = target(HintRequestStatus.REQUESTED);
-        given(hintBlockCheckService.findBlockedReason(10L, 20L)).willReturn(Optional.empty());
         given(hintRequestRepository.recoverAsFallback(1L, HintRequestStatus.REQUESTED, NOW)).willReturn(1);
 
-        HintRecoveryService.Result result = hintRecoveryService.recover(target, CORRELATION_ID);
+        HintRecoveryService.Result result = hintRecoveryService.recover(target, Optional.empty(), CORRELATION_ID);
 
         assertThat(result).isEqualTo(HintRecoveryService.Result.FALLBACK);
     }
@@ -108,12 +97,12 @@ class HintRecoveryServiceTest {
     @DisplayName("시험 차단 중이면 BLOCKED(EXAM)로 회수하고 요청일 횟수를 반환한 뒤 HintReady(BLOCKED)를 기록한다")
     void recover_examBlocked_blockRefundAndPublish() {
         HintRequest target = target(HintRequestStatus.GENERATING);
-        given(hintBlockCheckService.findBlockedReason(10L, 20L))
-            .willReturn(Optional.of(HintBlockCheckService.BLOCKED_REASON_EXAM));
         given(hintRequestRepository.recoverAsBlocked(1L, HintRequestStatus.GENERATING, "EXAM", NOW)).willReturn(1);
         given(hintDailyUsageRepository.decrementIfPositive(10L, LocalDate.of(2026, 11, 17), NOW)).willReturn(1);
 
-        HintRecoveryService.Result result = hintRecoveryService.recover(target, CORRELATION_ID);
+        HintRecoveryService.Result result
+            = hintRecoveryService
+                .recover(target, Optional.of(HintBlockCheckService.BLOCKED_REASON_EXAM), CORRELATION_ID);
 
         assertThat(result).isEqualTo(HintRecoveryService.Result.BLOCKED);
         then(hintDailyUsageRepository).should().decrementIfPositive(10L, LocalDate.of(2026, 11, 17), NOW);
@@ -125,12 +114,12 @@ class HintRecoveryServiceTest {
     @DisplayName("진단 차단 중이면 BLOCKED(DIAGNOSIS)로 회수한다")
     void recover_diagnosisBlocked_blockWithDiagnosisReason() {
         HintRequest target = target(HintRequestStatus.REQUESTED);
-        given(hintBlockCheckService.findBlockedReason(10L, 20L))
-            .willReturn(Optional.of(HintBlockCheckService.BLOCKED_REASON_DIAGNOSIS));
         given(hintRequestRepository.recoverAsBlocked(1L, HintRequestStatus.REQUESTED, "DIAGNOSIS", NOW)).willReturn(1);
         given(hintDailyUsageRepository.decrementIfPositive(anyLong(), any(), any())).willReturn(1);
 
-        HintRecoveryService.Result result = hintRecoveryService.recover(target, CORRELATION_ID);
+        HintRecoveryService.Result result
+            = hintRecoveryService
+                .recover(target, Optional.of(HintBlockCheckService.BLOCKED_REASON_DIAGNOSIS), CORRELATION_ID);
 
         assertThat(result).isEqualTo(HintRecoveryService.Result.BLOCKED);
         then(hintRequestRepository).should().recoverAsBlocked(1L, HintRequestStatus.REQUESTED, "DIAGNOSIS", NOW);
@@ -140,12 +129,12 @@ class HintRecoveryServiceTest {
     @DisplayName("반환할 일일 횟수가 없어도 BLOCKED 회수와 HintReady 기록은 유지한다")
     void recover_blockedWithoutUsage_keepsRecovery() {
         HintRequest target = target(HintRequestStatus.GENERATING);
-        given(hintBlockCheckService.findBlockedReason(10L, 20L))
-            .willReturn(Optional.of(HintBlockCheckService.BLOCKED_REASON_EXAM));
         given(hintRequestRepository.recoverAsBlocked(anyLong(), any(), anyString(), any())).willReturn(1);
         given(hintDailyUsageRepository.decrementIfPositive(anyLong(), any(), any())).willReturn(0);
 
-        HintRecoveryService.Result result = hintRecoveryService.recover(target, CORRELATION_ID);
+        HintRecoveryService.Result result
+            = hintRecoveryService
+                .recover(target, Optional.of(HintBlockCheckService.BLOCKED_REASON_EXAM), CORRELATION_ID);
 
         assertThat(result).isEqualTo(HintRecoveryService.Result.BLOCKED);
         assertThat(capturePayload().result()).isEqualTo("BLOCKED");
@@ -155,10 +144,9 @@ class HintRecoveryServiceTest {
     @DisplayName("그사이 다른 경로로 종결돼 갱신 행이 없으면 횟수 반환·이벤트 기록 없이 SKIPPED를 반환한다")
     void recover_alreadyTerminated_skipped() {
         HintRequest target = target(HintRequestStatus.GENERATING);
-        given(hintBlockCheckService.findBlockedReason(10L, 20L)).willReturn(Optional.empty());
         given(hintRequestRepository.recoverAsFallback(1L, HintRequestStatus.GENERATING, NOW)).willReturn(0);
 
-        HintRecoveryService.Result result = hintRecoveryService.recover(target, CORRELATION_ID);
+        HintRecoveryService.Result result = hintRecoveryService.recover(target, Optional.empty(), CORRELATION_ID);
 
         assertThat(result).isEqualTo(HintRecoveryService.Result.SKIPPED);
         then(outboxEventWriter).should(never()).append(any(), any(), any(), any(), any(), any());
@@ -168,11 +156,11 @@ class HintRecoveryServiceTest {
     @DisplayName("차단 회수 경합에서 갱신 행이 없으면 횟수를 반환하지 않는다")
     void recover_blockedButAlreadyTerminated_noRefund() {
         HintRequest target = target(HintRequestStatus.GENERATING);
-        given(hintBlockCheckService.findBlockedReason(10L, 20L))
-            .willReturn(Optional.of(HintBlockCheckService.BLOCKED_REASON_EXAM));
         given(hintRequestRepository.recoverAsBlocked(anyLong(), any(), anyString(), any())).willReturn(0);
 
-        HintRecoveryService.Result result = hintRecoveryService.recover(target, CORRELATION_ID);
+        HintRecoveryService.Result result
+            = hintRecoveryService
+                .recover(target, Optional.of(HintBlockCheckService.BLOCKED_REASON_EXAM), CORRELATION_ID);
 
         assertThat(result).isEqualTo(HintRecoveryService.Result.SKIPPED);
         then(hintDailyUsageRepository).should(never()).decrementIfPositive(anyLong(), any(), any());
@@ -182,8 +170,8 @@ class HintRecoveryServiceTest {
     private static HintRequest target(HintRequestStatus status) {
         HintRequest target = mock(HintRequest.class);
         given(target.getId()).willReturn(1L);
-        given(target.getMemberId()).willReturn(10L);
-        given(target.getProblemId()).willReturn(20L);
+        lenient().when(target.getMemberId()).thenReturn(10L);
+        lenient().when(target.getProblemId()).thenReturn(20L);
         given(target.getStatus()).willReturn(status);
         lenient().when(target.getProblemRevisionId()).thenReturn(30L);
         lenient().when(target.getLevel()).thenReturn(2);

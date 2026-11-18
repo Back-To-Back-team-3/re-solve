@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -45,6 +46,9 @@ class HintGenerationTimeoutSchedulerTest {
     private HintRecoveryService hintRecoveryService;
 
     @Mock
+    private HintBlockCheckService hintBlockCheckService;
+
+    @Mock
     private HintRequestRepository hintRequestRepository;
 
     private SimpleMeterRegistry meterRegistry;
@@ -56,6 +60,7 @@ class HintGenerationTimeoutSchedulerTest {
         scheduler
             = new HintGenerationTimeoutScheduler(
                 hintRecoveryService,
+                hintBlockCheckService,
                 hintRequestRepository,
                 FIXED_CLOCK,
                 meterRegistry
@@ -79,7 +84,7 @@ class HintGenerationTimeoutSchedulerTest {
                 pageable.capture()
             );
         assertThat(pageable.getValue().getPageSize()).isEqualTo(100);
-        then(hintRecoveryService).should(never()).recover(any(), anyString());
+        then(hintRecoveryService).should(never()).recover(any(), any(), anyString());
     }
 
     @Test
@@ -89,13 +94,15 @@ class HintGenerationTimeoutSchedulerTest {
         HintRequest second = mock(HintRequest.class);
         HintRequest third = mock(HintRequest.class);
         given(hintRequestRepository.findRecoveryTargets(any(), any(), any())).willReturn(List.of(first, second, third));
-        willThrow(new RuntimeException("테스트 예외")).given(hintRecoveryService).recover(eq(first), anyString());
-        given(hintRecoveryService.recover(eq(second), anyString())).willReturn(HintRecoveryService.Result.FALLBACK);
-        given(hintRecoveryService.recover(eq(third), anyString())).willReturn(HintRecoveryService.Result.BLOCKED);
+        willThrow(new RuntimeException("테스트 예외")).given(hintRecoveryService).recover(eq(first), any(), anyString());
+        given(hintRecoveryService.recover(eq(second), any(), anyString()))
+            .willReturn(HintRecoveryService.Result.FALLBACK);
+        given(hintRecoveryService.recover(eq(third), any(), anyString()))
+            .willReturn(HintRecoveryService.Result.BLOCKED);
 
         scheduler.recoverStalledRequests();
 
-        then(hintRecoveryService).should(times(3)).recover(any(), anyString());
+        then(hintRecoveryService).should(times(3)).recover(any(), any(), anyString());
         assertThat(count("hint_recovered_fallback")).isEqualTo(1.0);
         assertThat(count("hint_recovered_blocked")).isEqualTo(1.0);
         assertThat(count("failed")).isEqualTo(1.0);
@@ -107,16 +114,38 @@ class HintGenerationTimeoutSchedulerTest {
         HintRequest first = mock(HintRequest.class);
         HintRequest second = mock(HintRequest.class);
         given(hintRequestRepository.findRecoveryTargets(any(), any(), any())).willReturn(List.of(first, second));
-        given(hintRecoveryService.recover(any(), anyString())).willReturn(HintRecoveryService.Result.SKIPPED);
+        given(hintRecoveryService.recover(any(), any(), anyString())).willReturn(HintRecoveryService.Result.SKIPPED);
 
         scheduler.recoverStalledRequests();
 
         ArgumentCaptor<String> correlationIds = ArgumentCaptor.forClass(String.class);
-        then(hintRecoveryService).should(times(2)).recover(any(), correlationIds.capture());
+        then(hintRecoveryService).should(times(2)).recover(any(), any(), correlationIds.capture());
         assertThat(correlationIds.getAllValues())
             .allMatch(id -> id.startsWith("sched-HintGenerationTimeoutScheduler-"))
             .doesNotHaveDuplicates();
         assertThat(count("hint_recovered_fallback")).isZero();
+    }
+
+    @Test
+    @DisplayName("차단 판정 결과를 회수 서비스에 넘기고 차단 판정 실패도 회수 실패로 집계한다")
+    void recoverStalledRequests_passesBlockedReasonAndCountsCheckFailure() {
+        HintRequest blocked = mock(HintRequest.class);
+        HintRequest broken = mock(HintRequest.class);
+        given(blocked.getMemberId()).willReturn(10L);
+        given(blocked.getProblemId()).willReturn(20L);
+        given(broken.getMemberId()).willReturn(11L);
+        given(broken.getProblemId()).willReturn(21L);
+        given(hintRequestRepository.findRecoveryTargets(any(), any(), any())).willReturn(List.of(blocked, broken));
+        given(hintBlockCheckService.findBlockedReason(10L, 20L)).willReturn(Optional.of("EXAM"));
+        willThrow(new IllegalStateException("테스트 예외")).given(hintBlockCheckService).findBlockedReason(11L, 21L);
+        given(hintRecoveryService.recover(eq(blocked), eq(Optional.of("EXAM")), anyString()))
+            .willReturn(HintRecoveryService.Result.BLOCKED);
+
+        scheduler.recoverStalledRequests();
+
+        then(hintRecoveryService).should(never()).recover(eq(broken), any(), anyString());
+        assertThat(count("hint_recovered_blocked")).isEqualTo(1.0);
+        assertThat(count("failed")).isEqualTo(1.0);
     }
 
     private double count(String result) {
