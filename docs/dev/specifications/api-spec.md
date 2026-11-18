@@ -8157,7 +8157,7 @@
     | --- | --- | --- | --- | --- |
     | `keyword` | string | N | — | 이름·설명 검색 |
     | `goal` | string | N | — | 목표 필터 |
-    | `skillLevel` | string | N | — | 스터디 실력 수준 필터 (`LV1` / `LV2` / `LV3`). 그 외 값은 일치하는 스터디가 없어 빈 목록을 반환한다 |
+    | `skillLevel` | string | N | — | 스터디 실력 수준 필터 (`LV1` / `LV2` / `LV3`). 값을 검증하지 않고 저장된 수준과 정확히 일치하는 스터디만 반환한다 |
     | `preferredLanguage` | string | N | — | 선호 언어 필터 (공통 Enum) |
     | `activeTimeSlot` | string | N | — | 활동 시간대 필터 |
     | `page` | int | N | 0 |  |
