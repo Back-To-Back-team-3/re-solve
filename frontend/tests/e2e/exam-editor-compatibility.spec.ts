@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockPracticePage } from "./practice-fixture";
+import { mockPracticePage, problemDetail } from "./practice-fixture";
 import { readBrowserStorage, seedBrowserStorage } from "./storage-fixture";
 
 test("시험 에디터의 Draft 복원·자동 저장·제출은 일반 풀이 경로와 분리한다", async ({ page }) => {
@@ -11,7 +11,10 @@ test("시험 에디터의 Draft 복원·자동 저장·제출은 일반 풀이 �
   const now = new Date().toISOString();
   const endsAt = new Date(Date.now() + 3600000).toISOString();
   await page.route("**/api/v1/exams/42/problems", (route) => route.fulfill({ json: { success: true, data: {
-    problems: [{ problemId: "1001", title: "시험 문제", body: "시험 본문", score: "100", languages: ["java"] }],
+    examId: "42", problems: [{ problemId: "1001", problemRevisionId: "9001", revisionNumber: 2,
+      title: "시험 문제", body: "시험 본문", score: "100.00", displayOrder: 1,
+      functionSpec: problemDetail.functionSpec, executionLimits: problemDetail.executionLimits,
+      sampleTests: problemDetail.samples, imageIds: [] }],
     serverNow: now, personalEndsAt: endsAt,
   } } }));
   const drafts: unknown[] = [];

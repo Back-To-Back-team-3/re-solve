@@ -1,12 +1,14 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Modal, useLoginRedirect } from "@/components/ui";
+import { Modal, useLoginRedirect } from "@/components/ui";
 import { contestApi, isUnauthorized, judgeApi } from "@/services/api";
 import { runInputs, runExpectedOutputs, type RunTestCase } from "@/services/run-inputs";
 import { draftKey, readDraft, saveDraft, useWorkspace, useWorkspaceApi } from "@/stores/workspace";
-import type { Language, Problem, RunResponse } from "@/services/types";
+import type { ExamRunResponse, Language, Problem, RunResponse } from "@/services/types";
 import { JudgePoll, EditorResultPanel } from "@/features/editor-results";
+import { ExamRunResult } from "@/features/exams-run-result";
+import { EditorResetDialog } from "@/features/editor-reset-dialog";
 import { EditorMonaco } from "@/features/editor-monaco";
 import { useRunInputDraft } from "@/features/editor-run-draft";
 import { EditorRunInputs } from "@/features/editor-run-inputs";
@@ -20,12 +22,14 @@ export function Buffer({
   examId,
   language,
   fontSize,
+  runDisabled = false,
 }: {
   problem: Problem;
   userId: string;
   examId?: string;
   language: Language;
   fontSize: number;
+  runDisabled?: boolean;
 }) {
   const key = draftKey(userId, problem.id, language, examId),
     setDraft = useWorkspace((s) => s.setDraft),
@@ -43,6 +47,7 @@ export function Buffer({
     [paused, setPaused] = useState(false),
     [pollVersion, setPollVersion] = useState(0),
     [runResult, setRunResult] = useState<RunResponse | null>(null),
+    [examRunResult, setExamRunResult] = useState<ExamRunResponse | null>(null),
     [runExpectations, setRunExpectations] = useState<(string | null)[]>([]),
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
@@ -76,7 +81,7 @@ export function Buffer({
     try {
       if (examId) {
         const draft = readExamDraft(examId, problem.id);
-        initial = draft ? { code: draft.code, revisionId: problem.problemRevisionId, savedAt: 0 } : undefined;
+        initial = draft && (!draft.language || draft.language === language) ? { code: draft.code, revisionId: problem.problemRevisionId, savedAt: 0 } : undefined;
         seqRef.current = draft?.seq ?? "1";
       } else initial = initial || readDraft(key) || undefined;
     } catch {
@@ -161,14 +166,18 @@ export function Buffer({
     timer.current = setTimeout(() => { persist(); persistExam(); }, 500);
   }
   async function handleRun() {
+    if (runDisabled) return;
     persist();
     setBusyRun(true); setShowRun(true);
     setJudgeError(null);
-    setRunResult(null);
-    setRunExpectations([]);
-    setRunError(null);
+    setRunResult(null); setExamRunResult(null);
+    setRunExpectations([]); setRunError(null);
     try {
       setRunExpectations(examId ? [] : runExpectedOutputs(problem.functionSpec.returnInputType, customInputs));
+      if (examId) {
+        setExamRunResult(await contestApi.runExam(examId, problem.id, { language, sourceCode: codeRef.current }));
+        return;
+      }
       setRunResult(
         await judgeApi.run({
           problemId: problem.id,
@@ -223,11 +232,11 @@ export function Buffer({
             setView(submissionKey, { showSubmission: true });
             setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false);
           }} />
-        <EditorResultPanel busy={busy} sending={sending} submissionFailed={!showSubmission && (!!pending || !!pendingExam || !!requestError)}
+        {showRun && examRunResult ? <ExamRunResult result={examRunResult} samples={problem.samples} /> : <EditorResultPanel busy={busy} sending={sending} submissionFailed={!showSubmission && (!!pending || !!pendingExam || !!requestError)}
           submissionPaused={showSubmission && !!judgeSubmissionId && !judgeResult && paused} showRun={showRun} busyRun={busyRun} queryError={judgeError}
-          judgeResult={showSubmission ? judgeResult : null} runError={runError} runResult={runResult} runExpectations={runExpectations} />
+          judgeResult={showSubmission ? judgeResult : null} runError={runError} runResult={runResult} runExpectations={runExpectations} />}
       </section>
-      <EditorActions saved={examId && view?.acceptedSourceCode === code ? "제출 완료" : saved} ready={ready} busy={busy} busyRun={busyRun}
+      <EditorActions saved={examId && view?.acceptedSourceCode === code ? "제출 완료" : saved} ready={ready} busy={busy} busyRun={busyRun} runDisabled={runDisabled}
         pendingSubmission={!!pending || !!pendingExam || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
         onTestCases={examId ? undefined : () => setTestCasesOpen(true)}
         onRun={handleRun} onSubmit={() => handleSubmit()} />
@@ -237,22 +246,8 @@ export function Buffer({
           rows={customInputs} disabled={busy || busyRun}
           onRows={setCustomInputs} storageError={runStorageError} />
       </Modal>}
-      <Modal
-        open={reset}
-        onOpenChange={setReset}
-        title="코드를 초기화할까요?"
-        description="현재 언어의 작성 내용을 초기 코드로 바꿉니다."
-      >
-        <Button
-          className="danger"
-          onClick={() => {
-            edit(problem.starterCodes[language] ?? "");
-            setReset(false);
-          }}
-        >
-          초기화
-        </Button>
-      </Modal>
+      <EditorResetDialog open={reset} onOpenChange={setReset}
+        onReset={() => { edit(problem.starterCodes[language] ?? ""); setReset(false); }} />
     </>
   );
 }
