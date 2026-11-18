@@ -6,7 +6,7 @@ package com.backtoback.study.assignment.dto;
  */
 public record AssignedProblemResponse(String problemId, boolean assigned) {
 
-    public static AssignedProblemResponse of(Long problemId, boolean assigned) {
+    public static AssignedProblemResponse from(Long problemId, boolean assigned) {
         return new AssignedProblemResponse(String.valueOf(problemId), assigned);
     }
 }

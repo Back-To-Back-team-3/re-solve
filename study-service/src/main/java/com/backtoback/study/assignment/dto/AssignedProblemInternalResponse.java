@@ -6,7 +6,7 @@ package com.backtoback.study.assignment.dto;
  */
 public record AssignedProblemInternalResponse(String memberId, String problemId, boolean assigned) {
 
-    public static AssignedProblemInternalResponse of(Long memberId, Long problemId, boolean assigned) {
+    public static AssignedProblemInternalResponse from(Long memberId, Long problemId, boolean assigned) {
         return new AssignedProblemInternalResponse(String.valueOf(memberId), String.valueOf(problemId), assigned);
     }
 }

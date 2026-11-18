@@ -35,6 +35,6 @@ public class AssignedProblemController {
     ) {
         Long memberId = Long.parseLong(user.userId());
         boolean assigned = assignedProblemQueryService.isAssigned(memberId, problemId);
-        return ResponseEntity.ok(ApiResponse.success(AssignedProblemResponse.of(problemId, assigned)));
+        return ResponseEntity.ok(ApiResponse.success(AssignedProblemResponse.from(problemId, assigned)));
     }
 }

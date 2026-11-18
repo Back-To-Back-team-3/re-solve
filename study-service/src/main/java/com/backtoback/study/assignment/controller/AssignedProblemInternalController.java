@@ -30,6 +30,6 @@ public class AssignedProblemInternalController {
         @PathVariable Long problemId
     ) {
         boolean assigned = assignedProblemQueryService.isAssigned(memberId, problemId);
-        return AssignedProblemInternalResponse.of(memberId, problemId, assigned);
+        return AssignedProblemInternalResponse.from(memberId, problemId, assigned);
     }
 }
