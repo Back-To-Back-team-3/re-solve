@@ -8517,6 +8517,8 @@
     ```
     
     - `problemIds` 1~20개, 중복 불가. `startsAt` 필수, `deadlineAt` 필수(`startsAt`보다 뒤). 과거 `startsAt`이면 다음 스케줄러 회차에 바로 `OPEN`
+    - 저장 직전 스터디 행을 잠근 상태에서 종료 여부·요청자 권한·신규 배정 난이도를 재확인한다. 난이도 상한은 정책 및 상태 §7.1을 따른다.
+    - 난이도 초과는 `STUDY_ASSIGNMENT_DIFFICULTY_EXCEEDED`(409), 스터디 수준이 `LV1`~`LV3` 이외이면 `COMMON_INVALID_REQUEST`(400)로 거절하며 문제집을 저장하지 않는다.
 - **응답 (201):**
     
     ```json
@@ -8524,7 +8526,7 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE`(409), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `STUDY_ASSIGNMENT_DIFFICULTY_EXCEEDED`(409), `STUDY_ASSIGNMENT_PROBLEM_NOT_AVAILABLE`(409), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **외부 의존:**
     - `GET /internal/v1/problems/summaries?ids=&purpose=ASSIGNMENT` (problem) — 공개 여부·현재 회차·표시 정보. 실패 시 fail-closed
 
