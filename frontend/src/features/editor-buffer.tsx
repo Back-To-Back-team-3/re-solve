@@ -177,7 +177,9 @@ export function Buffer({
     try {
       setRunExpectations(examId ? [] : runExpectedOutputs(problem.functionSpec.returnInputType, customInputs));
       if (examId) {
-        setExamRunResult(await contestApi.runExam(examId, problem.id, { language, sourceCode: codeRef.current }));
+        const inputs = runInputs(problem.functionSpec.parameters, customInputs.map((row) => row.arguments), true, 10);
+        setExamRunResult(await contestApi.runExam(examId, problem.id, { language, sourceCode: codeRef.current },
+          inputs.map((item) => problem.functionSpec.parameters.map(({ name }) => item.argumentTexts[name]))));
         return;
       }
       setRunResult(
@@ -241,14 +243,14 @@ export function Buffer({
       </section>
       <EditorActions saved={examId && view?.acceptedSourceCode === code ? "제출 완료" : saved} ready={ready && !disabled} busy={busy} busyRun={busyRun} runDisabled={runDisabled}
         pendingSubmission={!!pending || !!pendingExam || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
-        onTestCases={examId ? undefined : () => setTestCasesOpen(true)}
+        onTestCases={() => setTestCasesOpen(true)}
         onRun={handleRun} onSubmit={() => handleSubmit()} />
-      {!examId && <Modal open={testCasesOpen} onOpenChange={setTestCasesOpen}
+      <Modal open={testCasesOpen} onOpenChange={setTestCasesOpen}
         title="테스트 케이스" description="공개 예제와 직접 입력한 값으로 실행합니다. 제출 시에는 전체 테스트로 채점합니다.">
         <EditorRunInputs parameters={problem.functionSpec.parameters} returnType={problem.functionSpec.returnInputType}
           rows={customInputs} disabled={disabled || busy || busyRun}
-          onRows={setCustomInputs} storageError={runStorageError} />
-      </Modal>}
+          onRows={setCustomInputs} storageError={runStorageError} maxCases={examId ? 10 : 5} allowExpectations={!examId} />
+      </Modal>
       <EditorResetDialog open={reset} onOpenChange={setReset}
         onReset={() => { edit(problem.starterCodes[language] ?? ""); setReset(false); }} />
     </>
