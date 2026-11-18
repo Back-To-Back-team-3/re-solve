@@ -16,8 +16,9 @@ import {
   setMemberGetter,
   setTokenGetter,
 } from "../services/api";
+import { cancelSubmissionRequests } from "@/services/submission-transport";
 import type { RunInputDraft } from "@/services/run-input-draft";
-import type { JudgeJobFilter, JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
+import type { ExamSubmitRequest, JudgeJobFilter, JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
 import { Loading } from "../components/ui";
 export interface Draft {
   code: string;
@@ -62,6 +63,14 @@ export interface PracticeSubmissionAttempt {
   result: JudgeResult | null;
 }
 
+/** 언어·회차별 결과 화면 선택과 접수 오류를 재마운트 뒤에도 유지한다. */
+interface EditorSubmissionView {
+  transportId: string | null;
+  acceptedSourceCode: string | null;
+  showSubmission: boolean;
+  requestError: string | null;
+}
+
 interface Workspace {
   judgeJobFilter: JudgeJobFilter;
   setJudgeJobFilter: (filter: JudgeJobFilter) => void;
@@ -80,8 +89,12 @@ interface Workspace {
   authReady: boolean;
   drafts: Record<string, Draft>;
   practiceSubmissions: Record<string, PracticeSubmissionAttempt | undefined>;
+  examRequests: Record<string, ExamSubmitRequest | undefined>;
+  setExamRequest: (key: string, request: ExamSubmitRequest | undefined) => void;
   practiceRequests: Record<string, PracticeSubmissionRequest | undefined>;
   activePracticeSubmissions: Record<string, string | undefined>;
+  editorSubmissionViews: Record<string, EditorSubmissionView | undefined>;
+  setEditorSubmissionView: (key: string, view: Partial<EditorSubmissionView>) => void;
   setPracticeRequest: (key: string, request: PracticeSubmissionRequest) => void;
   acceptPracticeSubmission: (key: string, request: PracticeSubmissionRequest, submissionId: string) => boolean;
   selectPracticeSubmission: (key: string, submissionId: string) => void;
@@ -121,8 +134,14 @@ const createWorkspace = () =>
     submissionAttempts: {},
     setSubmissionAttempt: (key, value) => set((state) => ({ submissionAttempts: { ...state.submissionAttempts, [key]: value } })),
     practiceSubmissions: {},
+    examRequests: {},
+    setExamRequest: (key, request) => set((state) => ({ examRequests: { ...state.examRequests, [key]: request } })),
     practiceRequests: {},
     activePracticeSubmissions: {},
+    editorSubmissionViews: {},
+    setEditorSubmissionView: (key, view) => set((state) => ({ editorSubmissionViews: {
+      ...state.editorSubmissionViews, [key]: { acceptedSourceCode: null, transportId: null, showSubmission: true, requestError: null, ...state.editorSubmissionViews[key], ...view },
+    } })),
     setPracticeRequest: (key, request) => set((state) => ({
       practiceRequests: { ...state.practiceRequests, [key]: request },
     })),
@@ -154,7 +173,7 @@ const createWorkspace = () =>
     fontSize: 14,
     activeProblems: {},
     setMember: (member) => set({ member }),
-    clearMember: () => set({ judgeJobFilter: { sort: "updatedAt,desc" }, judgeRecoveryReasons: {}, viewPages: {}, practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, practiceRequests: {}, activePracticeSubmissions: {} }),
+    clearMember: () => { cancelSubmissionRequests(); set({ judgeJobFilter: { sort: "updatedAt,desc" }, judgeRecoveryReasons: {}, viewPages: {}, practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, examRequests: {}, practiceRequests: {}, activePracticeSubmissions: {}, editorSubmissionViews: {} }); },
     setAccessToken: (accessToken) => set({ accessToken }),
     setAuthReady: (authReady) => set({ authReady }),
     setDraft: (key, d) => set((s) => ({ drafts: { ...s.drafts, [key]: d } })),

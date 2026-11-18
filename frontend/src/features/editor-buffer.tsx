@@ -12,7 +12,7 @@ import { useRunInputDraft } from "@/features/editor-run-draft";
 import { EditorRunInputs } from "@/features/editor-run-inputs";
 import { EditorActions } from "@/features/editor-actions";
 import { EditorSubmissionStatus } from "@/features/editor-submission-status";
-import { expiredPracticeRequestMessage, isPracticeRequestExpired } from "@/services/practice-request";
+import { submitEditorCode } from "@/features/editor-submission";
 import { readExamDraft, writeExamDraft } from "@/services/exam-editor-draft";
 export function Buffer({
   problem,
@@ -40,7 +40,6 @@ export function Buffer({
     [saved, setSaved] = useState("복원 중…"),
     [reset, setReset] = useState(false),
     [testCasesOpen, setTestCasesOpen] = useState(false),
-    [sending, setSending] = useState(false),
     [paused, setPaused] = useState(false),
     [pollVersion, setPollVersion] = useState(0),
     [runResult, setRunResult] = useState<RunResponse | null>(null),
@@ -48,8 +47,7 @@ export function Buffer({
     [runError, setRunError] = useState<string | null>(null),
     [busyRun, setBusyRun] = useState(false),
     [showRun, setShowRun] = useState(false),
-    [judgeError, setJudgeError] = useState<string | null>(null),
-    [requestError, setRequestError] = useState<string | null>(null);
+    [judgeError, setJudgeError] = useState<string | null>(null);
   const runInputKey = JSON.stringify([userId, examId ?? "practice", problem.id, problem.problemRevisionId]);
   const { configuration: runConfiguration, storageError: runStorageError } = useRunInputDraft(runInputKey);
   const setRunInputs = useWorkspace((state) => state.setPracticeRunInputs);
@@ -57,15 +55,21 @@ export function Buffer({
   const setCustomInputs = (value: RunTestCase[]) => setRunInputs(runInputKey, { useSamples: true, customInputs: value });
   const submissionKey = JSON.stringify([key, problem.problemRevisionId]);
   const submissions = useWorkspace((state) => state.practiceSubmissions);
+  const pendingExam = useWorkspace((state) => state.examRequests[submissionKey]);
   const pending = useWorkspace((state) => state.practiceRequests[submissionKey]);
+  const view = useWorkspace((state) => state.editorSubmissionViews[submissionKey]);
+  const setView = useWorkspace((state) => state.setEditorSubmissionView);
+  const showSubmission = view?.showSubmission ?? !(pending || pendingExam);
+  const requestError = view?.requestError ?? null;
+  const sending = !!view?.transportId;
   const activeId = useWorkspace((state) => state.activePracticeSubmissions[submissionKey]);
   const attempt = activeId ? submissions[activeId] : undefined;
   const accepted = Object.values(submissions).flatMap((item) => item?.contextKey === submissionKey ? [item] : []);
   const workspace = useWorkspaceApi();
-  const sendingRef = useRef(false), router = useRouter(), toLogin = useLoginRedirect();
+  const router = useRouter(), toLogin = useLoginRedirect();
   const judgeSubmissionId = attempt?.submissionId ?? null;
   const judgeResult = attempt?.result ?? null;
-  const polling = !!judgeSubmissionId && !judgeResult && !paused;
+  const polling = showSubmission && !!judgeSubmissionId && !judgeResult && !paused;
   const busy = sending || polling;
   useEffect(() => {
     let initial: typeof memory | undefined = memory;
@@ -158,8 +162,8 @@ export function Buffer({
   }
   async function handleRun() {
     persist();
-    setBusyRun(true);
-    setShowRun(true);
+    setBusyRun(true); setShowRun(true);
+    setJudgeError(null);
     setRunResult(null);
     setRunExpectations([]);
     setRunError(null);
@@ -185,51 +189,10 @@ export function Buffer({
     }
   }
   async function handleSubmit(retry = false) {
-    if (sendingRef.current) return;
     persist();
-    if (retry && !pending) return;
-    const request = retry && pending ? pending : {
-      idempotencyKey: crypto.randomUUID(),
-      createdAt: Date.now(),
-      body: {
-        problemId: problem.id,
-        problemRevisionId: problem.problemRevisionId,
-        language,
-        sourceCode: codeRef.current,
-      },
-    };
-    if (retry && isPracticeRequestExpired(request.createdAt, Date.now())) {
-      setRequestError(expiredPracticeRequestMessage); return;
-    }
-    sendingRef.current = true;
-    setShowRun(false);
-    if (!examId) workspace.getState().setPracticeRequest(submissionKey, request);
-    setRunResult(null);
-    setRunError(null);
-    setJudgeError(null);
-    setRequestError(null);
-    setPaused(true);
-    setSending(true);
-    try {
-      if (examId) {
-        await contestApi.submitExam(examId, { problemId: problem.id, language, sourceCode: codeRef.current, seq: seqRef.current });
-        setSaved("제출 완료");
-      } else {
-        const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
-        if (!workspace.getState().acceptPracticeSubmission(submissionKey, request, receipt.submissionId)) return;
-        setPollVersion((value) => value + 1);
-        setPaused(false);
-      }
-      router.refresh();
-    } catch (failure) {
-      if (isUnauthorized(failure)) return toLogin();
-      const message = typeof failure === "object" && failure !== null && "message" in failure
-        && typeof failure.message === "string" ? failure.message : "제출에 실패했습니다.";
-      setRequestError(message);
-    } finally {
-      sendingRef.current = false;
-      setSending(false);
-    }
+    await submitEditorCode({ workspace, submissionKey, problem, language, sourceCode: codeRef.current, seq: seqRef.current, examId, retry,
+      onStart: () => { setShowRun(false); setRunResult(null); setRunError(null); setJudgeError(null); setPaused(true); },
+      onAccepted: () => { if (!examId) { setPollVersion((value) => value + 1); setPaused(false); } router.refresh(); }, toLogin });
   }
   return (
     <>
@@ -252,18 +215,20 @@ export function Buffer({
       </div>
       <section className="results stack-sm flex-1 max-h-[50dvh] overflow-y-auto overscroll-contain">
         <h3>실행 결과</h3>
-        <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} error={requestError}
-          disabled={busy || busyRun} paused={paused} onRetry={() => handleSubmit(true)}
-          onResume={() => { setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false); }}
+        <EditorSubmissionStatus accepted={accepted} selected={attempt} pending={pending} pendingExam={!!pendingExam} error={requestError}
+          disabled={busy || busyRun} hiddenResult={!showSubmission || showRun} paused={!showSubmission || paused} onRetry={() => handleSubmit(true)}
+          onResume={() => { setView(submissionKey, { showSubmission: true }); setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false); }}
           onSelect={(id) => {
             workspace.getState().selectPracticeSubmission(submissionKey, id);
+            setView(submissionKey, { showSubmission: true });
             setShowRun(false); setJudgeError(null); setPollVersion((value) => value + 1); setPaused(false);
           }} />
-        <EditorResultPanel busy={busy} showRun={showRun} busyRun={busyRun} queryError={judgeError}
-          judgeResult={judgeResult} runError={runError} runResult={runResult} runExpectations={runExpectations} />
+        <EditorResultPanel busy={busy} sending={sending} submissionFailed={!showSubmission && (!!pending || !!pendingExam || !!requestError)}
+          submissionPaused={showSubmission && !!judgeSubmissionId && !judgeResult && paused} showRun={showRun} busyRun={busyRun} queryError={judgeError}
+          judgeResult={showSubmission ? judgeResult : null} runError={runError} runResult={runResult} runExpectations={runExpectations} />
       </section>
-      <EditorActions saved={saved} ready={ready} busy={busy} busyRun={busyRun}
-        pendingSubmission={!!pending || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
+      <EditorActions saved={examId && view?.acceptedSourceCode === code ? "제출 완료" : saved} ready={ready} busy={busy} busyRun={busyRun}
+        pendingSubmission={!!pending || !!pendingExam || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
         onTestCases={examId ? undefined : () => setTestCasesOpen(true)}
         onRun={handleRun} onSubmit={() => handleSubmit()} />
       {!examId && <Modal open={testCasesOpen} onOpenChange={setTestCasesOpen}
