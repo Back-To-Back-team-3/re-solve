@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockPracticePage } from "./practice-fixture";
-import { submissionResponseTimeoutMs } from "../../src/services/submission-transport";
+import { submissionResponseTimeoutMs } from "@/services/submission-transport";
 
 test("접수 응답 대기 만료 후 원본 코드·키를 유지한 채 같은 제출을 재요청한다", async ({ page }) => {
   await mockPracticePage(page);

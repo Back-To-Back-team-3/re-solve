@@ -53,10 +53,10 @@ it("같은 세션의 만료 토큰은 갱신하고 같은 코드·키로 한 번
   expect(new Headers(retry.headers).get("Authorization")).toBe("Bearer new");
   expect(new Headers(retry.headers).get("Idempotency-Key")).toBe("original-key");
   expect(retry.body).toBe(original.body); expect(retry.signal).toBe(original.signal);
-  expect(fetcher.mock.calls[1][1].signal).toBe(original.signal);
+  expect(fetcher.mock.calls[1][1].signal).not.toBe(original.signal);
 });
 
-it.each([false, true])("제출 응답·갱신 대기 제한 시간이 지나면 실제 요청을 취소하고 재요청할 수 있다 (갱신=%s)", async (refreshing) => {
+it("제출 응답 대기 제한 시간이 지나면 실제 요청을 취소하고 재요청할 수 있다", async () => {
   vi.useFakeTimers();
   let signal: AbortSignal | null | undefined;
   const waiting = (_path: string, init: RequestInit) => {
@@ -64,7 +64,6 @@ it.each([false, true])("제출 응답·갱신 대기 제한 시간이 지나면 
     return new Promise<Response>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal?.reason), { once: true }));
   };
   const fetcher = vi.fn();
-  if (refreshing) fetcher.mockResolvedValueOnce(new Response(null, { status: 401 }));
   fetcher.mockImplementationOnce(waiting); vi.stubGlobal("fetch", fetcher);
   const pending = expect(judgeApi.submit(body, "original-key")).rejects.toThrow("제출 접수 여부를 확인하지 못했습니다");
   await vi.advanceTimersByTimeAsync(0);
@@ -77,4 +76,25 @@ it.each([false, true])("제출 응답·갱신 대기 제한 시간이 지나면 
   const retry: RequestInit = fetcher.mock.calls.at(-1)![1];
   expect(new Headers(retry.headers).get("Idempotency-Key")).toBe("original-key");
   expect(retry.body).toBe(JSON.stringify(body)); expect(retry.signal?.aborted).toBe(false);
+});
+
+
+it.each([false, true])("제출 기한 후에도 갱신은 완료하고 재전송하지 않으며 로그아웃은 갱신을 취소한다 (로그아웃=%s)", async (logout) => {
+  vi.useFakeTimers();
+  const setter = vi.fn(); setAccessTokenSetter(setter);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status: 401 }))
+    .mockImplementationOnce(async () => { await held; return Response.json({ data: { accessToken: "rotated" } }); });
+  vi.stubGlobal("fetch", fetcher);
+  const pending = expect(judgeApi.submit(body, "original-key")).rejects.toThrow("제출 접수 여부를 확인하지 못했습니다");
+  await vi.advanceTimersByTimeAsync(0);
+  const request: RequestInit = fetcher.mock.calls[0][1], refresh: RequestInit = fetcher.mock.calls[1][1];
+  await vi.advanceTimersByTimeAsync(submissionResponseTimeoutMs);
+  expect(request.signal?.aborted).toBe(true); expect(refresh.signal?.aborted).toBe(false);
+  if (logout) cancelSubmissionRequests();
+  expect(refresh.signal?.aborted).toBe(logout);
+  release(); await pending;
+  expect(setter.mock.calls).toEqual(logout ? [] : [["rotated"]]);
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });
