@@ -208,15 +208,14 @@ export function Buffer({
     const isCurrent = () => workspace.getState().editorSubmissionViews[submissionKey]?.transportId === transportId;
     setShowRun(false);
     // 전송 식별자는 언어 전환에도 유지하고 로그아웃 시 함께 폐기한다.
-    setView(submissionKey, { showSubmission: false, requestError: null, transportId });
+    setView(submissionKey, { showSubmission: false, requestError: null, acceptedSourceCode: null, transportId });
     if (!examId) workspace.getState().setPracticeRequest(submissionKey, request);
     setRunResult(null); setRunError(null); setJudgeError(null); setPaused(true);
     try {
       if (examId) {
         await contestApi.submitExam(examId, { problemId: problem.id, language, sourceCode: codeRef.current, seq: seqRef.current });
         if (!isCurrent()) return;
-        setView(submissionKey, { requestError: null });
-        setSaved("제출 완료");
+        setView(submissionKey, { requestError: null, acceptedSourceCode: request.body.sourceCode });
       } else {
         const receipt = await judgeApi.submit(request.body, request.idempotencyKey);
         if (!isCurrent() || !workspace.getState().acceptPracticeSubmission(submissionKey, request, receipt.submissionId)) return;
@@ -269,7 +268,7 @@ export function Buffer({
           submissionPaused={showSubmission && !!judgeSubmissionId && !judgeResult && paused} showRun={showRun} busyRun={busyRun} queryError={judgeError}
           judgeResult={showSubmission ? judgeResult : null} runError={runError} runResult={runResult} runExpectations={runExpectations} />
       </section>
-      <EditorActions saved={saved} ready={ready} busy={busy} busyRun={busyRun}
+      <EditorActions saved={examId && view?.acceptedSourceCode === code ? "제출 완료" : saved} ready={ready} busy={busy} busyRun={busyRun}
         pendingSubmission={!!pending || (!!attempt && !attempt.result)} onReset={() => setReset(true)}
         onTestCases={examId ? undefined : () => setTestCasesOpen(true)}
         onRun={handleRun} onSubmit={() => handleSubmit()} />

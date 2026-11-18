@@ -31,6 +31,7 @@ test("초기 안내는 실행·접수 실패 뒤 숨기고 이전 성공 결과�
   await page.getByRole("button", { name: "이전 결과 보기", exact: true }).click();
   await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "실행", exact: true }).click();
+  await expect(page.getByText("실행 실패", { exact: true })).toBeVisible();
   await expect(page.getByText("접수 실패", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "같은 제출 재요청", exact: true }).click();
   await expect(page.getByText("AC 정답", { exact: true })).toBeVisible();

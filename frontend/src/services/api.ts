@@ -1,3 +1,4 @@
+import { withSubmissionTransport } from "@/services/submission-transport";
 import type {
   DiagnosisRunResult, DiagnosisContent, DiagnosisDetail, DiagnosisDraftRequest, DiagnosisSaved, DiagnosisReceipt,
   DiagnosisStarted, DiagnosisFinished, DiagnosisHistory,
@@ -211,6 +212,8 @@ async function apiRequest(path: string, init: RequestInit | undefined, isRetry: 
     throw { code: "UNKNOWN", message: NETWORK_ERROR_MESSAGE } satisfies ApiError;
   }
 
+  // 로그아웃·응답 대기 만료 뒤 도착한 401로 인증 갱신을 다시 시작하지 않는다.
+  init?.signal?.throwIfAborted();
   // /auth/token/refresh 자체는 인터셉터에서 제외해 무한 루프를 방지한다.
   if (res.status === 401 && !isRetry && !path.includes("/auth/token/refresh")) {
     let refreshRes: Response;
@@ -344,11 +347,12 @@ export const judgeApi = {
       body: JSON.stringify(body),
     }),
   submit: (body: SubmissionCreateRequest, idempotencyKey: string) =>
-    apiFetch<SubmissionReceipt>("/api/v1/submissions", {
+    withSubmissionTransport((signal) => apiFetch<SubmissionReceipt>("/api/v1/submissions", {
+      signal,
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(body),
-    }),
+    })),
   getStatus: (submissionId: string, signal?: AbortSignal) =>
     apiFetch<JudgeResult>(`/api/v1/submissions/${submissionId}`, { signal }),
   getSource: (id: string) => apiFetch<SubmissionSource>(`/api/v1/submissions/${id}/source`, { cache: "no-store" }),
@@ -633,10 +637,11 @@ export const contestApi = {
     }),
 
   submitExam: (examId: string, body: ExamSubmitRequest) =>
-    apiFetch<ExamSubmitResponse>(`/api/v1/exams/${examId}/submissions`, {
+    withSubmissionTransport((signal) => apiFetch<ExamSubmitResponse>(`/api/v1/exams/${examId}/submissions`, {
+      signal,
       method: "POST",
       body: JSON.stringify(body),
-    }),
+    })),
 
   finishExam: (examId: string) =>
     apiFetch<ExamFinishResponse>(`/api/v1/exams/${examId}/finish`, {
