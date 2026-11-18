@@ -1,5 +1,6 @@
 package com.backtoback.study.membership.controller;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -16,6 +17,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.TestingAuthenticationToken;
@@ -24,6 +27,7 @@ import org.springframework.security.web.method.annotation.AuthenticationPrincipa
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.common.web.exception.GlobalExceptionHandler;
 import com.backtoback.common.web.logging.CorrelationIdFilter;
 import com.backtoback.common.web.security.user.GatewayUser;
@@ -132,5 +136,63 @@ class StudyCommandControllerTest {
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.error.code").value(StudyErrorCode.MEMBER_SUSPENDED.getCode()));
         then(studyCommandService).should(never()).createStudy(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "LV1",
+            "LV2",
+            "LV3"
+        }
+    )
+    @DisplayName("5.2.1 skillLevel이 LV1~LV3이면 201을 반환한다")
+    void createStudy_allowedSkillLevel_returns201(String skillLevel) throws Exception {
+        // given
+        given(studyCommandService.createStudy(eq(7L), any(), anyString())).willReturn(10L);
+
+        // when & then
+        mockMvc
+            .perform(
+                post("/api/v1/studies").contentType(MediaType.APPLICATION_JSON).content(bodyWithSkillLevel(skillLevel))
+            )
+            .andExpect(status().isCreated());
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "LV0",
+            "MASTER",
+            "LV4",
+            "lv1"
+        }
+    )
+    @DisplayName("5.2.1 skillLevel이 LV1~LV3이 아니면 생성 서비스를 호출하지 않고 400 COMMON_INVALID_REQUEST를 반환한다")
+    void createStudy_disallowedSkillLevel_returns400(String skillLevel) throws Exception {
+        // when & then
+        mockMvc
+            .perform(
+                post("/api/v1/studies").contentType(MediaType.APPLICATION_JSON).content(bodyWithSkillLevel(skillLevel))
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value(CommonErrorCode.COMMON_INVALID_REQUEST.getCode()))
+            .andExpect(jsonPath("$.error.details[*].field").value(hasItem("skillLevel")));
+        then(studyCommandService).should(never()).createStudy(any(), any(), any());
+    }
+
+    private static String bodyWithSkillLevel(String skillLevel) {
+        return """
+            {
+                "name": "코딩테스트 스터디",
+                "description": "설명",
+                "goal": "EMPLOYMENT",
+                "skillLevel": "%s",
+                "preferredLanguage": "java",
+                "activeTimeSlot": "EVENING",
+                "capacity": 5,
+                "joinType": "INSTANT",
+                "isAutoReopen": false
+            }""".formatted(skillLevel);
     }
 }
