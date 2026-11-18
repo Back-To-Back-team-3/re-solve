@@ -434,8 +434,8 @@ export function StudyPage({ id }: { id: string }) {
               )}
             </div>
           )}
-          {tab === "exams" && (memberGuard ?? <ExamsPage studyId={id}
-            canCreate={study.status !== "CLOSED" && (isLeader || myM?.role === "MANAGER")} />)}
+          {tab === "exams" && <ExamsPage studyId={id}
+            canCreate={isApproved && study.status !== "CLOSED" && (isLeader || myM?.role === "MANAGER")} />}
         </section>
         <div className="stack">
           <Section title="스터디 안내">
