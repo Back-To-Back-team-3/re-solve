@@ -36,3 +36,43 @@ test("서로 다른 문제·회차 ID의 시험은 Contest Run만 호출하고 �
   await expect(result).toHaveCount(0);
   expect(ordinaryRuns).toBe(0); expect(submissions).toBe(0); expect(currentReads).toBe(0);
 });
+
+test("시험 직접 입력은 최대 10개·함수 명세로 검증하며 INT64를 원문으로 전송한다", async ({ page }) => {
+  const { now, endsAt } = await mockExamRoom(page);
+  await page.route("**/api/v1/exams/42/problems", (route) => route.fulfill({ json: { success: true, data: {
+    examId: "42", serverNow: now, personalEndsAt: endsAt, problems: [{
+      problemId: "1001", problemRevisionId: "9001", revisionNumber: 2, title: "큰 정수 시험", body: "큰 정수를 반환하세요.",
+      score: "100.00", displayOrder: 1, imageIds: [], executionLimits: {}, sampleTests: [],
+      functionSpec: { name: "solution", parameters: [{ name: "value", type: { kind: "INT64" } }], returnType: { kind: "INT64" } },
+    }],
+  } } }));
+  let body = "";
+  await page.route("**/api/v1/exams/42/problems/1001/runs", (route) => {
+    body = route.request().postData() ?? "";
+    return route.fulfill({ json: { success: true, data: { results: [
+      { type: "SAMPLE", index: 0, output: "1", error: null, timeMs: 1, memoryKb: 1 },
+      { type: "CUSTOM", index: 0, output: "9223372036854775807", error: null, timeMs: 2, memoryKb: 2 },
+    ], completedAt: now } } });
+  });
+  await page.goto("/exams/42/room");
+  await expect(page.getByRole("textbox", { name: "코드 편집기" })).toBeVisible();
+  await page.getByRole("button", { name: "테스트 케이스 추가하기" }).click();
+  const add = page.getByRole("button", { name: "직접 입력 추가", exact: true });
+  for (let index = 1; index <= 10; index++) {
+    await add.click();
+    await page.getByLabel(`직접 입력 ${index} value`, { exact: true }).fill(index === 1 ? "9223372036854775808" : "1");
+  }
+  await expect(add).toBeDisabled();
+  await expect(page.getByLabel("직접 입력 1 기대 출력", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: "실행", exact: true }).click();
+  await expect(page.getByText(/허용 범위 안의 정수를 입력/)).toBeVisible();
+  expect(body).toBe("");
+  await page.getByRole("button", { name: "테스트 케이스 추가하기" }).click();
+  await page.getByLabel("직접 입력 1 value", { exact: true }).fill("9223372036854775807");
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: "실행", exact: true }).click();
+  await expect(page.getByLabel("시험 Run 실행 결과")).toContainText("직접 입력 1");
+  expect(body).toContain('"args":[9223372036854775807]');
+  expect(JSON.parse(body).customTests).toHaveLength(10);
+});

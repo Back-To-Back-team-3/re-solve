@@ -196,7 +196,7 @@ export function ErrorState({
       <TriangleAlert />
       <h2>불러오지 못했어요</h2>
       <p>{message}</p>
-      {retry && <Button onClick={retry}>다시 시도</Button>}
+      {retry && <Button type="button" onClick={retry}>다시 시도</Button>}
       <Go href="/">홈으로</Go>
     </div>
   );
