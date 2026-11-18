@@ -72,3 +72,25 @@ python3 -B -m unittest discover -s problem-service/scripts -p 'test_*.py' -v
 ```
 
 실제 환경 검증에서는 새 회차·세 종류 검증의 접수 ID를 보관하고 관리자 조회·사용자 상세 조회까지 확인한다. 비공개 테스트 입력과 코드가 포함된 응답 본문은 PR·실행 로그에 첨부하지 않는다.
+
+## 신규 운영 DB의 기존 시드 테스트 버전 연결
+
+신규 운영 DB에 V14·V15를 적용한 뒤 기존 시드 회차를 서비스하기 전에 실행한다. 대상 버킷에는 버전 관리가 활성화되어 있고 `test-cases/1.json`부터 `test-cases/150.json`까지 실제 시드 파일이 준비되어 있어야 한다. 새 회차 등록은 위의 관리자 API 절차를 따른다.
+
+Python 3.9 이상과 AWS CLI를 사용한다. DB 반영에는 MySQL 8.0.16 이상과 `mysql` 클라이언트가 필요하다. 대상 Problem DB의 접속 정보는 MySQL 로그인 경로에 저장한다. 작업 계정에는 시드 행 조회·갱신 및 임시 테이블 생성 권한이 필요하다.
+
+```sh
+# 버킷만 조회한다. 아래 예시 값은 대상 환경에 맞게 지정한다.
+python3 -B problem-service/scripts/link-seed-test-versions.py \
+  --profile AWS_PROFILE --region AWS_REGION --bucket PROBLEM_BUCKET
+
+# S3를 다시 확인한 뒤 신규 Problem DB의 누락된 참조를 연결한다.
+python3 -B problem-service/scripts/link-seed-test-versions.py \
+  --profile AWS_PROFILE --region AWS_REGION --bucket PROBLEM_BUCKET \
+  --mysql-login-path PROBLEM_LOGIN_PATH --database PROBLEM_DATABASE
+```
+
+- 객체별 최신 버전을 고정해 다운로드하고 V14의 SHA-256과 크기를 대조한다. 버전이 없거나 파일이 일치하지 않으면 DB 반영 전에 중단한다.
+- V14 시드의 키·생성 시각·상태·체크섬·크기가 일치하는 행 중 버전이 비어 있는 행만 갱신한다. 150개 모두 확인한 버전과 일치해야 커밋한다. 이미 같은 버전이 연결되어 있으면 재실행해도 바뀌는 행이 없다.
+- 연결된 버전과 새로 조회한 버전이 다르면 기존 참조를 유지하고 중단한다. DB 대상이나 S3 자료를 다시 확인한다.
+- 연결 후 시드 문제의 공개 예제 Run과 정답 제출을 확인한다. 실제 문제 데이터와 테스트 내용을 로그에 남기지 않는다.
