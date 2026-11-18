@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -120,5 +121,20 @@ public interface HintRequestRepository extends JpaRepository<HintRequest, Long> 
         @Param("expectedStatus") HintRequestStatus expectedStatus,
         @Param("blockedReason") String blockedReason,
         @Param("completedAt") LocalDateTime completedAt
+    );
+
+    /**
+     * 회수 대상 조회 — 진행 중 상태로 기준 시각이 {@code cutoff} 이하인 요청을 오래된 순으로 가져온다(scheduler §6.1).
+     * 기준 시각은 생성 시작 시각이며, 없으면(생성 대기 또는 시작 시각 기록 전 요청) 요청 시각으로 판단한다.
+     * 별도 인덱스 없이 기존 (status, generation_started_at) 인덱스의 status 접두로 진행 중 행만 좁힌다.
+     */
+    @Query(
+        "SELECT r FROM HintRequest r WHERE r.status IN :statuses"
+            + " AND COALESCE(r.generationStartedAt, r.createdAt) <= :cutoff ORDER BY r.id"
+    )
+    List<HintRequest> findRecoveryTargets(
+        @Param("statuses") List<HintRequestStatus> statuses,
+        @Param("cutoff") LocalDateTime cutoff,
+        Pageable pageable
     );
 }
