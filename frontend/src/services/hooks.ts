@@ -1,6 +1,8 @@
 "use client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiError } from "./api";
+import { studyApi } from "@/services/api";
+import { assignedProblemTimeoutMs } from "@/services/assigned-problem-transport";
 import { connectNotificationStream } from "@/services/notification-stream";
 import { useWorkspace } from "@/stores/workspace";
 
@@ -31,6 +33,33 @@ export function useResource<T>(
 
   const retry = useCallback(() => setRetryCount((n) => n + 1), []);
   return { data, loading, error, retry };
+}
+
+/** 현재 회원·문제의 배정 여부를 기다리며, 실패·기한 만료·오래된 응답으로는 잠금을 풀지 않는다. */
+export function useAssignedProblem(memberId: string, problemId: string): boolean | null {
+  const key = JSON.stringify([memberId, problemId]);
+  const [result, setResult] = useState<{ key: string; allowed: boolean | null }>({ key, allowed: null });
+  useEffect(() => {
+    let active = true;
+    const query = new AbortController();
+    setResult({ key, allowed: null });
+    const timer = setTimeout(() => {
+      query.abort();
+      setResult({ key, allowed: false });
+    }, assignedProblemTimeoutMs);
+    studyApi.getAssignedProblem(problemId, query.signal).then((response) => {
+      if (active && !query.signal.aborted)
+        setResult({ key, allowed: response.problemId === problemId && response.assigned === true });
+    }).catch(() => {
+      if (active) setResult({ key, allowed: false });
+    }).finally(() => clearTimeout(timer));
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      query.abort();
+    };
+  }, [key, problemId]);
+  return result.key === key ? result.allowed : null;
 }
 
 export function usePollUntil<T>(

@@ -1,4 +1,5 @@
 import { withSubmissionTransport } from "@/services/submission-transport";
+import { withAssignedProblemTransport } from "@/services/assigned-problem-transport";
 import type {
   DiagnosisRunResult, DiagnosisContent, DiagnosisDetail, DiagnosisDraftRequest, DiagnosisSaved, DiagnosisReceipt,
   DiagnosisStarted, DiagnosisFinished, DiagnosisHistory,
@@ -17,6 +18,7 @@ import type {
   ProblemSaved,
   ValidationProgress,
   AssignmentDetail,
+  AssignedProblemResponse,
   CreateAssignmentRequest,
   AssignmentCreated,
   AssignmentStatus,
@@ -471,6 +473,10 @@ export const adminApi = {
 
 // 스터디 API (§5)
 export const studyApi = {
+  getAssignedProblem: (problemId: string, signal: AbortSignal) =>
+    withAssignedProblemTransport(signal, (query, refresh) => apiFetch<AssignedProblemResponse>(
+      `/api/v1/studies/me/assigned-problems/${problemId}`, { cache: "no-store", signal: query }, refresh,
+    )),
   create: (body: {
     name: string;
     description: string;

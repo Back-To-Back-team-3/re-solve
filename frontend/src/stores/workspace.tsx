@@ -17,6 +17,7 @@ import {
   setTokenGetter,
 } from "../services/api";
 import { cancelSubmissionRequests } from "@/services/submission-transport";
+import { cancelAssignedProblemRequests } from "@/services/assigned-problem-transport";
 import type { RunInputDraft } from "@/services/run-input-draft";
 import type { ExamSubmitRequest, JudgeJobFilter, JudgeResult, Language, Member, SubmissionCreateRequest } from "@/services/types";
 import { Loading } from "../components/ui";
@@ -173,7 +174,7 @@ const createWorkspace = () =>
     fontSize: 14,
     activeProblems: {},
     setMember: (member) => set({ member }),
-    clearMember: () => { cancelSubmissionRequests(); set({ judgeJobFilter: { sort: "updatedAt,desc" }, judgeRecoveryReasons: {}, viewPages: {}, practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, examRequests: {}, practiceRequests: {}, activePracticeSubmissions: {}, editorSubmissionViews: {} }); },
+    clearMember: () => { cancelSubmissionRequests(); cancelAssignedProblemRequests(); set({ judgeJobFilter: { sort: "updatedAt,desc" }, judgeRecoveryReasons: {}, viewPages: {}, practiceRunInputs: {}, submissionAttempts: {}, member: null, accessToken: null, practiceSubmissions: {}, examRequests: {}, practiceRequests: {}, activePracticeSubmissions: {}, editorSubmissionViews: {} }); },
     setAccessToken: (accessToken) => set({ accessToken }),
     setAuthReady: (authReady) => set({ authReady }),
     setDraft: (key, d) => set((s) => ({ drafts: { ...s.drafts, [key]: d } })),

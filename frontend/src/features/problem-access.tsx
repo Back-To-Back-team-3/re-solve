@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button, ErrorState, Go, Loading } from "@/components/ui";
 import { memberApi } from "@/services/api";
-import { useResource } from "@/services/hooks";
+import { useResource, useAssignedProblem } from "@/services/hooks";
 import { problemAccess } from "@/services/problem-access";
 import type { Problem } from "@/services/types";
 import { useWorkspace } from "@/stores/workspace";
@@ -58,7 +58,7 @@ function ProblemAccessContent({ problem, levels, children }: {
     }
   }
 
-  return <section className="card stack" aria-label="문제 레벨 제한">
+  return <AssignedProblemAccess problemId={problem.id} memberId={levels.memberId} fallback={<section className="card stack" aria-label="문제 레벨 제한">
     <h2>레벨 잠금</h2>
     <p>모든 알고리즘의 레벨이 Lv. {problem.difficulty} 이상이어야 풀 수 있어요.</p>
     {access.blockedTags.map((tag) => <div key={tag.tagId} className="stack-sm">
@@ -71,5 +71,13 @@ function ProblemAccessContent({ problem, levels, children }: {
     {error && <p className="error-text" role="alert">{error}</p>}
     <Go href="/mypage">진단 테스트로 레벨 올리기</Go>
     <Button disabled={pending} onClick={levels.retry}>레벨 다시 확인</Button>
-  </section>;
+  </section>}>{children}</AssignedProblemAccess>;
+}
+
+/** 개인 레벨이 부족할 때만 배정 여부를 확인하며, 실패하면 기존 잠금을 유지한다. */
+function AssignedProblemAccess({ problemId, memberId, children, fallback }: {
+  problemId: string; memberId: string; children: ReactNode; fallback: ReactNode;
+}) {
+  const assigned = useAssignedProblem(memberId, problemId);
+  return assigned === null ? <Loading /> : assigned ? children : fallback;
 }
