@@ -4,6 +4,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { authApi, judgeApi, memberApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import { THEME_STORAGE_KEY } from "@/services/storage-keys";
+import { cancelAssignedProblemRequests } from "@/services/assigned-problem-transport";
+import { cancelSubmissionRequests } from "@/services/submission-transport";
 import { ProblemSubmissionList } from "@/features/problem-list";
 import { NotificationPreferencesSection } from "@/features/account-notifications";
 import { SkillPage } from "@/features/account-skill";
@@ -40,6 +42,8 @@ export function CallbackPage() {
     authApi
       .exchangeToken(loginCode)
       .then(({ accessToken, member }) => {
+        cancelAssignedProblemRequests();
+        cancelSubmissionRequests();
         setAccessToken(accessToken);
         isNew = member.isNewMember;
         return memberApi.getMe();
