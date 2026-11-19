@@ -117,3 +117,63 @@ test("로그아웃은 배정 조회에서 시작한 인증 갱신도 취소한�
     await expect(page.getByRole("textbox", { name: "코드 편집기" })).toHaveCount(0);
   } finally { releaseQuery(); releaseRefresh(); }
 });
+
+test("같은 문서의 로그인 콜백은 이전 회원의 갱신을 취소하고 새 토큰을 유지한다", async ({ page }) => {
+  await mockLocked(page);
+  let releaseQuery = () => {}, releaseRefresh = () => {};
+  let started = false, refreshing = false, switched = false;
+  const heldQuery = new Promise<void>((resolve) => { releaseQuery = resolve; });
+  const heldRefresh = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+  const newAuthorizations: (string | undefined)[] = [];
+  await page.route(`**${path}`, async (route) => {
+    if (switched) {
+      newAuthorizations.push(route.request().headers().authorization);
+      return route.fulfill({ json: { success: true, data: { problemId: "1001", assigned: false } } });
+    }
+    started = true;
+    await heldQuery;
+    return route.fulfill({ status: 401, json: { success: false, error: { code: "UNAUTHORIZED", message: "갱신 필요" } } }).catch(() => {});
+  });
+  try {
+    await page.goto("/problems/1001");
+    await expect.poll(() => started).toBe(true);
+    await page.route("**/api/v1/auth/token/refresh", async (route) => {
+      refreshing = true;
+      await heldRefresh;
+      return route.fulfill({ json: { success: true, data: { accessToken: "old-session-token" } } }).catch(() => {});
+    });
+    releaseQuery();
+    await expect.poll(() => refreshing).toBe(true);
+    await page.route("**/api/v1/auth/token", (route) => {
+      switched = true;
+      return route.fulfill({ json: { success: true, data: { accessToken: "new-member-token", member: { isNewMember: false } } } });
+    });
+    await page.route("**/api/v1/members/me", (route) => {
+      newAuthorizations.push(route.request().headers().authorization);
+      return route.fulfill({ json: { success: true, data: {
+        memberId: "8", nickname: "새 회원", role: "USER", status: "ACTIVE",
+        githubLogin: "new-member", profileImageUrl: null, email: null, hasLearningProfile: true,
+        createdAt: "2026-11-13T00:00:00+09:00",
+      } } });
+    });
+    const aborted = page.waitForEvent("requestfailed", (request) => new URL(request.url()).pathname === "/api/v1/auth/token/refresh");
+    // Next 개발 서버의 공개 라우터로 이동해 기존 문서·스토어·진행 중 요청을 유지한다.
+    await page.evaluate(() => {
+      if (!("nd" in window)) throw new Error("Next 개발 라우터가 없습니다.");
+      const debug = window.nd;
+      if (!debug || typeof debug !== "object" || !("router" in debug)) throw new Error("라우터가 없습니다.");
+      const router = debug.router;
+      if (!router || typeof router !== "object" || !("push" in router) || typeof router.push !== "function") throw new Error("push가 없습니다.");
+      document.documentElement.dataset.callbackDocument = "same-document";
+      router.push("/auth/callback?loginCode=switch-member&redirectPath=/problems/1001");
+    });
+    await aborted;
+    await expect(page.getByRole("heading", { name: "레벨 잠금" })).toBeVisible();
+    releaseRefresh();
+    await page.getByRole("button", { name: "레벨 다시 확인", exact: true }).click();
+    await expect.poll(() => newAuthorizations.length).toBeGreaterThanOrEqual(3);
+    expect(newAuthorizations.every((value) => value === "Bearer new-member-token")).toBe(true);
+    await expect(page.locator("html")).toHaveAttribute("data-callback-document", "same-document");
+    await expect(page.getByRole("textbox", { name: "코드 편집기" })).toHaveCount(0);
+  } finally { releaseQuery(); releaseRefresh(); }
+});
