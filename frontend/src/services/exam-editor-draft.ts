@@ -1,13 +1,16 @@
 import type { Language } from "@/services/types";
 
 /** 기존 시험 Draft 키에서 코드와 서버 저장 순번을 복원한다. */
-export function readExamDraft(examId: string, problemId: string): { code: string; seq: string } | null {
+export function readExamDraft(examId: string, problemId: string): { code: string; seq: string; language?: Language } | null {
   try {
     const raw = localStorage.getItem(`re-solve:editor:draft:exam:${examId}:${problemId}`);
     if (!raw) return null;
     const draft: unknown = JSON.parse(raw);
     if (typeof draft !== "object" || draft === null || !("code" in draft) || typeof draft.code !== "string") return null;
-    return { code: draft.code, seq: "seq" in draft && typeof draft.seq === "string" ? draft.seq : "1" };
+    const value = { code: draft.code, seq: "seq" in draft && typeof draft.seq === "string" ? draft.seq : "1" };
+    if (!("language" in draft)) return value;
+    const language = draft.language;
+    return language === "java" || language === "python3" || language === "cpp" ? { ...value, language } : null;
   } catch { return null; }
 }
 

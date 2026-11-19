@@ -19,7 +19,7 @@ const routes: { path: string; ready: (page: Page) => Locator }[] = [
   { path: "/studies/new", ready: (p) => p.getByRole("heading", { name: "스터디 만들기" }) },
   { path: `/studies/${INSTANT_STUDY_ID}`, ready: (p) => p.getByRole("heading", { name: "즉시 가입 스터디" }) },
   { path: "/exams", ready: (p) => p.getByRole("heading", { name: "모의 코딩테스트" }) },
-  { path: `/exams/new?studyId=${INSTANT_STUDY_ID}`, ready: (p) => p.getByRole("heading", { name: "모의 코테 만들기" }) },
+  { path: `/exams/new?studyId=${INSTANT_STUDY_ID}`, ready: (p) => p.getByText("진행 중인 스터디의 스터디장·운영진만 시험을 만들 수 있습니다.", { exact: true }) },
   { path: `/exams/${EXAM_ID}`, ready: (p) => p.getByRole("heading", { name: "주간 모의 코테" }) },
   { path: `/exams/${EXAM_ID}/result`, ready: (p) => p.getByRole("heading", { name: "도전의 기록" }) },
   { path: "/contests", ready: (p) => p.getByRole("heading", { name: "공개대회 준비 중" }) },

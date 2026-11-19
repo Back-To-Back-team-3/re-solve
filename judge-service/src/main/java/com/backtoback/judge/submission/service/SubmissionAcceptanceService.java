@@ -18,6 +18,7 @@ import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.judge.global.error.JudgeErrorCode;
 import com.backtoback.judge.global.error.JudgeException;
 import com.backtoback.judge.judging.domain.JudgeLanguage;
+import com.backtoback.judge.judging.service.execution.dto.JudgeRuntime;
 import com.backtoback.judge.submission.client.SubmissionDependencyClient;
 import com.backtoback.judge.submission.dto.ProblemExecutionProfileResponse;
 import com.backtoback.judge.submission.dto.ProblemValidationResponse;
@@ -67,30 +68,26 @@ public class SubmissionAcceptanceService {
         LocalDateTime submittedAt
             = LocalDateTime.ofInstant(clock.instant(), ClockConfiguration.SERVICE_ZONE).truncatedTo(ChronoUnit.MICROS);
         JudgeLanguage.fromCode(request.language());
-        access.checkMember(memberId);
         long problemId = SubmissionCreateRequest.parseId(request.problemId());
         long revisionId = SubmissionCreateRequest.parseId(request.problemRevisionId());
+        List<TestCase> tests;
+        JudgeRuntime runtime;
         try {
+            access.checkMember(memberId);
             rateLimiter.acquire(memberId, problemId);
-        } catch (JudgeException exception) {
-            if (exception.getErrorCode() == JudgeErrorCode.SUBMISSION_RATE_LIMITED) {
-                // 최초 조회 이후 다른 요청이 접수를 완료했을 수 있으므로 새 읽기로 응답을 복원한다.
-                var replay = store.findReusable(memberId, key, hash);
-                if (replay.isPresent()) {
-                    return replay.get();
-                }
+            var validation = access.checkProblem(memberId, problemId, revisionId);
+            Map<String, ProblemExecutionProfileResponse> profiles
+                = access.profiles(validation.supportedLanguages(), validation.executionProfiles());
+            var selected = profiles.get(request.language());
+            if (selected == null) {
+                throw new JudgeException(JudgeErrorCode.UNSUPPORTED_LANGUAGE);
             }
-            throw exception;
+            tests = tests(validation, request, profiles);
+            runtime = access.runtime(request.language(), selected);
+        } catch (JudgeException exception) {
+            // 외부 검증 중 같은 요청이 먼저 접수됐으면 최초 202 응답을 복원한다.
+            return store.findReusable(memberId, key, hash).orElseThrow(() -> exception);
         }
-        var validation = access.checkProblem(memberId, problemId, revisionId);
-        Map<String, ProblemExecutionProfileResponse> profiles
-            = access.profiles(validation.supportedLanguages(), validation.executionProfiles());
-        var selected = profiles.get(request.language());
-        if (selected == null) {
-            throw new JudgeException(JudgeErrorCode.UNSUPPORTED_LANGUAGE);
-        }
-        var tests = tests(validation, request, profiles);
-        var runtime = access.runtime(request.language(), selected);
         try {
             return store.accept(memberId, key, hash, request, submittedAt, runtime, tests);
         } catch (DataIntegrityViolationException | ObjectOptimisticLockingFailureException exception) {

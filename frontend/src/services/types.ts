@@ -228,18 +228,33 @@ export interface ExamDetail {
   myParticipation: MyParticipation | null;
 }
 
+/** 시험 응시자에게 허용되는 고정 회차 본문(API 명세서 §4.2.3). */
 export interface ExamProblem {
   problemId: string;
+  problemRevisionId: string;
+  revisionNumber: number;
   title: string;
   body: string;
   score: string | null;
-  languages: Language[];
+  displayOrder: number;
+  functionSpec: ProblemDetail["functionSpec"];
+  executionLimits: Omit<ProblemDetail["executionLimits"], "outputLimitKb">;
+  sampleTests: ProblemDetail["samples"];
+  imageIds: string[];
 }
 
 export interface ExamProblemsResponse {
+  examId: string;
   problems: ExamProblem[];
   serverNow: string;
   personalEndsAt: string;
+}
+
+/** 공개 예제·직접 입력 결과만 제공하며 제출 판정을 포함하지 않는다(§4.2.13). */
+export interface ExamRunResponse {
+  results: { type: "SAMPLE" | "CUSTOM"; index: number; output: string | null;
+    error: string | null; timeMs: number; memoryKb: number }[];
+  completedAt: string;
 }
 
 export interface DraftSaveRequest {
@@ -634,6 +649,12 @@ export type CreateAssignmentRequest = {
   deadlineAt: string;
 };
 export type AssignmentCreated = { assignmentId: string; status: AssignmentStatus };
+
+// GET /api/v1/studies/me/assigned-problems/{problemId} (api-spec §5.4.5)
+export type AssignedProblemResponse = {
+  problemId: string;
+  assigned: boolean;
+};
 
 // GET /api/v1/studies/{studyId}/assignments 항목 (api-spec §5.4.2)
 export type AssignmentSummary = {

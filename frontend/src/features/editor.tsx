@@ -11,11 +11,17 @@ export function CodeEditor({
   userId,
   examId,
   availableLanguages,
+  runLanguages,
+  runDisabled = false,
+  disabled = false,
 }: {
   problem: Problem;
   userId: string;
   examId?: string;
   availableLanguages?: Language[];
+  runLanguages?: Language[];
+  runDisabled?: boolean;
+  disabled?: boolean;
 }) {
   const language = useWorkspace((s) => s.language),
     setLanguage = useWorkspace((s) => s.setLanguage),
@@ -79,6 +85,8 @@ export function CodeEditor({
           ))}
         </select>
       </div>
+      {selectedLanguage && runLanguages && !runLanguages.includes(selectedLanguage) && !runDisabled &&
+        <p className="muted">선택한 언어의 실행 환경을 사용할 수 없습니다. 코드 작성·저장·제출은 계속할 수 있습니다.</p>}
       {selectedLanguage ? <Buffer
         key={JSON.stringify([draftKey(userId, problem.id, selectedLanguage, examId), problem.problemRevisionId])}
         problem={problem}
@@ -86,6 +94,8 @@ export function CodeEditor({
         examId={examId}
         language={selectedLanguage}
         fontSize={fontSize}
+        runDisabled={runDisabled || (runLanguages !== undefined && !runLanguages.includes(selectedLanguage))}
+        disabled={disabled}
       /> : <Empty title="실행 가능한 언어가 없어요" description="지원 실행 환경을 확인한 뒤 다시 시도해 주세요." />}
     </div>
   );

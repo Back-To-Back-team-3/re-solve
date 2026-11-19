@@ -60,7 +60,7 @@ class SubmissionJudgingDataClientTest {
                 var client
                     = new SubmissionJudgingDataClient(
                         RestClient.builder(),
-                        new SubmissionClientProperties(uri, uri, Duration.ofSeconds(30))
+                        new SubmissionClientProperties(uri, uri, uri, Duration.ofSeconds(30))
                     );
                 assertTimeoutPreemptively(
                     Duration.ofSeconds(8),
