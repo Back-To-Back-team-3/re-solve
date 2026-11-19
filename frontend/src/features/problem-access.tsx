@@ -2,8 +2,8 @@
 import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button, ErrorState, Go, Loading } from "@/components/ui";
-import { memberApi, studyApi } from "@/services/api";
-import { useResource } from "@/services/hooks";
+import { memberApi } from "@/services/api";
+import { useResource, useAssignedProblem } from "@/services/hooks";
 import { problemAccess } from "@/services/problem-access";
 import type { Problem } from "@/services/types";
 import { useWorkspace } from "@/stores/workspace";
@@ -78,7 +78,6 @@ function ProblemAccessContent({ problem, levels, children }: {
 function AssignedProblemAccess({ problemId, memberId, children, fallback }: {
   problemId: string; memberId: string; children: ReactNode; fallback: ReactNode;
 }) {
-  const assigned = useResource(() => studyApi.getAssignedProblem(problemId), `assigned-problem:${memberId}:${problemId}`);
-  if (assigned.loading) return <Loading />;
-  return !assigned.error && assigned.data?.problemId === problemId && assigned.data.assigned === true ? children : fallback;
+  const assigned = useAssignedProblem(memberId, problemId);
+  return assigned === null ? <Loading /> : assigned ? children : fallback;
 }

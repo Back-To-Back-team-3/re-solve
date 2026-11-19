@@ -116,17 +116,18 @@ test("이전 문제의 늦은 배정 응답으로 다른 문제의 잠금을 풀
   await page.route("**/api/v1/studies/me/assigned-problems/*", async (route) => {
     const problemId = new URL(route.request().url()).pathname.split("/").at(-1);
     if (problemId === "1001") { started = true; await held; }
-    return route.fulfill({ json: { success: true, data: { problemId, assigned: problemId === "1001" } } });
+    return route.fulfill({ json: { success: true, data: { problemId, assigned: problemId === "1001" } } }).catch(() => {});
   });
   try {
     await page.goto("/problems/1001");
     await expect.poll(() => started).toBe(true);
     await expect(page.getByRole("textbox", { name: "코드 편집기" })).toHaveCount(0);
+    const aborted = page.waitForEvent("requestfailed", (request) => new URL(request.url()).pathname === assignedPath);
     await page.getByRole("link", { name: "← 문제 목록", exact: true }).click();
+    await aborted;
     await page.getByRole("link", { name: "고정 회차 배열 최댓값", exact: true }).click();
     await expect(page.getByRole("heading", { name: "레벨 잠금" })).toBeVisible();
-    const previousResponse = page.waitForResponse(`**${assignedPath}`);
-    release(); await (await previousResponse).finished();
+    release();
     await expect(page.getByRole("heading", { name: "고정 회차 배열 최댓값", exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "코드 편집기" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "레벨 잠금" })).toBeVisible();
