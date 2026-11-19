@@ -2,8 +2,9 @@
 import { Play, RotateCcw, Send } from "lucide-react";
 import { Button } from "@/components/ui";
 
-export function EditorActions({ saved, ready, busy, busyRun, pendingSubmission, onReset, onRun, onSubmit, onTestCases }: {
+export function EditorActions({ saved, ready, busy, busyRun, runDisabled = false, pendingSubmission, onReset, onRun, onSubmit, onTestCases }: {
   saved: string; ready: boolean; busy: boolean; busyRun: boolean; pendingSubmission: boolean;
+  runDisabled?: boolean;
   onTestCases?: () => void;
   onReset: () => void; onRun: () => void; onSubmit: () => void;
 }) {
@@ -15,8 +16,8 @@ export function EditorActions({ saved, ready, busy, busyRun, pendingSubmission, 
       )}
     </div>
     <div className="row">
-      <Button className="small" aria-label="코드 초기화" onClick={onReset}><RotateCcw size={15} /></Button>
-      <Button className="small" disabled={busyRun || busy || !ready} onClick={onRun}><Play size={14} />실행</Button>
+      <Button className="small" aria-label="코드 초기화" disabled={!ready || busy || busyRun} onClick={onReset}><RotateCcw size={15} /></Button>
+      <Button className="small" disabled={runDisabled || busyRun || busy || !ready} onClick={onRun}><Play size={14} />실행</Button>
       <Button className="small primary" disabled={busy || busyRun || !ready} onClick={onSubmit}>
         <Send size={14} />{busy ? "채점 중…" : pendingSubmission ? "현재 코드로 새 제출" : "제출"}
       </Button>
