@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Group the owner group's features into categories (Step B), check the cycle table first (Step A), then split one approved category into Issues and separate what people must decide (Step C).
+Group the owner group's features into categories (Step B), review open Issues first (Step A), then split one approved category into Issues and separate what people must decide (Step C).
 
 ## When to use
 
-- Step A: before every issue, to check the cycle table
+- Step A: before every issue, to review open Issues
 - Step B: at the start of a milestone, or when scope or priority changes
 - Step C: once for each category approved in Step B
 
@@ -18,17 +18,15 @@ Group the owner group's features into categories (Step B), check the cycle table
 - The owner group's sections of `api-spec.md`, `erd.md`, `error-codes.md`, `event-contract.md`, and `policy-and-state.md`
 - Related decision records
 
-## Step A — Cycle table review (run before every issue)
+## Step A — Open Issue review (run before every issue)
 
-1. Check if `docs/records/progress/{owner}.md` exists and the cycle table is filled.
-    - If the file does not exist or the table is empty: skip to Step B. Use `planning.md` and the reference documents to plan instead.
-    - After Step B, output the issue breakdown result as a draft table so the user can record it in the progress file.
-2. Read the cycle table and verify the next issue matches the table order and dependency.
-    - If a new issue was manually created, confirm its title and scope match the table.
-    - If the table needs update (add / insert / change), propose changes and wait for Human gate.
-3. Confirm dependency order before proceeding to Step B.
+1. Read the owner group's open Issues and the current Milestone through GitHub MCP.
+    - Find the owner group's Issues by the title `domain` and the assignee.
+2. Check that the next Issue is not already registered, and that its prerequisite Issues are closed.
+    - If a new issue was manually created, confirm its title and scope match the plan.
+3. Report the open Issues and the next Issue candidate.
 
-Human gate: user approves the cycle table state before issue planning begins.
+Human gate: user confirms the next Issue before Step B or Step C begins.
 
 ## Steps — B. Category plan
 
@@ -57,7 +55,7 @@ Human gate: user approves the cycle table state before issue planning begins.
 
 Step B:
 
-| 사이클 | 카테고리 | 포함 기능 | 우선순위 | 선행 조건 | 다른 도메인 영향 | 근거 |
+| 순서 | 카테고리 | 포함 기능 | 우선순위 | 선행 조건 | 다른 도메인 영향 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
 
 ### 일정 위험
@@ -93,10 +91,12 @@ Step C:
 
 ## Human gate
 
-- Step A: user approves the cycle table state before category planning begins.
+- Step A: user confirms the next Issue before Step B or Step C begins.
 - Step B: approve the categories, adjust priority, and agree on dependency order with the other owner groups.
 - Step C: settle the Issue scope; decide API signatures, state transitions, and error codes; register and merge the document Issues first.
 
 ## Tool differences
 
-None
+| Claude Code | Codex, Gemini CLI |
+| --- | --- |
+| Reads open Issues through MCP | The user pastes the open Issue list |
