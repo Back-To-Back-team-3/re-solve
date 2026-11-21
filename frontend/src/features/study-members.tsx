@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { rethrowWithMessage, studyApi } from "@/services/api";
+import { useCatalog } from "@/services/catalog";
 import { useResource } from "@/services/hooks";
 import type {
   GoalType,
@@ -13,6 +14,7 @@ import type {
 import { Badge, Button, ErrorState, Loading, useAction } from "@/components/ui";
 import { Pet } from "@/components/pet";
 import { DelegateModal, RemoveModal } from "./study-member-modals";
+import { formatTagLevels, tagNameMap } from "./study-member-profile";
 
 const goalLabel: Record<GoalType, string> = {
   EMPLOYMENT: "취업 준비",
@@ -79,6 +81,7 @@ export function MembersTab({
     `${studyId}:pending:${version}:${String(isManagerOrLeader)}`,
   );
 
+  const tagNames = tagNameMap(useCatalog().tags);
   const pendingContent = pending.data?.content ?? [];
   const approvedContent = approved.data?.content ?? [];
 
@@ -152,10 +155,8 @@ export function MembersTab({
                     <b>{m.nickname}</b>
                     {m.learningProfile && (
                       <p className="muted">
-                        {goalLabel[m.learningProfile.goal]} ·{" "}
-                        {Object.entries(m.learningProfile.tagLevels)
-                          .slice(0, 2)
-                          .map(([t, l]) => `${t} ${l}`)
+                        {[goalLabel[m.learningProfile.goal], formatTagLevels(m.learningProfile.tagLevels, tagNames)]
+                          .filter(Boolean)
                           .join(" · ")}
                       </p>
                     )}

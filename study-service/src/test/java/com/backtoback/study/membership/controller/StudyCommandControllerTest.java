@@ -181,18 +181,111 @@ class StudyCommandControllerTest {
         then(studyCommandService).should(never()).createStudy(any(), any(), any());
     }
 
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "EMPLOYMENT",
+            "CONTEST",
+            "STUDY"
+        }
+    )
+    @DisplayName("5.2.1 goal이 EMPLOYMENT·CONTEST·STUDY 중 하나면 201을 반환한다")
+    void createStudy_allowedGoal_returns201(String goal) throws Exception {
+        // given
+        given(studyCommandService.createStudy(eq(7L), any(), anyString())).willReturn(10L);
+
+        // when & then
+        mockMvc
+            .perform(
+                post("/api/v1/studies").contentType(MediaType.APPLICATION_JSON).content(body("LV2", goal, "EVENING"))
+            )
+            .andExpect(status().isCreated());
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "취업",
+            "employment",
+            "JOB"
+        }
+    )
+    @DisplayName("5.2.1 goal이 값 목록에 없으면 생성 서비스를 호출하지 않고 400 COMMON_INVALID_REQUEST를 반환한다")
+    void createStudy_disallowedGoal_returns400(String goal) throws Exception {
+        // when & then
+        mockMvc
+            .perform(
+                post("/api/v1/studies").contentType(MediaType.APPLICATION_JSON).content(body("LV2", goal, "EVENING"))
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value(CommonErrorCode.COMMON_INVALID_REQUEST.getCode()))
+            .andExpect(jsonPath("$.error.details[*].field").value(hasItem("goal")));
+        then(studyCommandService).should(never()).createStudy(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "MORNING",
+            "AFTERNOON",
+            "EVENING",
+            "NIGHT"
+        }
+    )
+    @DisplayName("5.2.1 activeTimeSlot이 MORNING·AFTERNOON·EVENING·NIGHT 중 하나면 201을 반환한다")
+    void createStudy_allowedActiveTimeSlot_returns201(String activeTimeSlot) throws Exception {
+        // given
+        given(studyCommandService.createStudy(eq(7L), any(), anyString())).willReturn(10L);
+
+        // when & then
+        mockMvc
+            .perform(
+                post("/api/v1/studies")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body("LV2", "EMPLOYMENT", activeTimeSlot))
+            )
+            .andExpect(status().isCreated());
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = {
+            "저녁",
+            "evening",
+            "DAWN"
+        }
+    )
+    @DisplayName("5.2.1 activeTimeSlot이 값 목록에 없으면 생성 서비스를 호출하지 않고 400 COMMON_INVALID_REQUEST를 반환한다")
+    void createStudy_disallowedActiveTimeSlot_returns400(String activeTimeSlot) throws Exception {
+        // when & then
+        mockMvc
+            .perform(
+                post("/api/v1/studies")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body("LV2", "EMPLOYMENT", activeTimeSlot))
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value(CommonErrorCode.COMMON_INVALID_REQUEST.getCode()))
+            .andExpect(jsonPath("$.error.details[*].field").value(hasItem("activeTimeSlot")));
+        then(studyCommandService).should(never()).createStudy(any(), any(), any());
+    }
+
     private static String bodyWithSkillLevel(String skillLevel) {
+        return body(skillLevel, "EMPLOYMENT", "EVENING");
+    }
+
+    private static String body(String skillLevel, String goal, String activeTimeSlot) {
         return """
             {
                 "name": "코딩테스트 스터디",
                 "description": "설명",
-                "goal": "EMPLOYMENT",
+                "goal": "%s",
                 "skillLevel": "%s",
                 "preferredLanguage": "java",
-                "activeTimeSlot": "EVENING",
+                "activeTimeSlot": "%s",
                 "capacity": 5,
                 "joinType": "INSTANT",
                 "isAutoReopen": false
-            }""".formatted(skillLevel);
+            }""".formatted(goal, skillLevel, activeTimeSlot);
     }
 }

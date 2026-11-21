@@ -142,7 +142,8 @@ class StudyMembershipQueryServiceTest {
             .willReturn(new PageImpl<>(List.of(memberPending)));
         given(memberReplicaRepository.findAllByMemberIdIn(any())).willReturn(List.of(replicaA));
         MemberLearningProfileReplica profile
-            = MemberLearningProfileReplica.sync(MEMBER_ID_A, "취업", "{\"JAVA\":\"LV2\"}", "[\"java\"]", null, 1L, NOW);
+            = MemberLearningProfileReplica
+                .sync(MEMBER_ID_A, "EMPLOYMENT", "{\"JAVA\":\"LV2\"}", "[\"java\"]", null, 1L, NOW);
         given(learningProfileReplicaRepository.findAllByMemberIdIn(any())).willReturn(List.of(profile));
 
         // when
@@ -154,7 +155,7 @@ class StudyMembershipQueryServiceTest {
         MembershipListItem item = result.getContent().get(0);
         assertThat(item.status()).isEqualTo("PENDING");
         assertThat(item.learningProfile()).isNotNull();
-        assertThat(item.learningProfile().goal()).isEqualTo("취업");
+        assertThat(item.learningProfile().goal()).isEqualTo("EMPLOYMENT");
         assertThat(item.learningProfile().tagLevels()).containsEntry("JAVA", "LV2");
         assertThat(item.learningProfile().preferredLanguages()).containsExactly("java");
         assertThat(item.joinedAt()).isNull();
@@ -229,7 +230,7 @@ class StudyMembershipQueryServiceTest {
             .willReturn(new PageImpl<>(List.of(memberPending)));
         given(memberReplicaRepository.findAllByMemberIdIn(any())).willReturn(List.of(replicaA));
         MemberLearningProfileReplica brokenProfile
-            = MemberLearningProfileReplica.sync(MEMBER_ID_A, "취업", "NOT_JSON", "ALSO_NOT", null, 1L, NOW);
+            = MemberLearningProfileReplica.sync(MEMBER_ID_A, "EMPLOYMENT", "NOT_JSON", "ALSO_NOT", null, 1L, NOW);
         given(learningProfileReplicaRepository.findAllByMemberIdIn(any())).willReturn(List.of(brokenProfile));
 
         // when
@@ -238,7 +239,7 @@ class StudyMembershipQueryServiceTest {
 
         // then
         assertThat(result.getContent()).hasSize(1);
-        assertThat(result.getContent().get(0).learningProfile().goal()).isEqualTo("취업");
+        assertThat(result.getContent().get(0).learningProfile().goal()).isEqualTo("EMPLOYMENT");
         assertThat(result.getContent().get(0).learningProfile().tagLevels()).isNull();
         assertThat(result.getContent().get(0).learningProfile().preferredLanguages()).isNull();
     }
