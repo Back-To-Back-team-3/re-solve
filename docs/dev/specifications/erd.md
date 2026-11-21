@@ -2592,8 +2592,8 @@ notification_withdrawn_members (1) ─ member_id                 -- 탈퇴 회�
 | `member_id` | BIGINT | Y |  |
 | `goal` | VARCHAR(30) | N | NULL 허용: 미입력 항목 |
 | `tag_levels_json` | JSON | N | NULL 허용: 진입한 태그 없음. `{태그 ID: 레벨}` (추천 점수 계산 입력, 검색 미사용) |
-| `preferred_languages_json` | JSON | N | NULL 허용: 미입력. `java` / `python3` / `cpp` 배열 |
-| `active_time_slots_json` | JSON | N | NULL 허용: 미입력. `MORNING` / `AFTERNOON` / `EVENING` / `NIGHT` 배열 |
+| `preferred_languages_json` | JSON | N | NULL 허용: 미입력. 값 배열 (값 목록은 API 명세서 1.3.2) |
+| `active_time_slots_json` | JSON | N | NULL 허용: 미입력. 값 배열 (값 목록은 API 명세서 1.3.2) |
 | `profile_version` | BIGINT | Y | 원천 프로필 순서 값. 작거나 같은 이벤트 무시 |
 | `synced_at` | DATETIME(6) | Y |  |
 | `created_at` | DATETIME(6) | Y |  |

@@ -8289,7 +8289,7 @@
       { "name": "코딩테스트 스터디", "description": "취업 준비 알고리즘 스터디", "goal": "EMPLOYMENT", "skillLevel": "LV2", "preferredLanguage": "java", "activeTimeSlot": "EVENING", "capacity": 10, "joinType": "APPROVAL", "isAutoReopen": true }
     ```
     
-    - `name` 1~200자, `description` 0~500자, `goal` `EMPLOYMENT` / `CONTEST` / `STUDY`, `activeTimeSlot` `MORNING` / `AFTERNOON` / `EVENING` / `NIGHT`(1.3.2 학습 프로필과 같은 값 목록), `skillLevel` `LV1` / `LV2` / `LV3`([정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준), `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
+    - `name` 1~200자, `description` 0~500자, `goal`·`activeTimeSlot`은 1.3.2 학습 프로필 저장과 같은 값 목록, `skillLevel` `LV1` / `LV2` / `LV3`([정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준), `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
 - **응답 (201):**
     
     ```json
@@ -8380,7 +8380,7 @@
     ```
     
     - `learningProfile`: `PENDING` 조회에서만 채운다. 복제본이 없으면 `null`. 단일 `skillLevel` 대신 태그별 레벨.
-    - `learningProfile.tagLevels`: 태그 ID를 키로, 레벨(`LV0`~`MASTER`)을 값으로 담는다. 태그 이름을 담지 않는 점은 1.3.1과 같다(화면은 2.5.1 태그 목록으로 이름을 붙인다).
+    - `learningProfile.tagLevels`: 태그 ID를 키로, 레벨을 값으로 담는다. 태그 이름을 담지 않는 점은 1.3.1과 같다(화면은 2.5.1 태그 목록으로 이름을 붙인다).
 - **에러:**
     - `STUDY_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403)
 
