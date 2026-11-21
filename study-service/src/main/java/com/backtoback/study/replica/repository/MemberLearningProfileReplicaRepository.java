@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -26,6 +27,15 @@ public interface MemberLearningProfileReplicaRepository extends JpaRepository<Me
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT m FROM MemberLearningProfileReplica m WHERE m.memberId = :memberId")
     Optional<MemberLearningProfileReplica> findByMemberIdForUpdate(@Param("memberId") Long memberId);
+
+    /**
+     * 학습 프로필 복제본이 있는 회원 ID를 {@code afterMemberId} 다음부터 오름차순으로 {@code limit}개 조회한다.
+     * 추천 갱신 스케줄러가 회원 유일 키로 청크를 나눠 순회한다(스케줄러 명세 5.4). 목록 조회이므로 잠그지 않는다(스케줄러 명세 0.1).
+     */
+    @Query(
+        "SELECT m.memberId FROM MemberLearningProfileReplica m WHERE m.memberId > :afterMemberId ORDER BY m.memberId"
+    )
+    List<Long> findMemberIdsAfter(@Param("afterMemberId") Long afterMemberId, Limit limit);
 
     @Modifying(clearAutomatically = true)
     @Query("DELETE FROM MemberLearningProfileReplica m WHERE m.memberId = :memberId")

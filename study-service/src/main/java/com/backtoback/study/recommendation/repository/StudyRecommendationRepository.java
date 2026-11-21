@@ -1,6 +1,8 @@
 package com.backtoback.study.recommendation.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -12,6 +14,13 @@ import com.backtoback.study.recommendation.domain.StudyRecommendation;
 public interface StudyRecommendationRepository extends JpaRepository<StudyRecommendation, Long> {
 
     List<StudyRecommendation> findAllByMemberId(Long memberId);
+
+    /**
+     * 회원 추천 결과의 마지막 계산 시각을 조회한다. 결과가 없으면 비어 있다.
+     * 한 번의 재계산으로 저장한 행은 계산 시각이 모두 같다(ERD 4.5.11 — 회원 단위 교체).
+     */
+    @Query("SELECT MAX(r.generatedAt) FROM StudyRecommendation r WHERE r.memberId = :memberId")
+    Optional<LocalDateTime> findLatestGeneratedAt(@Param("memberId") Long memberId);
 
     /**
      * 회원의 추천 결과를 모두 물리 삭제한다(ERD 4.5.11 — 파생 데이터라 물리 삭제 허용).
