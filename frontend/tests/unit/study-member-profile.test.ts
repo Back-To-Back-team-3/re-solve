@@ -28,4 +28,8 @@ describe("가입 신청자 태그 레벨 표시", () => {
   it("진입한 태그가 없으면 빈 문자열을 돌려준다", () => {
     expect(formatTagLevels({}, names)).toBe("");
   });
+
+  it("태그 레벨이 null이면 오류 없이 빈 문자열을 돌려준다", () => {
+    expect(formatTagLevels(null, names)).toBe("");
+  });
 });

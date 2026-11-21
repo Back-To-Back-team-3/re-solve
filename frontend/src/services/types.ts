@@ -626,7 +626,7 @@ export type StudyMemberItem = {
   expiresAt?: string | null;
   learningProfile?: {
     goal: GoalType;
-    tagLevels: Record<string, string>;
+    tagLevels: Record<string, string> | null;
     preferredLanguages: Language[];
   } | null;
 };

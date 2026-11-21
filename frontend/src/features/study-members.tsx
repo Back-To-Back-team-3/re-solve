@@ -155,8 +155,9 @@ export function MembersTab({
                     <b>{m.nickname}</b>
                     {m.learningProfile && (
                       <p className="muted">
-                        {goalLabel[m.learningProfile.goal]} ·{" "}
-                        {formatTagLevels(m.learningProfile.tagLevels, tagNames)}
+                        {[goalLabel[m.learningProfile.goal], formatTagLevels(m.learningProfile.tagLevels, tagNames)]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </p>
                     )}
                     {m.expiresAt && <p className="muted">만료 {m.expiresAt.slice(0, 10)}</p>}
