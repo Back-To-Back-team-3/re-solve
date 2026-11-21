@@ -78,7 +78,8 @@ public class StudyRecommendationService {
 
         Page<PersonalizedStudyRow> rows
             = studyRecommendationQueryRepository.findPersonalizedStudies(memberId, pageable);
-        if (rows.isEmpty()) {
+        // 요청한 페이지가 아니라 전체 결과가 비었을 때만 바꾼다. 마지막 페이지 뒤를 요청해도 모드가 바뀌지 않게 한다.
+        if (rows.getTotalElements() == 0) {
             return popular(memberId, false, pageable);
         }
         JavaType reasonsType = objectMapper.getTypeFactory().constructCollectionType(List.class, String.class);

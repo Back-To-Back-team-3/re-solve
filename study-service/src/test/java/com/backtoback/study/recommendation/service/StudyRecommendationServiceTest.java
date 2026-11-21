@@ -237,6 +237,26 @@ class StudyRecommendationServiceTest {
     }
 
     @Test
+    @DisplayName("개인화 결과가 있는 회원이 마지막 페이지 뒤를 요청하면 POPULAR로 바꾸지 않고 빈 PERSONALIZED 페이지를 반환한다")
+    void getRecommendations_pageBeyondPersonalizedResults_staysPersonalized() {
+        // given
+        Pageable secondPage = PageRequest.of(1, 20);
+        givenProfile(true);
+        givenGeneratedAt(NOW_LOCAL.minusHours(1));
+        given(studyRecommendationQueryRepository.findPersonalizedStudies(MEMBER_ID, secondPage))
+            .willReturn(new PageImpl<>(List.of(), secondPage, 1));
+
+        // when
+        StudyRecommendationPageResponse response = service.getRecommendations(MEMBER_ID, secondPage);
+
+        // then
+        assertThat(response.mode()).isEqualTo(RecommendationMode.PERSONALIZED);
+        assertThat(response.content()).isEmpty();
+        assertThat(response.totalElements()).isEqualTo(1);
+        then(studyRecommendationQueryRepository).should(never()).findPopularStudies(anyLong(), any(), any());
+    }
+
+    @Test
     @DisplayName("POPULAR 모드는 점수 없이 최근 활동 근거를 붙여 반환한다")
     void getRecommendations_popularRows_returnsPopularItems() {
         // given
