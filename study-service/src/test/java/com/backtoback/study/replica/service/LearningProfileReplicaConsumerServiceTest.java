@@ -26,6 +26,7 @@ import org.springframework.dao.DuplicateKeyException;
 
 import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
+import com.backtoback.study.recommendation.service.StudyRecommendationRefreshService;
 import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.domain.MemberStatus;
 import com.backtoback.study.replica.event.dto.LearningProfileUpdatedPayload;
@@ -54,6 +55,8 @@ class LearningProfileReplicaConsumerServiceTest {
     private MemberReplicaRepository memberReplicaRepository;
     @Mock
     private MemberLearningProfileReplicaRepository learningProfileReplicaRepository;
+    @Mock
+    private StudyRecommendationRefreshService recommendationRefreshService;
 
     private LearningProfileReplicaConsumerService service;
 
@@ -65,7 +68,8 @@ class LearningProfileReplicaConsumerServiceTest {
                 JsonMapper.builder().build(),
                 processedEventStore,
                 memberReplicaRepository,
-                learningProfileReplicaRepository
+                learningProfileReplicaRepository,
+                recommendationRefreshService
             );
     }
 
@@ -98,6 +102,7 @@ class LearningProfileReplicaConsumerServiceTest {
                 4L,
                 NOW_MICROS
             );
+        verify(recommendationRefreshService).refresh(MEMBER_ID);
     }
 
     @Test
@@ -172,6 +177,7 @@ class LearningProfileReplicaConsumerServiceTest {
         verify(processedEventStore).insert(any(EventMetadata.class), eq(NOW_MICROS));
         verify(learningProfileReplicaRepository, never())
             .upsertFromLearningProfileUpdated(anyLong(), any(), any(), any(), any(), anyLong(), any());
+        verify(recommendationRefreshService, never()).refresh(anyLong());
     }
 
     @Test
@@ -190,6 +196,7 @@ class LearningProfileReplicaConsumerServiceTest {
         verify(memberReplicaRepository, never()).findByMemberIdWithForShare(anyLong());
         verify(learningProfileReplicaRepository, never())
             .upsertFromLearningProfileUpdated(anyLong(), any(), any(), any(), any(), anyLong(), any());
+        verify(recommendationRefreshService, never()).refresh(anyLong());
     }
 
     @Test

@@ -118,4 +118,12 @@ public class MemberLearningProfileReplica extends BaseTimeEntity {
             syncedAt
         );
     }
+
+    /**
+     * 학습 프로필 입력(목표·선호 언어·활동 시간대 중 하나 이상)이 있는지 판단한다. 태그 레벨만 있는 상태는 입력으로 보지 않는다
+     * (정책 및 상태 8.2 스터디 추천 > 이용 조건). 빈 목록은 {@code null}로 저장된다(ERD 4.5.10).
+     */
+    public boolean hasProfileInput() {
+        return goal != null || preferredLanguagesJson != null || activeTimeSlotsJson != null;
+    }
 }
