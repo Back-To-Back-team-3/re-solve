@@ -24,6 +24,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
+import com.backtoback.study.recommendation.domain.StudyRecommendation;
+import com.backtoback.study.recommendation.repository.StudyRecommendationRepository;
 import com.backtoback.study.replica.domain.MemberLearningProfileReplica;
 import com.backtoback.study.replica.listener.SubmissionJudgedEventListener;
 import com.backtoback.study.replica.repository.MemberLearningProfileReplicaRepository;
@@ -56,6 +58,9 @@ class LearningProfileReplicaConsumerServiceIntegrationTest {
 
     @Autowired
     private MemberLearningProfileReplicaRepository repository;
+
+    @Autowired
+    private StudyRecommendationRepository recommendationRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -113,6 +118,30 @@ class LearningProfileReplicaConsumerServiceIntegrationTest {
         executor.shutdown();
         assertThat(repository.findAllByMemberIdIn(List.of(memberId))).isEmpty();
         assertThat(processedCount(eventId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("학습 프로필 이벤트를 소비하면 같은 트랜잭션에서 해당 회원 추천을 즉시 재계산해 저장한다")
+    void onMessage_profileUpdated_refreshesRecommendations() {
+        // given
+        long memberId = 9203L;
+        jdbcTemplate
+            .update(
+                "INSERT INTO studies (name, goal, skill_level, preferred_language, active_time_slot, capacity, "
+                    + "member_count, manager_count, join_type, is_auto_reopen, status, version, "
+                    + "created_at, updated_at) "
+                    + "VALUES ('즉시 재계산', 'EMPLOYMENT', 'LV2', 'java', 'EVENING', 10, 2, 0, 'APPROVAL', true, "
+                    + "'RECRUITING', 0, NOW(6), NOW(6))"
+            );
+        Long studyId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM studies", Long.class);
+
+        // when
+        listener.onMessage(message("6c1b2a39-4d5e-4f60-8a7b-9c0d1e2f3a4b", memberId));
+
+        // then
+        assertThat(recommendationRepository.findAllByMemberId(memberId))
+            .extracting(StudyRecommendation::getStudyId)
+            .containsExactly(studyId);
     }
 
     private void awaitBlockedInsert() throws InterruptedException {
