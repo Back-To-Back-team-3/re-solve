@@ -65,6 +65,7 @@ class MemberLearningProfileReplicaConcurrencyTest {
         CountDownLatch ready = new CountDownLatch(ATTEMPT_COUNT);
         CountDownLatch start = new CountDownLatch(1);
         ConcurrentLinkedQueue<Long> appliedVersions = new ConcurrentLinkedQueue<>();
+        ConcurrentLinkedQueue<Throwable> interrupted = new ConcurrentLinkedQueue<>();
         List<Future<?>> futures = new ArrayList<>();
         for (int i = 1; i <= ATTEMPT_COUNT; i++) {
             long version = i;
@@ -87,7 +88,9 @@ class MemberLearningProfileReplicaConcurrencyTest {
                         );
                     appliedVersions.add(version);
                 } catch (InterruptedException e) {
+                    // 시작 신호 전에 인터럽트되면 반영이 실행되지 않으므로 실패로 기록한다.
                     Thread.currentThread().interrupt();
+                    interrupted.add(e);
                 } catch (RuntimeException ignored) {
                     // 같은 키 동시 삽입의 교착 실패는 운영에서 SQS 재수신으로 다시 처리된다. 성공한 반영만 판정에 쓴다.
                 }
@@ -106,6 +109,7 @@ class MemberLearningProfileReplicaConcurrencyTest {
 
         List<MemberLearningProfileReplica> replicas = repository.findAllByMemberIdIn(List.of(MEMBER_ID));
         long highestApplied = appliedVersions.stream().mapToLong(Long::longValue).max().orElseThrow();
+        assertThat(interrupted).isEmpty();
         assertThat(replicas).hasSize(1);
         assertThat(replicas.get(0).getProfileVersion()).isEqualTo(highestApplied);
         assertThat(replicas.get(0).getGoal()).isEqualTo("GOAL_" + highestApplied);

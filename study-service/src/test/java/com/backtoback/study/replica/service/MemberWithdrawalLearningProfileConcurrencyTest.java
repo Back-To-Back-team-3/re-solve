@@ -130,7 +130,9 @@ class MemberWithdrawalLearningProfileConcurrencyTest {
                     start.await();
                     deliverWithRetry(task);
                 } catch (InterruptedException e) {
+                    // 시작 신호 전에 인터럽트되면 소비가 실행되지 않으므로 실패로 기록한다.
                     Thread.currentThread().interrupt();
+                    failures.add(e);
                 } catch (RuntimeException e) {
                     // 재시도까지 실패한 소비는 운영에서 DLQ로 갈 실패이므로 테스트 실패로 모은다.
                     failures.add(e);
