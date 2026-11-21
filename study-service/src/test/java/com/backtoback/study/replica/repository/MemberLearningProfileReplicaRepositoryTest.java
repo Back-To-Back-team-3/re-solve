@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.Limit;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +45,24 @@ class MemberLearningProfileReplicaRepositoryTest {
 
     @Autowired
     private MemberLearningProfileReplicaRepository repository;
+
+    @Test
+    @DisplayName("회원 ID 청크 조회는 기준 ID 다음부터 오름차순으로 개수만큼 반환한다")
+    void findMemberIdsAfter_returnsAscendingIdsAfterCursor() {
+        // given
+        for (long memberId : new long[] {
+            9L,
+            3L,
+            5L
+        }) {
+            repository.upsertFromLearningProfileUpdated(memberId, "EMPLOYMENT", null, null, null, 1L, SYNCED_AT);
+        }
+
+        // when & then
+        assertThat(repository.findMemberIdsAfter(0L, Limit.of(10))).containsExactly(3L, 5L, 9L);
+        assertThat(repository.findMemberIdsAfter(3L, Limit.of(1))).containsExactly(5L);
+        assertThat(repository.findMemberIdsAfter(9L, Limit.of(10))).isEmpty();
+    }
 
     @Test
     @DisplayName("복제본이 없는 회원의 학습 프로필 이벤트를 반영하면 복제본을 새로 만든다")
