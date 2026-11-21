@@ -16,10 +16,12 @@ import com.backtoback.study.hint.service.ExamStartedConsumerService;
 import com.backtoback.study.hint.service.HintBlockReplicaConsumerService;
 import com.backtoback.study.hint.service.HintReadyConsumerService;
 import com.backtoback.study.membership.service.MemberWithdrawnConsumerService;
+import com.backtoback.study.replica.event.dto.LearningProfileUpdatedPayload;
 import com.backtoback.study.replica.event.dto.MemberSuspendedPayload;
 import com.backtoback.study.replica.event.dto.MemberUpdatedPayload;
 import com.backtoback.study.replica.event.dto.MemberWithdrawnPayload;
 import com.backtoback.study.replica.event.dto.SubmissionJudgedPayload;
+import com.backtoback.study.replica.service.LearningProfileReplicaConsumerService;
 import com.backtoback.study.replica.service.MemberReplicaConsumerService;
 import com.backtoback.study.replica.service.SubmissionJudgedConsumerService;
 
@@ -56,6 +58,7 @@ public class SubmissionJudgedEventListener {
     private static final String DIAGNOSIS_STARTED_EVENT_TYPE = "DiagnosisStarted";
     private static final String EXAM_STARTED_EVENT_TYPE = "ExamStarted";
     private static final String DIAGNOSIS_CLOSED_EVENT_TYPE = "DiagnosisClosed";
+    private static final String LEARNING_PROFILE_UPDATED_EVENT_TYPE = "LearningProfileUpdated";
     private static final String MDC_CORRELATION_ID = "correlationId";
     private static final String MDC_EVENT_ID = "eventId";
     private static final String MDC_EVENT_TYPE = "eventType";
@@ -67,6 +70,7 @@ public class SubmissionJudgedEventListener {
     private final HintBlockReplicaConsumerService hintBlockReplicaConsumerService;
     private final HintReadyConsumerService hintReadyConsumerService;
     private final ExamStartedConsumerService examStartedConsumerService;
+    private final LearningProfileReplicaConsumerService learningProfileReplicaConsumerService;
 
     @SqsListener("${study.sqs.queue-name:study-queue}")
     public void onMessage(String messageBody) {
@@ -155,6 +159,12 @@ public class SubmissionJudgedEventListener {
                 return;
             }
 
+            if (LEARNING_PROFILE_UPDATED_EVENT_TYPE.equals(eventType)) {
+                LearningProfileUpdatedPayload event
+                    = objectMapper.treeToValue(payload, LearningProfileUpdatedPayload.class);
+                learningProfileReplicaConsumerService.consume(event);
+                return;
+            }
             if (HINT_READY_EVENT_TYPE.equals(eventType)) {
                 HintReadyConsumedPayload event = objectMapper.treeToValue(payload, HintReadyConsumedPayload.class);
                 hintReadyConsumerService.consume(event);

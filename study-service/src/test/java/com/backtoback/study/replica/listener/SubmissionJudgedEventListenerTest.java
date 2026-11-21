@@ -18,8 +18,10 @@ import com.backtoback.study.hint.service.ExamStartedConsumerService;
 import com.backtoback.study.hint.service.HintBlockReplicaConsumerService;
 import com.backtoback.study.hint.service.HintReadyConsumerService;
 import com.backtoback.study.membership.service.MemberWithdrawnConsumerService;
+import com.backtoback.study.replica.event.dto.LearningProfileUpdatedPayload;
 import com.backtoback.study.replica.event.dto.MemberSuspendedPayload;
 import com.backtoback.study.replica.event.dto.MemberUpdatedPayload;
+import com.backtoback.study.replica.service.LearningProfileReplicaConsumerService;
 import com.backtoback.study.replica.service.MemberReplicaConsumerService;
 import com.backtoback.study.replica.service.SubmissionJudgedConsumerService;
 
@@ -43,6 +45,8 @@ class SubmissionJudgedEventListenerTest {
     private HintReadyConsumerService hintReadyConsumerService;
     @Mock
     private ExamStartedConsumerService examStartedConsumerService;
+    @Mock
+    private LearningProfileReplicaConsumerService learningProfileReplicaConsumerService;
 
     private SubmissionJudgedEventListener listener;
 
@@ -56,7 +60,8 @@ class SubmissionJudgedEventListenerTest {
                 consumerService,
                 hintBlockReplicaConsumerService,
                 hintReadyConsumerService,
-                examStartedConsumerService
+                examStartedConsumerService,
+                learningProfileReplicaConsumerService
             );
     }
 
@@ -105,6 +110,34 @@ class SubmissionJudgedEventListenerTest {
         MemberSuspendedPayload payload = captor.getValue();
         assertThat(payload.suspended()).isTrue();
         assertThat(payload.sourceVersion()).isEqualTo(4L);
+        verify(consumerService, never()).consumeUnknown(anyString(), anyString(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("LearningProfileUpdated 메시지를 받으면 태그 레벨 배열까지 읽어 학습 프로필 소비로 넘기고 미지원 처리하지 않는다")
+    void onMessage_learningProfileUpdated_delegatesToLearningProfileConsumer() {
+        // given
+        String message = """
+            {"eventId":"8b3e4d5c-6f70-4b82-8c9d-1e2f3a4b5c6d","eventType":"LearningProfileUpdated","schemaVersion":"v1",
+             "occurredAt":"2026-11-21T10:00:00.123456+09:00","aggregateId":"7","correlationId":"corr-3",
+             "memberId":"7","profileVersion":4,"goal":"EMPLOYMENT","preferredLanguages":["java"],
+             "activeTimeSlots":["EVENING"],"tagLevels":[{"tagId":"3","level":"LV2"},{"tagId":"5","level":"LV1"}]}
+            """;
+
+        // when
+        listener.onMessage(message);
+
+        // then
+        ArgumentCaptor<LearningProfileUpdatedPayload> captor
+            = ArgumentCaptor.forClass(LearningProfileUpdatedPayload.class);
+        verify(learningProfileReplicaConsumerService).consume(captor.capture());
+        LearningProfileUpdatedPayload payload = captor.getValue();
+        assertThat(payload.memberId()).isEqualTo("7");
+        assertThat(payload.profileVersion()).isEqualTo(4L);
+        assertThat(payload.goal()).isEqualTo("EMPLOYMENT");
+        assertThat(payload.tagLevels()).hasSize(2);
+        assertThat(payload.tagLevels().get(0).tagId()).isEqualTo("3");
+        assertThat(payload.tagLevels().get(0).level()).isEqualTo("LV2");
         verify(consumerService, never()).consumeUnknown(anyString(), anyString(), any(), any(), any());
     }
 }

@@ -97,6 +97,6 @@ public class MemberWithdrawnConsumerService {
 
         memberReplicaRepository.upsertWithdrawn(memberId, payload.sourceVersion(), leftAt);
 
-        // TODO(#추천이슈): study_recommendations 삭제 — 추천 기능 구현 시 처리
+        // TODO(#476): study_recommendations 삭제
     }
 }
