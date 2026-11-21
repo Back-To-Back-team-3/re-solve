@@ -3,13 +3,14 @@ package com.backtoback.study.replica.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
-import java.util.ArrayList;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -34,9 +36,13 @@ import com.backtoback.study.replica.repository.MemberLearningProfileReplicaRepos
 @Testcontainers(disabledWithoutDocker = true)
 class LearningProfileReplicaConsumerServiceIntegrationTest {
 
+    private static final Duration WAIT_TIMEOUT = Duration.ofSeconds(30);
+
+    // 다른 연결의 실행 중 쿼리(information_schema.PROCESSLIST)를 보려면 PROCESS 권한이 필요해 root로 접속한다.
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("study_db");
+    static final MySQLContainer MYSQL
+        = new MySQLContainer("mysql:8.4").withDatabaseName("study_db").withUsername("root").withPassword("test");
 
     @DynamicPropertySource
     static void infrastructureProperties(DynamicPropertyRegistry registry) {
@@ -54,6 +60,9 @@ class LearningProfileReplicaConsumerServiceIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
     @Test
     @DisplayName("이미 커밋된 학습 프로필 이벤트를 다시 받으면 예외 없이 성공 처리하고 복제본과 소비 기록은 한 번만 남는다")
     void onMessage_sameEventTwice_secondSucceedsWithoutChange() {
@@ -65,60 +74,79 @@ class LearningProfileReplicaConsumerServiceIntegrationTest {
 
         // when & then
         assertThatCode(() -> listener.onMessage(message)).doesNotThrowAnyException();
-        assertSingleReplicaAndRecord(eventId, memberId);
-    }
-
-    @Test
-    @DisplayName("같은 학습 프로필 이벤트를 동시에 두 번 받아도 둘 다 성공 처리하고 복제본과 소비 기록은 한 번만 남는다")
-    void onMessage_sameEventConcurrently_bothSucceed() throws InterruptedException {
-        // given
-        String eventId = "7d2c3b4a-5e6f-4a70-8b9c-0d1e2f3a4b5c";
-        long memberId = 9202L;
-        String message = message(eventId, memberId);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        CountDownLatch ready = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
-        ConcurrentLinkedQueue<Throwable> failures = new ConcurrentLinkedQueue<>();
-        List<Future<?>> futures = new ArrayList<>();
-
-        // when
-        for (int i = 0; i < 2; i++) {
-            futures.add(executor.submit(() -> {
-                ready.countDown();
-                try {
-                    start.await();
-                    listener.onMessage(message);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } catch (RuntimeException e) {
-                    failures.add(e);
-                }
-            }));
-        }
-        ready.await();
-        start.countDown();
-        for (Future<?> future : futures) {
-            try {
-                future.get();
-            } catch (Exception e) {
-                failures.add(e);
-            }
-        }
-        executor.shutdown();
-
-        // then
-        assertThat(failures).isEmpty();
-        assertSingleReplicaAndRecord(eventId, memberId);
-    }
-
-    private void assertSingleReplicaAndRecord(String eventId, long memberId) {
         List<MemberLearningProfileReplica> replicas = repository.findAllByMemberIdIn(List.of(memberId));
         assertThat(replicas).hasSize(1);
         assertThat(replicas.get(0).getProfileVersion()).isEqualTo(1L);
-        Integer processed
-            = jdbcTemplate
-                .queryForObject("SELECT COUNT(*) FROM processed_events WHERE event_id = ?", Integer.class, eventId);
-        assertThat(processed).isEqualTo(1);
+        assertThat(processedCount(eventId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("다른 트랜잭션이 같은 소비 기록을 커밋하기 전에 INSERT가 충돌하면 대기 후 롤백하고 커밋된 기록을 확인해 성공 처리한다")
+    void onMessage_insertCollidesWithUncommittedRecord_succeedsAfterCommit() throws Exception {
+        // given — 같은 이벤트를 먼저 처리 중인 트랜잭션: 소비 기록만 INSERT하고 커밋을 멈춘다
+        String eventId = "7d2c3b4a-5e6f-4a70-8b9c-0d1e2f3a4b5c";
+        long memberId = 9202L;
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch recordInserted = new CountDownLatch(1);
+        CountDownLatch releaseCommit = new CountDownLatch(1);
+        Future<?> firstDelivery = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate
+                .update(
+                    "INSERT INTO processed_events (event_id, event_type, processed_at, created_at) "
+                        + "VALUES (?, 'LearningProfileUpdated', NOW(6), NOW(6))",
+                    eventId
+                );
+            recordInserted.countDown();
+            awaitUninterruptibly(releaseCommit);
+        }));
+        assertThat(recordInserted.await(WAIT_TIMEOUT.toSeconds(), TimeUnit.SECONDS)).isTrue();
+
+        // when — 두 번째 수신의 INSERT가 커밋되지 않은 같은 키에서 멈춘 것을 확인한 뒤 앞 트랜잭션을 커밋한다
+        Future<?> secondDelivery = executor.submit(() -> listener.onMessage(message(eventId, memberId)));
+        awaitBlockedInsert();
+        assertThat(secondDelivery.isDone()).isFalse();
+        releaseCommit.countDown();
+        firstDelivery.get(WAIT_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+
+        // then — 충돌한 수신은 예외 없이 끝나고, 업무 반영은 롤백되어 복제본이 생기지 않는다
+        assertThatCode(() -> secondDelivery.get(WAIT_TIMEOUT.toSeconds(), TimeUnit.SECONDS)).doesNotThrowAnyException();
+        executor.shutdown();
+        assertThat(repository.findAllByMemberIdIn(List.of(memberId))).isEmpty();
+        assertThat(processedCount(eventId)).isEqualTo(1);
+    }
+
+    private void awaitBlockedInsert() throws InterruptedException {
+        Instant deadline = Instant.now().plus(WAIT_TIMEOUT);
+        while (Instant.now().isBefore(deadline)) {
+            Integer executing
+                = jdbcTemplate
+                    .queryForObject(
+                        "SELECT COUNT(*) FROM information_schema.PROCESSLIST "
+                            + "WHERE COMMAND = 'Query' AND INFO LIKE 'insert into processed_events%'",
+                        Integer.class
+                    );
+            if (executing != null && executing > 0) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("두 번째 수신의 소비 기록 INSERT가 실행 중 상태로 확인되지 않았다");
+    }
+
+    private static void awaitUninterruptibly(CountDownLatch latch) {
+        try {
+            if (!latch.await(WAIT_TIMEOUT.toSeconds(), TimeUnit.SECONDS)) {
+                throw new IllegalStateException("커밋 해제 신호를 받지 못했다");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("커밋 대기 중 인터럽트됐다", e);
+        }
+    }
+
+    private Integer processedCount(String eventId) {
+        return jdbcTemplate
+            .queryForObject("SELECT COUNT(*) FROM processed_events WHERE event_id = ?", Integer.class, eventId);
     }
 
     private static String message(String eventId, long memberId) {
