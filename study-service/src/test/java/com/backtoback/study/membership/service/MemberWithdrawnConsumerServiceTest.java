@@ -35,6 +35,7 @@ import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.StudyMembership;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
+import com.backtoback.study.recommendation.repository.StudyRecommendationRepository;
 import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.event.dto.MemberWithdrawnPayload;
 import com.backtoback.study.replica.repository.MemberLearningProfileReplicaRepository;
@@ -65,6 +66,8 @@ class MemberWithdrawnConsumerServiceTest {
     private MemberLearningProfileReplicaRepository learningProfileReplicaRepository;
     @Mock
     private HintBlockReplicaRepository hintBlockReplicaRepository;
+    @Mock
+    private StudyRecommendationRepository studyRecommendationRepository;
 
     @InjectMocks
     private MemberWithdrawnConsumerService service;
@@ -100,6 +103,7 @@ class MemberWithdrawnConsumerServiceTest {
         verify(historyRepository).save(any());
         verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
         verify(hintBlockReplicaRepository).deleteByMemberId(MEMBER_ID);
+        verify(studyRecommendationRepository).deleteAllByMemberId(MEMBER_ID);
         verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(10L), any(LocalDateTime.class));
     }
 
@@ -123,11 +127,12 @@ class MemberWithdrawnConsumerServiceTest {
         verify(historyRepository, never()).save(any());
         verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
         verify(hintBlockReplicaRepository).deleteByMemberId(MEMBER_ID);
+        verify(studyRecommendationRepository).deleteAllByMemberId(MEMBER_ID);
         verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(5L), any(LocalDateTime.class));
     }
 
     @Test
-    @DisplayName("탈퇴를 처리하면 회원 복제본을 먼저 탈퇴로 바꾼 뒤 가입 정리와 학습 프로필 복제본 삭제를 한다")
+    @DisplayName("탈퇴를 처리하면 회원 복제본을 먼저 탈퇴로 바꾼 뒤 가입 정리, 학습 프로필 복제본 삭제, 추천 결과 삭제 순으로 처리한다")
     void consume_withdrawn_locksMemberReplicaBeforeDeletingProfile() {
         // given
         MemberWithdrawnPayload payload = payload(5L);
@@ -141,10 +146,17 @@ class MemberWithdrawnConsumerServiceTest {
         service.consume(payload);
 
         // then
-        InOrder order = inOrder(memberReplicaRepository, membershipRepository, learningProfileReplicaRepository);
+        InOrder order
+            = inOrder(
+                memberReplicaRepository,
+                membershipRepository,
+                learningProfileReplicaRepository,
+                studyRecommendationRepository
+            );
         order.verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(5L), any(LocalDateTime.class));
         order.verify(membershipRepository).findAllByMemberIdAndStatus(MEMBER_ID, MembershipStatus.APPROVED);
         order.verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
+        order.verify(studyRecommendationRepository).deleteAllByMemberId(MEMBER_ID);
     }
 
     @Test
