@@ -69,6 +69,10 @@ public class MemberWithdrawnConsumerService {
                 .toLocalDateTime()
                 .truncatedTo(ChronoUnit.MICROS);
 
+        // 회원 복제본 행을 먼저 탈퇴로 바꿔 잠근다. 학습 프로필 소비가 같은 행을 잠금 조회하므로, 프로필 복제본 삭제 뒤에
+        // 프로필 소비가 행을 다시 만들지 못한다. 두 경로 모두 회원 행 → 프로필 행 순서로 잠가 교착을 피한다.
+        memberReplicaRepository.upsertWithdrawn(memberId, payload.sourceVersion(), leftAt);
+
         membershipRepository
             .findAllByMemberIdAndStatus(memberId, MembershipStatus.APPROVED)
             .forEach(
@@ -95,8 +99,6 @@ public class MemberWithdrawnConsumerService {
 
         learningProfileReplicaRepository.deleteByMemberId(memberId);
         hintBlockReplicaRepository.deleteByMemberId(memberId);
-
-        memberReplicaRepository.upsertWithdrawn(memberId, payload.sourceVersion(), leftAt);
 
         // TODO(#476): study_recommendations 삭제
     }

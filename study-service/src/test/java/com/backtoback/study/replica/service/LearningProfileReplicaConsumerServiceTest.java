@@ -72,7 +72,7 @@ class LearningProfileReplicaConsumerServiceTest {
     @DisplayName("학습 프로필 이벤트를 처리하면 소비 기록 후 태그 레벨을 tagId 맵으로 바꿔 복제본 교체를 요청한다")
     void consume_validPayload_upsertsWithTagIdMap() {
         // given
-        given(memberReplicaRepository.findByMemberId(MEMBER_ID)).willReturn(Optional.empty());
+        given(memberReplicaRepository.findByMemberIdWithForShare(MEMBER_ID)).willReturn(Optional.empty());
 
         // when
         service
@@ -103,7 +103,7 @@ class LearningProfileReplicaConsumerServiceTest {
     @DisplayName("학습 목표가 없고 목록이 비어 있으면 미입력으로 보고 null로 교체를 요청한다")
     void consume_nullGoalAndEmptyLists_upsertsNulls() {
         // given
-        given(memberReplicaRepository.findByMemberId(MEMBER_ID)).willReturn(Optional.empty());
+        given(memberReplicaRepository.findByMemberIdWithForShare(MEMBER_ID)).willReturn(Optional.empty());
 
         // when
         service.consume(payload(null, List.of(), List.of(), List.of()));
@@ -117,7 +117,7 @@ class LearningProfileReplicaConsumerServiceTest {
     @DisplayName("같은 태그 ID가 두 번 오면 마지막 레벨로 교체를 요청한다")
     void consume_duplicateTagId_usesLatestLevel() {
         // given
-        given(memberReplicaRepository.findByMemberId(MEMBER_ID)).willReturn(Optional.empty());
+        given(memberReplicaRepository.findByMemberIdWithForShare(MEMBER_ID)).willReturn(Optional.empty());
 
         // when
         service
@@ -147,7 +147,7 @@ class LearningProfileReplicaConsumerServiceTest {
     @DisplayName("활동 중인 회원의 학습 프로필 이벤트는 복제본 교체를 요청한다")
     void consume_activeMember_upserts() {
         // given
-        given(memberReplicaRepository.findByMemberId(MEMBER_ID))
+        given(memberReplicaRepository.findByMemberIdWithForShare(MEMBER_ID))
             .willReturn(Optional.of(MemberReplica.sync(MEMBER_ID, "닉네임", null, MemberStatus.ACTIVE, 5L, NOW_MICROS)));
 
         // when
@@ -170,7 +170,7 @@ class LearningProfileReplicaConsumerServiceTest {
     @DisplayName("탈퇴한 회원의 학습 프로필 이벤트는 소비 기록만 남기고 복제본에 반영하지 않는다")
     void consume_withdrawnMember_skips() {
         // given
-        given(memberReplicaRepository.findByMemberId(MEMBER_ID))
+        given(memberReplicaRepository.findByMemberIdWithForShare(MEMBER_ID))
             .willReturn(
                 Optional.of(MemberReplica.sync(MEMBER_ID, "탈퇴회원", null, MemberStatus.WITHDRAWN, 9L, NOW_MICROS))
             );
@@ -194,7 +194,7 @@ class LearningProfileReplicaConsumerServiceTest {
         service.consume(payload("EMPLOYMENT", List.of("java"), List.of("EVENING"), List.of()));
 
         // then
-        verify(memberReplicaRepository, never()).findByMemberId(anyLong());
+        verify(memberReplicaRepository, never()).findByMemberIdWithForShare(anyLong());
         verify(learningProfileReplicaRepository, never())
             .upsertFromLearningProfileUpdated(anyLong(), any(), any(), any(), any(), anyLong(), any());
     }

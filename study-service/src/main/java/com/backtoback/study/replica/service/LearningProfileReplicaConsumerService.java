@@ -60,9 +60,10 @@ public class LearningProfileReplicaConsumerService {
         Long memberId = payload.memberIdAsLong();
 
         // 탈퇴 시 복제본을 물리 삭제하므로 늦게 도착한 이벤트가 행을 되살리지 않게 회원 복제본 상태로 거른다(정책 및 상태 §9.4).
+        // 탈퇴 소비와 같은 회원 복제본 행을 잠금 조회해 둘 중 먼저 커밋한 쪽의 결과를 보고 진행한다.
         boolean withdrawn
             = memberReplicaRepository
-                .findByMemberId(memberId)
+                .findByMemberIdWithForShare(memberId)
                 .map(replica -> replica.getMemberStatus() == MemberStatus.WITHDRAWN)
                 .orElse(false);
         if (withdrawn) {

@@ -3,6 +3,7 @@ package com.backtoback.study.membership.service;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -17,6 +18,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -118,6 +120,27 @@ class MemberWithdrawnConsumerServiceTest {
         verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
         verify(hintBlockReplicaRepository).deleteByMemberId(MEMBER_ID);
         verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(5L), any(LocalDateTime.class));
+    }
+
+    @Test
+    @DisplayName("탈퇴를 처리하면 회원 복제본을 먼저 탈퇴로 바꾼 뒤 가입 정리와 학습 프로필 복제본 삭제를 한다")
+    void consume_withdrawn_locksMemberReplicaBeforeDeletingProfile() {
+        // given
+        MemberWithdrawnPayload payload = payload(5L);
+        given(memberReplicaRepository.findByMemberId(MEMBER_ID)).willReturn(Optional.empty());
+        given(membershipRepository.findAllByMemberIdAndStatus(MEMBER_ID, MembershipStatus.APPROVED))
+            .willReturn(List.of());
+        given(membershipRepository.findAllByMemberIdAndStatus(MEMBER_ID, MembershipStatus.PENDING))
+            .willReturn(List.of());
+
+        // when
+        service.consume(payload);
+
+        // then
+        InOrder order = inOrder(memberReplicaRepository, membershipRepository, learningProfileReplicaRepository);
+        order.verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(5L), any(LocalDateTime.class));
+        order.verify(membershipRepository).findAllByMemberIdAndStatus(MEMBER_ID, MembershipStatus.APPROVED);
+        order.verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
     }
 
     @Test

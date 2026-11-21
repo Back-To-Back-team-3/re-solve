@@ -212,4 +212,18 @@ class MemberReplicaRepositoryTest {
         assertThat(updated).isZero();
         assertThat(repository.findByMemberId(MEMBER_ID)).isEmpty();
     }
+
+    @Test
+    @DisplayName("회원 복제본을 FOR SHARE로 조회하면 커밋된 상태를 읽고 없으면 빈 값을 돌려준다")
+    void findByMemberIdWithForShare_returnsCurrentStatus() {
+        // given
+        repository.upsertWithdrawn(MEMBER_ID, 3L, SYNCED_AT);
+
+        // when & then
+        assertThat(repository.findByMemberIdWithForShare(MEMBER_ID))
+            .get()
+            .extracting(MemberReplica::getMemberStatus)
+            .isEqualTo(MemberStatus.WITHDRAWN);
+        assertThat(repository.findByMemberIdWithForShare(MEMBER_ID + 1)).isEmpty();
+    }
 }
