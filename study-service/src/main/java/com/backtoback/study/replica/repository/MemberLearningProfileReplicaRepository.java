@@ -3,17 +3,29 @@ package com.backtoback.study.replica.repository;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.backtoback.study.replica.domain.MemberLearningProfileReplica;
 
+import jakarta.persistence.LockModeType;
+
 public interface MemberLearningProfileReplicaRepository extends JpaRepository<MemberLearningProfileReplica, Long> {
 
     List<MemberLearningProfileReplica> findAllByMemberIdIn(Collection<Long> memberIds);
+
+    /**
+     * 회원의 학습 프로필 복제본을 {@code FOR UPDATE}로 조회한다. 같은 회원의 추천 재계산을 이 행 잠금으로 직렬화한다
+     * (스케줄러 명세 5.4 경합 시나리오 — 회원 단위 교체 트랜잭션, 나중 커밋이 최종).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT m FROM MemberLearningProfileReplica m WHERE m.memberId = :memberId")
+    Optional<MemberLearningProfileReplica> findByMemberIdForUpdate(@Param("memberId") Long memberId);
 
     @Modifying(clearAutomatically = true)
     @Query("DELETE FROM MemberLearningProfileReplica m WHERE m.memberId = :memberId")

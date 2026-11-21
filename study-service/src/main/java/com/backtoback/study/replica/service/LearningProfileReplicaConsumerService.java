@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
+import com.backtoback.study.recommendation.service.StudyRecommendationRefreshService;
 import com.backtoback.study.replica.domain.MemberStatus;
 import com.backtoback.study.replica.event.dto.LearningProfileUpdatedPayload;
 import com.backtoback.study.replica.event.dto.LearningProfileUpdatedPayload.TagLevel;
@@ -36,10 +37,12 @@ public class LearningProfileReplicaConsumerService {
     private final JdbcProcessedEventStore processedEventStore;
     private final MemberReplicaRepository memberReplicaRepository;
     private final MemberLearningProfileReplicaRepository learningProfileReplicaRepository;
+    private final StudyRecommendationRefreshService recommendationRefreshService;
 
     /**
      * 학습 프로필 스냅샷을 복제본에 반영한다. 같은 이벤트는 한 번만 처리하고, 순서 값이 같거나 낮은 이벤트는
      * 저장소 조건부 쿼리가 무시한다. 탈퇴한 회원의 이벤트는 소비 기록만 남긴다.
+     * 반영 후 같은 트랜잭션에서 해당 회원 추천을 다시 계산한다(event-contract.md §M4 소비자 처리).
      * 태그 레벨은 {@code {tagId: level}} 맵으로, 빈 목록은 미입력({@code null})으로 저장한다(ERD 4.5.10).
      *
      * @throws RuntimeException 페이로드가 계약과 다를 때(검증 실패는 {@code IllegalArgumentException}, 헤더 형식 오류는
@@ -81,6 +84,10 @@ public class LearningProfileReplicaConsumerService {
                 payload.profileVersion(),
                 now()
             );
+
+        // 조건부 교체는 반영 여부를 돌려주지 않으므로(useAffectedRows=false) 순서 값이 낮아 무시된 이벤트에도 다시 계산한다.
+        // 같은 복제본으로 계산하면 결과가 같아 멱등하다.
+        recommendationRefreshService.refresh(memberId);
     }
 
     private String toTagLevelsJson(List<TagLevel> tagLevels) {

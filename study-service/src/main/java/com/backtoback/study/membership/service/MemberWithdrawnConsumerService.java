@@ -16,6 +16,7 @@ import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.StudyMembershipHistory;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
+import com.backtoback.study.recommendation.repository.StudyRecommendationRepository;
 import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.event.dto.MemberWithdrawnPayload;
 import com.backtoback.study.replica.repository.MemberLearningProfileReplicaRepository;
@@ -41,6 +42,7 @@ public class MemberWithdrawnConsumerService {
     private final MemberReplicaRepository memberReplicaRepository;
     private final MemberLearningProfileReplicaRepository learningProfileReplicaRepository;
     private final HintBlockReplicaRepository hintBlockReplicaRepository;
+    private final StudyRecommendationRepository studyRecommendationRepository;
 
     @Transactional
     public void consume(MemberWithdrawnPayload payload) {
@@ -92,7 +94,8 @@ public class MemberWithdrawnConsumerService {
 
         learningProfileReplicaRepository.deleteByMemberId(memberId);
         hintBlockReplicaRepository.deleteByMemberId(memberId);
-
-        // TODO(#476): study_recommendations 삭제
+        // 추천 결과는 파생 데이터라 물리 삭제한다(정책 및 상태 §9.4 회원 탈퇴 전파, ERD 4.5.11). 재계산과 같은 순서
+        // (회원 행 → 학습 프로필 행 → 추천 행)로 잠가 교착을 피한다.
+        studyRecommendationRepository.deleteAllByMemberId(memberId);
     }
 }

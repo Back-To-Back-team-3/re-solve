@@ -1,6 +1,7 @@
 package com.backtoback.study.recommendation.repository;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -64,4 +65,27 @@ public interface StudyRecommendationQueryRepository extends Repository<Study, Lo
         @Param("since") LocalDateTime since,
         Pageable pageable
     );
+
+    /**
+     * 규칙 기반 추천 점수 계산 대상을 조회한다. 대상 조건은 콜드 스타트와 같다(정책 및 상태 §8.2 스터디 추천 > 추천 대상).
+     * 점수 계산·정렬·건수 제한은 호출하는 쪽이 한다.
+     *
+     * @param memberId 추천받는 회원 ID. 이 회원의 {@code PENDING}·{@code APPROVED} 가입이 있는 스터디는 제외한다.
+     */
+    @Query(
+        value = """
+            SELECT s.id AS studyId, s.goal AS goal, s.skill_level AS skillLevel,
+                   s.preferred_language AS preferredLanguage, s.active_time_slot AS activeTimeSlot,
+                   s.last_activity_at AS lastActivityAt
+            FROM studies s
+            WHERE s.status = 'RECRUITING'
+              AND s.member_count < s.capacity
+              AND NOT EXISTS (
+                  SELECT 1 FROM study_memberships m
+                  WHERE m.study_id = s.id AND m.member_id = :memberId AND m.status IN ('PENDING', 'APPROVED')
+              )
+            """,
+        nativeQuery = true
+    )
+    List<RecommendationCandidateRow> findRecommendationCandidates(@Param("memberId") Long memberId);
 }
