@@ -11,7 +11,6 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.study.replica.domain.MemberStatus;
 import com.backtoback.study.replica.event.dto.LearningProfileUpdatedPayload;
@@ -49,13 +48,7 @@ public class LearningProfileReplicaConsumerService {
     @Transactional
     public void consume(LearningProfileUpdatedPayload payload) {
         // 소비 기록을 첫 문장으로 남긴다. 이후 예외로 롤백되면 기록도 함께 롤백되어 재수신 때 다시 처리한다(event-contract.md §5.1).
-        EventMetadata metadata = payload.toMetadata();
-        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
-        if (processedEventStore.exists(metadata.eventId())) {
-            log.warn("LearningProfileUpdated 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
-        processedEventStore.insert(metadata, now());
+        processedEventStore.insert(payload.toMetadata(), now());
         payload.validate();
         Long memberId = payload.memberIdAsLong();
 

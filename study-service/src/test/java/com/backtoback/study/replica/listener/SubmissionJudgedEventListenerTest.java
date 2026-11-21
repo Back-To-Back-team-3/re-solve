@@ -1,10 +1,16 @@
 package com.backtoback.study.replica.listener;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+
+import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -13,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
 import com.backtoback.study.hint.service.ExamStartedConsumerService;
 import com.backtoback.study.hint.service.HintBlockReplicaConsumerService;
@@ -33,6 +40,8 @@ import tools.jackson.databind.json.JsonMapper;
 @ExtendWith(MockitoExtension.class)
 class SubmissionJudgedEventListenerTest {
 
+    private static final String LEARNING_PROFILE_EVENT_ID = "9c4f5e6d-7081-4c93-9dae-2f3a4b5c6d7e";
+
     @Mock
     private MemberWithdrawnConsumerService memberWithdrawnConsumerService;
     @Mock
@@ -47,6 +56,8 @@ class SubmissionJudgedEventListenerTest {
     private ExamStartedConsumerService examStartedConsumerService;
     @Mock
     private LearningProfileReplicaConsumerService learningProfileReplicaConsumerService;
+    @Mock
+    private CommittedEventChecker committedEventChecker;
 
     private SubmissionJudgedEventListener listener;
 
@@ -61,7 +72,8 @@ class SubmissionJudgedEventListenerTest {
                 hintBlockReplicaConsumerService,
                 hintReadyConsumerService,
                 examStartedConsumerService,
-                learningProfileReplicaConsumerService
+                learningProfileReplicaConsumerService,
+                committedEventChecker
             );
     }
 
@@ -139,5 +151,41 @@ class SubmissionJudgedEventListenerTest {
         assertThat(payload.tagLevels().get(0).tagId()).isEqualTo("3");
         assertThat(payload.tagLevels().get(0).level()).isEqualTo("LV2");
         verify(consumerService, never()).consumeUnknown(anyString(), anyString(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("소비 기록 INSERT가 중복이고 같은 이벤트 기록이 커밋돼 있으면 예외 없이 성공 처리한다")
+    void onMessage_duplicateAlreadyCommitted_succeeds() {
+        // given
+        willThrow(new DuplicateKeyException("duplicate"))
+            .given(learningProfileReplicaConsumerService)
+            .consume(any(LearningProfileUpdatedPayload.class));
+        given(committedEventChecker.isCommitted(UUID.fromString(LEARNING_PROFILE_EVENT_ID))).willReturn(true);
+
+        // when & then
+        assertThatCode(() -> listener.onMessage(learningProfileMessage())).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("유일 제약 위반인데 같은 이벤트 기록이 커밋돼 있지 않으면 재수신되도록 예외를 다시 던진다")
+    void onMessage_duplicateNotCommitted_rethrows() {
+        // given
+        willThrow(new DuplicateKeyException("business unique"))
+            .given(learningProfileReplicaConsumerService)
+            .consume(any(LearningProfileUpdatedPayload.class));
+        given(committedEventChecker.isCommitted(UUID.fromString(LEARNING_PROFILE_EVENT_ID))).willReturn(false);
+
+        // when & then
+        assertThatThrownBy(() -> listener.onMessage(learningProfileMessage()))
+            .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    private static String learningProfileMessage() {
+        return """
+            {"eventId":"%s","eventType":"LearningProfileUpdated","schemaVersion":"v1",
+             "occurredAt":"2026-11-21T10:00:00.123456+09:00","aggregateId":"7","correlationId":"corr-4",
+             "memberId":"7","profileVersion":4,"goal":"EMPLOYMENT","preferredLanguages":["java"],
+             "activeTimeSlots":["EVENING"],"tagLevels":[]}
+            """.formatted(LEARNING_PROFILE_EVENT_ID);
     }
 }

@@ -43,13 +43,7 @@ public class SubmissionJudgedConsumerService {
 
     @Transactional
     public void consume(SubmissionJudgedPayload payload) {
-        EventMetadata metadata = payload.toMetadata();
-        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
-        if (processedEventStore.exists(metadata.eventId())) {
-            log.warn("SubmissionJudged 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
-        processedEventStore.insert(metadata, LocalDateTime.now(clock));
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         boolean shouldRecalculate = applyAcReplica(payload);
         if (!shouldRecalculate) {
@@ -83,11 +77,6 @@ public class SubmissionJudgedConsumerService {
         String corrId = (rawCorrelationId != null && !rawCorrelationId.isBlank()) ? rawCorrelationId : "anonymous";
         EventMetadata metadata
             = new EventMetadata(UUID.fromString(rawEventId), rawEventType, "v1", odt, rawAggregateId, corrId);
-        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
-        if (processedEventStore.exists(metadata.eventId())) {
-            log.warn("미지원 이벤트 중복 수신 무시 eventId={} eventType={}", rawEventId, rawEventType);
-            return;
-        }
         processedEventStore.insert(metadata, LocalDateTime.now(clock));
     }
 

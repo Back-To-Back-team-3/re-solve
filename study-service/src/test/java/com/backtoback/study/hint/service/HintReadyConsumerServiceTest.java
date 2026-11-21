@@ -1,10 +1,12 @@
 package com.backtoback.study.hint.service;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -19,7 +21,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
+import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.study.hint.domain.HintRequestStatus;
@@ -157,14 +161,16 @@ class HintReadyConsumerServiceTest {
     }
 
     @Test
-    @DisplayName("이미 처리된 eventId를 수신하면 상태 갱신과 Outbox 발행 없이 무시한다")
+    @DisplayName("소비 기록 INSERT가 중복이면 상태 갱신과 Outbox 발행 없이 중복 예외를 전파한다")
     void consume_duplicateEventId_skipsUpdateAndOutbox() {
         // given
         HintReadyConsumedPayload payload = payload("READY", true);
-        given(processedEventStore.exists(any(UUID.class))).willReturn(true);
+        willThrow(new DuplicateKeyException("duplicate"))
+            .given(processedEventStore)
+            .insert(any(EventMetadata.class), any(LocalDateTime.class));
 
-        // when
-        service.consume(payload);
+        // when & then
+        assertThatThrownBy(() -> service.consume(payload)).isInstanceOf(DuplicateKeyException.class);
 
         // then
         verify(hintRequestRepository, never())

@@ -1,6 +1,9 @@
 package com.backtoback.study.replica.listener;
 
+import java.util.UUID;
+
 import org.slf4j.MDC;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 
 import com.backtoback.study.hint.event.dto.ContestTerminatedPayload;
@@ -34,7 +37,8 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * SQS {@code study-queue}의 이벤트를 {@code eventType}별 소비 서비스에 위임한다
  * (event-contract.md §1.4 소비 규칙, §5 서비스별 구독 매트릭스).
- * 처리 대상이 아닌 이벤트는 소비 기록만 남기고 성공 처리한다. 클래스 이름은 최초 구독 이벤트 기준으로 유지한다.
+ * 처리 대상이 아닌 이벤트는 소비 기록만 남기고 성공 처리한다. 이미 처리한 이벤트는 소비 트랜잭션을 롤백한 뒤
+ * 커밋된 소비 기록을 확인해 성공 처리한다(메시지 삭제). 클래스 이름은 최초 구독 이벤트 기준으로 유지한다.
  */
 @Slf4j
 @Component
@@ -71,6 +75,7 @@ public class SubmissionJudgedEventListener {
     private final HintReadyConsumerService hintReadyConsumerService;
     private final ExamStartedConsumerService examStartedConsumerService;
     private final LearningProfileReplicaConsumerService learningProfileReplicaConsumerService;
+    private final CommittedEventChecker committedEventChecker;
 
     @SqsListener("${study.sqs.queue-name:study-queue}")
     public void onMessage(String messageBody) {
@@ -187,6 +192,13 @@ public class SubmissionJudgedEventListener {
 
             SubmissionJudgedPayload event = objectMapper.treeToValue(payload, SubmissionJudgedPayload.class);
             consumerService.consume(event);
+        } catch (DuplicateKeyException duplicate) {
+            // 소비 기록 INSERT가 유일 제약에 걸리면 소비 트랜잭션은 이미 롤백됐다. 같은 이벤트의 기록이 커밋돼 있으면
+            // 중복 수신이므로 성공 처리하고, 없으면 업무 테이블의 유일 제약 위반이므로 재수신되게 다시 던진다(event-contract.md §1.4).
+            if (eventId == null || !committedEventChecker.isCommitted(UUID.fromString(eventId))) {
+                throw duplicate;
+            }
+            log.warn("이미 처리한 이벤트 중복 수신 무시 eventId={} eventType={}", eventId, eventType);
         } finally {
             MDC.remove(MDC_EVENT_ID);
             MDC.remove(MDC_EVENT_TYPE);

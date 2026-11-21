@@ -10,7 +10,6 @@ import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.common.time.ClockConfiguration;
@@ -49,13 +48,7 @@ public class ExamStartedConsumerService {
 
     @Transactional
     public void consume(ExamStartedPayload payload) {
-        EventMetadata metadata = payload.toMetadata();
-        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
-        if (processedEventStore.exists(metadata.eventId())) {
-            log.warn("ExamStarted 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
-        processedEventStore.insert(metadata, LocalDateTime.now(clock));
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         Long examId = Long.parseLong(payload.examId());
         LocalDateTime completedAt = toLocalDateTime(payload.startsAt());
