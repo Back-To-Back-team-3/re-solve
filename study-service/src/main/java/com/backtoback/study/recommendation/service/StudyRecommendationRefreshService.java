@@ -24,8 +24,8 @@ import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 회원 한 명의 규칙 기반 추천 결과를 다시 계산해 저장한다. 학습 프로필 변경 소비·추천 갱신 스케줄러·조회 시 재계산이
- * 모두 이 진입점을 쓴다(스케줄러 명세 5.4). 추천 조회 응답은 만들지 않는다.
+ * 회원 한 명의 규칙 기반 추천 결과를 다시 계산해 저장하는 회원 단위 재계산 진입점이다(스케줄러 명세 5.4 처리·추가 트리거).
+ * 추천 조회 응답은 만들지 않는다.
  */
 @Service
 @RequiredArgsConstructor
