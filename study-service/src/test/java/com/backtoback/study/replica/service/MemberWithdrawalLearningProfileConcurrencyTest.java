@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +25,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 import com.backtoback.study.membership.service.MemberWithdrawnConsumerService;
+import com.backtoback.study.replica.domain.MemberStatus;
 import com.backtoback.study.replica.event.dto.LearningProfileUpdatedPayload;
 import com.backtoback.study.replica.event.dto.LearningProfileUpdatedPayload.TagLevel;
 import com.backtoback.study.replica.event.dto.MemberWithdrawnPayload;
@@ -50,7 +52,11 @@ class MemberWithdrawalLearningProfileConcurrencyTest {
 
     @Container
     @SuppressWarnings("resource")
-    static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4").withDatabaseName("study_db");
+    // 운영 기본값이 READ COMMITTED여도 보호되는지 확인하려고 서버 격리 수준을 READ COMMITTED로 둔다.
+    static final MySQLContainer MYSQL
+        = new MySQLContainer("mysql:8.4")
+            .withDatabaseName("study_db")
+            .withCommand("--transaction-isolation=READ-COMMITTED");
 
     @DynamicPropertySource
     static void infrastructureProperties(DynamicPropertyRegistry registry) {
@@ -74,8 +80,10 @@ class MemberWithdrawalLearningProfileConcurrencyTest {
     @Autowired
     private TransactionTemplate transactionTemplate;
 
+    private final ConcurrentLinkedQueue<Throwable> failures = new ConcurrentLinkedQueue<>();
+
     @Test
-    @DisplayName("탈퇴 이벤트와 학습 프로필 이벤트를 동시에 소비해도 탈퇴 회원의 학습 프로필 복제본이 남지 않는다")
+    @DisplayName("서버 격리 수준이 READ COMMITTED여도 탈퇴·학습 프로필 이벤트 동시 소비가 모두 성공하고 탈퇴 회원의 학습 프로필 복제본이 남지 않는다")
     void consume_withdrawalAndProfileConcurrently_leavesNoProfileReplica() throws InterruptedException {
         List<Long> memberIds = new ArrayList<>();
         for (int round = 0; round < ROUNDS; round++) {
@@ -103,7 +111,11 @@ class MemberWithdrawalLearningProfileConcurrencyTest {
             );
         }
 
+        assertThat(failures).isEmpty();
         assertThat(learningProfileReplicaRepository.findAllByMemberIdIn(memberIds)).isEmpty();
+        assertThat(memberReplicaRepository.findAllByMemberIdIn(memberIds))
+            .hasSize(ROUNDS)
+            .allSatisfy(replica -> assertThat(replica.getMemberStatus()).isEqualTo(MemberStatus.WITHDRAWN));
     }
 
     private void runConcurrently(Runnable first, Runnable second) throws InterruptedException {
@@ -119,6 +131,9 @@ class MemberWithdrawalLearningProfileConcurrencyTest {
                     deliverWithRetry(task);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
+                } catch (RuntimeException e) {
+                    // 재시도까지 실패한 소비는 운영에서 DLQ로 갈 실패이므로 테스트 실패로 모은다.
+                    failures.add(e);
                 }
             }));
         }
@@ -127,8 +142,8 @@ class MemberWithdrawalLearningProfileConcurrencyTest {
         for (Future<?> future : futures) {
             try {
                 future.get();
-            } catch (Exception ignored) {
-                // 결과는 마지막 복제본 상태로 판정한다
+            } catch (Exception e) {
+                failures.add(e);
             }
         }
         executor.shutdown();

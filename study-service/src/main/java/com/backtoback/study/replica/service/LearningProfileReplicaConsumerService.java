@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
@@ -45,7 +46,9 @@ public class LearningProfileReplicaConsumerService {
      * @throws RuntimeException 페이로드가 계약과 다를 때(검증 실패는 {@code IllegalArgumentException}, 헤더 형식 오류는
      *     페이로드의 {@code toMetadata()} 참고). 롤백 후 재수신을 거쳐 DLQ로 격리된다.
      */
-    @Transactional
+    // 회원 복제본이 아직 없을 때 탈퇴 반영과의 직렬화는 FOR SHARE의 갭 잠금에 기대므로, 갭 잠금이 없는
+    // READ COMMITTED로 운영 기본값이 바뀌어도 보호되도록 격리 수준을 고정한다.
+    @Transactional(isolation = Isolation.REPEATABLE_READ)
     public void consume(LearningProfileUpdatedPayload payload) {
         // 소비 기록을 첫 문장으로 남긴다. 이후 예외로 롤백되면 기록도 함께 롤백되어 재수신 때 다시 처리한다(event-contract.md §5.1).
         processedEventStore.insert(payload.toMetadata(), now());
