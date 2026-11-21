@@ -8273,6 +8273,7 @@
     ```
     
     - `mode`: `PERSONALIZED` / `POPULAR`. `POPULAR`이면 `score`는 `null`, `reasons`는 `["최근 활동이 많은 스터디"]`
+    - `reasons`(`PERSONALIZED`): `목표 일치`, `태그 레벨 비슷함`(태그 레벨 차이 0·1), `선호 언어 같음`, `활동 시간대 겹침` 중 해당하는 문구를 이 순서로 담는다([정책 및 상태 > 8.2 스터디 추천](../planning/policy-and-state.md#82-스터디-추천) > 1차 방식).
     - `isProfileRequired`: 학습 프로필이 없으면 `true` (화면에서 프로필 입력 안내). 프로필이 없어도 오류를 반환하지 않는다.
 
 ### 5.2 외부 API — 스터디 생성·가입
