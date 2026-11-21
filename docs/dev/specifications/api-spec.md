@@ -8289,7 +8289,7 @@
       { "name": "코딩테스트 스터디", "description": "취업 준비 알고리즘 스터디", "goal": "EMPLOYMENT", "skillLevel": "LV2", "preferredLanguage": "java", "activeTimeSlot": "EVENING", "capacity": 10, "joinType": "APPROVAL", "isAutoReopen": true }
     ```
     
-    - `name` 1~200자, `description` 0~500자, `skillLevel` `LV1` / `LV2` / `LV3`([정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준), `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
+    - `name` 1~200자, `description` 0~500자, `goal` `EMPLOYMENT` / `CONTEST` / `STUDY`, `activeTimeSlot` `MORNING` / `AFTERNOON` / `EVENING` / `NIGHT`(1.3.2 학습 프로필과 같은 값 목록), `skillLevel` `LV1` / `LV2` / `LV3`([정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준), `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
 - **응답 (201):**
     
     ```json
@@ -8297,7 +8297,7 @@
     ```
     
 - **에러:**
-    - `COMMON_INVALID_REQUEST`(400, 필수값 누락·길이 초과, `skillLevel`이 `LV1`~`LV3`이 아님), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+    - `COMMON_INVALID_REQUEST`(400, 필수값 누락·길이 초과, `goal`·`activeTimeSlot`이 값 목록에 없음, `skillLevel`이 `LV1`~`LV3`이 아님), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **동시성/멱등 보장:**
     - 트랜잭션 순서 = ① `study_member_quotas` 조건부 UPDATE(`active_count < 5`) ② `studies` INSERT(`member_count = 1`) ③ `study_memberships` INSERT(`LEADER`, `APPROVED`) ④ 이력 INSERT ⑤ `outbox_events` INSERT. ①이 0행이면 전체 롤백.
 - **발행:**
@@ -8371,7 +8371,7 @@
         "data": {
           "content": [
             { "membershipId": "55", "memberId": "7", "nickname": "user7", "role": "MEMBER", "status": "PENDING",
-              "learningProfile": { "goal": "EMPLOYMENT", "tagLevels": { "해시": "LV2", "그래프": "LV1" }, "preferredLanguages": ["java"] },
+              "learningProfile": { "goal": "EMPLOYMENT", "tagLevels": { "3": "LV2", "5": "LV1" }, "preferredLanguages": ["java"] },
               "appliedAt": "2026-09-28T09:00:00+09:00", "expiresAt": "2026-10-05T09:00:00+09:00", "joinedAt": null }
           ],
           "page": 0, "size": 20, "totalElements": 3, "totalPages": 1, "hasNext": false
@@ -8380,6 +8380,7 @@
     ```
     
     - `learningProfile`: `PENDING` 조회에서만 채운다. 복제본이 없으면 `null`. 단일 `skillLevel` 대신 태그별 레벨.
+    - `learningProfile.tagLevels`: 태그 ID를 키로, 레벨(`LV0`~`MASTER`)을 값으로 담는다. 태그 이름은 담지 않는다(1.3.1과 같음, 화면은 2.5.1 태그 목록으로 이름을 붙인다).
 - **에러:**
     - `STUDY_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403)
 
