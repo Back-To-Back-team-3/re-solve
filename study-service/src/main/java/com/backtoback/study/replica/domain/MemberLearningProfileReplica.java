@@ -16,9 +16,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 학습 프로필 복제본(ERD 4.5.10 member_learning_profile_replicas). {@code LearningProfileUpdated}
- * 이벤트로 유지하며, 반영 조건({@code profileVersion} 비교)은 이벤트 소비 기능 Issue에서 구현한다.
- * {@code goal}과 JSON 컬럼 3종은 값 체계가 아직 미확정이라(정책 및 상태 미결정 사항) {@code String}으로 원문을 저장한다.
+ * 학습 프로필 복제본(ERD 4.5.10 member_learning_profile_replicas). {@code LearningProfileUpdated} 이벤트로 유지하며,
+ * 반영과 {@code profileVersion} 비교는 저장소의 조건부 교체 쿼리가 맡는다.
+ * {@code tagLevelsJson}은 {@code {tagId: level}} 맵, 나머지 JSON 컬럼은 값 배열이다. 값 목록은 member가 소유해
+ * study는 검사하지 않고 원문 {@code String}으로 저장한다(event-contract.md §M4).
  */
 @Getter
 @Entity
@@ -96,7 +97,7 @@ public class MemberLearningProfileReplica extends BaseTimeEntity {
     }
 
     /**
-     * 회원 1명의 학습 프로필 복제본을 만든다. 지연 이벤트 덮어쓰기 방지 비교는 이벤트 소비 기능에서 처리한다(ERD 4.5.10).
+     * 회원 1명의 학습 프로필 복제본을 만든다. 순서 값 비교를 하지 않으므로 이벤트 반영에는 저장소의 조건부 교체 쿼리를 쓴다(ERD 4.5.10).
      */
     public static MemberLearningProfileReplica sync(
         Long memberId,

@@ -4,7 +4,6 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,12 +39,7 @@ public class MemberReplicaConsumerService {
     @Transactional
     public void consumeUpdated(MemberUpdatedPayload payload) {
         // 소비 기록을 첫 문장으로 남긴다. 이후 예외로 롤백되면 기록도 함께 롤백되어 재수신 때 다시 처리한다(event-contract.md §5.1).
-        try {
-            processedEventStore.insert(payload.toMetadata(), now());
-        } catch (DuplicateKeyException e) {
-            log.warn("MemberUpdated 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), now());
 
         payload.validate();
         Long memberId = payload.memberIdAsLong();
@@ -78,12 +72,7 @@ public class MemberReplicaConsumerService {
      */
     @Transactional
     public void consumeSuspended(MemberSuspendedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), now());
-        } catch (DuplicateKeyException e) {
-            log.warn("MemberSuspended 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), now());
 
         payload.validate();
         Long memberId = payload.memberIdAsLong();

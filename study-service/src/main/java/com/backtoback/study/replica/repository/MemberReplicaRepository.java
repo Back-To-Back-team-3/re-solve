@@ -6,15 +6,26 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.backtoback.study.replica.domain.MemberReplica;
 
+import jakarta.persistence.LockModeType;
+
 public interface MemberReplicaRepository extends JpaRepository<MemberReplica, Long> {
 
     Optional<MemberReplica> findByMemberId(Long memberId);
+
+    /**
+     * 회원 복제본을 FOR SHARE로 조회해 REPEATABLE READ 스냅샷이 아닌 최신 커밋 상태를 읽는다.
+     * 행이 없어도 같은 회원 키에 잠금이 걸려, 탈퇴 반영({@link #upsertWithdrawn})의 행 삽입·갱신이 이 트랜잭션 커밋을 기다린다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("SELECT m FROM MemberReplica m WHERE m.memberId = :memberId")
+    Optional<MemberReplica> findByMemberIdWithForShare(@Param("memberId") Long memberId);
 
     List<MemberReplica> findAllByMemberIdIn(Collection<Long> memberIds);
 

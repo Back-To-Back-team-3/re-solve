@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,12 +43,7 @@ public class SubmissionJudgedConsumerService {
 
     @Transactional
     public void consume(SubmissionJudgedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("SubmissionJudged 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         boolean shouldRecalculate = applyAcReplica(payload);
         if (!shouldRecalculate) {
@@ -83,11 +77,7 @@ public class SubmissionJudgedConsumerService {
         String corrId = (rawCorrelationId != null && !rawCorrelationId.isBlank()) ? rawCorrelationId : "anonymous";
         EventMetadata metadata
             = new EventMetadata(UUID.fromString(rawEventId), rawEventType, "v1", odt, rawAggregateId, corrId);
-        try {
-            processedEventStore.insert(metadata, LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("미지원 이벤트 중복 수신 무시 eventId={} eventType={}", rawEventId, rawEventType);
-        }
+        processedEventStore.insert(metadata, LocalDateTime.now(clock));
     }
 
     private boolean applyAcReplica(SubmissionJudgedPayload payload) {

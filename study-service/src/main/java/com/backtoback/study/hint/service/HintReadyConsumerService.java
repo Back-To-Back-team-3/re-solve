@@ -6,7 +6,6 @@ import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 
 import org.slf4j.MDC;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,12 +45,7 @@ public class HintReadyConsumerService {
      */
     @Transactional
     public void consume(HintReadyConsumedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("HintReady 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         Long hintRequestId = Long.parseLong(payload.hintRequestId());
         HintRequestStatus newStatus = HintRequestStatus.valueOf(payload.result());
