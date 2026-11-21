@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -25,9 +24,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DuplicateKeyException;
 
-import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.study.assignment.domain.AssignmentMemberStatus;
 import com.backtoback.study.assignment.domain.AssignmentProblemStatus;
@@ -72,9 +69,7 @@ class SubmissionJudgedConsumerServiceTest {
     void consume_duplicateEventId_skipsRecalculation() {
         // given
         SubmissionJudgedPayload payload = payload("AC", 1);
-        willThrow(new DuplicateKeyException("중복"))
-            .given(processedEventStore)
-            .insert(any(EventMetadata.class), any(LocalDateTime.class));
+        given(processedEventStore.exists(any(UUID.class))).willReturn(true);
 
         // when
         service.consume(payload);

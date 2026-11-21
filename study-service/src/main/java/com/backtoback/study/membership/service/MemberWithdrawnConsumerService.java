@@ -6,10 +6,10 @@ import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.hint.repository.HintBlockReplicaRepository;
@@ -45,12 +45,13 @@ public class MemberWithdrawnConsumerService {
 
     @Transactional
     public void consume(MemberWithdrawnPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
+        EventMetadata metadata = payload.toMetadata();
+        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
+        if (processedEventStore.exists(metadata.eventId())) {
             log.warn("MemberWithdrawn 중복 수신 무시 eventId={}", payload.eventId());
             return;
         }
+        processedEventStore.insert(metadata, LocalDateTime.now(clock));
 
         Long memberId = Long.parseLong(payload.memberId());
 

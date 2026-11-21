@@ -5,10 +5,10 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.common.time.ClockConfiguration;
 import com.backtoback.study.hint.domain.HintBlockContextType;
@@ -39,12 +39,13 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeParticipantRegistered(ParticipantRegisteredPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
+        EventMetadata metadata = payload.toMetadata();
+        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
+        if (processedEventStore.exists(metadata.eventId())) {
             log.warn("{} 중복 수신 무시 eventId={}", payload.eventType(), payload.eventId());
             return;
         }
+        processedEventStore.insert(metadata, LocalDateTime.now(clock));
 
         HintBlockContextType contextType = HintBlockContextType.valueOf(payload.context());
         Long contextId = Long.parseLong(payload.contextId());
@@ -72,12 +73,13 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeParticipantCanceled(ParticipantCanceledPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
+        EventMetadata metadata = payload.toMetadata();
+        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
+        if (processedEventStore.exists(metadata.eventId())) {
             log.warn("{} 중복 수신 무시 eventId={}", payload.eventType(), payload.eventId());
             return;
         }
+        processedEventStore.insert(metadata, LocalDateTime.now(clock));
 
         HintBlockContextType contextType = HintBlockContextType.valueOf(payload.context());
         Long contextId = Long.parseLong(payload.contextId());
@@ -87,12 +89,13 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeExamUpdated(ExamUpdatedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
+        EventMetadata metadata = payload.toMetadata();
+        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
+        if (processedEventStore.exists(metadata.eventId())) {
             log.warn("ExamUpdated 중복 수신 무시 eventId={}", payload.eventId());
             return;
         }
+        processedEventStore.insert(metadata, LocalDateTime.now(clock));
 
         Long examId = Long.parseLong(payload.examId());
         int incomingRevision = Integer.parseInt(payload.examRevision());
@@ -135,12 +138,13 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeExamTerminated(ExamTerminatedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
+        EventMetadata metadata = payload.toMetadata();
+        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
+        if (processedEventStore.exists(metadata.eventId())) {
             log.warn("{} 중복 수신 무시 eventId={}", payload.eventType(), payload.eventId());
             return;
         }
+        processedEventStore.insert(metadata, LocalDateTime.now(clock));
 
         hintBlockReplicaRepository
             .deleteByContextTypeAndContextId(HintBlockContextType.EXAM, Long.parseLong(payload.examId()));
@@ -148,12 +152,13 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeContestTerminated(ContestTerminatedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
+        EventMetadata metadata = payload.toMetadata();
+        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
+        if (processedEventStore.exists(metadata.eventId())) {
             log.warn("{} 중복 수신 무시 eventId={}", payload.eventType(), payload.eventId());
             return;
         }
+        processedEventStore.insert(metadata, LocalDateTime.now(clock));
 
         hintBlockReplicaRepository
             .deleteByContextTypeAndContextId(HintBlockContextType.CONTEST, Long.parseLong(payload.contestId()));
@@ -161,12 +166,13 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeDiagnosisStarted(DiagnosisStartedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
+        EventMetadata metadata = payload.toMetadata();
+        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
+        if (processedEventStore.exists(metadata.eventId())) {
             log.warn("DiagnosisStarted 중복 수신 무시 eventId={}", payload.eventId());
             return;
         }
+        processedEventStore.insert(metadata, LocalDateTime.now(clock));
 
         Long diagnosisAttemptId = Long.parseLong(payload.diagnosisAttemptId());
         Long memberId = Long.parseLong(payload.memberId());
@@ -192,12 +198,13 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeDiagnosisClosed(DiagnosisClosedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
+        EventMetadata metadata = payload.toMetadata();
+        // INSERT 중복을 잡고 계속하면 트랜잭션이 rollback-only가 되므로 커밋된 소비 기록으로 먼저 확인한다(event-contract.md §1.4).
+        if (processedEventStore.exists(metadata.eventId())) {
             log.warn("DiagnosisClosed 중복 수신 무시 eventId={}", payload.eventId());
             return;
         }
+        processedEventStore.insert(metadata, LocalDateTime.now(clock));
 
         hintBlockReplicaRepository
             .deleteByContextTypeAndContextId(

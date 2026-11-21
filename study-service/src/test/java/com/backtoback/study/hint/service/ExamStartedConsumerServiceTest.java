@@ -4,7 +4,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,9 +20,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DuplicateKeyException;
 
-import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.service.OutboxEventWriter;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
 import com.backtoback.study.hint.domain.HintBlockContextType;
@@ -159,9 +156,7 @@ class ExamStartedConsumerServiceTest {
     void consume_duplicateEventId_skipsAllProcessing() {
         // given
         ExamStartedPayload payload = payload();
-        willThrow(new DuplicateKeyException("중복"))
-            .given(processedEventStore)
-            .insert(any(EventMetadata.class), any(LocalDateTime.class));
+        given(processedEventStore.exists(any(UUID.class))).willReturn(true);
 
         // when
         service.consume(payload);

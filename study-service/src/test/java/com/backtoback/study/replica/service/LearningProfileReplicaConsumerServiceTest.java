@@ -5,7 +5,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -15,6 +14,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DuplicateKeyException;
 
 import com.backtoback.common.event.dto.EventMetadata;
 import com.backtoback.common.event.store.JdbcProcessedEventStore;
@@ -189,9 +188,7 @@ class LearningProfileReplicaConsumerServiceTest {
     @DisplayName("이미 처리한 학습 프로필 이벤트는 복제본에 반영하지 않는다")
     void consume_duplicateEventId_skips() {
         // given
-        willThrow(new DuplicateKeyException("duplicate"))
-            .given(processedEventStore)
-            .insert(any(EventMetadata.class), any(LocalDateTime.class));
+        given(processedEventStore.exists(any(UUID.class))).willReturn(true);
 
         // when
         service.consume(payload("EMPLOYMENT", List.of("java"), List.of("EVENING"), List.of()));
