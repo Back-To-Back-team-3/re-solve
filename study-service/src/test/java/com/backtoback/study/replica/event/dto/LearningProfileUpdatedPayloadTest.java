@@ -102,6 +102,22 @@ class LearningProfileUpdatedPayloadTest {
     }
 
     @Test
+    @DisplayName("같은 태그 ID가 두 번 오면 검증에서 예외가 발생한다")
+    void validate_duplicateTagId_throws() {
+        LearningProfileUpdatedPayload payload
+            = payload(
+                "7",
+                1L,
+                "EMPLOYMENT",
+                List.of("java"),
+                List.of("EVENING"),
+                List.of(new TagLevel("3", "LV1"), new TagLevel("3", "LV2"))
+            );
+
+        assertThatThrownBy(payload::validate).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @DisplayName("correlationId가 없으면 anonymous로 대체한 소비 메타데이터를 만든다")
     void toMetadata_nullCorrelationId_usesAnonymous() {
         LearningProfileUpdatedPayload payload

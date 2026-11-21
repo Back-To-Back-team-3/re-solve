@@ -6,7 +6,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -88,13 +87,9 @@ public class LearningProfileReplicaConsumerService {
         if (tagLevels.isEmpty()) {
             return null;
         }
-        // 계약상 tagId는 중복되지 않지만, 중복이 와도 DLQ로 보내지 않고 마지막 값을 쓴다.
-        Map<String, String> levelByTagId
-            = tagLevels
-                .stream()
-                .collect(
-                    Collectors.toMap(TagLevel::tagId, TagLevel::level, (previous, latest) -> latest, LinkedHashMap::new)
-                );
+        // 중복 태그 ID는 validate()가 거부한다. 입력 순서를 유지해 저장한다.
+        Map<String, String> levelByTagId = new LinkedHashMap<>();
+        tagLevels.forEach(tagLevel -> levelByTagId.put(tagLevel.tagId(), tagLevel.level()));
         return objectMapper.writeValueAsString(levelByTagId);
     }
 

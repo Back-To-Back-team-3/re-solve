@@ -1,7 +1,9 @@
 package com.backtoback.study.replica.event.dto;
 
 import java.time.OffsetDateTime;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import com.backtoback.common.event.dto.EventMetadata;
@@ -62,7 +64,7 @@ public record LearningProfileUpdatedPayload(
      * 복제본에 반영하기 전에 필수 필드와 형식이 계약과 컬럼 제약을 지키는지 검사한다.
      * {@code goal}은 프로필 미입력이면 없을 수 있어 허용한다(event-contract.md §M4 goal 필수 N).
      *
-     * @throws IllegalArgumentException 필수값 누락·형식·길이가 계약과 다를 때
+     * @throws IllegalArgumentException 필수값 누락·형식·길이·태그 ID 중복이 계약과 다를 때
      */
     public void validate() {
         if (memberId == null || !memberId.matches("[0-9]+")) {
@@ -79,9 +81,14 @@ public record LearningProfileUpdatedPayload(
                 "LearningProfileUpdated preferredLanguages, activeTimeSlots and tagLevels are required"
             );
         }
+        // 진입한 태그 전체를 태그당 하나씩 보내는 스냅샷이라 같은 태그 ID가 두 번 오면 계약 위반이다(event-contract.md §M4 tagLevels).
+        Set<String> tagIds = new HashSet<>();
         for (TagLevel tagLevel : tagLevels) {
             if (tagLevel == null || isBlank(tagLevel.tagId()) || isBlank(tagLevel.level())) {
                 throw new IllegalArgumentException("LearningProfileUpdated tagLevels entry requires tagId and level");
+            }
+            if (!tagIds.add(tagLevel.tagId())) {
+                throw new IllegalArgumentException("LearningProfileUpdated tagLevels has a duplicate tagId");
             }
         }
     }

@@ -115,33 +115,22 @@ class LearningProfileReplicaConsumerServiceTest {
     }
 
     @Test
-    @DisplayName("같은 태그 ID가 두 번 오면 마지막 레벨로 교체를 요청한다")
-    void consume_duplicateTagId_usesLatestLevel() {
-        // given
-        given(memberReplicaRepository.findByMemberIdWithForShare(MEMBER_ID)).willReturn(Optional.empty());
-
-        // when
-        service
-            .consume(
-                payload(
-                    "STUDY",
-                    List.of("cpp"),
-                    List.of("NIGHT"),
-                    List.of(new TagLevel("3", "LV1"), new TagLevel("3", "LV2"))
+    @DisplayName("같은 태그 ID가 두 번 오는 계약 위반 이벤트는 예외를 던지고 복제본에 반영하지 않는다")
+    void consume_duplicateTagId_throws() {
+        // when & then
+        assertThatThrownBy(
+            () -> service
+                .consume(
+                    payload(
+                        "STUDY",
+                        List.of("cpp"),
+                        List.of("NIGHT"),
+                        List.of(new TagLevel("3", "LV1"), new TagLevel("3", "LV2"))
+                    )
                 )
-            );
-
-        // then
-        verify(learningProfileReplicaRepository)
-            .upsertFromLearningProfileUpdated(
-                MEMBER_ID,
-                "STUDY",
-                "{\"3\":\"LV2\"}",
-                "[\"cpp\"]",
-                "[\"NIGHT\"]",
-                4L,
-                NOW_MICROS
-            );
+        ).isInstanceOf(IllegalArgumentException.class);
+        verify(learningProfileReplicaRepository, never())
+            .upsertFromLearningProfileUpdated(anyLong(), any(), any(), any(), any(), anyLong(), any());
     }
 
     @Test
