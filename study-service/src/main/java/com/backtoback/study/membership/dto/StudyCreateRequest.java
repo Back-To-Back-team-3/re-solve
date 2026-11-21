@@ -12,7 +12,7 @@ import jakarta.validation.constraints.Size;
 /**
  * 스터디 생성 요청 바디 (API 명세서 §5.2.1 요청 바디).
  * {@code skillLevel}은 {@code LV1}~{@code LV3}만 받는다(정책 및 상태 §7.1 허용 수준).
- * {@code goal}·{@code activeTimeSlot}은 학습 프로필과 같은 값 목록만 받는다(API 명세서 §5.1.1, §1.3.2 학습 프로필 저장).
+ * {@code goal}·{@code activeTimeSlot}은 학습 프로필과 같은 값 목록만 받는다(API 명세서 §5.2.1, §1.3.2 학습 프로필 저장).
  * 추천의 목표 일치·시간대 비교가 같은 값 체계를 전제로 한다.
  */
 public record StudyCreateRequest(

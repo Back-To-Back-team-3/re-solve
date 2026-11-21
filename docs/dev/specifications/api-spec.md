@@ -8380,7 +8380,7 @@
     ```
     
     - `learningProfile`: `PENDING` 조회에서만 채운다. 복제본이 없으면 `null`. 단일 `skillLevel` 대신 태그별 레벨.
-    - `learningProfile.tagLevels`: 태그 ID를 키로, 레벨(`LV0`~`MASTER`)을 값으로 담는다. 태그 이름은 담지 않는다(1.3.1과 같음, 화면은 2.5.1 태그 목록으로 이름을 붙인다).
+    - `learningProfile.tagLevels`: 태그 ID를 키로, 레벨(`LV0`~`MASTER`)을 값으로 담는다. 태그 이름을 담지 않는 점은 1.3.1과 같다(화면은 2.5.1 태그 목록으로 이름을 붙인다).
 - **에러:**
     - `STUDY_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403)
 
