@@ -123,7 +123,7 @@ function RecCard({
         <Users size={16} />
         {study.memberCount} / {study.capacity}명
       </p>
-      {study.reasons[0] && <p className="muted">{study.reasons[0]}</p>}
+      {study.reasons.length > 0 && <p className="muted">{study.reasons.join(", ")}</p>}
       <Go className="actions primary" href={`/studies/${study.studyId}`}>
         자세히 보기
         <ArrowRight size={16} />
