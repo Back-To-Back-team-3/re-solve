@@ -107,4 +107,14 @@ public class Post extends BaseTimeEntity {
     public void delete() {
         this.status = PostStatus.DELETED;
     }
+
+    /**
+     * 운영진이 고정·공지·숨김을 한 번에 정한다. 숨김을 풀면 다시 공개된다(API 명세서 5.5.5).
+     * 운영진 권한과 작성자 삭제 여부는 호출하는 쪽에서 먼저 확인한다.
+     */
+    public void moderate(boolean pinned, boolean notice, boolean hidden) {
+        this.pinned = pinned;
+        this.notice = notice;
+        this.status = hidden ? PostStatus.HIDDEN : PostStatus.VISIBLE;
+    }
 }
