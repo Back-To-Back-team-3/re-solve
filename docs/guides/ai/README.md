@@ -235,8 +235,8 @@ AI에게 단계 이름으로 요청하면 `AGENTS.md` §7에 따라 해당 프�
 ```text
 [00 세션 시작] — 모든 단계 앞에서 1회, .personal/ 읽기 포함
         │
-[10 사이클 표 점검·이슈 쪼개기]
-    A. 사이클 표 점검 ──(Human gate: 변경 승인)
+[10 계획·이슈 쪼개기]
+    A. 열린 Issue 점검 ──(Human gate: 다음 Issue 확인)
     B. 카테고리 계획 ──(Human gate)
     C. 이슈 쪼개기 ──(Human gate)
         │ 계약 변경 필요 → 문서 Issue 먼저

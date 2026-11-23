@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Users, ArrowRight, Plus } from "lucide-react";
 import { rethrowWithMessage, studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
@@ -31,6 +31,7 @@ import { useQuery, Pager } from "./problem-list";
 import { MembersTab } from "./study-members";
 import { ExamsPage } from "@/features/exams";
 import { AssignmentsTab } from "./study-assignments";
+import { PostsTab } from "./study-posts";
 const goalLabel: Record<GoalType, string> = {
   EMPLOYMENT: "취업 준비",
   CONTEST: "대회 준비",
@@ -123,7 +124,7 @@ function RecCard({
         <Users size={16} />
         {study.memberCount} / {study.capacity}명
       </p>
-      {study.reasons[0] && <p className="muted">{study.reasons[0]}</p>}
+      {study.reasons.length > 0 && <p className="muted">{study.reasons.join(", ")}</p>}
       <Go className="actions primary" href={`/studies/${study.studyId}`}>
         자세히 보기
         <ArrowRight size={16} />
@@ -287,7 +288,9 @@ export function StudiesPage() {
   );
 }
 export function StudyPage({ id }: { id: string }) {
-  const [tab, setTab] = useState("intro");
+  // 게시글 화면에서 돌아올 때 게시판 탭을 바로 연다.
+  const initialTab = useSearchParams().get("tab") === "board" ? "board" : "intro";
+  const [tab, setTab] = useState(initialTab);
   const [version, setVersion] = useState(0);
   const router = useRouter();
   const action = useAction();
@@ -311,6 +314,8 @@ export function StudyPage({ id }: { id: string }) {
   const myM = study.myMembership;
   const leaderNickname = study.leader?.nickname ?? "정보 없음";
   const isApproved = myM?.status === "APPROVED";
+  // 게시판 탭은 승인 구성원에게만 있으므로 그 밖의 사람이 ?tab=board로 들어오면 소개 탭을 보여 준다.
+  const shownTab = tab === "board" && !isApproved ? "intro" : tab;
   const isPending = myM?.status === "PENDING";
   const isLeader = myM?.role === "LEADER";
 
@@ -376,16 +381,17 @@ export function StudyPage({ id }: { id: string }) {
       <div className="detail-grid">
         <section className="card stack">
           <Tabs
-            value={tab}
+            value={shownTab}
             onChange={setTab}
             items={[
               { id: "intro", label: "소개" },
               { id: "members", label: "구성원" },
               { id: "problems", label: "주간 문제집" },
               { id: "exams", label: "모의 코딩테스트" },
+              ...(isApproved ? [{ id: "board", label: "게시판" }] : []),
             ]}
           />
-          {tab === "intro" && (
+          {shownTab === "intro" && (
             <div className="stack">
               <Pet size={100} />
               <div className="inset stack-sm">
@@ -415,7 +421,7 @@ export function StudyPage({ id }: { id: string }) {
               <p>{study.description}</p>
             </div>
           )}
-          {tab === "members" && (
+          {shownTab === "members" && (
             <div className="stack">
               {memberGuard ?? (
                 <MembersTab
@@ -427,14 +433,15 @@ export function StudyPage({ id }: { id: string }) {
               )}
             </div>
           )}
-          {tab === "problems" && (
+          {shownTab === "problems" && (
             <div className="stack">
               {memberGuard ?? (
                 <AssignmentsTab studyId={id} version={version} study={study} />
               )}
             </div>
           )}
-          {tab === "exams" && <ExamsPage studyId={id}
+          {shownTab === "board" && isApproved && <PostsTab study={study} version={version} />}
+          {shownTab === "exams" && <ExamsPage studyId={id}
             canCreate={isApproved && study.status !== "CLOSED" && (isLeader || myM?.role === "MANAGER")} />}
         </section>
         <div className="stack">

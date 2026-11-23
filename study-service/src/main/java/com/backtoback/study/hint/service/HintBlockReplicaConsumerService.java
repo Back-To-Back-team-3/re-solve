@@ -5,7 +5,6 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,12 +38,7 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeParticipantRegistered(ParticipantRegisteredPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("{} 중복 수신 무시 eventId={}", payload.eventType(), payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         HintBlockContextType contextType = HintBlockContextType.valueOf(payload.context());
         Long contextId = Long.parseLong(payload.contextId());
@@ -72,12 +66,7 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeParticipantCanceled(ParticipantCanceledPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("{} 중복 수신 무시 eventId={}", payload.eventType(), payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         HintBlockContextType contextType = HintBlockContextType.valueOf(payload.context());
         Long contextId = Long.parseLong(payload.contextId());
@@ -87,12 +76,7 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeExamUpdated(ExamUpdatedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("ExamUpdated 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         Long examId = Long.parseLong(payload.examId());
         int incomingRevision = Integer.parseInt(payload.examRevision());
@@ -135,12 +119,7 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeExamTerminated(ExamTerminatedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("{} 중복 수신 무시 eventId={}", payload.eventType(), payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         hintBlockReplicaRepository
             .deleteByContextTypeAndContextId(HintBlockContextType.EXAM, Long.parseLong(payload.examId()));
@@ -148,12 +127,7 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeContestTerminated(ContestTerminatedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("{} 중복 수신 무시 eventId={}", payload.eventType(), payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         hintBlockReplicaRepository
             .deleteByContextTypeAndContextId(HintBlockContextType.CONTEST, Long.parseLong(payload.contestId()));
@@ -161,12 +135,7 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeDiagnosisStarted(DiagnosisStartedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("DiagnosisStarted 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         Long diagnosisAttemptId = Long.parseLong(payload.diagnosisAttemptId());
         Long memberId = Long.parseLong(payload.memberId());
@@ -192,12 +161,7 @@ public class HintBlockReplicaConsumerService {
 
     @Transactional
     public void consumeDiagnosisClosed(DiagnosisClosedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("DiagnosisClosed 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         hintBlockReplicaRepository
             .deleteByContextTypeAndContextId(

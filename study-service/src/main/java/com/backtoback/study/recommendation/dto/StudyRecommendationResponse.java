@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import com.backtoback.study.membership.domain.StudyStatus;
+import com.backtoback.study.recommendation.repository.PersonalizedStudyRow;
 import com.backtoback.study.recommendation.repository.PopularStudyRow;
 
 /**
@@ -31,6 +32,21 @@ public record StudyRecommendationResponse(
             row.getName(),
             null,
             POPULAR_REASONS,
+            row.getMemberCount(),
+            row.getCapacity(),
+            StudyStatus.valueOf(row.getStatus())
+        );
+    }
+
+    /**
+     * 저장된 추천 결과 행을 {@code PERSONALIZED} 항목으로 바꾼다. {@code reasons}는 호출하는 쪽이 행의 JSON 원문을 읽어 넘긴다.
+     */
+    public static StudyRecommendationResponse from(PersonalizedStudyRow row, List<String> reasons) {
+        return new StudyRecommendationResponse(
+            String.valueOf(row.getStudyId()),
+            row.getName(),
+            row.getScore(),
+            reasons,
             row.getMemberCount(),
             row.getCapacity(),
             StudyStatus.valueOf(row.getStatus())

@@ -1,9 +1,11 @@
 package com.backtoback.study.membership.service;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -18,6 +20,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -32,6 +35,7 @@ import com.backtoback.study.membership.domain.MembershipStatus;
 import com.backtoback.study.membership.domain.StudyMembership;
 import com.backtoback.study.membership.repository.StudyMembershipHistoryRepository;
 import com.backtoback.study.membership.repository.StudyMembershipRepository;
+import com.backtoback.study.recommendation.repository.StudyRecommendationRepository;
 import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.event.dto.MemberWithdrawnPayload;
 import com.backtoback.study.replica.repository.MemberLearningProfileReplicaRepository;
@@ -62,6 +66,8 @@ class MemberWithdrawnConsumerServiceTest {
     private MemberLearningProfileReplicaRepository learningProfileReplicaRepository;
     @Mock
     private HintBlockReplicaRepository hintBlockReplicaRepository;
+    @Mock
+    private StudyRecommendationRepository studyRecommendationRepository;
 
     @InjectMocks
     private MemberWithdrawnConsumerService service;
@@ -97,6 +103,7 @@ class MemberWithdrawnConsumerServiceTest {
         verify(historyRepository).save(any());
         verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
         verify(hintBlockReplicaRepository).deleteByMemberId(MEMBER_ID);
+        verify(studyRecommendationRepository).deleteAllByMemberId(MEMBER_ID);
         verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(10L), any(LocalDateTime.class));
     }
 
@@ -120,20 +127,49 @@ class MemberWithdrawnConsumerServiceTest {
         verify(historyRepository, never()).save(any());
         verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
         verify(hintBlockReplicaRepository).deleteByMemberId(MEMBER_ID);
+        verify(studyRecommendationRepository).deleteAllByMemberId(MEMBER_ID);
         verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(5L), any(LocalDateTime.class));
     }
 
     @Test
-    @DisplayName("이미 처리된 eventId를 수신하면 가입 정리 없이 무시한다")
-    void consume_duplicateEventId_skipsProcessing() {
+    @DisplayName("탈퇴를 처리하면 회원 복제본을 먼저 탈퇴로 바꾼 뒤 가입 정리, 학습 프로필 복제본 삭제, 추천 결과 삭제 순으로 처리한다")
+    void consume_withdrawn_locksMemberReplicaBeforeDeletingProfile() {
         // given
-        MemberWithdrawnPayload payload = payload(3L);
-        willThrow(new DuplicateKeyException("중복"))
-            .given(processedEventStore)
-            .insert(any(EventMetadata.class), any(LocalDateTime.class));
+        MemberWithdrawnPayload payload = payload(5L);
+        given(memberReplicaRepository.findByMemberId(MEMBER_ID)).willReturn(Optional.empty());
+        given(membershipRepository.findAllByMemberIdAndStatus(MEMBER_ID, MembershipStatus.APPROVED))
+            .willReturn(List.of());
+        given(membershipRepository.findAllByMemberIdAndStatus(MEMBER_ID, MembershipStatus.PENDING))
+            .willReturn(List.of());
 
         // when
         service.consume(payload);
+
+        // then
+        InOrder order
+            = inOrder(
+                memberReplicaRepository,
+                membershipRepository,
+                learningProfileReplicaRepository,
+                studyRecommendationRepository
+            );
+        order.verify(memberReplicaRepository).upsertWithdrawn(eq(MEMBER_ID), eq(5L), any(LocalDateTime.class));
+        order.verify(membershipRepository).findAllByMemberIdAndStatus(MEMBER_ID, MembershipStatus.APPROVED);
+        order.verify(learningProfileReplicaRepository).deleteByMemberId(MEMBER_ID);
+        order.verify(studyRecommendationRepository).deleteAllByMemberId(MEMBER_ID);
+    }
+
+    @Test
+    @DisplayName("소비 기록 INSERT가 중복이면 가입 정리 없이 중복 예외를 전파한다")
+    void consume_duplicateEventId_skipsProcessing() {
+        // given
+        MemberWithdrawnPayload payload = payload(3L);
+        willThrow(new DuplicateKeyException("duplicate"))
+            .given(processedEventStore)
+            .insert(any(EventMetadata.class), any(LocalDateTime.class));
+
+        // when & then
+        assertThatThrownBy(() -> service.consume(payload)).isInstanceOf(DuplicateKeyException.class);
 
         // then
         verify(membershipRepository, never()).findAllByMemberIdAndStatus(any(), any());

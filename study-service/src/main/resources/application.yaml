@@ -40,6 +40,13 @@ study:
   events:
     publish-enabled: ${STUDY_EVENTS_PUBLISH_ENABLED:false}
     topic-arn: ${STUDY_EVENTS_TOPIC_ARN:}
+  recommendation:
+    weight:
+      goal: 40
+      level: 30
+      level-far: 10
+      language: 20
+      time-slot: 10
 
 springdoc:
   api-docs:

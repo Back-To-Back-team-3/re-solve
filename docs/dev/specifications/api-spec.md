@@ -8273,6 +8273,7 @@
     ```
     
     - `mode`: `PERSONALIZED` / `POPULAR`. `POPULAR`이면 `score`는 `null`, `reasons`는 `["최근 활동이 많은 스터디"]`
+    - `reasons`(`PERSONALIZED`): `목표 일치`, `태그 레벨 비슷함`(태그 레벨 차이 0·1), `선호 언어 같음`, `활동 시간대 겹침` 중 해당하는 문구를 이 순서로 담는다([정책 및 상태 > 8.2 스터디 추천](../planning/policy-and-state.md#82-스터디-추천) > 1차 방식).
     - `isProfileRequired`: 학습 프로필이 없으면 `true` (화면에서 프로필 입력 안내). 프로필이 없어도 오류를 반환하지 않는다.
 
 ### 5.2 외부 API — 스터디 생성·가입
@@ -8289,7 +8290,7 @@
       { "name": "코딩테스트 스터디", "description": "취업 준비 알고리즘 스터디", "goal": "EMPLOYMENT", "skillLevel": "LV2", "preferredLanguage": "java", "activeTimeSlot": "EVENING", "capacity": 10, "joinType": "APPROVAL", "isAutoReopen": true }
     ```
     
-    - `name` 1~200자, `description` 0~500자, `skillLevel` `LV1` / `LV2` / `LV3`([정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준), `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
+    - `name` 1~200자, `description` 0~500자, `goal`·`activeTimeSlot`은 1.3.2 학습 프로필 저장과 같은 값 목록, `skillLevel` `LV1` / `LV2` / `LV3`([정책 및 상태 > 7.1 문제집·진행률](../planning/policy-and-state.md#71-문제집진행률) > 허용 수준), `capacity` 2~10, `joinType` `INSTANT` / `APPROVAL`
 - **응답 (201):**
     
     ```json
@@ -8297,7 +8298,7 @@
     ```
     
 - **에러:**
-    - `COMMON_INVALID_REQUEST`(400, 필수값 누락·길이 초과, `skillLevel`이 `LV1`~`LV3`이 아님), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+    - `COMMON_INVALID_REQUEST`(400, 필수값 누락·길이 초과, `goal`·`activeTimeSlot`이 값 목록에 없음, `skillLevel`이 `LV1`~`LV3`이 아님), `STUDY_JOIN_LIMIT_EXCEEDED`(409), `MEMBER_SUSPENDED`(403), `AUTH_ACCESS_DENIED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
 - **동시성/멱등 보장:**
     - 트랜잭션 순서 = ① `study_member_quotas` 조건부 UPDATE(`active_count < 5`) ② `studies` INSERT(`member_count = 1`) ③ `study_memberships` INSERT(`LEADER`, `APPROVED`) ④ 이력 INSERT ⑤ `outbox_events` INSERT. ①이 0행이면 전체 롤백.
 - **발행:**
@@ -8371,7 +8372,7 @@
         "data": {
           "content": [
             { "membershipId": "55", "memberId": "7", "nickname": "user7", "role": "MEMBER", "status": "PENDING",
-              "learningProfile": { "goal": "EMPLOYMENT", "tagLevels": { "해시": "LV2", "그래프": "LV1" }, "preferredLanguages": ["java"] },
+              "learningProfile": { "goal": "EMPLOYMENT", "tagLevels": { "3": "LV2", "5": "LV1" }, "preferredLanguages": ["java"] },
               "appliedAt": "2026-09-28T09:00:00+09:00", "expiresAt": "2026-10-05T09:00:00+09:00", "joinedAt": null }
           ],
           "page": 0, "size": 20, "totalElements": 3, "totalPages": 1, "hasNext": false
@@ -8380,6 +8381,7 @@
     ```
     
     - `learningProfile`: `PENDING` 조회에서만 채운다. 복제본이 없으면 `null`. 단일 `skillLevel` 대신 태그별 레벨.
+    - `learningProfile.tagLevels`: 태그 ID를 키로, 레벨을 값으로 담는다. 진입한 태그가 없으면 `null`. 태그 이름을 담지 않는 점은 1.3.1과 같다(화면은 2.5.1 태그 목록으로 이름을 붙인다).
 - **에러:**
     - `STUDY_NOT_FOUND`(404), `AUTH_ACCESS_DENIED`(403)
 
@@ -8627,13 +8629,14 @@
 - **Method / URI:** `GET /api/v1/studies/{studyId}/posts`
 - **인증:** 로그인 필요 + `APPROVED` 구성원
 - **대응 테이블:** `posts`, `member_replicas`
-- **설명:** 고정 게시글을 먼저, 이후 최신순으로 반환한다. `HIDDEN`·`DELETED`는 제외한다.
+- **설명:** 고정 게시글을 먼저, 이후 최신순으로 반환한다. `HIDDEN`·`DELETED`는 제외한다. 정렬을 지정해도 고정 게시글이 먼저 온다. `commentCount`는 `VISIBLE` 댓글만 센다. `isHidden=true`면 `LEADER`·`MANAGER`에게 `HIDDEN` 게시글만 반환한다(숨김 해제 5.5.5 대상 찾기).
 - **요청 파라미터:**
     
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `isNotice` | boolean | N | — | 공지만 보기 |
+    | `isNotice` | boolean | N | — | `true`면 공지만 보기, `false`·생략은 전체 |
+    | `isHidden` | boolean | N | — | `true`면 숨긴 글만 보기 (`LEADER`·`MANAGER`만, 그 밖에는 `AUTH_ACCESS_DENIED`). `false`·생략은 공개 글 |
     | `page` | int | N | 0 |  |
     | `size` | int | N | 20 |  |
     
@@ -8653,21 +8656,21 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_NOT_FOUND`(404)
 
 #### 5.5.2 게시글 작성
 
 - **Method / URI:** `POST /api/v1/studies/{studyId}/posts`
 - **인증:** 로그인 필요 (`SUSPENDED` 차단) + `APPROVED` 구성원
 - **대응 테이블:** `posts`, `studies`
-- **설명:** 게시글을 작성하고 `studies.last_activity_at`을 갱신한다. 공지(`isNotice`)는 `LEADER`·`MANAGER`만 지정할 수 있다.
+- **설명:** 게시글을 작성하고 `studies.last_activity_at`을 갱신한다. 공지(`isNotice`)는 `LEADER`·`MANAGER`만 지정할 수 있으며, 권한 없이 `isNotice: true`를 보내면 `AUTH_ACCESS_DENIED`다.
 - **요청 바디:**
     
     ```json
       { "title": "이번 주 풀이 공유", "content": "BFS로 풀었습니다...", "isNotice": false }
     ```
     
-    - `title` 1~200자, `content` 1자 이상
+    - `title` 1~200자, `content` 1~10,000자 (공백만은 불가), `isNotice` 생략 시 `false`
 - **응답 (201):**
     
     ```json
@@ -8675,13 +8678,16 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403)
+    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403), `STUDY_NOT_FOUND`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.5.3 게시글 상세
 
 - **Method / URI:** `GET /api/v1/studies/{studyId}/posts/{postId}`
 - **인증:** 로그인 필요 + `APPROVED` 구성원
 - **대응 테이블:** `posts`, `comments`, `member_replicas`
+- **설명:** `HIDDEN`·`DELETED` 게시글과 다른 스터디의 게시글은 운영진을 포함해 누구에게나 `STUDY_POST_NOT_FOUND`다. `comments`는 `VISIBLE` 댓글만 작성순으로 담는다.
 - **응답 (200):**
     
     ```json
@@ -8698,35 +8704,40 @@
     
     - 탈퇴 회원은 `nickname: "탈퇴한 사용자"`
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_NOT_FOUND`(404)
 
 #### 5.5.4 게시글 수정·삭제
 
 - **Method / URI:** `PATCH /api/v1/studies/{studyId}/posts/{postId}`, `DELETE /api/v1/studies/{studyId}/posts/{postId}`
-- **인증:** 로그인 필요 + 작성자 본인
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + `APPROVED` 구성원 + 작성자 본인
 - **대응 테이블:** `posts`
+- **설명:** `VISIBLE` 게시글만 수정·삭제할 수 있다. `HIDDEN`·`DELETED` 게시글은 `STUDY_POST_NOT_FOUND`다.
 - **요청 바디 (PATCH):**
     
     ```json
       { "title": "수정한 제목", "content": "수정한 본문" }
     ```
     
+    - `title` 1~200자, `content` 1~10,000자 (공백만은 불가)
 - **응답:** PATCH `200` `{ "postId": "88" }` / DELETE `204` (`status = DELETED`)
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_NOT_FOUND`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.5.5 게시글 고정·공지·숨김 (운영진)
 
 - **Method / URI:** `PATCH /api/v1/studies/{studyId}/posts/{postId}/moderation`
-- **인증:** 로그인 필요 + `LEADER`·`MANAGER`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + `APPROVED` 구성원 중 `LEADER`·`MANAGER`
 - **대응 테이블:** `posts`
-- **설명:** 공지·상단 고정 여부와 부적절한 글의 숨김을 변경한다. 기존 경로(`/pin`)를 숨김까지 포함하도록 넓혔다.
+- **설명:** 공지·상단 고정 여부와 부적절한 글의 숨김을 변경한다. 기존 경로(`/pin`)를 숨김까지 포함하도록 넓혔다. `isHidden: false`를 보내면 숨긴 글이 `VISIBLE`로 돌아온다. `DELETED` 게시글은 `STUDY_POST_NOT_FOUND`다.
 - **요청 바디:**
     
     ```json
       { "isPinned": true, "isNotice": true, "isHidden": false }
     ```
     
+    - 세 필드 모두 필수
 - **응답 (200):**
     
     ```json
@@ -8734,7 +8745,9 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `COMMON_INVALID_REQUEST`(400), `STUDY_NOT_FOUND`(404), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.5.6 댓글 작성·수정·삭제
 
@@ -8747,6 +8760,7 @@
       { "content": "좋네요" }
     ```
     
+    - `content` 1~10,000자
 - **응답:** POST `201` `{ "commentId": "301" }` / PATCH `200` / DELETE `204`
 - **에러:**
     - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_COMMENT_NOT_FOUND`(404)

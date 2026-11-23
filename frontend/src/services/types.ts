@@ -626,7 +626,7 @@ export type StudyMemberItem = {
   expiresAt?: string | null;
   learningProfile?: {
     goal: GoalType;
-    tagLevels: Record<string, string>;
+    tagLevels: Record<string, string> | null;
     preferredLanguages: Language[];
   } | null;
 };
@@ -704,6 +704,77 @@ export type AssignmentDetail = {
     avgCompletionRate: number;
     avgOnTimeRate: number;
   };
+};
+
+// ===== 스터디 커뮤니티 게시글 (api-spec §5.5) =====
+
+export type PostStatus = "VISIBLE" | "DELETED" | "HIDDEN";
+
+// GET /api/v1/studies/{studyId}/posts 항목 (api-spec §5.5.1)
+export type PostSummary = {
+  postId: string;
+  title: string;
+  authorId: string;
+  authorNickname: string | null;
+  isPinned: boolean;
+  isNotice: boolean;
+  commentCount: number;
+  createdAt: string;
+};
+
+// 게시글·댓글 작성자 (api-spec §5.5.3). 회원 복제본이 없으면 nickname은 null이다.
+export type PostAuthor = {
+  memberId: string;
+  nickname: string | null;
+};
+
+// GET /api/v1/studies/{studyId}/posts/{postId} comments 항목 (api-spec §5.5.3)
+export type PostComment = {
+  commentId: string;
+  content: string;
+  author: PostAuthor;
+  createdAt: string;
+};
+
+// GET /api/v1/studies/{studyId}/posts/{postId} (api-spec §5.5.3)
+export type PostDetail = {
+  postId: string;
+  title: string;
+  content: string;
+  author: PostAuthor;
+  isPinned: boolean;
+  isNotice: boolean;
+  comments: PostComment[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+// POST /api/v1/studies/{studyId}/posts 요청 (api-spec §5.5.2)
+export type PostCreateRequest = {
+  title: string;
+  content: string;
+  isNotice: boolean;
+};
+
+// PATCH /api/v1/studies/{studyId}/posts/{postId} 요청 (api-spec §5.5.4)
+export type PostUpdateRequest = {
+  title: string;
+  content: string;
+};
+
+// PATCH /api/v1/studies/{studyId}/posts/{postId}/moderation 요청 (api-spec §5.5.5)
+export type PostModerationRequest = {
+  isPinned: boolean;
+  isNotice: boolean;
+  isHidden: boolean;
+};
+
+// PATCH /api/v1/studies/{studyId}/posts/{postId}/moderation 응답 (api-spec §5.5.5)
+export type PostModerationResult = {
+  postId: string;
+  isPinned: boolean;
+  isNotice: boolean;
+  status: PostStatus;
 };
 
 // --- api-spec §8 integration-service A 도메인 실서버 타입 ---
