@@ -20,7 +20,7 @@ const stored = (postId: string, authorId: string, title: string, minute: number,
   createdAt: `2026-11-20T10:${String(minute).padStart(2, "0")}:00+09:00`, updatedAt: "2026-11-20T10:00:00+09:00", ...extra,
 });
 
-/** 게시글 API(api-spec §5.5)를 메모리 목록으로 흉내 낸다. 숨김·삭제 글은 목록·상세에서 빠지고 상세는 404다. */
+/** 게시글 API(api-spec §5.5)를 메모리 목록으로 흉내 낸다. 숨김·삭제 글은 목록·상세에서 빠지고 상세는 404다. isHidden=true 목록은 숨긴 글만 준다. */
 async function setup(page: Page, detail: StudyDetail, initial: StoredPost[]) {
   const posts = [...initial];
   const created: unknown[] = [];
@@ -39,8 +39,10 @@ async function setup(page: Page, detail: StudyDetail, initial: StoredPost[]) {
           await ok(route, { postId: post.postId }, 201);
           return true;
         }
-        const noticeOnly = new URL(route.request().url()).searchParams.get("isNotice") === "true";
-        const content = visible()
+        const query = new URL(route.request().url()).searchParams;
+        const noticeOnly = query.get("isNotice") === "true";
+        const source = query.get("isHidden") === "true" ? posts.filter((p) => p.status === "HIDDEN") : visible();
+        const content = source
           .filter((p) => !noticeOnly || p.isNotice)
           .sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || b.createdAt.localeCompare(a.createdAt))
           .map((p) => ({
@@ -182,4 +184,29 @@ test("구성원이 아니면 상세는 가입 안내를, 게시판 주소는 소
   await page.goto("/studies/2?tab=board");
   await expect(page.getByRole("button", { name: "게시판", exact: true })).toHaveCount(0);
   await expect(page.getByText("학습 목표")).toBeVisible();
+});
+
+test("운영진은 숨긴 글 보기에서 숨김을 해제해 게시판에 다시 공개한다", async ({ page }) => {
+  await setup(page, study("LEADER"), [
+    stored("1", "8", "숨긴 공지", 1, { status: "HIDDEN", isNotice: true }),
+    stored("2", "8", "공개 글", 0),
+  ]);
+  await openBoard(page);
+  await expect(titles(page)).toHaveText(["공개 글"]);
+
+  await page.getByLabel("숨긴 글 보기").check();
+  await expect(titles(page)).toHaveText(["숨긴 공지"]);
+  await expect(page.getByRole("link", { name: "숨긴 공지" })).toHaveCount(0);
+  await page.getByRole("button", { name: "숨김 해제" }).click();
+  await expect(page.getByText("숨긴 글이 없어요")).toBeVisible();
+
+  await page.getByLabel("숨긴 글 보기").uncheck();
+  await expect(titles(page)).toHaveText(["숨긴 공지", "공개 글"]);
+});
+
+test("일반 구성원에게는 숨긴 글 보기가 없다", async ({ page }) => {
+  await setup(page, study("MEMBER"), [stored("1", "8", "공개 글", 0)]);
+  await openBoard(page);
+  await expect(titles(page)).toHaveText(["공개 글"]);
+  await expect(page.getByLabel("숨긴 글 보기")).toHaveCount(0);
 });

@@ -611,9 +611,10 @@ export const studyApi = {
 
 /** 스터디 커뮤니티 게시글 API (api-spec §5.5). 서버가 권한·상태를 다시 검증하므로 화면의 버튼 노출은 편의용이다. */
 export const studyPostApi = {
-  list: (studyId: string, params: { isNotice?: boolean; page?: number; size?: number } = {}) => {
+  list: (studyId: string, params: { isNotice?: boolean; isHidden?: boolean; page?: number; size?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.isNotice) q.set("isNotice", "true");
+    if (params.isHidden) q.set("isHidden", "true");
     if (params.page != null) q.set("page", String(params.page));
     if (params.size != null) q.set("size", String(params.size));
     const qs = q.toString();
