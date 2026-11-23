@@ -221,4 +221,9 @@ public class Study extends BaseTimeEntity {
     public void addMember() {
         this.memberCount++;
     }
+
+    /** 게시글 작성 등 새 활동이 생긴 시각을 콜드 스타트 정렬 기준에 남긴다(ERD 4.5.1 {@code last_activity_at}). */
+    public void recordActivity(LocalDateTime occurredAt) {
+        this.lastActivityAt = occurredAt;
+    }
 }
