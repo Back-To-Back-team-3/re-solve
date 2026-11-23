@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Users, ArrowRight, Plus } from "lucide-react";
 import { rethrowWithMessage, studyApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
@@ -31,6 +31,7 @@ import { useQuery, Pager } from "./problem-list";
 import { MembersTab } from "./study-members";
 import { ExamsPage } from "@/features/exams";
 import { AssignmentsTab } from "./study-assignments";
+import { PostsTab } from "./study-posts";
 const goalLabel: Record<GoalType, string> = {
   EMPLOYMENT: "취업 준비",
   CONTEST: "대회 준비",
@@ -287,7 +288,9 @@ export function StudiesPage() {
   );
 }
 export function StudyPage({ id }: { id: string }) {
-  const [tab, setTab] = useState("intro");
+  // 게시글 화면에서 돌아올 때 게시판 탭을 바로 연다.
+  const initialTab = useSearchParams().get("tab") === "board" ? "board" : "intro";
+  const [tab, setTab] = useState(initialTab);
   const [version, setVersion] = useState(0);
   const router = useRouter();
   const action = useAction();
@@ -383,6 +386,7 @@ export function StudyPage({ id }: { id: string }) {
               { id: "members", label: "구성원" },
               { id: "problems", label: "주간 문제집" },
               { id: "exams", label: "모의 코딩테스트" },
+              ...(isApproved ? [{ id: "board", label: "게시판" }] : []),
             ]}
           />
           {tab === "intro" && (
@@ -434,6 +438,7 @@ export function StudyPage({ id }: { id: string }) {
               )}
             </div>
           )}
+          {tab === "board" && isApproved && <PostsTab study={study} version={version} />}
           {tab === "exams" && <ExamsPage studyId={id}
             canCreate={isApproved && study.status !== "CLOSED" && (isLeader || myM?.role === "MANAGER")} />}
         </section>
