@@ -24,4 +24,6 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
         @Param("postIds") Collection<Long> postIds,
         @Param("status") CommentStatus status
     );
+
+    List<Comment> findByPostIdAndStatusOrderByCreatedAtAscIdAsc(Long postId, CommentStatus status);
 }

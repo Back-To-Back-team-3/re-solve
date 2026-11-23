@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,9 +30,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.backtoback.common.exception.CommonErrorCode;
+import com.backtoback.common.exception.ErrorCode;
+import com.backtoback.study.community.domain.Comment;
 import com.backtoback.study.community.domain.CommentStatus;
 import com.backtoback.study.community.domain.Post;
 import com.backtoback.study.community.domain.PostStatus;
+import com.backtoback.study.community.dto.PostDetailResponse;
 import com.backtoback.study.community.dto.PostSummaryResponse;
 import com.backtoback.study.community.repository.CommentRepository;
 import com.backtoback.study.community.repository.PostRepository;
@@ -148,11 +152,74 @@ class PostQueryServiceTest {
         verifyNoInteractions(postRepository, commentRepository, memberReplicaRepository);
     }
 
+    @Test
+    @DisplayName("상세는 공개 댓글만 작성순으로 작성자 닉네임과 함께 반환하고, 복제본이 없는 작성자의 닉네임은 null이다")
+    void getPost_returnsVisibleCommentsWithAuthors() {
+        // given
+        Post post = post(88L, MEMBER_ID);
+        Comment first = comment(301L, 88L, OTHER_AUTHOR_ID, "좋네요");
+        Comment second = comment(302L, 88L, 10L, "저도 BFS로 풀었어요");
+        given(studyRepository.existsById(STUDY_ID)).willReturn(true);
+        given(postRepository.findByIdAndStudyId(88L, STUDY_ID)).willReturn(Optional.of(post));
+        given(commentRepository.findByPostIdAndStatusOrderByCreatedAtAscIdAsc(88L, CommentStatus.VISIBLE))
+            .willReturn(List.of(first, second));
+        given(memberReplicaRepository.findAllByMemberIdIn(anyCollection()))
+            .willReturn(
+                List
+                    .of(
+                        MemberReplica.sync(MEMBER_ID, "user7", null, MemberStatus.ACTIVE, 1L, CREATED_AT),
+                        MemberReplica.sync(OTHER_AUTHOR_ID, "lee", null, MemberStatus.ACTIVE, 1L, CREATED_AT)
+                    )
+            );
+
+        // when
+        PostDetailResponse result = service.getPost(STUDY_ID, 88L, MEMBER_ID);
+
+        // then
+        assertThat(result.postId()).isEqualTo("88");
+        assertThat(result.author()).isEqualTo(new PostDetailResponse.Author("7", "user7"));
+        assertThat(result.comments())
+            .extracting(PostDetailResponse.CommentItem::commentId, item -> item.author().nickname())
+            .containsExactly(tuple("301", "lee"), tuple("302", null));
+        assertThat(result.updatedAt()).isEqualTo(OffsetDateTime.parse("2026-11-23T10:00:00+09:00"));
+    }
+
+    @Test
+    @DisplayName("숨김·삭제 글이나 다른 스터디 글의 상세는 STUDY_POST_NOT_FOUND로 거절한다")
+    void getPost_notVisibleOrOtherStudy_throwsPostNotFound() {
+        given(studyRepository.existsById(STUDY_ID)).willReturn(true);
+
+        given(postRepository.findByIdAndStudyId(88L, STUDY_ID)).willReturn(Optional.empty());
+        assertGetPostError(StudyErrorCode.STUDY_POST_NOT_FOUND);
+
+        for (PostStatus status : List.of(PostStatus.HIDDEN, PostStatus.DELETED)) {
+            Post post = post(88L, MEMBER_ID);
+            ReflectionTestUtils.setField(post, "status", status);
+            given(postRepository.findByIdAndStudyId(88L, STUDY_ID)).willReturn(Optional.of(post));
+            assertGetPostError(StudyErrorCode.STUDY_POST_NOT_FOUND);
+        }
+
+        verifyNoInteractions(commentRepository, memberReplicaRepository);
+    }
+
+    private void assertGetPostError(ErrorCode expected) {
+        assertThatThrownBy(() -> service.getPost(STUDY_ID, 88L, MEMBER_ID))
+            .isInstanceOfSatisfying(StudyException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(expected));
+    }
+
     private Post post(Long id, Long authorId) {
         Post post = Post.write(STUDY_ID, authorId, "제목 " + id, "본문", false);
         ReflectionTestUtils.setField(post, "id", id);
         ReflectionTestUtils.setField(post, "createdAt", CREATED_AT);
+        ReflectionTestUtils.setField(post, "updatedAt", CREATED_AT);
         return post;
+    }
+
+    private Comment comment(Long id, Long postId, Long authorId, String content) {
+        Comment comment = Comment.write(postId, authorId, content);
+        ReflectionTestUtils.setField(comment, "id", id);
+        ReflectionTestUtils.setField(comment, "createdAt", CREATED_AT);
+        return comment;
     }
 
     private PostCommentCount commentCount(Long postId, long count) {
