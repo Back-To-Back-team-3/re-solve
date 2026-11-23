@@ -51,10 +51,10 @@ Re:Solve는 알고리즘을 연습하는 학습자와 과제를 운영하는 스
 
 ## 🎬 발표 자료와 시연
 
-- **최종 발표 자료** · PPTX 및 PDF
-- **전체 시연 영상** · MP4
+- **최종 발표 자료** · [PPTX](https://github.com/Back-To-Back-team-3/re-solve/releases/download/v0.2.0/re-solve-presentation.pptx) · [PDF](https://github.com/Back-To-Back-team-3/re-solve/releases/download/v0.2.0/re-solve-presentation.pdf)
+- **전체 시연 영상** · [MP4](https://github.com/Back-To-Back-team-3/re-solve/releases/download/v0.2.0/re-solve-demo.mp4)
 
-[GitHub Releases](https://github.com/Back-To-Back-team-3/re-solve/releases)
+[Re:Solve v0.2.0 Release](https://github.com/Back-To-Back-team-3/re-solve/releases/tag/v0.2.0)
 
 ---
 
@@ -135,7 +135,7 @@ Re:Solve는 알고리즘을 연습하는 학습자와 과제를 운영하는 스
 
 ## 🔄 서비스 흐름
 
-![Re:Solve 서비스 흐름. 개인 풀이·스터디 과제·모의 코딩 테스트·실력 진단·AI 힌트·알림·GitHub 동기화](docs/dev/architecture/images/issue-828-service-flow.png)
+![Re:Solve 서비스 흐름. 개인 풀이·스터디 과제·모의 코딩 테스트·실력 진단·AI 힌트·알림·GitHub 동기화](docs/dev/architecture/images/service-flow.png)
 
 [서비스별 시퀀스와 상태 다이어그램](docs/dev/architecture/diagrams.md)
 
@@ -145,7 +145,7 @@ Re:Solve는 알고리즘을 연습하는 학습자와 과제를 운영하는 스
 
 ## 🏗️ 시스템 아키텍처
 
-![Re:Solve 최종 배포 구성. ECS 서비스 10개, 데이터·메시징·채점, CI/CD와 관측](docs/dev/architecture/images/issue-828-system-architecture.png)
+![Re:Solve 최종 배포 구성. ECS 서비스 10개, 데이터·메시징·채점, CI/CD와 관측](docs/dev/architecture/images/system-architecture.png)
 
 ---
 
@@ -663,37 +663,53 @@ erDiagram
 
 ## 🧰 기술 스택
 
-**Backend**
+### Backend
 
-![Java 21](https://img.shields.io/badge/Java%2021-42678C?style=flat-square) ![Spring Boot 4.1.1](https://img.shields.io/badge/Spring%20Boot%204.1.1-42678C?style=flat-square) ![Spring Cloud Gateway](https://img.shields.io/badge/Spring%20Cloud%20Gateway-42678C?style=flat-square) ![Spring Data JPA](https://img.shields.io/badge/Spring%20Data%20JPA-42678C?style=flat-square) ![Gradle](https://img.shields.io/badge/Gradle-42678C?style=flat-square)
+![Java 21](https://img.shields.io/badge/Java_21-ED8B00?style=flat-square&logo=openjdk&logoColor=white) ![Spring Boot 4.1.1](https://img.shields.io/badge/Spring_Boot_4.1.1-6DB33F?style=flat-square&logo=springboot&logoColor=white) ![Spring Cloud Gateway](https://img.shields.io/badge/Spring_Cloud_Gateway-6DB33F?style=flat-square&logo=spring&logoColor=white) ![Spring Data JPA](https://img.shields.io/badge/Spring_Data_JPA-59666C?style=flat-square&logo=hibernate&logoColor=white) ![Gradle](https://img.shields.io/badge/Gradle-02303A?style=flat-square&logo=gradle&logoColor=white)
 
-**Frontend**
+### Frontend
 
-![Next.js 16](https://img.shields.io/badge/Next.js%2016-374D7C?style=flat-square) ![React 19](https://img.shields.io/badge/React%2019-374D7C?style=flat-square) ![TypeScript](https://img.shields.io/badge/TypeScript-374D7C?style=flat-square) ![Tailwind CSS 4](https://img.shields.io/badge/Tailwind%20CSS%204-374D7C?style=flat-square) ![Monaco Editor](https://img.shields.io/badge/Monaco%20Editor-374D7C?style=flat-square)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) ![Next.js 16](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=nextdotjs&logoColor=white) ![React 19](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=20232A) ![Tailwind CSS 4](https://img.shields.io/badge/Tailwind_CSS_4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white) ![Monaco Editor](https://img.shields.io/badge/Monaco_Editor-007ACC?style=flat-square)
 
-**Data**
+### Database
 
-![MySQL 8.4](https://img.shields.io/badge/MySQL%208.4-31586D?style=flat-square) ![Redis 7.4](https://img.shields.io/badge/Redis%207.4-31586D?style=flat-square) ![Flyway](https://img.shields.io/badge/Flyway-31586D?style=flat-square)
+![MySQL 8.4](https://img.shields.io/badge/MySQL_8.4-4479A1?style=flat-square&logo=mysql&logoColor=white) ![Flyway](https://img.shields.io/badge/Flyway-CC0200?style=flat-square&logo=flyway&logoColor=white)
 
-**Messaging · Judge**
+### Cache
 
-![Amazon SNS](https://img.shields.io/badge/Amazon%20SNS-536880?style=flat-square) ![Amazon SQS](https://img.shields.io/badge/Amazon%20SQS-536880?style=flat-square) ![Judge0](https://img.shields.io/badge/Judge0-536880?style=flat-square)
+![Redis 7.4](https://img.shields.io/badge/Redis_7.4-DC382D?style=flat-square&logo=redis&logoColor=white)
 
-**Infra · Deploy**
+### Messaging
 
-![Docker Compose](https://img.shields.io/badge/Docker%20Compose-445A71?style=flat-square) ![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-445A71?style=flat-square) ![Amazon ECR](https://img.shields.io/badge/Amazon%20ECR-445A71?style=flat-square) ![ECS Fargate](https://img.shields.io/badge/ECS%20Fargate-445A71?style=flat-square) ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare%20Workers-445A71?style=flat-square)
+![Amazon SNS](https://img.shields.io/badge/Amazon_SNS-FF4F8B?style=flat-square) ![Amazon SQS](https://img.shields.io/badge/Amazon_SQS-FF4F8B?style=flat-square)
 
-**Monitoring**
+### 채점 엔진
 
-![CloudWatch](https://img.shields.io/badge/CloudWatch-2D6970?style=flat-square) ![Prometheus](https://img.shields.io/badge/Prometheus-2D6970?style=flat-square) ![Grafana](https://img.shields.io/badge/Grafana-2D6970?style=flat-square)
+![Judge0](https://img.shields.io/badge/Judge0-281C54?style=flat-square)
 
-**Test**
+### Monitoring
 
-![JUnit](https://img.shields.io/badge/JUnit-426782?style=flat-square) ![Testcontainers](https://img.shields.io/badge/Testcontainers-426782?style=flat-square) ![Vitest](https://img.shields.io/badge/Vitest-426782?style=flat-square) ![Playwright](https://img.shields.io/badge/Playwright-426782?style=flat-square) ![k6](https://img.shields.io/badge/k6-426782?style=flat-square)
+![CloudWatch](https://img.shields.io/badge/CloudWatch-FF4F8B?style=flat-square) ![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=flat-square&logo=prometheus&logoColor=white) ![Grafana](https://img.shields.io/badge/Grafana-F46800?style=flat-square&logo=grafana&logoColor=white)
 
-**Code Quality**
+### Test
 
-![Spotless](https://img.shields.io/badge/Spotless-53657D?style=flat-square) ![Checkstyle](https://img.shields.io/badge/Checkstyle-53657D?style=flat-square)
+![JUnit](https://img.shields.io/badge/JUnit-25A162?style=flat-square&logo=junit5&logoColor=white) ![Testcontainers](https://img.shields.io/badge/Testcontainers-2496ED?style=flat-square&logo=docker&logoColor=white)
+
+### Frontend Test
+
+![Vitest](https://img.shields.io/badge/Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=white) ![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square)
+
+### Load Test
+
+![k6](https://img.shields.io/badge/k6-7D64FF?style=flat-square&logo=k6&logoColor=white)
+
+### Code Quality
+
+![Checkstyle](https://img.shields.io/badge/Checkstyle-03C75A?style=flat-square) ![Spotless](https://img.shields.io/badge/Spotless-4285F4?style=flat-square)
+
+### Infra·Deploy
+
+![Docker Compose](https://img.shields.io/badge/Docker_Compose-2496ED?style=flat-square&logo=docker&logoColor=white) ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white) ![Amazon ECR](https://img.shields.io/badge/Amazon_ECR-FF9900?style=flat-square&logo=amazonwebservices&logoColor=white) ![ECS Fargate](https://img.shields.io/badge/ECS_Fargate-FF9900?style=flat-square&logo=amazonecs&logoColor=white) ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare_Workers-F38020?style=flat-square&logo=cloudflare&logoColor=white)
 
 ---
 
