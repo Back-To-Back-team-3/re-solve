@@ -58,11 +58,13 @@ public class PostController {
 
     /**
      * 5.5.1 게시글 목록 — 고정 글을 먼저 반환한다. {@code isNotice=true}일 때만 공지로 거르고, 생략·{@code false}는 전체다.
+     * {@code isHidden=true}면 운영진에게 숨긴 글을 돌려준다.
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<PostSummaryResponse>>> getPosts(
         @PathVariable Long studyId,
         @RequestParam(required = false) Boolean isNotice,
+        @RequestParam(required = false) Boolean isHidden,
         @PageableDefault(
             size = 20,
             sort = "createdAt",
@@ -71,7 +73,15 @@ public class PostController {
         @AuthenticationPrincipal GatewayUser user
     ) {
         Pageable safePageable = clampPageSize(restrictToAllowedSort(pageable));
-        var result = postQueryService.getPosts(studyId, memberId(user), Boolean.TRUE.equals(isNotice), safePageable);
+        var result
+            = postQueryService
+                .getPosts(
+                    studyId,
+                    memberId(user),
+                    Boolean.TRUE.equals(isNotice),
+                    Boolean.TRUE.equals(isHidden),
+                    safePageable
+                );
         return ResponseEntity.ok(ApiResponse.success(PageResponse.from(result)));
     }
 

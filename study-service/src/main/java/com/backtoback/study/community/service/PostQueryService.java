@@ -15,6 +15,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.common.exception.CommonErrorCode;
 import com.backtoback.study.community.domain.Comment;
 import com.backtoback.study.community.domain.CommentStatus;
 import com.backtoback.study.community.domain.Post;
@@ -26,6 +27,7 @@ import com.backtoback.study.community.repository.PostRepository;
 import com.backtoback.study.community.repository.projection.PostCommentCount;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
+import com.backtoback.study.membership.domain.StudyMembership;
 import com.backtoback.study.membership.repository.StudyRepository;
 import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.repository.MemberReplicaRepository;
@@ -33,7 +35,8 @@ import com.backtoback.study.replica.repository.MemberReplicaRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 구성원의 게시글 조회를 처리한다(API 명세서 5.5.1, 5.5.3). 숨김·삭제 게시글과 댓글은 누구에게도 보여 주지 않는다.
+ * 구성원의 게시글 조회를 처리한다(API 명세서 5.5.1, 5.5.3). 숨김·삭제 게시글과 댓글은 상세로 보여 주지 않고,
+ * 숨긴 글은 운영진이 숨김을 해제할 수 있도록 목록으로만 운영진에게 보여 준다.
  */
 @Service
 @RequiredArgsConstructor
@@ -46,24 +49,34 @@ public class PostQueryService {
     private final CommunityAccessChecker accessChecker;
 
     /**
-     * 공개 게시글을 고정 글 먼저, 이후 요청 정렬로 조회한다. 정지 회원과 종료된 스터디도 조회는 허용한다.
+     * 게시글을 고정 글 먼저, 이후 요청 정렬로 조회한다. 정지 회원과 종료된 스터디도 조회는 허용한다.
      *
      * @param noticeOnly {@code true}면 공지만, {@code false}면 전체
+     * @param hiddenOnly {@code true}면 숨긴 글만(운영진 전용), {@code false}면 공개 글
      * @param pageable 정렬은 {@code createdAt}만 허용된 상태로 받는다
-     * @throws StudyException {@code STUDY_NOT_FOUND}, {@code AUTH_ACCESS_DENIED}
+     * @throws StudyException {@code STUDY_NOT_FOUND}, {@code AUTH_ACCESS_DENIED}: 구성원이 아니거나 운영진이 아닌데 숨긴 글 요청
      */
     @Transactional(readOnly = true)
-    public Page<PostSummaryResponse> getPosts(Long studyId, Long memberId, boolean noticeOnly, Pageable pageable) {
+    public Page<PostSummaryResponse> getPosts(
+        Long studyId,
+        Long memberId,
+        boolean noticeOnly,
+        boolean hiddenOnly,
+        Pageable pageable
+    ) {
         if (!studyRepository.existsById(studyId)) {
             throw new StudyException(StudyErrorCode.STUDY_NOT_FOUND);
         }
-        accessChecker.requireApprovedMember(studyId, memberId);
+        StudyMembership membership = accessChecker.requireApprovedMember(studyId, memberId);
+        if (hiddenOnly && !accessChecker.isOperator(membership)) {
+            throw new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED);
+        }
 
+        PostStatus status = hiddenOnly ? PostStatus.HIDDEN : PostStatus.VISIBLE;
         Pageable pinnedFirst = withPinnedFirst(pageable);
         Page<Post> posts
-            = noticeOnly
-                ? postRepository.findByStudyIdAndStatusAndNotice(studyId, PostStatus.VISIBLE, true, pinnedFirst)
-                : postRepository.findByStudyIdAndStatus(studyId, PostStatus.VISIBLE, pinnedFirst);
+            = noticeOnly ? postRepository.findByStudyIdAndStatusAndNotice(studyId, status, true, pinnedFirst)
+                : postRepository.findByStudyIdAndStatus(studyId, status, pinnedFirst);
         if (!posts.hasContent()) {
             return new PageImpl<>(List.of(), pinnedFirst, posts.getTotalElements());
         }

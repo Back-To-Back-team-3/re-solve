@@ -8629,13 +8629,14 @@
 - **Method / URI:** `GET /api/v1/studies/{studyId}/posts`
 - **인증:** 로그인 필요 + `APPROVED` 구성원
 - **대응 테이블:** `posts`, `member_replicas`
-- **설명:** 고정 게시글을 먼저, 이후 최신순으로 반환한다. `HIDDEN`·`DELETED`는 제외한다. 정렬을 지정해도 고정 게시글이 먼저 온다. `commentCount`는 `VISIBLE` 댓글만 센다.
+- **설명:** 고정 게시글을 먼저, 이후 최신순으로 반환한다. `HIDDEN`·`DELETED`는 제외한다. 정렬을 지정해도 고정 게시글이 먼저 온다. `commentCount`는 `VISIBLE` 댓글만 센다. `isHidden=true`면 `LEADER`·`MANAGER`에게 `HIDDEN` 게시글만 반환한다(숨김 해제 5.5.5 대상 찾기).
 - **요청 파라미터:**
     
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
     | `isNotice` | boolean | N | — | `true`면 공지만 보기, `false`·생략은 전체 |
+    | `isHidden` | boolean | N | — | `true`면 숨긴 글만 보기 (`LEADER`·`MANAGER`만, 그 밖에는 `AUTH_ACCESS_DENIED`). `false`·생략은 공개 글 |
     | `page` | int | N | 0 |  |
     | `size` | int | N | 20 |  |
     
