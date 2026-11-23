@@ -314,6 +314,8 @@ export function StudyPage({ id }: { id: string }) {
   const myM = study.myMembership;
   const leaderNickname = study.leader?.nickname ?? "정보 없음";
   const isApproved = myM?.status === "APPROVED";
+  // 게시판 탭은 승인 구성원에게만 있으므로 그 밖의 사람이 ?tab=board로 들어오면 소개 탭을 보여 준다.
+  const shownTab = tab === "board" && !isApproved ? "intro" : tab;
   const isPending = myM?.status === "PENDING";
   const isLeader = myM?.role === "LEADER";
 
@@ -379,7 +381,7 @@ export function StudyPage({ id }: { id: string }) {
       <div className="detail-grid">
         <section className="card stack">
           <Tabs
-            value={tab}
+            value={shownTab}
             onChange={setTab}
             items={[
               { id: "intro", label: "소개" },
@@ -389,7 +391,7 @@ export function StudyPage({ id }: { id: string }) {
               ...(isApproved ? [{ id: "board", label: "게시판" }] : []),
             ]}
           />
-          {tab === "intro" && (
+          {shownTab === "intro" && (
             <div className="stack">
               <Pet size={100} />
               <div className="inset stack-sm">
@@ -419,7 +421,7 @@ export function StudyPage({ id }: { id: string }) {
               <p>{study.description}</p>
             </div>
           )}
-          {tab === "members" && (
+          {shownTab === "members" && (
             <div className="stack">
               {memberGuard ?? (
                 <MembersTab
@@ -431,15 +433,15 @@ export function StudyPage({ id }: { id: string }) {
               )}
             </div>
           )}
-          {tab === "problems" && (
+          {shownTab === "problems" && (
             <div className="stack">
               {memberGuard ?? (
                 <AssignmentsTab studyId={id} version={version} study={study} />
               )}
             </div>
           )}
-          {tab === "board" && isApproved && <PostsTab study={study} version={version} />}
-          {tab === "exams" && <ExamsPage studyId={id}
+          {shownTab === "board" && isApproved && <PostsTab study={study} version={version} />}
+          {shownTab === "exams" && <ExamsPage studyId={id}
             canCreate={isApproved && study.status !== "CLOSED" && (isLeader || myM?.role === "MANAGER")} />}
         </section>
         <div className="stack">

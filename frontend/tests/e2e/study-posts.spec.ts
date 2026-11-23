@@ -145,3 +145,41 @@ test("종료된 스터디에서는 쓰기 버튼을 숨기고 목록·상세 조
   for (const name of ["수정", "삭제", "상단 고정", "공지 해제", "숨기기"])
     await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
 });
+
+const fail = (route: Route, status: number, code: string, message: string) =>
+  route.fulfill({ status, json: { success: false, error: { code, message } } });
+
+test("작성이 서버에서 거절되면 폼 안에 서버 안내를 보여 주고 입력을 유지한다", async ({ page }) => {
+  await setup(page, study("MEMBER"), []);
+  // mockApi보다 나중에 등록한 route가 먼저 처리된다. 작성 요청만 거절하고 나머지는 기존 흉내로 넘긴다.
+  await page.route("**/api/v1/studies/2/posts", (route) =>
+    route.request().method() === "POST"
+      ? fail(route, 409, "STUDY_ALREADY_CLOSED", "이미 종료된 스터디입니다.")
+      : route.fallback());
+  await page.goto("/studies/2/posts/new");
+  await page.getByLabel("제목", { exact: true }).fill("남길 제목");
+  await page.getByLabel("본문", { exact: true }).fill("본문");
+  await page.getByRole("button", { name: "등록" }).click();
+  await expect(page.locator("form [role=alert]")).toHaveText("이미 종료된 스터디입니다.");
+  await expect(page.getByLabel("제목", { exact: true })).toHaveValue("남길 제목");
+});
+
+test("없거나 숨겨진 글의 상세는 찾을 수 없다는 안내와 게시판 링크를 보여 준다", async ({ page }) => {
+  await setup(page, study("MEMBER"), [stored("1", "8", "숨긴 글", 1, { status: "HIDDEN" })]);
+  await page.goto("/studies/2/posts/1");
+  await expect(page.getByText("게시글을 찾을 수 없어요")).toBeVisible();
+  await expect(page.getByRole("link", { name: "← 게시판으로 돌아가기" })).toBeVisible();
+});
+
+test("구성원이 아니면 상세는 가입 안내를, 게시판 주소는 소개 탭을 보여 준다", async ({ page }) => {
+  await setup(page, { ...study("MEMBER"), myMembership: null }, [stored("1", "8", "구성원 글", 1)]);
+  await page.route("**/api/v1/studies/2/posts/1", (route) =>
+    fail(route, 403, "AUTH_ACCESS_DENIED", "접근 권한이 없습니다."));
+  await page.goto("/studies/2/posts/1");
+  await expect(page.getByText("구성원만 볼 수 있어요")).toBeVisible();
+  await expect(page.getByText("접근 권한이 없습니다.")).toHaveCount(0);
+
+  await page.goto("/studies/2?tab=board");
+  await expect(page.getByRole("button", { name: "게시판", exact: true })).toHaveCount(0);
+  await expect(page.getByText("학습 목표")).toBeVisible();
+});
