@@ -1,7 +1,9 @@
 package com.backtoback.study.community.service;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -13,9 +15,11 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.backtoback.study.community.domain.Comment;
 import com.backtoback.study.community.domain.CommentStatus;
 import com.backtoback.study.community.domain.Post;
 import com.backtoback.study.community.domain.PostStatus;
+import com.backtoback.study.community.dto.PostDetailResponse;
 import com.backtoback.study.community.dto.PostSummaryResponse;
 import com.backtoback.study.community.repository.CommentRepository;
 import com.backtoback.study.community.repository.PostRepository;
@@ -29,7 +33,7 @@ import com.backtoback.study.replica.repository.MemberReplicaRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 구성원의 게시글 조회를 처리한다(API 명세서 5.5.1). 숨김·삭제 게시글과 댓글은 누구에게도 보여 주지 않는다.
+ * 구성원의 게시글 조회를 처리한다(API 명세서 5.5.1, 5.5.3). 숨김·삭제 게시글과 댓글은 누구에게도 보여 주지 않는다.
  */
 @Service
 @RequiredArgsConstructor
@@ -70,16 +74,45 @@ public class PostQueryService {
                 .countByPostIdsAndStatus(postIds, CommentStatus.VISIBLE)
                 .stream()
                 .collect(Collectors.toMap(PostCommentCount::getPostId, PostCommentCount::getCommentCount));
-        Map<Long, MemberReplica> authors
-            = memberReplicaRepository
-                .findAllByMemberIdIn(posts.map(Post::getAuthorId).toSet())
-                .stream()
-                .collect(Collectors.toMap(MemberReplica::getMemberId, Function.identity()));
+        Map<Long, MemberReplica> authors = replicasById(posts.map(Post::getAuthorId).toSet());
         return posts
             .map(
                 post -> PostSummaryResponse
                     .from(post, authors.get(post.getAuthorId()), commentCounts.getOrDefault(post.getId(), 0L))
             );
+    }
+
+    /**
+     * 공개 게시글과 공개 댓글을 작성순으로 조회한다. 숨김·삭제 글은 운영진에게도 없는 글로 응답한다.
+     *
+     * @throws StudyException {@code STUDY_NOT_FOUND}, {@code AUTH_ACCESS_DENIED},
+     *     {@code STUDY_POST_NOT_FOUND}: 다른 스터디 글이거나 공개 상태가 아님
+     */
+    @Transactional(readOnly = true)
+    public PostDetailResponse getPost(Long studyId, Long postId, Long memberId) {
+        if (!studyRepository.existsById(studyId)) {
+            throw new StudyException(StudyErrorCode.STUDY_NOT_FOUND);
+        }
+        accessChecker.requireApprovedMember(studyId, memberId);
+        Post post
+            = postRepository
+                .findByIdAndStudyId(postId, studyId)
+                .filter(found -> found.getStatus() == PostStatus.VISIBLE)
+                .orElseThrow(() -> new StudyException(StudyErrorCode.STUDY_POST_NOT_FOUND));
+
+        List<Comment> comments
+            = commentRepository.findByPostIdAndStatusOrderByCreatedAtAscIdAsc(postId, CommentStatus.VISIBLE);
+        Set<Long> authorIds = new HashSet<>();
+        authorIds.add(post.getAuthorId());
+        comments.forEach(comment -> authorIds.add(comment.getAuthorId()));
+        return PostDetailResponse.from(post, comments, replicasById(authorIds));
+    }
+
+    private Map<Long, MemberReplica> replicasById(Set<Long> memberIds) {
+        return memberReplicaRepository
+            .findAllByMemberIdIn(memberIds)
+            .stream()
+            .collect(Collectors.toMap(MemberReplica::getMemberId, Function.identity()));
     }
 
     // 정렬 파라미터와 관계없이 고정 글을 먼저 두고, 같은 시각의 글은 ID 역순으로 순서를 고정한다(API 명세서 5.5.1).

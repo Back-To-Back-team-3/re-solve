@@ -116,10 +116,32 @@ class CommentRepositoryTest {
             .containsExactlyInAnyOrder(tuple(first, 2L), tuple(second, 1L));
     }
 
-    private void saveComment(Long postId, CommentStatus status) {
+    @Test
+    @DisplayName("게시글의 공개 댓글만 작성순으로 조회하고 다른 게시글 댓글은 제외한다")
+    void findByPostIdAndStatus_returnsVisibleInWrittenOrder() {
+        // given
+        Long postId = savePost();
+        Long first = saveComment(postId, CommentStatus.VISIBLE);
+        saveComment(postId, CommentStatus.HIDDEN);
+        Long second = saveComment(postId, CommentStatus.VISIBLE);
+        saveComment(savePost(), CommentStatus.VISIBLE);
+
+        // when
+        List<Long> ids
+            = repository
+                .findByPostIdAndStatusOrderByCreatedAtAscIdAsc(postId, CommentStatus.VISIBLE)
+                .stream()
+                .map(Comment::getId)
+                .toList();
+
+        // then
+        assertThat(ids).containsExactly(first, second);
+    }
+
+    private Long saveComment(Long postId, CommentStatus status) {
         Comment comment = Comment.write(postId, AUTHOR_ID, "댓글");
         ReflectionTestUtils.setField(comment, "status", status);
-        repository.saveAndFlush(comment);
+        return repository.saveAndFlush(comment).getId();
     }
 
     private Long savePost() {
