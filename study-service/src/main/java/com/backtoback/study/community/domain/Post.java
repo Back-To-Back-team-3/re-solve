@@ -96,4 +96,15 @@ public class Post extends BaseTimeEntity {
     public static Post write(Long studyId, Long authorId, String title, String content, boolean notice) {
         return new Post(studyId, authorId, title, content, notice);
     }
+
+    /** 작성자 본인 여부와 공개 상태는 호출하는 쪽에서 먼저 확인한다(API 명세서 5.5.4). */
+    public void edit(String title, String content) {
+        this.title = title;
+        this.content = content;
+    }
+
+    /** 행을 지우지 않고 작성자 삭제 상태로 바꾼다(ERD 4.5.12 {@code status}). */
+    public void delete() {
+        this.status = PostStatus.DELETED;
+    }
 }
