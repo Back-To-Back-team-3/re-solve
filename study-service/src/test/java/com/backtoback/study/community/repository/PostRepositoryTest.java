@@ -153,6 +153,18 @@ class PostRepositoryTest {
         assertThat(ids).containsExactly(notice);
     }
 
+    @Test
+    @DisplayName("잠금 조회는 경로의 스터디 ID가 다르면 게시글을 찾지 않는다")
+    void findByIdAndStudyIdWithLock_otherStudy_returnsEmpty() {
+        // given
+        Long studyId = saveStudy();
+        Long postId = savePost(studyId, false, false, PostStatus.VISIBLE, at(0));
+
+        // when & then
+        assertThat(repository.findByIdAndStudyIdWithLock(postId, studyId)).isPresent();
+        assertThat(repository.findByIdAndStudyIdWithLock(postId, saveStudy())).isEmpty();
+    }
+
     private Long saveStudy() {
         Study study
             = Study.recruit("커뮤니티 테스트 스터디", null, "EMPLOYMENT", "LV2", "java", "EVENING", 5, JoinType.INSTANT, false);
