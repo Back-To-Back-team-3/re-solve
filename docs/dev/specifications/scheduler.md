@@ -793,6 +793,8 @@
    →  ⑥ assignment_member_statuses · assignment_completions
 ```
 
+커뮤니티 `posts`는 ② 뒤에만 잠근다. ③~⑥과 같은 트랜잭션에서 `posts`를 잠그는 경로는 없다.
+
 | 경로 | 잠그는 순서 | 비고 |
 | --- | --- | --- |
 | 가입 승인·즉시 가입 (API) | ① UPDATE → ② UPDATE → ③ `FOR SHARE` → ④ UPDATE/INSERT → ⑤ `FOR SHARE` → ⑥ upsert | ③을 ④보다 먼저 잡는 것이 핵심 |
@@ -800,6 +802,8 @@
 | `SubmissionJudged` 반영 (이벤트) | ③ `FOR SHARE` → ⑤ upsert → ⑥ 재계산 | 복제본을 쓰기 **전에** 문제집 행을 잡는다 |
 | 스터디 종료 (API) | ① 구성원 카운터 `FOR UPDATE`(`member_id` 오름차순) → ② UPDATE → ③ UPDATE → ④ UPDATE → ① 차감 | 카운터를 먼저 잡아야 가입 경로와 순환하지 않는다 |
 | 회원 탈퇴 전파 (`MemberWithdrawn`) | ① 해당 회원 카운터 → ② 가입한 스터디들(`id` 오름차순) → ④ | 가입 경로와 같은 방향 |
+| 게시글 작성 (API 5.5.2) | ② `FOR UPDATE` → `posts` INSERT | 구성원 확인은 ② 뒤의 일반 읽기다. 구성원 제거 경로가 ②를 먼저 갱신하므로 작성과 제거가 직렬화된다 |
+| 게시글 수정·삭제·운영진 관리 (API 5.5.4·5.5.5) | `posts` `FOR UPDATE` | ②는 잠그지 않는다. 작성자 수정과 운영진 숨김이 서로를 덮어쓰지 않게 한다 |
 
 **스터디 종료의 순서:**
 

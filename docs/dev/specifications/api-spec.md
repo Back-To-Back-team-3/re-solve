@@ -8677,7 +8677,9 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403), `STUDY_NOT_FOUND`(404)
+    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403), `STUDY_NOT_FOUND`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.5.3 게시글 상세
 
@@ -8718,7 +8720,9 @@
     - `title` 1~200자, `content` 1~10,000자 (공백만은 불가)
 - **응답:** PATCH `200` `{ "postId": "88" }` / DELETE `204` (`status = DELETED`)
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_NOT_FOUND`(404)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_NOT_FOUND`(404), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.5.5 게시글 고정·공지·숨김 (운영진)
 
@@ -8740,7 +8744,9 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `COMMON_INVALID_REQUEST`(400), `STUDY_NOT_FOUND`(404), `MEMBER_SUSPENDED`(403)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `COMMON_INVALID_REQUEST`(400), `STUDY_NOT_FOUND`(404), `MEMBER_SUSPENDED`(403), `COMMON_DEPENDENCY_UNAVAILABLE`(503)
+- **외부 의존:**
+    - `GET /internal/v1/members/{memberId}/status` (member, 1.7.1) — 회원 복제본이 없을 때만 조회한다. 상태만 확인하고 복제본은 만들지 않는다. `SUSPENDED` → `MEMBER_SUSPENDED`(403), `WITHDRAWN` → `AUTH_ACCESS_DENIED`(403), 조회 실패·불완전 응답 → `COMMON_DEPENDENCY_UNAVAILABLE`(503). 원격 조회는 트랜잭션 전에 수행한다.
 
 #### 5.5.6 댓글 작성·수정·삭제
 

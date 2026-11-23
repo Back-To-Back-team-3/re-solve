@@ -44,7 +44,7 @@ public class PostCommandService {
      */
     @Transactional
     public Long write(Long studyId, Long memberId, PostCreateRequest request) {
-        // 회원 제거 경로와 같은 순서(studies → study_memberships)로 잠가 작성 중 구성원 제거와 직렬화한다(scheduler.md §5.0).
+        // 스터디 행만 잠근다. 구성원 제거 경로가 studies를 먼저 갱신하므로, 잠금 뒤에 읽는 가입 상태는 제거가 커밋된 뒤의 값이다(scheduler.md §5.0).
         Study study
             = studyRepository
                 .findByIdWithLock(studyId)
