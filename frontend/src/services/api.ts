@@ -609,7 +609,6 @@ export const studyApi = {
     ),
 };
 
-// 모의 코테·시험 API (§4)
 /** 스터디 커뮤니티 게시글 API (api-spec §5.5). 서버가 권한·상태를 다시 검증하므로 화면의 버튼 노출은 편의용이다. */
 export const studyPostApi = {
   list: (studyId: string, params: { isNotice?: boolean; page?: number; size?: number } = {}) => {
@@ -641,6 +640,7 @@ export const studyPostApi = {
     }),
 };
 
+// 모의 코테·시험 API (§4)
 export const contestApi = {
   getExamImage: (examId: string, problemId: string, imageId: string) =>
     apiFetchBlob(`/api/v1/exams/${examId}/problems/${problemId}/images/${imageId}`),

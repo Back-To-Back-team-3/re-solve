@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { actionErrorMessage, studyApi, studyPostApi } from "@/services/api";
 import { useResource } from "@/services/hooks";
 import type { PostDetail, StudyDetail } from "@/services/types";
-import { Badge, Button, Empty, ErrorState, Go, Heading, Loading, NotFound, Section, useAction } from "@/components/ui";
+import { Badge, Button, Empty, ErrorState, Go, Heading, Loading, Section, useAction } from "@/components/ui";
 import { useWorkspace } from "@/stores/workspace";
 import {
   POST_CONTENT_MAX,
@@ -24,19 +24,32 @@ export function StudyPostDetail({ studyId, postId }: { studyId: string; postId: 
 
   if (study.loading || post.loading)
     return <div className="container"><Loading /></div>;
-  if (post.error?.code === "STUDY_POST_NOT_FOUND") return <NotFound what="게시글" />;
-  const failure = study.error ?? post.error;
-  if (failure)
-    return <div className="container"><ErrorState message={failure.message} retry={study.error ? study.retry : post.retry} /></div>;
+  if (study.error)
+    return <div className="container"><ErrorState message={study.error.message} retry={study.retry} /></div>;
+  const back = <Go className="small" href={`/studies/${studyId}?tab=board`}>← 게시판으로 돌아가기</Go>;
+  // 구성원이 아니면 서버가 게시글 조회를 403으로 거절하므로, 게시글 오류보다 먼저 가입 여부로 안내한다.
+  if (!canReadPosts(study.data!))
+    return (
+      <div className="container stack">
+        {back}
+        <Empty title="구성원만 볼 수 있어요" description="스터디에 가입한 뒤 게시글을 볼 수 있습니다." />
+      </div>
+    );
+  // 공용 NotFound는 "{what}를"로 조사를 붙여 "게시글"에 맞지 않으므로 같은 모양의 안내를 직접 쓴다.
+  if (post.error?.code === "STUDY_POST_NOT_FOUND")
+    return (
+      <div className="container stack">
+        {back}
+        <Empty title="게시글을 찾을 수 없어요" description="삭제되었거나 숨겨진 글입니다." />
+      </div>
+    );
+  if (post.error)
+    return <div className="container"><ErrorState message={post.error.message} retry={post.retry} /></div>;
 
   return (
     <div className="container stack">
-      <Go className="small" href={`/studies/${studyId}?tab=board`}>← 게시판으로 돌아가기</Go>
-      {canReadPosts(study.data!) ? (
-        <PostView study={study.data!} post={post.data!} onChanged={() => setVersion((v) => v + 1)} />
-      ) : (
-        <Empty title="구성원만 볼 수 있어요" description="스터디에 가입한 뒤 게시글을 볼 수 있습니다." />
-      )}
+      {back}
+      <PostView study={study.data!} post={post.data!} onChanged={() => setVersion((v) => v + 1)} />
     </div>
   );
 }
