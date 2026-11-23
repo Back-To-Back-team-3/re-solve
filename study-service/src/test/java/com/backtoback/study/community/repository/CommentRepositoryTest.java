@@ -2,6 +2,9 @@ package com.backtoback.study.community.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.groups.Tuple.tuple;
+
+import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,6 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -18,6 +22,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import com.backtoback.study.community.domain.Comment;
 import com.backtoback.study.community.domain.CommentStatus;
 import com.backtoback.study.community.domain.Post;
+import com.backtoback.study.community.repository.projection.PostCommentCount;
 import com.backtoback.study.membership.domain.JoinType;
 import com.backtoback.study.membership.domain.Study;
 import com.backtoback.study.membership.repository.StudyRepository;
@@ -86,6 +91,35 @@ class CommentRepositoryTest {
         // when & then
         assertThatThrownBy(() -> repository.saveAndFlush(Comment.write(999_999L, AUTHOR_ID, "좋네요")))
             .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("게시글별 공개 댓글 수만 집계하고 숨김·삭제 댓글과 댓글 없는 게시글은 결과에 넣지 않는다")
+    void countByPostIdsAndStatus_countsVisibleOnly() {
+        // given
+        Long first = savePost();
+        Long second = savePost();
+        Long empty = savePost();
+        saveComment(first, CommentStatus.VISIBLE);
+        saveComment(first, CommentStatus.VISIBLE);
+        saveComment(first, CommentStatus.HIDDEN);
+        saveComment(first, CommentStatus.DELETED);
+        saveComment(second, CommentStatus.VISIBLE);
+
+        // when
+        List<PostCommentCount> counts
+            = repository.countByPostIdsAndStatus(List.of(first, second, empty), CommentStatus.VISIBLE);
+
+        // then
+        assertThat(counts)
+            .extracting(PostCommentCount::getPostId, PostCommentCount::getCommentCount)
+            .containsExactlyInAnyOrder(tuple(first, 2L), tuple(second, 1L));
+    }
+
+    private void saveComment(Long postId, CommentStatus status) {
+        Comment comment = Comment.write(postId, AUTHOR_ID, "댓글");
+        ReflectionTestUtils.setField(comment, "status", status);
+        repository.saveAndFlush(comment);
     }
 
     private Long savePost() {
