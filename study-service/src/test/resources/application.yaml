@@ -13,3 +13,10 @@ study:
     problem-base-url: http://localhost:8080
   judge-client:
     base-url: http://localhost:8080
+  recommendation:
+    weight:
+      goal: 40
+      level: 30
+      level-far: 10
+      language: 20
+      time-slot: 10

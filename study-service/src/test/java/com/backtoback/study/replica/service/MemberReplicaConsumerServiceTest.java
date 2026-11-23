@@ -81,15 +81,16 @@ class MemberReplicaConsumerServiceTest {
     }
 
     @Test
-    @DisplayName("이미 처리한 회원 정보 변경 이벤트는 복제본에 반영하지 않는다")
+    @DisplayName("소비 기록 INSERT가 중복인 회원 정보 변경 이벤트는 복제본에 반영하지 않고 중복 예외를 전파한다")
     void consumeUpdated_duplicateEventId_skips() {
         // given
         willThrow(new DuplicateKeyException("duplicate"))
             .given(processedEventStore)
             .insert(any(EventMetadata.class), any(LocalDateTime.class));
 
-        // when
-        service.consumeUpdated(updated("ACTIVE", "닉네임"));
+        // when & then
+        assertThatThrownBy(() -> service.consumeUpdated(updated("ACTIVE", "닉네임")))
+            .isInstanceOf(DuplicateKeyException.class);
 
         // then
         verify(memberReplicaRepository, never())
@@ -175,15 +176,15 @@ class MemberReplicaConsumerServiceTest {
     }
 
     @Test
-    @DisplayName("이미 처리한 정지 이벤트는 복제본에 반영하지 않는다")
+    @DisplayName("소비 기록 INSERT가 중복인 정지 이벤트는 복제본에 반영하지 않고 중복 예외를 전파한다")
     void consumeSuspended_duplicateEventId_skips() {
         // given
         willThrow(new DuplicateKeyException("duplicate"))
             .given(processedEventStore)
             .insert(any(EventMetadata.class), any(LocalDateTime.class));
 
-        // when
-        service.consumeSuspended(suspended(true));
+        // when & then
+        assertThatThrownBy(() -> service.consumeSuspended(suspended(true))).isInstanceOf(DuplicateKeyException.class);
 
         // then
         verify(memberReplicaRepository, never())

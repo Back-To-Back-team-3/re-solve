@@ -69,6 +69,8 @@ class StudyRecommendationControllerTest {
 
     @BeforeEach
     void cleanUp() {
+        jdbc.update("DELETE FROM study_recommendations");
+        jdbc.update("DELETE FROM member_learning_profile_replicas");
         jdbc.update("DELETE FROM assignment_completions");
         jdbc.update("DELETE FROM assignments");
         jdbc.update("DELETE FROM study_memberships");
@@ -159,6 +161,40 @@ class StudyRecommendationControllerTest {
     }
 
     @Test
+    @DisplayName("학습 프로필 입력과 저장된 추천 결과가 있으면 PERSONALIZED 모드로 점수와 추천 근거를 반환한다")
+    void getRecommendations_storedResult_returnsPersonalized() throws Exception {
+        // given
+        long studyId = insertStudy("개인화 추천", "RECRUITING", 10, 5, OLD);
+        insertLearningProfile(MEMBER_ID);
+        jdbc
+            .update(
+                "INSERT INTO study_recommendations (member_id, study_id, score, reasons_json, generated_at, "
+                    + "created_at, updated_at) VALUES (?, ?, 87.00, ?, ?, NOW(6), NOW(6))",
+                MEMBER_ID,
+                studyId,
+                "[\"목표 일치\", \"태그 레벨 비슷함\", \"선호 언어 같음\"]",
+                Timestamp.valueOf(NOW)
+            );
+
+        // when & then
+        mockMvc
+            .perform(
+                get("/api/v1/studies/recommendations")
+                    .header("X-User-Id", String.valueOf(MEMBER_ID))
+                    .header("X-User-Role", USER_ROLE)
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.mode").value("PERSONALIZED"))
+            .andExpect(jsonPath("$.data.isProfileRequired").value(false))
+            .andExpect(jsonPath("$.data.totalElements").value(1))
+            .andExpect(jsonPath("$.data.content[0].studyId").value(String.valueOf(studyId)))
+            .andExpect(jsonPath("$.data.content[0].score").value(87.00))
+            .andExpect(jsonPath("$.data.content[0].reasons").value(contains("목표 일치", "태그 레벨 비슷함", "선호 언어 같음")))
+            .andExpect(jsonPath("$.data.content[0].memberCount").value(5))
+            .andExpect(jsonPath("$.data.content[0].status").value("RECRUITING"));
+    }
+
+    @Test
     @DisplayName("로그인하지 않으면 401을 반환한다")
     void getRecommendations_unauthenticated_returns401() throws Exception {
         mockMvc.perform(get("/api/v1/studies/recommendations")).andExpect(status().isUnauthorized());
@@ -194,6 +230,15 @@ class StudyRecommendationControllerTest {
             return ps;
         }, keyHolder);
         return Objects.requireNonNull(keyHolder.getKey()).longValue();
+    }
+
+    private void insertLearningProfile(long memberId) {
+        jdbc
+            .update(
+                "INSERT INTO member_learning_profile_replicas (member_id, goal, profile_version, synced_at, "
+                    + "created_at, updated_at) VALUES (?, 'EMPLOYMENT', 1, NOW(6), NOW(6), NOW(6))",
+                memberId
+            );
     }
 
     private void insertMembership(long studyId, long memberId, String membershipStatus) {

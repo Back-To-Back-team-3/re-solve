@@ -7,7 +7,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import org.slf4j.MDC;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,12 +48,7 @@ public class ExamStartedConsumerService {
 
     @Transactional
     public void consume(ExamStartedPayload payload) {
-        try {
-            processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
-        } catch (DuplicateKeyException e) {
-            log.warn("ExamStarted 중복 수신 무시 eventId={}", payload.eventId());
-            return;
-        }
+        processedEventStore.insert(payload.toMetadata(), LocalDateTime.now(clock));
 
         Long examId = Long.parseLong(payload.examId());
         LocalDateTime completedAt = toLocalDateTime(payload.startsAt());

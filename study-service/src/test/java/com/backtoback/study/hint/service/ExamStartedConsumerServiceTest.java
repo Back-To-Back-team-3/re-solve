@@ -1,5 +1,6 @@
 package com.backtoback.study.hint.service;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -155,16 +156,16 @@ class ExamStartedConsumerServiceTest {
     }
 
     @Test
-    @DisplayName("이미 처리된 eventId를 수신하면 조회·갱신·Outbox 발행 없이 무시한다")
+    @DisplayName("소비 기록 INSERT가 중복이면 조회·갱신·Outbox 발행 없이 중복 예외를 전파한다")
     void consume_duplicateEventId_skipsAllProcessing() {
         // given
         ExamStartedPayload payload = payload();
-        willThrow(new DuplicateKeyException("중복"))
+        willThrow(new DuplicateKeyException("duplicate"))
             .given(processedEventStore)
             .insert(any(EventMetadata.class), any(LocalDateTime.class));
 
-        // when
-        service.consume(payload);
+        // when & then
+        assertThatThrownBy(() -> service.consume(payload)).isInstanceOf(DuplicateKeyException.class);
 
         // then
         verify(hintBlockReplicaRepository, never()).findByContextTypeAndContextId(any(), any());

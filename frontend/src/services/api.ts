@@ -18,6 +18,12 @@ import type {
   ProblemSaved,
   ValidationProgress,
   AssignmentDetail,
+  PostCreateRequest,
+  PostDetail,
+  PostModerationRequest,
+  PostModerationResult,
+  PostSummary,
+  PostUpdateRequest,
   AssignedProblemResponse,
   CreateAssignmentRequest,
   AssignmentCreated,
@@ -601,6 +607,38 @@ export const studyApi = {
     apiFetch<AssignmentDetail>(
       `/api/v1/studies/${studyId}/assignments/${assignmentId}`,
     ),
+};
+
+/** 스터디 커뮤니티 게시글 API (api-spec §5.5). 서버가 권한·상태를 다시 검증하므로 화면의 버튼 노출은 편의용이다. */
+export const studyPostApi = {
+  list: (studyId: string, params: { isNotice?: boolean; isHidden?: boolean; page?: number; size?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.isNotice) q.set("isNotice", "true");
+    if (params.isHidden) q.set("isHidden", "true");
+    if (params.page != null) q.set("page", String(params.page));
+    if (params.size != null) q.set("size", String(params.size));
+    const qs = q.toString();
+    return apiFetch<ServerPage<PostSummary>>(`/api/v1/studies/${studyId}/posts${qs ? `?${qs}` : ""}`);
+  },
+  create: (studyId: string, body: PostCreateRequest) =>
+    apiFetch<{ postId: string }>(`/api/v1/studies/${studyId}/posts`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  get: (studyId: string, postId: string) =>
+    apiFetch<PostDetail>(`/api/v1/studies/${studyId}/posts/${postId}`),
+  update: (studyId: string, postId: string, body: PostUpdateRequest) =>
+    apiFetch<{ postId: string }>(`/api/v1/studies/${studyId}/posts/${postId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  remove: (studyId: string, postId: string) =>
+    apiFetch<void>(`/api/v1/studies/${studyId}/posts/${postId}`, { method: "DELETE" }),
+  moderate: (studyId: string, postId: string, body: PostModerationRequest) =>
+    apiFetch<PostModerationResult>(`/api/v1/studies/${studyId}/posts/${postId}/moderation`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
 };
 
 // 모의 코테·시험 API (§4)

@@ -1,6 +1,7 @@
 package com.backtoback.study.replica.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -68,16 +69,16 @@ class SubmissionJudgedConsumerServiceTest {
     private SubmissionJudgedConsumerService service;
 
     @Test
-    @DisplayName("이미 처리된 eventId를 수신하면 재계산을 호출하지 않는다")
+    @DisplayName("소비 기록 INSERT가 중복이면 재계산을 호출하지 않고 중복 예외를 전파한다")
     void consume_duplicateEventId_skipsRecalculation() {
         // given
         SubmissionJudgedPayload payload = payload("AC", 1);
-        willThrow(new DuplicateKeyException("중복"))
+        willThrow(new DuplicateKeyException("duplicate"))
             .given(processedEventStore)
             .insert(any(EventMetadata.class), any(LocalDateTime.class));
 
-        // when
-        service.consume(payload);
+        // when & then
+        assertThatThrownBy(() -> service.consume(payload)).isInstanceOf(DuplicateKeyException.class);
 
         // then
         verify(memberAcReplicaRepository, never()).findBySubmissionId(any());
