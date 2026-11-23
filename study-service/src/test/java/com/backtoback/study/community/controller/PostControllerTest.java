@@ -154,11 +154,11 @@ class PostControllerTest {
     }
 
     @Test
-    @DisplayName("5.5.1 목록은 페이지 응답 구조로 반환하고, size는 최대 100, 허용하지 않은 정렬 필드는 무시하며 isNotice=true일 때만 공지로 거른다")
+    @DisplayName("5.5.1 목록은 페이지 응답 구조로 반환하고, size는 최대 100, 허용하지 않은 정렬 필드는 무시하며 isNotice·isHidden은 true일 때만 거른다")
     void getPosts_returnsPageAndSanitizesPaging() throws Exception {
         // given
         PostSummaryResponse item = new PostSummaryResponse("88", "풀이 공유", "7", "user7", true, false, 2, CREATED_AT);
-        given(postQueryService.getPosts(eq(1L), eq(MEMBER_ID), anyBoolean(), any(Pageable.class)))
+        given(postQueryService.getPosts(eq(1L), eq(MEMBER_ID), anyBoolean(), anyBoolean(), any(Pageable.class)))
             .willReturn(new PageImpl<>(List.of(item), PageRequest.of(0, 20), 1));
 
         // when
@@ -174,14 +174,17 @@ class PostControllerTest {
             .andExpect(jsonPath("$.data.totalElements").value(1))
             .andExpect(jsonPath("$.data.hasNext").value(false));
         mockMvc.perform(get(POSTS).param("isNotice", "false")).andExpect(status().isOk());
+        mockMvc.perform(get(POSTS).param("isHidden", "true")).andExpect(status().isOk());
 
         // then
         ArgumentCaptor<Boolean> noticeOnly = ArgumentCaptor.forClass(Boolean.class);
+        ArgumentCaptor<Boolean> hiddenOnly = ArgumentCaptor.forClass(Boolean.class);
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         then(postQueryService)
-            .should(times(2))
-            .getPosts(eq(1L), eq(MEMBER_ID), noticeOnly.capture(), pageable.capture());
-        assertThat(noticeOnly.getAllValues()).containsExactly(true, false);
+            .should(times(3))
+            .getPosts(eq(1L), eq(MEMBER_ID), noticeOnly.capture(), hiddenOnly.capture(), pageable.capture());
+        assertThat(noticeOnly.getAllValues()).containsExactly(true, false, false);
+        assertThat(hiddenOnly.getAllValues()).containsExactly(false, false, true);
         assertThat(pageable.getAllValues().get(0).getPageSize()).isEqualTo(100);
         assertThat(pageable.getAllValues().get(0).getSort()).containsExactly(Sort.Order.desc("createdAt"));
     }

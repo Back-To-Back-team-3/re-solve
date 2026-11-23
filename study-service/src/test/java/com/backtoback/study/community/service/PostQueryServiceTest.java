@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -42,6 +43,7 @@ import com.backtoback.study.community.repository.PostRepository;
 import com.backtoback.study.community.repository.projection.PostCommentCount;
 import com.backtoback.study.global.error.StudyErrorCode;
 import com.backtoback.study.global.error.StudyException;
+import com.backtoback.study.membership.domain.StudyMembership;
 import com.backtoback.study.membership.repository.StudyRepository;
 import com.backtoback.study.replica.domain.MemberReplica;
 import com.backtoback.study.replica.domain.MemberStatus;
@@ -91,7 +93,7 @@ class PostQueryServiceTest {
             );
 
         // when
-        Page<PostSummaryResponse> result = service.getPosts(STUDY_ID, MEMBER_ID, false, LATEST);
+        Page<PostSummaryResponse> result = service.getPosts(STUDY_ID, MEMBER_ID, false, false, LATEST);
 
         // then
         assertThat(result.getContent())
@@ -121,7 +123,7 @@ class PostQueryServiceTest {
         given(memberReplicaRepository.findAllByMemberIdIn(anyCollection())).willReturn(List.of());
 
         // when
-        Page<PostSummaryResponse> result = service.getPosts(STUDY_ID, MEMBER_ID, true, LATEST);
+        Page<PostSummaryResponse> result = service.getPosts(STUDY_ID, MEMBER_ID, true, false, LATEST);
 
         // then
         assertThat(result.getContent()).singleElement().satisfies(item -> {
@@ -134,7 +136,7 @@ class PostQueryServiceTest {
     @DisplayName("스터디가 없으면 STUDY_NOT_FOUND, 구성원이 아니면 AUTH_ACCESS_DENIED로 거절하고 게시글을 조회하지 않는다")
     void getPosts_invalidStudyOrMember_throws() {
         given(studyRepository.existsById(STUDY_ID)).willReturn(false);
-        assertThatThrownBy(() -> service.getPosts(STUDY_ID, MEMBER_ID, false, LATEST))
+        assertThatThrownBy(() -> service.getPosts(STUDY_ID, MEMBER_ID, false, false, LATEST))
             .isInstanceOfSatisfying(
                 StudyException.class,
                 ex -> assertThat(ex.getErrorCode()).isEqualTo(StudyErrorCode.STUDY_NOT_FOUND)
@@ -143,13 +145,51 @@ class PostQueryServiceTest {
         given(studyRepository.existsById(STUDY_ID)).willReturn(true);
         given(accessChecker.requireApprovedMember(STUDY_ID, MEMBER_ID))
             .willThrow(new StudyException(CommonErrorCode.AUTH_ACCESS_DENIED));
-        assertThatThrownBy(() -> service.getPosts(STUDY_ID, MEMBER_ID, false, LATEST))
+        assertThatThrownBy(() -> service.getPosts(STUDY_ID, MEMBER_ID, false, false, LATEST))
             .isInstanceOfSatisfying(
                 StudyException.class,
                 ex -> assertThat(ex.getErrorCode()).isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
             );
 
         verifyNoInteractions(postRepository, commentRepository, memberReplicaRepository);
+    }
+
+    @Test
+    @DisplayName("운영진이 숨긴 글을 요청하면 숨김 상태 게시글을 같은 정렬로 조회한다")
+    void getPosts_hiddenOnlyByOperator_queriesHiddenPosts() {
+        // given
+        StudyMembership operator = mock(StudyMembership.class);
+        given(studyRepository.existsById(STUDY_ID)).willReturn(true);
+        given(accessChecker.requireApprovedMember(STUDY_ID, MEMBER_ID)).willReturn(operator);
+        given(accessChecker.isOperator(operator)).willReturn(true);
+        given(postRepository.findByStudyIdAndStatus(eq(STUDY_ID), eq(PostStatus.HIDDEN), any(Pageable.class)))
+            .willAnswer(invocation -> new PageImpl<>(List.of(post(88L, MEMBER_ID)), invocation.getArgument(2), 1));
+        given(commentRepository.countByPostIdsAndStatus(List.of(88L), CommentStatus.VISIBLE)).willReturn(List.of());
+        given(memberReplicaRepository.findAllByMemberIdIn(anyCollection())).willReturn(List.of());
+
+        // when
+        Page<PostSummaryResponse> result = service.getPosts(STUDY_ID, MEMBER_ID, false, true, LATEST);
+
+        // then
+        assertThat(result.getContent()).extracting(PostSummaryResponse::postId).containsExactly("88");
+    }
+
+    @Test
+    @DisplayName("운영진이 아닌 구성원이 숨긴 글을 요청하면 AUTH_ACCESS_DENIED로 거절하고 게시글을 조회하지 않는다")
+    void getPosts_hiddenOnlyByMember_throws() {
+        // given
+        StudyMembership member = mock(StudyMembership.class);
+        given(studyRepository.existsById(STUDY_ID)).willReturn(true);
+        given(accessChecker.requireApprovedMember(STUDY_ID, MEMBER_ID)).willReturn(member);
+        given(accessChecker.isOperator(member)).willReturn(false);
+
+        // when · then
+        assertThatThrownBy(() -> service.getPosts(STUDY_ID, MEMBER_ID, false, true, LATEST))
+            .isInstanceOfSatisfying(
+                StudyException.class,
+                ex -> assertThat(ex.getErrorCode()).isEqualTo(CommonErrorCode.AUTH_ACCESS_DENIED)
+            );
+        verifyNoInteractions(postRepository);
     }
 
     @Test
