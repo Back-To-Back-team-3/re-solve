@@ -91,7 +91,7 @@ public class Post extends BaseTimeEntity {
     }
 
     /**
-     * 공개 상태이고 고정되지 않은 게시글을 만든다. 공지 지정 권한은 호출하는 쪽에서 확인한다(API 명세서 5.5.2).
+     * 공지 지정 권한({@code LEADER}·{@code MANAGER})은 확인하지 않으므로 호출하는 쪽에서 먼저 확인한다(API 명세서 5.5.2).
      */
     public static Post write(Long studyId, Long authorId, String title, String content, boolean notice) {
         return new Post(studyId, authorId, title, content, notice);
