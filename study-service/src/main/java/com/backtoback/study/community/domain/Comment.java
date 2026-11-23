@@ -69,7 +69,7 @@ public class Comment extends BaseTimeEntity {
         this.status = CommentStatus.VISIBLE;
     }
 
-    public static Comment create(Long postId, Long authorId, String content) {
+    public static Comment write(Long postId, Long authorId, String content) {
         return new Comment(postId, authorId, content);
     }
 }

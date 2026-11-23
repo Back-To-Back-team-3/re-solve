@@ -59,7 +59,7 @@ class PostRepositoryTest {
     void save_post_readsBackInitialState() {
         // given
         Long studyId = saveStudy();
-        Post post = Post.create(studyId, AUTHOR_ID, "이번 주 공지", "BFS 문제를 풉니다.", true);
+        Post post = Post.write(studyId, AUTHOR_ID, "이번 주 공지", "BFS 문제를 풉니다.", true);
 
         // when
         Long postId = repository.saveAndFlush(post).getId();
@@ -83,7 +83,7 @@ class PostRepositoryTest {
     @DisplayName("존재하지 않는 스터디 ID로 게시글을 저장하면 FK 위반으로 실패한다")
     void save_unknownStudy_violatesForeignKey() {
         // when & then
-        assertThatThrownBy(() -> repository.saveAndFlush(Post.create(999_999L, AUTHOR_ID, "제목", "본문", false)))
+        assertThatThrownBy(() -> repository.saveAndFlush(Post.write(999_999L, AUTHOR_ID, "제목", "본문", false)))
             .isInstanceOf(DataIntegrityViolationException.class);
     }
 

@@ -63,7 +63,7 @@ class CommentRepositoryTest {
     void save_comment_readsBackInitialState() {
         // given
         Long postId = savePost();
-        Comment comment = Comment.create(postId, AUTHOR_ID, "좋네요");
+        Comment comment = Comment.write(postId, AUTHOR_ID, "좋네요");
 
         // when
         Long commentId = repository.saveAndFlush(comment).getId();
@@ -84,7 +84,7 @@ class CommentRepositoryTest {
     @DisplayName("존재하지 않는 게시글 ID로 댓글을 저장하면 FK 위반으로 실패한다")
     void save_unknownPost_violatesForeignKey() {
         // when & then
-        assertThatThrownBy(() -> repository.saveAndFlush(Comment.create(999_999L, AUTHOR_ID, "좋네요")))
+        assertThatThrownBy(() -> repository.saveAndFlush(Comment.write(999_999L, AUTHOR_ID, "좋네요")))
             .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -92,6 +92,6 @@ class CommentRepositoryTest {
         Study study
             = Study.recruit("커뮤니티 테스트 스터디", null, "EMPLOYMENT", "LV2", "java", "EVENING", 5, JoinType.INSTANT, false);
         Long studyId = studyRepository.saveAndFlush(study).getId();
-        return postRepository.saveAndFlush(Post.create(studyId, 7L, "제목", "본문", false)).getId();
+        return postRepository.saveAndFlush(Post.write(studyId, 7L, "제목", "본문", false)).getId();
     }
 }
