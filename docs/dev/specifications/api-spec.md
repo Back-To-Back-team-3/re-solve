@@ -8629,13 +8629,13 @@
 - **Method / URI:** `GET /api/v1/studies/{studyId}/posts`
 - **인증:** 로그인 필요 + `APPROVED` 구성원
 - **대응 테이블:** `posts`, `member_replicas`
-- **설명:** 고정 게시글을 먼저, 이후 최신순으로 반환한다. `HIDDEN`·`DELETED`는 제외한다.
+- **설명:** 고정 게시글을 먼저, 이후 최신순으로 반환한다. `HIDDEN`·`DELETED`는 제외한다. 정렬을 지정해도 고정 게시글이 먼저 온다. `commentCount`는 `VISIBLE` 댓글만 센다.
 - **요청 파라미터:**
     
     
     | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
     | --- | --- | --- | --- | --- |
-    | `isNotice` | boolean | N | — | 공지만 보기 |
+    | `isNotice` | boolean | N | — | `true`면 공지만 보기, `false`·생략은 전체 |
     | `page` | int | N | 0 |  |
     | `size` | int | N | 20 |  |
     
@@ -8655,21 +8655,21 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_NOT_FOUND`(404)
 
 #### 5.5.2 게시글 작성
 
 - **Method / URI:** `POST /api/v1/studies/{studyId}/posts`
 - **인증:** 로그인 필요 (`SUSPENDED` 차단) + `APPROVED` 구성원
 - **대응 테이블:** `posts`, `studies`
-- **설명:** 게시글을 작성하고 `studies.last_activity_at`을 갱신한다. 공지(`isNotice`)는 `LEADER`·`MANAGER`만 지정할 수 있다.
+- **설명:** 게시글을 작성하고 `studies.last_activity_at`을 갱신한다. 공지(`isNotice`)는 `LEADER`·`MANAGER`만 지정할 수 있으며, 권한 없이 `isNotice: true`를 보내면 `AUTH_ACCESS_DENIED`다.
 - **요청 바디:**
     
     ```json
       { "title": "이번 주 풀이 공유", "content": "BFS로 풀었습니다...", "isNotice": false }
     ```
     
-    - `title` 1~200자, `content` 1자 이상
+    - `title` 1~200자, `content` 1~10,000자 (공백만은 불가), `isNotice` 생략 시 `false`
 - **응답 (201):**
     
     ```json
@@ -8677,13 +8677,14 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403)
+    - `AUTH_ACCESS_DENIED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403), `STUDY_NOT_FOUND`(404)
 
 #### 5.5.3 게시글 상세
 
 - **Method / URI:** `GET /api/v1/studies/{studyId}/posts/{postId}`
 - **인증:** 로그인 필요 + `APPROVED` 구성원
 - **대응 테이블:** `posts`, `comments`, `member_replicas`
+- **설명:** `HIDDEN`·`DELETED` 게시글과 다른 스터디의 게시글은 운영진을 포함해 누구에게나 `STUDY_POST_NOT_FOUND`다. `comments`는 `VISIBLE` 댓글만 작성순으로 담는다.
 - **응답 (200):**
     
     ```json
@@ -8700,35 +8701,38 @@
     
     - 탈퇴 회원은 `nickname: "탈퇴한 사용자"`
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_NOT_FOUND`(404)
 
 #### 5.5.4 게시글 수정·삭제
 
 - **Method / URI:** `PATCH /api/v1/studies/{studyId}/posts/{postId}`, `DELETE /api/v1/studies/{studyId}/posts/{postId}`
-- **인증:** 로그인 필요 + 작성자 본인
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + `APPROVED` 구성원 + 작성자 본인
 - **대응 테이블:** `posts`
+- **설명:** `VISIBLE` 게시글만 수정·삭제할 수 있다. `HIDDEN`·`DELETED` 게시글은 `STUDY_POST_NOT_FOUND`다.
 - **요청 바디 (PATCH):**
     
     ```json
       { "title": "수정한 제목", "content": "수정한 본문" }
     ```
     
+    - `title` 1~200자, `content` 1~10,000자 (공백만은 불가)
 - **응답:** PATCH `200` `{ "postId": "88" }` / DELETE `204` (`status = DELETED`)
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `MEMBER_SUSPENDED`(403), `COMMON_INVALID_REQUEST`(400), `STUDY_NOT_FOUND`(404)
 
 #### 5.5.5 게시글 고정·공지·숨김 (운영진)
 
 - **Method / URI:** `PATCH /api/v1/studies/{studyId}/posts/{postId}/moderation`
-- **인증:** 로그인 필요 + `LEADER`·`MANAGER`
+- **인증:** 로그인 필요 (`SUSPENDED` 차단) + `APPROVED` 구성원 중 `LEADER`·`MANAGER`
 - **대응 테이블:** `posts`
-- **설명:** 공지·상단 고정 여부와 부적절한 글의 숨김을 변경한다. 기존 경로(`/pin`)를 숨김까지 포함하도록 넓혔다.
+- **설명:** 공지·상단 고정 여부와 부적절한 글의 숨김을 변경한다. 기존 경로(`/pin`)를 숨김까지 포함하도록 넓혔다. `isHidden: false`를 보내면 숨긴 글이 `VISIBLE`로 돌아온다. `DELETED` 게시글은 `STUDY_POST_NOT_FOUND`다.
 - **요청 바디:**
     
     ```json
       { "isPinned": true, "isNotice": true, "isHidden": false }
     ```
     
+    - 세 필드 모두 필수
 - **응답 (200):**
     
     ```json
@@ -8736,7 +8740,7 @@
     ```
     
 - **에러:**
-    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404)
+    - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_ALREADY_CLOSED`(409), `COMMON_INVALID_REQUEST`(400), `STUDY_NOT_FOUND`(404), `MEMBER_SUSPENDED`(403)
 
 #### 5.5.6 댓글 작성·수정·삭제
 
@@ -8749,6 +8753,7 @@
       { "content": "좋네요" }
     ```
     
+    - `content` 1~10,000자
 - **응답:** POST `201` `{ "commentId": "301" }` / PATCH `200` / DELETE `204`
 - **에러:**
     - `AUTH_ACCESS_DENIED`(403), `STUDY_POST_NOT_FOUND`(404), `STUDY_COMMENT_NOT_FOUND`(404)
