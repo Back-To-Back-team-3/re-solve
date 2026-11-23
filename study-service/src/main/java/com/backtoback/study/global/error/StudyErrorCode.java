@@ -42,6 +42,9 @@ public enum StudyErrorCode implements ErrorCode {
     STUDY_MANAGER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "운영진은 최대 2명까지만 임명할 수 있습니다."),
     STUDY_ACTIVE_EXAM_EXISTS(HttpStatus.CONFLICT, "예정 또는 진행 중인 시험이 남아 있어 스터디를 종료할 수 없습니다."),
 
+    // 커뮤니티 (community)
+    STUDY_POST_NOT_FOUND(HttpStatus.NOT_FOUND, "게시글을 찾을 수 없습니다."),
+
     // 힌트 (hint)
     HINT_PROBLEM_NOT_AVAILABLE(HttpStatus.NOT_FOUND, "힌트를 제공할 수 없는 문제입니다."),
     HINT_BLOCKED_DURING_EXAM(HttpStatus.FORBIDDEN, "참가 중인 시험·대회 문제는 힌트를 사용할 수 없습니다."),
